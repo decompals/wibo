@@ -106,6 +106,11 @@ struct TIB {
 };
 
 int main(int argc, char **argv) {
+	if (argc <= 1) {
+		printf("Usage: ./wibo program.exe ...\n");
+		return 1;
+	}
+
 	// Create TIB
 	TIB tib;
 	tib.tib = &tib;
@@ -125,13 +130,46 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-	// Build a command line (todo, fill this with argv etc)
-	wibo::commandLine = new char[1024];
-	strcpy(wibo::commandLine, "mwcceppc.exe");
+	// Build a command line
+	std::string cmdLine;
+	for (int i = 1; i < argc; i++) {
+		if (i != 1) cmdLine += ' ';
+		std::string arg = argv[i];
+		bool needQuotes = arg.find_first_of("\\\" \t\n") != std::string::npos;
+		if (needQuotes)
+			cmdLine += '"';
+		int backslashes = 0;
+		for (const char *p = arg.c_str(); ; p++) {
+			char c = *p;
+			if (c == '\\') {
+				backslashes++;
+				continue;
+			}
+
+			// Backslashes are doubled *before quotes*
+			for (int j = 0; j < backslashes; j++) {
+				cmdLine += '\\';
+				if (c == '\0' || c == '"')
+					cmdLine += '\\';
+			}
+
+			if (c == '\0')
+				break;
+			if (c == '\"')
+				cmdLine += '\\';
+			cmdLine += c;
+		}
+		if (needQuotes)
+			cmdLine += '"';
+	}
+	cmdLine += '\0';
+
+	wibo::commandLine = cmdLine.data();
+	DEBUG_LOG("Command line: %s\n", wibo::commandLine);
 
 	wibo::Executable exec;
 
-	FILE *f = fopen("mwcceppc.exe", "rb");
+	FILE *f = fopen(argv[1], "rb");
 	exec.loadPE(f);
 	fclose(f);
 
@@ -144,5 +182,5 @@ int main(int argc, char **argv) {
 	);
 	DEBUG_LOG("We came back\n");
 
-	return 0;
+	return 1;
 }

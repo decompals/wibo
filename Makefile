@@ -1,6 +1,6 @@
 all: wibo
 
-CXXFLAGS = -Wall -g -m32 -std=c++20 -lstdc++
+CXXFLAGS = -Wall -g -m32 -std=c++20 -lstdc++ -MD
 
 BUILD_DIR := build
 CPP_FILES := $(wildcard *.cpp)

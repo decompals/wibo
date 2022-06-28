@@ -6,15 +6,20 @@
 #include <assert.h>
 
 #define WIN_FUNC __attribute__((stdcall))
+#define DEBUG_LOG(...) /* nothing */
+// #define DEBUG_LOG(...) wibo::debug_log(__VA_ARGS__)
 
 namespace wibo {
 	extern uint32_t lastError;
 	extern char *commandLine;
 
+	void debug_log(const char *fmt, ...);
+
 	void *resolveVersion(const char *name);
 	void *resolveKernel32(const char *name);
 	void *resolveUser32(const char *name);
 	void *resolveAdvApi32(const char *name);
+	void *resolveLmgr11(uint16_t ordinal);
 	void *resolveStubByName(const char *dllName, const char *funcName);
 	void *resolveStubByOrdinal(const char *dllName, uint16_t ordinal);
 

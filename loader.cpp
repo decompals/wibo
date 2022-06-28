@@ -128,7 +128,7 @@ bool wibo::Executable::loadPE(FILE *file) {
 	if (header.machine != 0x14C) // i386
 		return false;
 
-	printf("Sections: %d / Size of optional header: %x\n", header.numberOfSections, header.sizeOfOptionalHeader);
+	DEBUG_LOG("Sections: %d / Size of optional header: %x\n", header.numberOfSections, header.sizeOfOptionalHeader);
 
 	PE32Header header32;
 	memset(&header32, 0, sizeof header32);
@@ -136,10 +136,10 @@ bool wibo::Executable::loadPE(FILE *file) {
 	if (header32.magic != 0x10B)
 		return false;
 
-	printf("Image Base: %x / Size: %x\n", header32.imageBase, header32.sizeOfImage);
+	DEBUG_LOG("Image Base: %x / Size: %x\n", header32.imageBase, header32.sizeOfImage);
 
 	long pageSize = sysconf(_SC_PAGE_SIZE);
-	printf("Page size: %x\n", (unsigned int)pageSize);
+	DEBUG_LOG("Page size: %x\n", (unsigned int)pageSize);
 
 	// Build buffer
 	imageSize = header32.sizeOfImage;
@@ -160,7 +160,7 @@ bool wibo::Executable::loadPE(FILE *file) {
 		char name[9];
 		memcpy(name, section.name, 8);
 		name[8] = 0;
-		printf("Section %d: name=%s addr=%x size=%x (raw=%x) ptr=%x\n", i, name, section.virtualAddress, section.virtualSize, section.sizeOfRawData, section.pointerToRawData);
+		DEBUG_LOG("Section %d: name=%s addr=%x size=%x (raw=%x) ptr=%x\n", i, name, section.virtualAddress, section.virtualSize, section.sizeOfRawData, section.pointerToRawData);
 
 		if (section.sizeOfRawData > 0) {
 			// Grab this data
@@ -177,7 +177,7 @@ bool wibo::Executable::loadPE(FILE *file) {
 
 	while (dir->name) {
 		char *name = fromRVA(dir->name);
-		printf("DLL Name: %s\n", name);
+		DEBUG_LOG("DLL Name: %s\n", name);
 		uint32_t *lookupTable = fromRVA(dir->importLookupTable);
 		uint32_t *addressTable = fromRVA(dir->importAddressTable);
 
@@ -186,12 +186,12 @@ bool wibo::Executable::loadPE(FILE *file) {
 			if (lookup & 0x80000000) {
 				// Import by ordinal
 				uint16_t ordinal = lookup & 0xFFFF;
-				printf("  Ordinal: %d\n", ordinal);
+				DEBUG_LOG("  Ordinal: %d\n", ordinal);
 				*addressTable = (uint32_t) resolveStubByOrdinal(name, ordinal);
 			} else {
 				// Import by name
 				PEHintNameTableEntry *hintName = fromRVA<PEHintNameTableEntry>(lookup);
-				printf("  Name: %s\n", hintName->name);
+				DEBUG_LOG("  Name: %s\n", hintName->name);
 				*addressTable = (uint32_t) resolveStubByName(name, hintName->name);
 			}
 			++lookupTable;

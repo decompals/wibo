@@ -4,9 +4,17 @@
 #include <memory>
 #include <sys/mman.h>
 #include <sys/syscall.h>
+#include <stdarg.h>
 
 uint32_t wibo::lastError = 0;
 char *wibo::commandLine;
+
+void wibo::debug_log(const char *fmt, ...) {
+	va_list args;
+	va_start(args, fmt);
+	vprintf(fmt, args);
+	va_end(args);
+}
 
 static int stubIndex = 0;
 static char stubDlls[0x100][0x100];
@@ -15,7 +23,7 @@ static char stubFuncNames[0x100][0x100];
 static void stubBase(int index) {
 	// should go through all the functions imported by mwcceppc.exe
 	// and create template stubs for them, at least...
-	printf("Unhandled function %s (%s)\n", stubFuncNames[index], stubDlls[index]);
+	DEBUG_LOG("Unhandled function %s (%s)\n", stubFuncNames[index], stubDlls[index]);
 	exit(0);
 }
 
@@ -35,7 +43,7 @@ DEFINE_STUBS(3, 0) DEFINE_STUBS(3, 1) DEFINE_STUBS(3, 2) DEFINE_STUBS(3, 3)
 #undef DEFINE_STUBS
 
 uint32_t __attribute__((stdcall)) CoInitialize(void *pvReserved) {
-	printf("CoInitialize(...)\n");
+	DEBUG_LOG("CoInitialize(...)\n");
 	return 0; // S_OK I think?
 }
 
@@ -64,7 +72,7 @@ void *wibo::resolveStubByName(const char *dllName, const char *funcName) {
 		if (strcmp(funcName, "CoInitialize") == 0) return (void *) CoInitialize;
 	}
 
-	printf("Missing function: %s (%s)\n", dllName, funcName);
+	DEBUG_LOG("Missing function: %s (%s)\n", dllName, funcName);
 	assert(stubIndex < 0x100);
 	assert(strlen(dllName) < 0x100);
 	assert(strlen(funcName) < 0x100);
@@ -74,7 +82,11 @@ void *wibo::resolveStubByName(const char *dllName, const char *funcName) {
 }
 
 void *wibo::resolveStubByOrdinal(const char *dllName, uint16_t ordinal) {
-	// printf("Missing function: %s (%x)\n", dllName, ordinal);
+	if (strcmp(dllName, "LMGR11.dll") == 0) {
+		void* func = wibo::resolveLmgr11(ordinal);
+		if (func)
+			return func;
+	}
 	assert(stubIndex < 0x100);
 	assert(strlen(dllName) < 0x100);
 	sprintf(stubFuncNames[stubIndex], "%d", ordinal);
@@ -130,7 +142,7 @@ int main(int argc, char **argv) {
 		:
 		: "r"(tibSegment), "r"(exec.entryPoint)
 	);
-	printf("We came back\n");
+	DEBUG_LOG("We came back\n");
 
 	return 0;
 }

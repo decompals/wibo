@@ -2,7 +2,7 @@
 
 namespace version {
 	unsigned int WIN_FUNC GetFileVersionInfoSizeA(const char* lptstrFilename, unsigned int* outZero) {
-		printf("GetFileVersionInfoSizeA %s\n", lptstrFilename);
+		DEBUG_LOG("GetFileVersionInfoSizeA %s\n", lptstrFilename);
 		*outZero = 0;
 		// stub: signal an error
 		wibo::lastError = 0;

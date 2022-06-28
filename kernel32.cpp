@@ -13,17 +13,21 @@ namespace kernel32 {
 		return (void *) 0xFFFFFFFF;
 	}
 
+	void WIN_FUNC ExitProcess(unsigned int uExitCode) {
+		exit(uExitCode);
+	}
+
 	void WIN_FUNC InitializeCriticalSection(void *param) {
-		// printf("InitializeCriticalSection(...)\n");
+		// DEBUG_LOG("InitializeCriticalSection(...)\n");
 	}
 	void WIN_FUNC DeleteCriticalSection(void *param) {
-		// printf("DeleteCriticalSection(...)\n");
+		// DEBUG_LOG("DeleteCriticalSection(...)\n");
 	}
 	void WIN_FUNC EnterCriticalSection(void *param) {
-		// printf("EnterCriticalSection(...)\n");
+		// DEBUG_LOG("EnterCriticalSection(...)\n");
 	}
 	void WIN_FUNC LeaveCriticalSection(void *param) {
-		// printf("LeaveCriticalSection(...)\n");
+		// DEBUG_LOG("LeaveCriticalSection(...)\n");
 	}
 
 	/*
@@ -33,20 +37,20 @@ namespace kernel32 {
 	static bool tlsValuesUsed[MAX_TLS_VALUES] = { false };
 	static void *tlsValues[MAX_TLS_VALUES];
 	unsigned int WIN_FUNC TlsAlloc() {
-		printf("TlsAlloc()\n");
+		DEBUG_LOG("TlsAlloc()\n");
 		for (int i = 0; i < MAX_TLS_VALUES; i++) {
 			if (tlsValuesUsed[i] == false) {
 				tlsValuesUsed[i] = true;
 				tlsValues[i] = 0;
-				printf("...returning %d\n", i);
+				DEBUG_LOG("...returning %d\n", i);
 				return i;
 			}
 		}
-		printf("...returning nothing\n");
+		DEBUG_LOG("...returning nothing\n");
 		return 0xFFFFFFFF;
 	}
 	unsigned int WIN_FUNC TlsFree(unsigned int dwTlsIndex) {
-		printf("TlsFree(%u)\n", dwTlsIndex);
+		DEBUG_LOG("TlsFree(%u)\n", dwTlsIndex);
 		if (dwTlsIndex >= 0 && dwTlsIndex < MAX_TLS_VALUES && tlsValuesUsed[dwTlsIndex]) {
 			tlsValuesUsed[dwTlsIndex] = false;
 			return 1;
@@ -55,14 +59,14 @@ namespace kernel32 {
 		}
 	}
 	void *WIN_FUNC TlsGetValue(unsigned int dwTlsIndex) {
-		// printf("TlsGetValue(%u)\n", dwTlsIndex);
+		// DEBUG_LOG("TlsGetValue(%u)\n", dwTlsIndex);
 		if (dwTlsIndex >= 0 && dwTlsIndex < MAX_TLS_VALUES && tlsValuesUsed[dwTlsIndex])
 			return tlsValues[dwTlsIndex];
 		else
 			return 0;
 	}
 	unsigned int WIN_FUNC TlsSetValue(unsigned int dwTlsIndex, void *lpTlsValue) {
-		// printf("TlsSetValue(%u, %p)\n", dwTlsIndex, lpTlsValue);
+		// DEBUG_LOG("TlsSetValue(%u, %p)\n", dwTlsIndex, lpTlsValue);
 		if (dwTlsIndex >= 0 && dwTlsIndex < MAX_TLS_VALUES && tlsValuesUsed[dwTlsIndex]) {
 			tlsValues[dwTlsIndex] = lpTlsValue;
 			return 1;
@@ -75,12 +79,15 @@ namespace kernel32 {
 	 * Memory
 	 */
 	void *WIN_FUNC GlobalAlloc(uint32_t uFlags, size_t dwBytes) {
-		printf("GlobalAlloc(flags=%x, size=%x)\n", uFlags, dwBytes);
+		DEBUG_LOG("GlobalAlloc(flags=%x, size=%x)\n", uFlags, dwBytes);
 		if (uFlags & 2) {
 			// GMEM_MOVEABLE - not implemented rn
 			return 0;
 		} else {
 			// GMEM_FIXED - this is simpler
+			if (dwBytes == 0)
+				dwBytes = 1;
+			assert(dwBytes > 0);
 			void *buffer = malloc(dwBytes);
 			if (buffer && (uFlags & 0x40)) {
 				// GMEM_ZEROINT
@@ -91,6 +98,25 @@ namespace kernel32 {
 	}
 	void *WIN_FUNC GlobalFree(void *hMem) {
 		free(hMem);
+		return 0;
+	}
+
+	void *WIN_FUNC GlobalReAlloc(void *hMem, size_t dwBytes, uint32_t uFlags) {
+		if (uFlags & 0x80) { // GMEM_MODIFY
+			assert(0);
+		} else {
+			if (dwBytes == 0)
+				dwBytes = 1;
+			void *buffer = realloc(hMem, dwBytes);
+			if (buffer && (uFlags & 0x40)) {
+				// GMEM_ZEROINT
+				memset(buffer, 0, dwBytes);
+			}
+			return buffer;
+		}
+	}
+
+	unsigned int WIN_FUNC GlobalFlags(void *hMem) {
 		return 0;
 	}
 
@@ -158,8 +184,12 @@ namespace kernel32 {
 		}
 
 		// This probably won't come up
-		printf("Unhandled DuplicateHandle(source=%p)\n", hSourceHandle);
+		DEBUG_LOG("Unhandled DuplicateHandle(source=%p)\n", hSourceHandle);
 		return 0;
+	}
+
+	int WIN_FUNC CloseHandle(void *hObject) {
+		return 1;
 	}
 
 	std::filesystem::path pathFromWindows(const char *inStr) {
@@ -187,10 +217,10 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC GetFullPathNameA(const char *lpFileName, unsigned int nBufferLength, char *lpBuffer, char **lpFilePart) {
-		printf("GetFullPathNameA(%s)...\n", lpFileName);
+		DEBUG_LOG("GetFullPathNameA(%s)...\n", lpFileName);
 		std::filesystem::path absPath = std::filesystem::absolute(pathFromWindows(lpFileName));
 		std::string absStr = pathToWindows(absPath);
-		printf("AbsPath: %s - %s\n", absPath.c_str(), absStr.c_str());
+		DEBUG_LOG("AbsPath: %s - %s\n", absPath.c_str(), absStr.c_str());
 
 		// Enough space?
 		if ((absStr.size() + 1) <= nBufferLength) {
@@ -214,20 +244,20 @@ namespace kernel32 {
 
 	unsigned int WIN_FUNC GetFileAttributesA(const char *lpFileName) {
 		auto path = pathFromWindows(lpFileName);
-		printf("GetFileAttributesA(%s)... (%s)\n", lpFileName, path.c_str());
+		DEBUG_LOG("GetFileAttributesA(%s)... (%s)\n", lpFileName, path.c_str());
 		auto status = std::filesystem::status(path);
 
 		wibo::lastError = 0;
 
 		switch (status.type()) {
 			case std::filesystem::file_type::regular:
-				printf("File exists\n");
+				DEBUG_LOG("File exists\n");
 				return 0x80; // FILE_ATTRIBUTE_NORMAL
 			case std::filesystem::file_type::directory:
 				return 0x10; // FILE_ATTRIBUTE_DIRECTORY
 			case std::filesystem::file_type::not_found:
 			default:
-				printf("File does not exist\n");
+				DEBUG_LOG("File does not exist\n");
 				wibo::lastError = 2; // ERROR_FILE_NOT_FOUND
 				return 0xFFFFFFFF; // INVALID_FILE_ATTRIBUTES
 		}
@@ -293,7 +323,7 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC GetCurrentDirectoryA(unsigned int uSize, char *lpBuffer) {
-        printf("GetCurrentDirectoryA\n");
+        DEBUG_LOG("GetCurrentDirectoryA\n");
 
         std::filesystem::path cwd = std::filesystem::current_path();
 		std::string path = pathToWindows(cwd);
@@ -305,44 +335,44 @@ namespace kernel32 {
     }
 
 	void* WIN_FUNC GetModuleHandleA(const char* lpModuleName) {
-		printf("GetModuleHandleA %s\n", lpModuleName);
+		DEBUG_LOG("GetModuleHandleA %s\n", lpModuleName);
 		// wibo::lastError = 0;
 		return (void*)1;
 	}
 
 	unsigned int WIN_FUNC GetModuleFileNameA(void* hModule, char* lpFilename, unsigned int nSize) {
-		printf("GetModuleFileNameA %p\n", hModule);
+		DEBUG_LOG("GetModuleFileNameA %p\n", hModule);
 		wibo::lastError = 0;
 		return 0;
 	}
 
 	void* WIN_FUNC FindResourceA(void* hModule, const char* lpName, const char* lpType) {
-		printf("FindResourceA %p %s %s\n", hModule, lpName, lpType);
+		DEBUG_LOG("FindResourceA %p %s %s\n", hModule, lpName, lpType);
 		return (void*)2;
 	}
 
 	void* WIN_FUNC LoadResource(void* hModule, void* res) {
-		printf("LoadResource %p %p\n", hModule, res);
+		DEBUG_LOG("LoadResource %p %p\n", hModule, res);
 		return (void*)3;
 	}
 
 	void* WIN_FUNC LockResource(void* res) {
-		printf("LockResource %p\n", res);
+		DEBUG_LOG("LockResource %p\n", res);
 		return (void*)4;
 	}
 
 	unsigned int WIN_FUNC SizeofResource(void* hModule, void* res) {
-		printf("SizeofResource %p %p\n", hModule, res);
+		DEBUG_LOG("SizeofResource %p %p\n", hModule, res);
 		return 0;
 	}
 
 	void* WIN_FUNC LoadLibraryA(const char* lpLibFileName) {
-		printf("LoadLibraryA %s\n", lpLibFileName);
+		DEBUG_LOG("LoadLibraryA %s\n", lpLibFileName);
 		return (void*)5;
 	}
 
 	int WIN_FUNC FreeLibrary(void* hLibModule) {
-		printf("FreeLibrary %p\n", hLibModule);
+		DEBUG_LOG("FreeLibrary %p\n", hLibModule);
 		return 1;
 	}
 }
@@ -350,12 +380,15 @@ namespace kernel32 {
 void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "GetLastError") == 0) return (void *) kernel32::GetLastError;
 	if (strcmp(name, "GetCurrentProcess") == 0) return (void *) kernel32::GetCurrentProcess;
+	if (strcmp(name, "ExitProcess") == 0) return (void *) kernel32::ExitProcess;
 	if (strcmp(name, "InitializeCriticalSection") == 0) return (void *) kernel32::InitializeCriticalSection;
 	if (strcmp(name, "DeleteCriticalSection") == 0) return (void *) kernel32::DeleteCriticalSection;
 	if (strcmp(name, "EnterCriticalSection") == 0) return (void *) kernel32::EnterCriticalSection;
 	if (strcmp(name, "LeaveCriticalSection") == 0) return (void *) kernel32::LeaveCriticalSection;
 	if (strcmp(name, "GlobalAlloc") == 0) return (void *) kernel32::GlobalAlloc;
+	if (strcmp(name, "GlobalReAlloc") == 0) return (void *) kernel32::GlobalReAlloc;
 	if (strcmp(name, "GlobalFree") == 0) return (void *) kernel32::GlobalFree;
+	if (strcmp(name, "GlobalFlags") == 0) return (void *) kernel32::GlobalFlags;
 	if (strcmp(name, "TlsAlloc") == 0) return (void *) kernel32::TlsAlloc;
 	if (strcmp(name, "TlsFree") == 0) return (void *) kernel32::TlsFree;
 	if (strcmp(name, "TlsGetValue") == 0) return (void *) kernel32::TlsGetValue;
@@ -365,6 +398,7 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "FreeEnvironmentStringsA") == 0) return (void *) kernel32::FreeEnvironmentStringsA;
 	if (strcmp(name, "GetStdHandle") == 0) return (void *) kernel32::GetStdHandle;
 	if (strcmp(name, "DuplicateHandle") == 0) return (void *) kernel32::DuplicateHandle;
+	if (strcmp(name, "CloseHandle") == 0) return (void *) kernel32::CloseHandle;
 	if (strcmp(name, "GetFullPathNameA") == 0) return (void *) kernel32::GetFullPathNameA;
 	if (strcmp(name, "GetFileAttributesA") == 0) return (void *) kernel32::GetFileAttributesA;
 	if (strcmp(name, "WriteFile") == 0) return (void *) kernel32::WriteFile;

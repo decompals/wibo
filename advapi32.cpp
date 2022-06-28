@@ -2,7 +2,7 @@
 
 namespace advapi32 {
 	unsigned int WIN_FUNC RegOpenKeyExA(void *hKey, const char *lpSubKey, unsigned int ulOptions, void *samDesired, void **phkResult) {
-		printf("RegOpenKeyExA(key=%p, subkey=%s, ...)\n", hKey, lpSubKey);
+		DEBUG_LOG("RegOpenKeyExA(key=%p, subkey=%s, ...)\n", hKey, lpSubKey);
 		return 1; // screw them for now
 	}
 }

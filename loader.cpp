@@ -139,7 +139,7 @@ bool wibo::Executable::loadPE(FILE *file) {
 	printf("Image Base: %x / Size: %x\n", header32.imageBase, header32.sizeOfImage);
 
 	long pageSize = sysconf(_SC_PAGE_SIZE);
-	printf("Page size: %x\n", pageSize);
+	printf("Page size: %x\n", (unsigned int)pageSize);
 
 	// Build buffer
 	imageSize = header32.sizeOfImage;

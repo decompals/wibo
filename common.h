@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <assert.h>
 
 #define WIN_FUNC __attribute__((stdcall))
 
@@ -10,7 +11,9 @@ namespace wibo {
 	extern uint32_t lastError;
 	extern char *commandLine;
 
+	void *resolveVersion(const char *name);
 	void *resolveKernel32(const char *name);
+	void *resolveUser32(const char *name);
 	void *resolveAdvApi32(const char *name);
 	void *resolveStubByName(const char *dllName, const char *funcName);
 	void *resolveStubByOrdinal(const char *dllName, uint16_t ordinal);

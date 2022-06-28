@@ -4,7 +4,7 @@ An experiment to try and write a minimal, low-fuss wrapper that can run really s
 
 Don't run this on any untrusted executables, I implore you. (Or probably just don't run it at all... :p)
 
-    g++ -g -m32 -std=c++20 -lstdc++ main.cpp kernel32.cpp advapi32.cpp loader.cpp
+    g++ -g -m32 -std=c++20 -lstdc++ main.cpp version.cpp user32.cpp kernel32.cpp advapi32.cpp loader.cpp
 
 If you need something like this project (but more mature), you might find [taviso/loadlibrary](https://github.com/taviso/loadlibrary) more interesting.
 

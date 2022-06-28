@@ -291,6 +291,60 @@ namespace kernel32 {
 		strcpy(lpBuffer, "C:\\Windows");
 		return strlen(lpBuffer);
 	}
+
+	unsigned int WIN_FUNC GetCurrentDirectoryA(unsigned int uSize, char *lpBuffer) {
+        printf("GetCurrentDirectoryA\n");
+
+        std::filesystem::path cwd = std::filesystem::current_path();
+		std::string path = pathToWindows(cwd);
+
+		assert(path.size() < uSize);
+
+        strcpy(lpBuffer, path.c_str());
+        return path.size();
+    }
+
+	void* WIN_FUNC GetModuleHandleA(const char* lpModuleName) {
+		printf("GetModuleHandleA %s\n", lpModuleName);
+		// wibo::lastError = 0;
+		return (void*)1;
+	}
+
+	unsigned int WIN_FUNC GetModuleFileNameA(void* hModule, char* lpFilename, unsigned int nSize) {
+		printf("GetModuleFileNameA %p\n", hModule);
+		wibo::lastError = 0;
+		return 0;
+	}
+
+	void* WIN_FUNC FindResourceA(void* hModule, const char* lpName, const char* lpType) {
+		printf("FindResourceA %p %s %s\n", hModule, lpName, lpType);
+		return (void*)2;
+	}
+
+	void* WIN_FUNC LoadResource(void* hModule, void* res) {
+		printf("LoadResource %p %p\n", hModule, res);
+		return (void*)3;
+	}
+
+	void* WIN_FUNC LockResource(void* res) {
+		printf("LockResource %p\n", res);
+		return (void*)4;
+	}
+
+	unsigned int WIN_FUNC SizeofResource(void* hModule, void* res) {
+		printf("SizeofResource %p %p\n", hModule, res);
+		return 0;
+	}
+
+	void* WIN_FUNC LoadLibraryA(const char* lpLibFileName) {
+		printf("LoadLibraryA %s\n", lpLibFileName);
+		return (void*)5;
+	}
+
+	int WIN_FUNC FreeLibrary(void* hLibModule) {
+		printf("FreeLibrary %p\n", hLibModule);
+		return 1;
+	}
 }
 
 void *wibo::resolveKernel32(const char *name) {
@@ -318,5 +372,14 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "GetConsoleScreenBufferInfo") == 0) return (void *) kernel32::GetConsoleScreenBufferInfo;
 	if (strcmp(name, "GetSystemDirectoryA") == 0) return (void *) kernel32::GetSystemDirectoryA;
 	if (strcmp(name, "GetWindowsDirectoryA") == 0) return (void *) kernel32::GetWindowsDirectoryA;
+	if (strcmp(name, "GetCurrentDirectoryA") == 0) return (void *) kernel32::GetCurrentDirectoryA;
+	if (strcmp(name, "GetModuleHandleA") == 0) return (void *) kernel32::GetModuleHandleA;
+	if (strcmp(name, "GetModuleFileNameA") == 0) return (void *) kernel32::GetModuleFileNameA;
+	if (strcmp(name, "FindResourceA") == 0) return (void *) kernel32::FindResourceA;
+	if (strcmp(name, "LoadResource") == 0) return (void *) kernel32::LoadResource;
+	if (strcmp(name, "LockResource") == 0) return (void *) kernel32::LockResource;
+	if (strcmp(name, "SizeofResource") == 0) return (void *) kernel32::SizeofResource;
+	if (strcmp(name, "LoadLibraryA") == 0) return (void *) kernel32::LoadLibraryA;
+	if (strcmp(name, "FreeLibrary") == 0) return (void *) kernel32::FreeLibrary;
 	return 0;
 }

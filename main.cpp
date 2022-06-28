@@ -8,12 +8,31 @@
 uint32_t wibo::lastError = 0;
 char *wibo::commandLine;
 
-void stub() {
+static int stubIndex = 0;
+static char stubDlls[0x100][0x100];
+static char stubFuncNames[0x100][0x100];
+
+static void stubBase(int index) {
 	// should go through all the functions imported by mwcceppc.exe
 	// and create template stubs for them, at least...
-	printf("Unhandled function\n");
+	printf("Unhandled function %s (%s)\n", stubFuncNames[index], stubDlls[index]);
 	exit(0);
 }
+
+void (*stubFuncs[0x100])(void) = {
+#define DEFINE_STUB(a, b, c, d) []() { stubBase(a << 6 | b << 4 | c << 2 | d); },
+#define DEFINE_STUBS(a, b) \
+	DEFINE_STUB(a, b, 0, 0) DEFINE_STUB(a, b, 0, 1) DEFINE_STUB(a, b, 0, 2) DEFINE_STUB(a, b, 0, 3) \
+	DEFINE_STUB(a, b, 1, 0) DEFINE_STUB(a, b, 1, 1) DEFINE_STUB(a, b, 1, 2) DEFINE_STUB(a, b, 1, 3) \
+	DEFINE_STUB(a, b, 2, 0) DEFINE_STUB(a, b, 2, 1) DEFINE_STUB(a, b, 2, 2) DEFINE_STUB(a, b, 2, 3) \
+	DEFINE_STUB(a, b, 3, 0) DEFINE_STUB(a, b, 3, 1) DEFINE_STUB(a, b, 3, 2) DEFINE_STUB(a, b, 3, 3)
+DEFINE_STUBS(0, 0) DEFINE_STUBS(0, 1) DEFINE_STUBS(0, 2) DEFINE_STUBS(0, 3)
+DEFINE_STUBS(1, 0) DEFINE_STUBS(1, 1) DEFINE_STUBS(1, 2) DEFINE_STUBS(1, 3)
+DEFINE_STUBS(2, 0) DEFINE_STUBS(2, 1) DEFINE_STUBS(2, 2) DEFINE_STUBS(2, 3)
+DEFINE_STUBS(3, 0) DEFINE_STUBS(3, 1) DEFINE_STUBS(3, 2) DEFINE_STUBS(3, 3)
+};
+#undef DEFINE_STUB
+#undef DEFINE_STUBS
 
 uint32_t __attribute__((stdcall)) CoInitialize(void *pvReserved) {
 	printf("CoInitialize(...)\n");
@@ -26,8 +45,18 @@ void *wibo::resolveStubByName(const char *dllName, const char *funcName) {
 		if (func)
 			return func;
 	}
+	if (strcmp(dllName, "USER32.dll") == 0) {
+		void *func = wibo::resolveUser32(funcName);
+		if (func)
+			return func;
+	}
 	if (strcmp(dllName, "ADVAPI32.dll") == 0) {
 		void *func = wibo::resolveAdvApi32(funcName);
+		if (func)
+			return func;
+	}
+	if (strcmp(dllName, "VERSION.dll") == 0) {
+		void *func = wibo::resolveVersion(funcName);
 		if (func)
 			return func;
 	}
@@ -36,11 +65,21 @@ void *wibo::resolveStubByName(const char *dllName, const char *funcName) {
 	}
 
 	printf("Missing function: %s (%s)\n", dllName, funcName);
-	return (void *) stub;
+	assert(stubIndex < 0x100);
+	assert(strlen(dllName) < 0x100);
+	assert(strlen(funcName) < 0x100);
+	strcpy(stubFuncNames[stubIndex], funcName);
+	strcpy(stubDlls[stubIndex], dllName);
+	return (void *) stubFuncs[stubIndex++];
 }
 
 void *wibo::resolveStubByOrdinal(const char *dllName, uint16_t ordinal) {
-	return (void *) stub;
+	// printf("Missing function: %s (%x)\n", dllName, ordinal);
+	assert(stubIndex < 0x100);
+	assert(strlen(dllName) < 0x100);
+	sprintf(stubFuncNames[stubIndex], "%d", ordinal);
+	strcpy(stubDlls[stubIndex], dllName);
+	return (void *) stubFuncs[stubIndex++];
 }
 
 // Windows Thread Information Block

@@ -3,7 +3,8 @@
 namespace user32 {
 	int WIN_FUNC LoadStringA(void* hInstance, unsigned int uID, char* lpBuffer, int cchBufferMax) {
 		printf("LoadStringA %p %d %d\n", hInstance, uID, cchBufferMax);
-		return 0;
+		strcpy(lpBuffer, "hello");
+		return 5;
 	}
 }
 

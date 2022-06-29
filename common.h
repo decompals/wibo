@@ -20,7 +20,7 @@ namespace wibo {
 	void *resolveUser32(const char *name);
 	void *resolveOle32(const char *name);
 	void *resolveAdvApi32(const char *name);
-	void *resolveLmgr11(uint16_t ordinal);
+	void *resolveLmgr(uint16_t ordinal);
 	void *resolveStubByName(const char *dllName, const char *funcName);
 	void *resolveStubByOrdinal(const char *dllName, uint16_t ordinal);
 

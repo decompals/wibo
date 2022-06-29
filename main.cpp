@@ -82,8 +82,10 @@ void *wibo::resolveStubByName(const char *dllName, const char *funcName) {
 }
 
 void *wibo::resolveStubByOrdinal(const char *dllName, uint16_t ordinal) {
-	if (strcmp(dllName, "LMGR11.dll") == 0 || strcmp(dllName, "LMGR326B.dll") == 0) {
-		void* func = wibo::resolveLmgr11(ordinal);
+	if (strcmp(dllName, "LMGR11.dll") == 0 ||
+			strcmp(dllName, "LMGR326B.dll") == 0 ||
+			strcmp(dllName, "LMGR8C.dll") == 0) {
+		void* func = wibo::resolveLmgr(ordinal);
 		if (func)
 			return func;
 	}

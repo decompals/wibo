@@ -20,7 +20,7 @@ namespace ole32 {
 		const GUID *riid,
 		void **ppv
 	) {
-		// for mwcc_41_60126:
+		// when license.dat is missing:
 		// rclsid = CLSID_ShellLink (0x21401), riid = IID_IShellLinkA (0x214ee)
 		// and then it crashes with a null pointer deref
 		DEBUG_LOG("CoCreateInstance 0x%x %p %d 0x%x %p\n", rclsid->Data1, pUnkOuter, dwClsContext, riid->Data1, *ppv);

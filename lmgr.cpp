@@ -1,6 +1,6 @@
 #include "common.h"
 
-namespace lmgr11 {
+namespace lmgr {
 	int lp_checkout(int a, int b, const char* c, const char* d, int e, const char* f, int* out) {
 		DEBUG_LOG("lp_checkout %d %d %s %s %d %s\n", a, b, c, d, e, f);
 		*out = 1234;
@@ -13,12 +13,12 @@ namespace lmgr11 {
 	}
 }
 
-void *wibo::resolveLmgr11(uint16_t ordinal) {
+void *wibo::resolveLmgr(uint16_t ordinal) {
 	switch (ordinal) {
 	case 189:
-		return (void*)lmgr11::lp_checkin;
+		return (void*)lmgr::lp_checkin;
 	case 190:
-		return (void*)lmgr11::lp_checkout;
+		return (void*)lmgr::lp_checkout;
 	}
 	return 0;
 }

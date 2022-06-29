@@ -47,6 +47,10 @@ namespace kernel32 {
 		return 0;
 	}
 
+	int WIN_FUNC GetSystemDefaultLangID() {
+		return 0;
+	}
+
 	void WIN_FUNC InitializeCriticalSection(void *param) {
 		// DEBUG_LOG("InitializeCriticalSection(...)\n");
 	}
@@ -277,6 +281,13 @@ namespace kernel32 {
 		}
 	}
 
+	void *WIN_FUNC FindFirstFileA(const char *lpFileName, void *lpFindFileData) {
+		auto path = pathFromWindows(lpFileName);
+		DEBUG_LOG("FindFirstFileA %s (%s)\n", lpFileName, path.c_str());
+		wibo::lastError = 2; // ERROR_FILE_NOT_FOUND
+		return (void *) 0xFFFFFFFF;
+	}
+
 	unsigned int WIN_FUNC GetFileAttributesA(const char *lpFileName) {
 		auto path = pathFromWindows(lpFileName);
 		DEBUG_LOG("GetFileAttributesA(%s)... (%s)\n", lpFileName, path.c_str());
@@ -454,6 +465,21 @@ namespace kernel32 {
 		return 0;
 	}
 
+	struct TIME_ZONE_INFORMATION {
+		int Bias;
+		short StandardName[32];
+		SYSTEMTIME StandardDate;
+		int StandardBias;
+		short DaylightName[32];
+		SYSTEMTIME DaylightDate;
+		int DaylightBias;
+	};
+
+	int WIN_FUNC GetTimeZoneInformation(TIME_ZONE_INFORMATION *lpTimeZoneInformation) {
+		memset(lpTimeZoneInformation, 0, sizeof(*lpTimeZoneInformation));
+		return 0;
+	}
+
 	/*
 	 * Console Nonsense
 	 */
@@ -558,6 +584,7 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "GetCurrentProcess") == 0) return (void *) kernel32::GetCurrentProcess;
 	if (strcmp(name, "ExitProcess") == 0) return (void *) kernel32::ExitProcess;
 	if (strcmp(name, "CreateProcessA") == 0) return (void *) kernel32::CreateProcessA;
+	if (strcmp(name, "GetSystemDefaultLangID") == 0) return (void *) kernel32::GetSystemDefaultLangID;
 	if (strcmp(name, "InitializeCriticalSection") == 0) return (void *) kernel32::InitializeCriticalSection;
 	if (strcmp(name, "DeleteCriticalSection") == 0) return (void *) kernel32::DeleteCriticalSection;
 	if (strcmp(name, "EnterCriticalSection") == 0) return (void *) kernel32::EnterCriticalSection;
@@ -577,6 +604,7 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "DuplicateHandle") == 0) return (void *) kernel32::DuplicateHandle;
 	if (strcmp(name, "CloseHandle") == 0) return (void *) kernel32::CloseHandle;
 	if (strcmp(name, "GetFullPathNameA") == 0) return (void *) kernel32::GetFullPathNameA;
+	if (strcmp(name, "FindFirstFileA") == 0) return (void *) kernel32::FindFirstFileA;
 	if (strcmp(name, "GetFileAttributesA") == 0) return (void *) kernel32::GetFileAttributesA;
 	if (strcmp(name, "WriteFile") == 0) return (void *) kernel32::WriteFile;
 	if (strcmp(name, "ReadFile") == 0) return (void *) kernel32::ReadFile;
@@ -589,6 +617,7 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "GetLocalTime") == 0) return (void *) kernel32::GetLocalTime;
 	if (strcmp(name, "SystemTimeToFileTime") == 0) return (void *) kernel32::SystemTimeToFileTime;
 	if (strcmp(name, "GetTickCount") == 0) return (void *) kernel32::GetTickCount;
+	if (strcmp(name, "GetTimeZoneInformation") == 0) return (void *) kernel32::GetTimeZoneInformation;
 	if (strcmp(name, "SetConsoleCtrlHandler") == 0) return (void *) kernel32::SetConsoleCtrlHandler;
 	if (strcmp(name, "GetConsoleScreenBufferInfo") == 0) return (void *) kernel32::GetConsoleScreenBufferInfo;
 	if (strcmp(name, "GetSystemDirectoryA") == 0) return (void *) kernel32::GetSystemDirectoryA;

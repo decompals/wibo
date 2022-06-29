@@ -3,6 +3,7 @@
 #include <ctype.h>
 #include <filesystem>
 #include <string>
+#include <malloc.h>
 
 namespace kernel32 {
 	uint32_t WIN_FUNC GetLastError() {
@@ -42,7 +43,7 @@ namespace kernel32 {
 			lpProcessInformation
 		);
 		printf("Cannot handle process creation, aborting\n");
-		abort();
+		exit(1);
 		return 0;
 	}
 
@@ -121,7 +122,7 @@ namespace kernel32 {
 			void *buffer = malloc(dwBytes);
 			if (buffer && (uFlags & 0x40)) {
 				// GMEM_ZEROINT
-				memset(buffer, 0, dwBytes);
+				memset(buffer, 0, malloc_usable_size(buffer));
 			}
 			return buffer;
 		}
@@ -137,10 +138,11 @@ namespace kernel32 {
 		} else {
 			if (dwBytes == 0)
 				dwBytes = 1;
+			size_t oldSize = malloc_usable_size(hMem);
 			void *buffer = realloc(hMem, dwBytes);
-			if (buffer && (uFlags & 0x40)) {
+			if (buffer && (uFlags & 0x40) && dwBytes > oldSize) {
 				// GMEM_ZEROINT
-				memset(buffer, 0, dwBytes);
+				memset((char*)buffer + oldSize, 0, malloc_usable_size(buffer) - oldSize);
 			}
 			return buffer;
 		}

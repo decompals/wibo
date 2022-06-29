@@ -45,11 +45,6 @@ DEFINE_STUBS(3, 0) DEFINE_STUBS(3, 1) DEFINE_STUBS(3, 2) DEFINE_STUBS(3, 3)
 #undef DEFINE_STUB
 #undef DEFINE_STUBS
 
-uint32_t __attribute__((stdcall)) CoInitialize(void *pvReserved) {
-	DEBUG_LOG("CoInitialize(...)\n");
-	return 0; // S_OK I think?
-}
-
 void *wibo::resolveStubByName(const char *dllName, const char *funcName) {
 	if (strcmp(dllName, "KERNEL32.dll") == 0) {
 		void *func = wibo::resolveKernel32(funcName);
@@ -72,7 +67,9 @@ void *wibo::resolveStubByName(const char *dllName, const char *funcName) {
 			return func;
 	}
 	if (strcmp(dllName, "ole32.dll") == 0) {
-		if (strcmp(funcName, "CoInitialize") == 0) return (void *) CoInitialize;
+		void *func = wibo::resolveOle32(funcName);
+		if (func)
+			return func;
 	}
 
 	DEBUG_LOG("Missing function: %s (%s)\n", dllName, funcName);

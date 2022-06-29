@@ -17,6 +17,35 @@ namespace kernel32 {
 		exit(uExitCode);
 	}
 
+	int WIN_FUNC CreateProcessA(
+		const char *lpApplicationName,
+		char *lpCommandLine,
+		void *lpProcessAttributes,
+		void *lpThreadAttributes,
+		int bInheritHandles,
+		int dwCreationFlags,
+		void *lpEnvironment,
+		const char *lpCurrentDirectory,
+		void *lpStartupInfo,
+		void *lpProcessInformation
+	) {
+		DEBUG_LOG("CreateProcessA %s \"%s\" %p %p %d 0x%x %p %s %p %p\n",
+			lpApplicationName,
+			lpCommandLine,
+			lpProcessAttributes,
+			lpThreadAttributes,
+			bInheritHandles,
+			dwCreationFlags,
+			lpEnvironment,
+			lpCurrentDirectory ? lpCurrentDirectory : "<none>",
+			lpStartupInfo,
+			lpProcessInformation
+		);
+		printf("Cannot handle process creation, aborting\n");
+		abort();
+		return 0;
+	}
+
 	void WIN_FUNC InitializeCriticalSection(void *param) {
 		// DEBUG_LOG("InitializeCriticalSection(...)\n");
 	}
@@ -190,6 +219,8 @@ namespace kernel32 {
 	}
 
 	int WIN_FUNC CloseHandle(void *hObject) {
+		// we *probably* won't run out of file descriptors even if we never close files
+		DEBUG_LOG("CloseHandle\n");
 		return 1;
 	}
 
@@ -265,6 +296,8 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC WriteFile(void *hFile, const void *lpBuffer, unsigned int nNumberOfBytesToWrite, unsigned int *lpNumberOfBytesWritten, void *lpOverlapped) {
+		DEBUG_LOG("WriteFile %d\n", nNumberOfBytesToWrite);
+		assert(!lpOverlapped);
 		// for now, we VERY naively assume that the handle is a FILE*
 		// haha this is gonna come back and bite me, isn't it
 		wibo::lastError = 0;
@@ -273,10 +306,149 @@ namespace kernel32 {
 		if (lpNumberOfBytesWritten)
 			*lpNumberOfBytesWritten = written;
 
+#if 0
+		printf("writing:\n");
+		for (unsigned int i = 0; i < nNumberOfBytesToWrite; i++) {
+			printf("%d ", ((const char*)lpBuffer)[i]);
+		}
+		printf("\n");
+#endif
+
 		if (written == 0)
 			wibo::lastError = 29; // ERROR_WRITE_FAULT
 
 		return (written == nNumberOfBytesToWrite);
+	}
+
+	unsigned int WIN_FUNC ReadFile(void *hFile, void *lpBuffer, unsigned int nNumberOfBytesToRead, unsigned int *lpNumberOfBytesRead, void *lpOverlapped) {
+		DEBUG_LOG("ReadFile %d\n", nNumberOfBytesToRead);
+		assert(!lpOverlapped);
+		wibo::lastError = 0;
+
+		size_t read = fread(lpBuffer, 1, nNumberOfBytesToRead, (FILE *) hFile);
+		*lpNumberOfBytesRead = read;
+		return 1;
+	}
+
+	void *WIN_FUNC CreateFileA(
+			const char* lpFileName,
+			unsigned int dwDesiredAccess,
+			unsigned int dwShareMode,
+			void *lpSecurityAttributes,
+			unsigned int dwCreationDisposition,
+			unsigned int dwFlagsAndAttributes,
+			void *hTemplateFile) {
+		std::string path = pathFromWindows(lpFileName);
+		DEBUG_LOG("CreateFileA %s (%s) 0x%x %u %p %u %u\n",
+				lpFileName, path.c_str(),
+				dwDesiredAccess, dwShareMode, lpSecurityAttributes,
+				dwCreationDisposition, dwFlagsAndAttributes);
+		if (dwDesiredAccess == 0x80000000 && dwShareMode == 1) { // read
+			return fopen(path.c_str(), "rb");
+		}
+		if (dwDesiredAccess == 0x40000000 && dwShareMode == 2) { // write
+			return fopen(path.c_str(), "wb");
+		}
+		if (dwDesiredAccess == 0xc0000000 && dwShareMode == 1) { // read/write
+			return fopen(path.c_str(), "wb+");
+		}
+		assert(0);
+		wibo::lastError = 0;
+		return 0;
+	}
+
+	int WIN_FUNC DeleteFileA(const char* lpFileName) {
+		std::string path = pathFromWindows(lpFileName);
+		DEBUG_LOG("DeleteFileA %s (%s)\n", lpFileName, path.c_str());
+		unlink(path.c_str());
+		return 1;
+	}
+
+	unsigned int WIN_FUNC SetFilePointer(void *hFile, int lDistanceToMove, int *lpDistanceToMoveHigh, int dwMoveMethod) {
+		DEBUG_LOG("SetFilePointer %d %d %d\n", lDistanceToMove, (lpDistanceToMoveHigh ? *lpDistanceToMoveHigh : -1), dwMoveMethod);
+		assert(!lpDistanceToMoveHigh);
+		FILE *fp = (FILE*) hFile;
+		int r = fseek(fp, lDistanceToMove,
+				dwMoveMethod == 0 ? SEEK_SET :
+				dwMoveMethod == 1 ? SEEK_CUR :
+				SEEK_END);
+		assert(r >= 0);
+		r = ftell(fp);
+		assert(r >= 0);
+		return r;
+	}
+
+	/*
+	 * Time
+	 */
+	unsigned int WIN_FUNC GetFileSize(void *hFile, unsigned int *lpFileSizeHigh) {
+		DEBUG_LOG("GetFileSize\n");
+		FILE *fp = (FILE*)hFile;
+		long pos = ftell(fp);
+		assert(pos >= 0);
+		int r = fseek(fp, 0L, SEEK_END);
+		assert(r == 0);
+		long sz = ftell(fp);
+		assert(sz >= 0);
+		fseek(fp, pos, SEEK_SET);
+		if (lpFileSizeHigh) {
+			*lpFileSizeHigh = 0;
+		}
+		DEBUG_LOG("-> %d\n", (int)sz);
+		return (unsigned int)sz;
+	}
+
+	struct FILETIME {
+		unsigned int dwLowDateTime;
+		unsigned int dwHighDateTime;
+	};
+
+	int WIN_FUNC GetFileTime(void *hFile, FILETIME *lpCreationTime, FILETIME *lpLastAccessTime, FILETIME *lpLastWriteTime) {
+		DEBUG_LOG("GetFileTime %p %p %p\n", lpCreationTime, lpLastAccessTime, lpLastWriteTime);
+		if (lpCreationTime) lpCreationTime->dwLowDateTime = lpCreationTime->dwHighDateTime = 0;
+		if (lpLastAccessTime) lpLastAccessTime->dwLowDateTime = lpLastAccessTime->dwHighDateTime = 0;
+		if (lpLastWriteTime) lpLastWriteTime->dwLowDateTime = lpLastWriteTime->dwHighDateTime = 0;
+		return 1;
+	}
+
+	struct SYSTEMTIME {
+		short wYear;
+		short wMonth;
+		short wDayOfWeek;
+		short wDay;
+		short wHour;
+		short wMinute;
+		short wSecond;
+		short wMilliseconds;
+	};
+
+	void WIN_FUNC GetSystemTime(SYSTEMTIME *lpSystemTime) {
+		DEBUG_LOG("GetSystemTime\n");
+		lpSystemTime->wYear = 0;
+		lpSystemTime->wMonth = 0;
+		lpSystemTime->wDayOfWeek = 0;
+		lpSystemTime->wDay = 0;
+		lpSystemTime->wHour = 0;
+		lpSystemTime->wMinute = 0;
+		lpSystemTime->wSecond = 0;
+		lpSystemTime->wMilliseconds = 0;
+	}
+
+	void WIN_FUNC GetLocalTime(SYSTEMTIME *lpSystemTime) {
+		DEBUG_LOG("GetLocalTime\n");
+		GetSystemTime(lpSystemTime);
+	}
+
+	int WIN_FUNC SystemTimeToFileTime(const SYSTEMTIME *lpSystemTime, FILETIME *lpFileTime) {
+		DEBUG_LOG("SystemTimeToFileTime\n");
+		lpFileTime->dwLowDateTime = 0;
+		lpFileTime->dwHighDateTime = 0;
+		return 1;
+	}
+
+	int WIN_FUNC GetTickCount() {
+		DEBUG_LOG("GetTickCount\n");
+		return 0;
 	}
 
 	/*
@@ -382,6 +554,7 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "GetLastError") == 0) return (void *) kernel32::GetLastError;
 	if (strcmp(name, "GetCurrentProcess") == 0) return (void *) kernel32::GetCurrentProcess;
 	if (strcmp(name, "ExitProcess") == 0) return (void *) kernel32::ExitProcess;
+	if (strcmp(name, "CreateProcessA") == 0) return (void *) kernel32::CreateProcessA;
 	if (strcmp(name, "InitializeCriticalSection") == 0) return (void *) kernel32::InitializeCriticalSection;
 	if (strcmp(name, "DeleteCriticalSection") == 0) return (void *) kernel32::DeleteCriticalSection;
 	if (strcmp(name, "EnterCriticalSection") == 0) return (void *) kernel32::EnterCriticalSection;
@@ -403,6 +576,16 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "GetFullPathNameA") == 0) return (void *) kernel32::GetFullPathNameA;
 	if (strcmp(name, "GetFileAttributesA") == 0) return (void *) kernel32::GetFileAttributesA;
 	if (strcmp(name, "WriteFile") == 0) return (void *) kernel32::WriteFile;
+	if (strcmp(name, "ReadFile") == 0) return (void *) kernel32::ReadFile;
+	if (strcmp(name, "CreateFileA") == 0) return (void *) kernel32::CreateFileA;
+	if (strcmp(name, "DeleteFileA") == 0) return (void *) kernel32::DeleteFileA;
+	if (strcmp(name, "SetFilePointer") == 0) return (void *) kernel32::SetFilePointer;
+	if (strcmp(name, "GetFileSize") == 0) return (void *) kernel32::GetFileSize;
+	if (strcmp(name, "GetFileTime") == 0) return (void *) kernel32::GetFileTime;
+	if (strcmp(name, "GetSystemTime") == 0) return (void *) kernel32::GetSystemTime;
+	if (strcmp(name, "GetLocalTime") == 0) return (void *) kernel32::GetLocalTime;
+	if (strcmp(name, "SystemTimeToFileTime") == 0) return (void *) kernel32::SystemTimeToFileTime;
+	if (strcmp(name, "GetTickCount") == 0) return (void *) kernel32::GetTickCount;
 	if (strcmp(name, "SetConsoleCtrlHandler") == 0) return (void *) kernel32::SetConsoleCtrlHandler;
 	if (strcmp(name, "GetConsoleScreenBufferInfo") == 0) return (void *) kernel32::GetConsoleScreenBufferInfo;
 	if (strcmp(name, "GetSystemDirectoryA") == 0) return (void *) kernel32::GetSystemDirectoryA;

@@ -30,7 +30,7 @@ namespace kernel32 {
 		void *lpStartupInfo,
 		void *lpProcessInformation
 	) {
-		DEBUG_LOG("CreateProcessA %s \"%s\" %p %p %d 0x%x %p %s %p %p\n",
+		printf("CreateProcessA %s \"%s\" %p %p %d 0x%x %p %s %p %p\n",
 			lpApplicationName,
 			lpCommandLine,
 			lpProcessAttributes,

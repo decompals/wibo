@@ -6,12 +6,12 @@
 #include <assert.h>
 
 #define WIN_FUNC __attribute__((stdcall))
-// inline void DEBUG_LOG(const char *fmt, ...) {}
 #define DEBUG_LOG(...) wibo::debug_log(__VA_ARGS__)
 
 namespace wibo {
 	extern uint32_t lastError;
 	extern char *commandLine;
+	extern bool debugEnabled;
 
 	void debug_log(const char *fmt, ...);
 

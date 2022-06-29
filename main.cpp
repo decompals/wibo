@@ -9,11 +9,13 @@
 uint32_t wibo::lastError = 0;
 char *wibo::commandLine;
 wibo::Executable *wibo::mainModule = 0;
+bool wibo::debugEnabled = false;
 
 void wibo::debug_log(const char *fmt, ...) {
 	va_list args;
 	va_start(args, fmt);
-	vprintf(fmt, args);
+	if (wibo::debugEnabled)
+		vprintf(fmt, args);
 	va_end(args);
 }
 
@@ -24,8 +26,8 @@ static char stubFuncNames[0x100][0x100];
 static void stubBase(int index) {
 	// should go through all the functions imported by mwcceppc.exe
 	// and create template stubs for them, at least...
-	DEBUG_LOG("Unhandled function %s (%s)\n", stubFuncNames[index], stubDlls[index]);
-	exit(0);
+	printf("Unhandled function %s (%s)\n", stubFuncNames[index], stubDlls[index]);
+	exit(1);
 }
 
 void (*stubFuncs[0x100])(void) = {
@@ -110,6 +112,10 @@ int main(int argc, char **argv) {
 	if (argc <= 1) {
 		printf("Usage: ./wibo program.exe ...\n");
 		return 1;
+	}
+
+	if (getenv("WIBO_DEBUG")) {
+		wibo::debugEnabled = true;
 	}
 
 	// Create TIB

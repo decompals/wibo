@@ -79,9 +79,10 @@ namespace kernel32 {
 	 * Memory
 	 */
 	void *WIN_FUNC GlobalAlloc(uint32_t uFlags, size_t dwBytes) {
-		DEBUG_LOG("GlobalAlloc(flags=%x, size=%x)\n", uFlags, dwBytes);
+		// DEBUG_LOG("GlobalAlloc(flags=%x, size=%x)\n", uFlags, dwBytes);
 		if (uFlags & 2) {
 			// GMEM_MOVEABLE - not implemented rn
+			assert(0);
 			return 0;
 		} else {
 			// GMEM_FIXED - this is simpler

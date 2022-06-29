@@ -6,8 +6,8 @@
 #include <assert.h>
 
 #define WIN_FUNC __attribute__((stdcall))
-#define DEBUG_LOG(...) /* nothing */
-// #define DEBUG_LOG(...) wibo::debug_log(__VA_ARGS__)
+// inline void DEBUG_LOG(const char *fmt, ...) {}
+#define DEBUG_LOG(...) wibo::debug_log(__VA_ARGS__)
 
 namespace wibo {
 	extern uint32_t lastError;
@@ -31,6 +31,7 @@ namespace wibo {
 		void *imageBuffer;
 		size_t imageSize;
 		void *entryPoint;
+		void *rsrcBase;
 
 		template <typename T>
 		T *fromRVA(uint32_t rva) {
@@ -42,4 +43,6 @@ namespace wibo {
 			return fromRVA<T>((uint32_t) rva);
 		}
 	};
+
+	extern Executable *mainModule;
 }

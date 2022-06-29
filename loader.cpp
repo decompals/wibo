@@ -106,6 +106,7 @@ uint32_t read32(FILE *file) {
 wibo::Executable::Executable() {
 	imageBuffer = nullptr;
 	imageSize = 0;
+	rsrcBase = 0;
 }
 
 wibo::Executable::~Executable() {
@@ -162,13 +163,17 @@ bool wibo::Executable::loadPE(FILE *file) {
 		name[8] = 0;
 		DEBUG_LOG("Section %d: name=%s addr=%x size=%x (raw=%x) ptr=%x\n", i, name, section.virtualAddress, section.virtualSize, section.sizeOfRawData, section.pointerToRawData);
 
+		void *sectionBase = (void *) (header32.imageBase + section.virtualAddress);
 		if (section.sizeOfRawData > 0) {
 			// Grab this data
 			long savePos = ftell(file);
 			fseek(file, section.pointerToRawData, SEEK_SET);
-			void *sectionBase = (void *) (header32.imageBase + section.virtualAddress);
 			fread(sectionBase, section.virtualSize, 1, file);
 			fseek(file, savePos, SEEK_SET);
+		}
+
+		if (strcmp(name, ".rsrc") == 0) {
+			rsrcBase = sectionBase;
 		}
 	}
 

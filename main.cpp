@@ -8,6 +8,7 @@
 
 uint32_t wibo::lastError = 0;
 char *wibo::commandLine;
+wibo::Executable *wibo::mainModule = 0;
 
 void wibo::debug_log(const char *fmt, ...) {
 	va_list args;
@@ -168,6 +169,7 @@ int main(int argc, char **argv) {
 	DEBUG_LOG("Command line: %s\n", wibo::commandLine);
 
 	wibo::Executable exec;
+	wibo::mainModule = &exec;
 
 	FILE *f = fopen(argv[1], "rb");
 	exec.loadPE(f);

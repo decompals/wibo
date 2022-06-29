@@ -140,9 +140,10 @@ namespace kernel32 {
 				dwBytes = 1;
 			size_t oldSize = malloc_usable_size(hMem);
 			void *buffer = realloc(hMem, dwBytes);
-			if (buffer && (uFlags & 0x40) && dwBytes > oldSize) {
+			size_t newSize = malloc_usable_size(buffer);
+			if (buffer && (uFlags & 0x40) && newSize > oldSize) {
 				// GMEM_ZEROINT
-				memset((char*)buffer + oldSize, 0, malloc_usable_size(buffer) - oldSize);
+				memset((char*)buffer + oldSize, 0, newSize - oldSize);
 			}
 			return buffer;
 		}

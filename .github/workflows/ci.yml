@@ -6,6 +6,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+      - name: Install GCC multilib
+        run: sudo apt update && sudo apt install gcc-multilib g++-multilib
       - name: Build
         run: make -j
       - name: Test

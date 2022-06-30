@@ -9,8 +9,8 @@ jobs:
 
       - name: Install GCC multilib
         run: |
-          sudo apt update
-          sudo apt install gcc-multilib g++-multilib
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib g++-multilib
 
       - name: Build
         run: make -j

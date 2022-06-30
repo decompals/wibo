@@ -9,6 +9,9 @@ jobs:
       - name: Build
         run: make -j
       - name: Test
+        env:
+         CC: gcc-10
+         CXX: g++-10
         run: |
           wget https://cdn.discordapp.com/attachments/727918646525165659/917185027656286218/GC_WII_COMPILERS.zip
           unzip GC_WII_COMPILERS.zip

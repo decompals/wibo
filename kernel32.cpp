@@ -6,6 +6,11 @@
 #include <malloc.h>
 
 namespace kernel32 {
+
+	void *heap = 0;
+	unsigned int heapUsed = 0;
+	unsigned int heapSize = 0;
+
 	uint32_t WIN_FUNC GetLastError() {
 		return wibo::lastError;
 	}
@@ -72,7 +77,7 @@ namespace kernel32 {
 	static void *tlsValues[MAX_TLS_VALUES];
 	unsigned int WIN_FUNC TlsAlloc() {
 		DEBUG_LOG("TlsAlloc()\n");
-		for (int i = 0; i < MAX_TLS_VALUES; i++) {
+		for (size_t i = 0; i < MAX_TLS_VALUES; i++) {
 			if (tlsValuesUsed[i] == false) {
 				tlsValuesUsed[i] = true;
 				tlsValues[i] = 0;
@@ -165,6 +170,7 @@ namespace kernel32 {
 	}
 
 	char *WIN_FUNC GetEnvironmentStrings() {
+		DEBUG_LOG("GetEnvironmentStrings\n");
 		// Step 1, figure out the size of the buffer we need.
 		size_t bufSize = 0;
 		char **work = environ;
@@ -185,6 +191,37 @@ namespace kernel32 {
 			memcpy(ptr, *work, strSize);
 			ptr[strSize] = 0;
 			ptr += strSize + 1;
+			work++;
+		}
+		*ptr = 0; // an extra null at the end
+
+		return buffer;
+	}
+
+	wchar_t* WIN_FUNC GetEnvironmentStringsW() {
+		DEBUG_LOG("GetEnvironmentStringsW\n");
+		// Step 1, figure out the size of the buffer we need.
+		size_t bufSizeW = 0;
+		char **work = environ;
+
+		while (*work) {
+			// "hello|" -> " h e l l o|"
+			bufSizeW += strlen(*work) * 2 + 1;
+			work++;
+		}
+		bufSizeW++;
+
+		// Step 2, actually build that buffer
+		wchar_t *buffer = (wchar_t *) malloc(bufSizeW);
+		wchar_t *ptr = buffer;
+		work = environ;
+
+		while (*work) {
+			size_t strSize = strlen(*work);
+			for (size_t i = 0; i < strSize; i++) {
+				*ptr++ = (*work)[i];
+			}
+			*ptr++ = 0; // NUL terminate
 			work++;
 		}
 		*ptr = 0; // an extra null at the end
@@ -323,7 +360,7 @@ namespace kernel32 {
 #if 0
 		printf("writing:\n");
 		for (unsigned int i = 0; i < nNumberOfBytesToWrite; i++) {
-			printf("%d ", ((const char*)lpBuffer)[i]);
+			printf("%c", ((const char*)lpBuffer)[i]);
 		}
 		printf("\n");
 #endif
@@ -366,7 +403,7 @@ namespace kernel32 {
 		if (dwDesiredAccess == 0xc0000000 && dwShareMode == 1) { // read/write
 			return fopen(path.c_str(), "wb+");
 		}
-		assert(0);
+		// assert(0);
 		wibo::lastError = 0;
 		return 0;
 	}
@@ -543,7 +580,7 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC GetModuleFileNameA(void* hModule, char* lpFilename, unsigned int nSize) {
-		DEBUG_LOG("GetModuleFileNameA %p\n", hModule);
+		DEBUG_LOG("GetModuleFileNameA %p (%s)\n", hModule, lpFilename);
 		wibo::lastError = 0;
 		return 0;
 	}
@@ -575,6 +612,160 @@ namespace kernel32 {
 
 	int WIN_FUNC FreeLibrary(void* hLibModule) {
 		DEBUG_LOG("FreeLibrary %p\n", hLibModule);
+		return 1;
+	}
+
+	int WIN_FUNC GetVersion() {
+		DEBUG_LOG("GetVersion\n");
+		return 1;
+	}
+
+	void *WIN_FUNC HeapCreate(unsigned int flOptions, unsigned int dwInitialSize, unsigned int dwMaximumSize) {
+		DEBUG_LOG("HeapCreate %u %u %u\n", flOptions, dwInitialSize, dwMaximumSize);
+		if (flOptions & 0x00000001) {
+			// HEAP_NO_SERIALIZE
+		}
+		if (flOptions & 0x00040000) {
+			// HEAP_CREATE_ENABLE_EXECUTE
+		}
+		if (flOptions & 0x00000004) {
+			// HEAP_GENERATE_EXCEPTIONS
+		}
+
+		heapSize = dwInitialSize * 1024;
+		void *_heap = malloc(heapSize); // overallocate memory
+		if (!_heap) {
+			wibo::lastError = 8; // ERROR_NOT_ENOUGH_MEMORY
+		}
+
+		// how many heaps do we need?
+		heap = _heap;
+
+		return _heap;
+	}
+
+	void *WIN_FUNC VirtualAlloc(void *lpAddress, unsigned int dwSize, unsigned int flAllocationType, unsigned int flProtect) {
+		DEBUG_LOG("VirtualAlloc %p %u %u %u\n",lpAddress, dwSize, flAllocationType, flProtect);
+		return (void *)((unsigned int)lpAddress + (unsigned int)malloc(dwSize));
+	}
+
+	typedef struct _STARTUPINFOA {
+		unsigned int   cb;
+	    char          *lpReserved;
+	    char          *lpDesktop;
+	    char          *lpTitle;
+	    unsigned int   dwX;
+	    unsigned int   dwY;
+	    unsigned int   dwXSize;
+	    unsigned int   dwYSize;
+	    unsigned int   dwXCountChars;
+	    unsigned int   dwYCountChars;
+	    unsigned int   dwFillAttribute;
+	    unsigned int   dwFlags;
+	    unsigned short wShowWindow;
+	    unsigned short cbReserved2;
+	    unsigned char  lpReserved2;
+	    void          *hStdInput;
+	    void          *hStdOutput;
+	    void          *hStdError;
+	} STARTUPINFOA, *LPSTARTUPINFOA;
+
+	void *WIN_FUNC GetStartupInfoA() {
+		DEBUG_LOG("GetStartupInfoA\n");
+		STARTUPINFOA *startupInfo = (STARTUPINFOA *) malloc(sizeof(STARTUPINFOA));
+		return startupInfo;
+	}
+
+	unsigned short WIN_FUNC GetFileType(void *hFile) {
+		DEBUG_LOG("GetFileType %p\n", hFile);
+		return 2; // FILE_TYPE_CHAR
+	}
+
+	unsigned int WIN_FUNC SetHandleCount(unsigned int uNumber) {
+		DEBUG_LOG("SetHandleCount %p\n", uNumber);
+		return uNumber + 10;
+	}
+
+	unsigned int WIN_FUNC GetACP() {
+		DEBUG_LOG("GetACP\n");
+		// return 65001; // utf-8
+		// return 437;   // OEM United States
+		// return 1200;  // Unicode (BMP of ISO 10646)
+		// return 850; 	 // OEM Multilingual Latin 1; Western European (DOS)
+		return 28591; // ISO/IEC 8859-1
+	}
+
+	typedef struct _cpinfo {
+	  unsigned int  MaxCharSize;
+	  unsigned char DefaultChar[2];
+	  unsigned char LeadByte[12];
+	} CPINFO, *LPCPINFO;
+
+	unsigned int WIN_FUNC GetCPInfo(unsigned int codePage, CPINFO* lpCPInfo) {
+		DEBUG_LOG("GetCPInfo: %u\n", codePage);
+		lpCPInfo->MaxCharSize = 1;
+		lpCPInfo->DefaultChar[0] = 0;
+		return 1; // success
+	}
+
+	unsigned int WIN_FUNC WideCharToMultiByte(unsigned int codePage, unsigned int dwFlags, char *lpWideCharStr, unsigned int cchWideChar, char *lpMultiByteStr, unsigned int cbMultiByte, char lpDefaultChar, unsigned int lpUsedDefaultChar) {
+		DEBUG_LOG("WideCharToMultiByte: %i\n", cbMultiByte);
+
+		if (cbMultiByte == 0) {
+			return strlen(lpWideCharStr) + 1;
+		}
+		for (size_t i = 0; i < cbMultiByte; i++) {
+			lpMultiByteStr[i] = lpWideCharStr[i];
+		}
+
+		return cbMultiByte;
+	}
+
+	unsigned int WIN_FUNC FreeEnvironmentStringsW(void *penv) {
+		DEBUG_LOG("FreeEnvironmentStringsW: %p\n", penv);
+		free(penv); // ?
+		return 1;
+	}
+
+	unsigned int WIN_FUNC IsProcessorFeaturePresent(unsigned int processorFeature) {
+		DEBUG_LOG("IsProcessorFeaturePresent: %u\n", processorFeature);
+
+		if (processorFeature == 0) // PF_FLOATING_POINT_PRECISION_ERRATA
+			return 1;
+
+		// sure, we have that feature...
+		return 1;
+	}
+
+	void *WIN_FUNC GetProcAddress(void *hModule, char *lpProcName) {
+		DEBUG_LOG("GetProcAddress: %s from %p\n", lpProcName, hModule);
+
+		if ((unsigned int)hModule == 1) {
+			if (strcmp(lpProcName, "IsProcessorFeaturePresent") == 0) return (void *) IsProcessorFeaturePresent;
+		}
+
+		return NULL;
+	}
+
+	void *WIN_FUNC HeapAlloc(void *hHeap, unsigned int dwFlags, size_t dwBytes) {
+		DEBUG_LOG("HeapAlloc (%u bytes)\n", dwBytes);
+
+		void *mem = heap + heapUsed;
+
+		heapUsed += dwBytes;
+
+		if (heapUsed > heapSize) {
+			printf("Ran out of heap (%u / %u)!\n", heapUsed, heapSize);
+		} else {
+			DEBUG_LOG("Heap Used %u / %u\n", heapUsed, heapSize);
+		}
+
+		return mem;
+	}
+
+	unsigned int WIN_FUNC HeapFree(void *hHeap, unsigned int dwFlags, void *lpMem) {
+		DEBUG_LOG("HeapFree\n");
+		free(hHeap);
 		return 1;
 	}
 }
@@ -631,5 +822,20 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "SizeofResource") == 0) return (void *) kernel32::SizeofResource;
 	if (strcmp(name, "LoadLibraryA") == 0) return (void *) kernel32::LoadLibraryA;
 	if (strcmp(name, "FreeLibrary") == 0) return (void *) kernel32::FreeLibrary;
+	if (strcmp(name, "GetVersion") == 0) return (void *) kernel32::GetVersion;
+	if (strcmp(name, "HeapCreate") == 0) return (void *) kernel32::HeapCreate;
+	if (strcmp(name, "VirtualAlloc") == 0) return (void *) kernel32::VirtualAlloc;
+	if (strcmp(name, "GetStartupInfoA") == 0) return (void *) kernel32::GetStartupInfoA;
+	if (strcmp(name, "GetFileType") == 0) return (void *) kernel32::GetFileType;
+	if (strcmp(name, "SetHandleCount") == 0) return (void *) kernel32::SetHandleCount;
+	if (strcmp(name, "GetACP") == 0) return (void *) kernel32::GetACP;
+	if (strcmp(name, "GetCPInfo") == 0) return (void *) kernel32::GetCPInfo;
+	if (strcmp(name, "GetEnvironmentStringsW") == 0) return (void *) kernel32::GetEnvironmentStringsW;
+	if (strcmp(name, "WideCharToMultiByte") == 0) return (void *) kernel32::WideCharToMultiByte;
+	if (strcmp(name, "FreeEnvironmentStringsW") == 0) return (void *) kernel32::FreeEnvironmentStringsW;
+	if (strcmp(name, "GetProcAddress") == 0) return (void *) kernel32::GetProcAddress;
+	if (strcmp(name, "HeapAlloc") == 0) return (void *) kernel32::HeapAlloc;
+	if (strcmp(name, "HeapFree") == 0) return (void *) kernel32::HeapFree;
+
 	return 0;
 }

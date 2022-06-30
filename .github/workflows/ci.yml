@@ -1,0 +1,23 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  build_and_test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Install GCC multilib
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib g++-multilib
+
+      - name: Build
+        run: make -j
+
+      - name: Test
+        run: |
+          wget https://cdn.discordapp.com/attachments/727918646525165659/917185027656286218/GC_WII_COMPILERS.zip
+          unzip GC_WII_COMPILERS.zip
+          MWCIncludes=. ./wibo GC/2.7/mwcceppc.exe -c test/test.c
+          file test.o

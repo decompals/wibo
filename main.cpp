@@ -1,5 +1,6 @@
 #include "common.h"
 #include <asm/ldt.h>
+#include <filesystem>
 #include <errno.h>
 #include <memory>
 #include <sys/mman.h>
@@ -176,7 +177,14 @@ int main(int argc, char **argv) {
 	wibo::Executable exec;
 	wibo::mainModule = &exec;
 
-	FILE *f = fopen(argv[1], "rb");
+	char* pe_path = argv[1];
+	FILE *f = fopen(pe_path, "rb");
+	if (!f) {
+		std::string mesg = std::string("Failed to open file ") + pe_path;
+		perror(mesg.c_str());
+		return 1;
+	}
+
 	exec.loadPE(f);
 	fclose(f);
 

@@ -178,16 +178,10 @@ int main(int argc, char **argv) {
 	wibo::mainModule = &exec;
 
 	char* pe_path = argv[1];
-
-	if (!std::filesystem::exists(pe_path)) {
-		printf("File not found: %s\n", pe_path);
-		return 1;
-	}
-
 	FILE *f = fopen(pe_path, "rb");
-
 	if (!f) {
-		perror("Failed to open file\n");
+		std::string mesg = std::string("Failed to open file ") + pe_path;
+		perror(mesg.c_str());
 		return 1;
 	}
 

@@ -145,6 +145,7 @@ bool wibo::Executable::loadPE(FILE *file) {
 	// Build buffer
 	imageSize = header32.sizeOfImage;
 	imageBuffer = mmap((void *) header32.imageBase, header32.sizeOfImage, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_ANONYMOUS|MAP_FIXED|MAP_PRIVATE, -1, 0);
+	memset(imageBuffer, 0, header32.sizeOfImage);
 	if (imageBuffer == MAP_FAILED) {
 		perror("Image mapping failed!");
 		imageBuffer = 0;
@@ -168,7 +169,7 @@ bool wibo::Executable::loadPE(FILE *file) {
 			// Grab this data
 			long savePos = ftell(file);
 			fseek(file, section.pointerToRawData, SEEK_SET);
-			fread(sectionBase, section.virtualSize, 1, file);
+			fread(sectionBase, section.sizeOfRawData, 1, file);
 			fseek(file, savePos, SEEK_SET);
 		}
 

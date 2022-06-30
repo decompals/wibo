@@ -7,10 +7,6 @@
 
 namespace kernel32 {
 
-	void *heap = 0;
-	unsigned int heapUsed = 0;
-	unsigned int heapSize = 0;
-
 	uint32_t WIN_FUNC GetLastError() {
 		return wibo::lastError;
 	}
@@ -198,7 +194,7 @@ namespace kernel32 {
 		return buffer;
 	}
 
-	wchar_t* WIN_FUNC GetEnvironmentStringsW() {
+	uint16_t* WIN_FUNC GetEnvironmentStringsW() {
 		DEBUG_LOG("GetEnvironmentStringsW\n");
 		// Step 1, figure out the size of the buffer we need.
 		size_t bufSizeW = 0;
@@ -206,14 +202,14 @@ namespace kernel32 {
 
 		while (*work) {
 			// "hello|" -> " h e l l o|"
-			bufSizeW += strlen(*work) * 2 + 1;
+			bufSizeW += strlen(*work) + 1;
 			work++;
 		}
 		bufSizeW++;
 
 		// Step 2, actually build that buffer
-		wchar_t *buffer = (wchar_t *) malloc(bufSizeW);
-		wchar_t *ptr = buffer;
+		uint16_t *buffer = (uint16_t *) malloc(bufSizeW * 2);
+		uint16_t *ptr = buffer;
 		work = environ;
 
 		while (*work) {
@@ -390,21 +386,21 @@ namespace kernel32 {
 			unsigned int dwFlagsAndAttributes,
 			void *hTemplateFile) {
 		std::string path = pathFromWindows(lpFileName);
-		DEBUG_LOG("CreateFileA %s (%s) 0x%x %u %p %u %u\n",
+		DEBUG_LOG("CreateFileA(filename=%s (%s), desiredAccess=0x%x, shareMode=%u, securityAttributes=%p, creationDisposition=%u, flagsAndAttributes=%u)\n",
 				lpFileName, path.c_str(),
 				dwDesiredAccess, dwShareMode, lpSecurityAttributes,
 				dwCreationDisposition, dwFlagsAndAttributes);
-		if (dwDesiredAccess == 0x80000000 && dwShareMode == 1) { // read
+		wibo::lastError = 0;
+		if (dwDesiredAccess == 0x80000000) { // read
 			return fopen(path.c_str(), "rb");
 		}
-		if (dwDesiredAccess == 0x40000000 && dwShareMode == 2) { // write
+		if (dwDesiredAccess == 0x40000000) { // write
 			return fopen(path.c_str(), "wb");
 		}
-		if (dwDesiredAccess == 0xc0000000 && dwShareMode == 1) { // read/write
+		if (dwDesiredAccess == 0xc0000000) { // read/write
 			return fopen(path.c_str(), "wb+");
 		}
-		// assert(0);
-		wibo::lastError = 0;
+		assert(0);
 		return 0;
 	}
 
@@ -632,21 +628,24 @@ namespace kernel32 {
 			// HEAP_GENERATE_EXCEPTIONS
 		}
 
-		heapSize = dwInitialSize * 1024;
-		void *_heap = malloc(heapSize); // overallocate memory
-		if (!_heap) {
-			wibo::lastError = 8; // ERROR_NOT_ENOUGH_MEMORY
-		}
-
-		// how many heaps do we need?
-		heap = _heap;
-
-		return _heap;
+		// return a dummy value
+		wibo::lastError = 0;
+		return (void *) 0x12345678;
 	}
 
 	void *WIN_FUNC VirtualAlloc(void *lpAddress, unsigned int dwSize, unsigned int flAllocationType, unsigned int flProtect) {
 		DEBUG_LOG("VirtualAlloc %p %u %u %u\n",lpAddress, dwSize, flAllocationType, flProtect);
-		return (void *)((unsigned int)lpAddress + (unsigned int)malloc(dwSize));
+		if (flAllocationType & 0x2000) { // MEM_RESERVE
+			// do this for now...
+			assert(lpAddress == NULL);
+			void *mem = 0;
+			posix_memalign(&mem, 0x1000, dwSize);
+			DEBUG_LOG("VirtualAlloc returning %p\n", mem);
+			return mem;
+		} else {
+			assert(lpAddress != NULL);
+			return lpAddress;
+		}
 	}
 
 	typedef struct _STARTUPINFOA {
@@ -670,10 +669,9 @@ namespace kernel32 {
 	    void          *hStdError;
 	} STARTUPINFOA, *LPSTARTUPINFOA;
 
-	void *WIN_FUNC GetStartupInfoA() {
+	void WIN_FUNC GetStartupInfoA(STARTUPINFOA *lpStartupInfo) {
 		DEBUG_LOG("GetStartupInfoA\n");
-		STARTUPINFOA *startupInfo = (STARTUPINFOA *) malloc(sizeof(STARTUPINFOA));
-		return startupInfo;
+		memset(lpStartupInfo, 0, sizeof(STARTUPINFOA));
 	}
 
 	unsigned short WIN_FUNC GetFileType(void *hFile) {
@@ -708,15 +706,24 @@ namespace kernel32 {
 		return 1; // success
 	}
 
-	unsigned int WIN_FUNC WideCharToMultiByte(unsigned int codePage, unsigned int dwFlags, char *lpWideCharStr, unsigned int cchWideChar, char *lpMultiByteStr, unsigned int cbMultiByte, char lpDefaultChar, unsigned int lpUsedDefaultChar) {
-		DEBUG_LOG("WideCharToMultiByte: %i\n", cbMultiByte);
+	unsigned int WIN_FUNC WideCharToMultiByte(unsigned int codePage, unsigned int dwFlags, uint16_t *lpWideCharStr, int cchWideChar, char *lpMultiByteStr, int cbMultiByte, char *lpDefaultChar, unsigned int *lpUsedDefaultChar) {
+		DEBUG_LOG("WideCharToMultiByte(codePage=%u, flags=%x, wcs=%p, wideChar=%d, mbs=%p, multiByte=%d, defaultChar=%p, usedDefaultChar=%p)\n", codePage, dwFlags, lpWideCharStr, cchWideChar, lpMultiByteStr, cbMultiByte, lpDefaultChar, lpUsedDefaultChar);
+
+		if (cchWideChar == -1) {
+			// determine how long the string actually is
+			cchWideChar = 0;
+			while (lpWideCharStr[cchWideChar] != 0)
+				++cchWideChar;
+		}
 
 		if (cbMultiByte == 0) {
-			return strlen(lpWideCharStr) + 1;
+			return cchWideChar + 1;
 		}
-		for (size_t i = 0; i < cbMultiByte; i++) {
+		for (int i = 0; i < cchWideChar; i++) {
 			lpMultiByteStr[i] = lpWideCharStr[i];
 		}
+		lpMultiByteStr[cchWideChar] = 0;
+		DEBUG_LOG("Converted string: [%s]\n", lpMultiByteStr);
 
 		return cbMultiByte;
 	}
@@ -748,24 +755,19 @@ namespace kernel32 {
 	}
 
 	void *WIN_FUNC HeapAlloc(void *hHeap, unsigned int dwFlags, size_t dwBytes) {
-		DEBUG_LOG("HeapAlloc (%u bytes)\n", dwBytes);
+		DEBUG_LOG("HeapAlloc(heap=%p, flags=%x, bytes=%u)\n", hHeap, dwFlags, dwBytes);
 
-		void *mem = heap + heapUsed;
+		void *mem = malloc(dwBytes);
+		if (mem && (dwFlags & 8))
+			memset(mem, 0, dwBytes);
 
-		heapUsed += dwBytes;
-
-		if (heapUsed > heapSize) {
-			printf("Ran out of heap (%u / %u)!\n", heapUsed, heapSize);
-		} else {
-			DEBUG_LOG("Heap Used %u / %u\n", heapUsed, heapSize);
-		}
-
+		DEBUG_LOG("HeapAlloc returning %p\n", mem);
 		return mem;
 	}
 
 	unsigned int WIN_FUNC HeapFree(void *hHeap, unsigned int dwFlags, void *lpMem) {
-		DEBUG_LOG("HeapFree\n");
-		free(hHeap);
+		DEBUG_LOG("HeapFree(heap=%p, flags=%x, mem=%p)\n", hHeap, dwFlags, lpMem);
+		free(lpMem);
 		return 1;
 	}
 }

@@ -15,6 +15,10 @@ namespace kernel32 {
 		return (void *) 0xFFFFFFFF;
 	}
 
+	unsigned int WIN_FUNC GetCurrentThreadId() {
+		return 1001; // a handy placeholder
+	}
+
 	void WIN_FUNC ExitProcess(unsigned int uExitCode) {
 		exit(uExitCode);
 	}
@@ -390,18 +394,37 @@ namespace kernel32 {
 				lpFileName, path.c_str(),
 				dwDesiredAccess, dwShareMode, lpSecurityAttributes,
 				dwCreationDisposition, dwFlagsAndAttributes);
-		wibo::lastError = 0;
+		FILE *result = 0;
 		if (dwDesiredAccess == 0x80000000) { // read
-			return fopen(path.c_str(), "rb");
+			result = fopen(path.c_str(), "rb");
+		} else if (dwDesiredAccess == 0x40000000) { // write
+			result = fopen(path.c_str(), "wb");
+		} else if (dwDesiredAccess == 0xc0000000) { // read/write
+			result = fopen(path.c_str(), "wb+");
+		} else {
+			assert(0);
 		}
-		if (dwDesiredAccess == 0x40000000) { // write
-			return fopen(path.c_str(), "wb");
+
+		if (result) {
+			wibo::lastError = 0;
+			return result;
+		} else {
+			switch (errno) {
+				case EACCES:
+					wibo::lastError = 5; // ERROR_ACCESS_DENIED
+					break;
+				case EEXIST:
+					wibo::lastError = 183; // ERROR_ALREADY_EXISTS
+					break;
+				case ENOENT:
+					wibo::lastError = 2; // ERROR_FILE_NOT_FOUND
+					break;
+				case ENOTDIR:
+					wibo::lastError = 3; // ERROR_PATH_NOT_FOUND
+					break;
+			}
+			return (FILE *) 0xFFFFFFFF; // INVALID_HANDLE_VALUE
 		}
-		if (dwDesiredAccess == 0xc0000000) { // read/write
-			return fopen(path.c_str(), "wb+");
-		}
-		assert(0);
-		return 0;
 	}
 
 	int WIN_FUNC DeleteFileA(const char* lpFileName) {
@@ -415,11 +438,20 @@ namespace kernel32 {
 		DEBUG_LOG("SetFilePointer %d %d %d\n", lDistanceToMove, (lpDistanceToMoveHigh ? *lpDistanceToMoveHigh : -1), dwMoveMethod);
 		assert(!lpDistanceToMoveHigh);
 		FILE *fp = (FILE*) hFile;
+		wibo::lastError = 0;
 		int r = fseek(fp, lDistanceToMove,
 				dwMoveMethod == 0 ? SEEK_SET :
 				dwMoveMethod == 1 ? SEEK_CUR :
 				SEEK_END);
-		assert(r >= 0);
+
+		if (r < 0) {
+			if (errno == EINVAL)
+				wibo::lastError = 131; // ERROR_NEGATIVE_SEEK
+			else
+				wibo::lastError = 87; // ERROR_INVALID_PARAMETER
+			return 0xFFFFFFFF; // INVALID_SET_FILE_POINTER
+		}
+
 		r = ftell(fp);
 		assert(r >= 0);
 		return r;
@@ -635,7 +667,7 @@ namespace kernel32 {
 
 	void *WIN_FUNC VirtualAlloc(void *lpAddress, unsigned int dwSize, unsigned int flAllocationType, unsigned int flProtect) {
 		DEBUG_LOG("VirtualAlloc %p %u %u %u\n",lpAddress, dwSize, flAllocationType, flProtect);
-		if (flAllocationType & 0x2000) { // MEM_RESERVE
+		if (flAllocationType & 0x2000 || lpAddress == NULL) { // MEM_RESERVE
 			// do this for now...
 			assert(lpAddress == NULL);
 			void *mem = 0;
@@ -775,6 +807,7 @@ namespace kernel32 {
 void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "GetLastError") == 0) return (void *) kernel32::GetLastError;
 	if (strcmp(name, "GetCurrentProcess") == 0) return (void *) kernel32::GetCurrentProcess;
+	if (strcmp(name, "GetCurrentThreadId") == 0) return (void *) kernel32::GetCurrentThreadId;
 	if (strcmp(name, "ExitProcess") == 0) return (void *) kernel32::ExitProcess;
 	if (strcmp(name, "CreateProcessA") == 0) return (void *) kernel32::CreateProcessA;
 	if (strcmp(name, "GetSystemDefaultLangID") == 0) return (void *) kernel32::GetSystemDefaultLangID;

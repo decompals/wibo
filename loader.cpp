@@ -165,7 +165,7 @@ bool wibo::Executable::loadPE(FILE *file) {
 		DEBUG_LOG("Section %d: name=%s addr=%x size=%x (raw=%x) ptr=%x\n", i, name, section.virtualAddress, section.virtualSize, section.sizeOfRawData, section.pointerToRawData);
 
 		void *sectionBase = (void *) (header32.imageBase + section.virtualAddress);
-		if (section.sizeOfRawData > 0) {
+		if (section.pointerToRawData > 0 && section.sizeOfRawData > 0) {
 			// Grab this data
 			long savePos = ftell(file);
 			fseek(file, section.pointerToRawData, SEEK_SET);

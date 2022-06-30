@@ -1,3 +1,5 @@
 wibo
 build/
 *.o
+
+.vscode/

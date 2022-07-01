@@ -278,7 +278,14 @@ namespace kernel32 {
 			str.erase(0, 2);
 		}
 
-		return std::filesystem::path(str);
+		// Return as-is if exists, else lowercase the path
+		std::filesystem::path path = std::filesystem::path(str);
+		if (std::filesystem::exists(path)) {
+			return path;
+		} else {
+			std::transform(str.begin(), str.end(), str.begin(), ::tolower);
+			return std::filesystem::path(str);
+		}
 	}
 
 	std::string pathToWindows(const std::filesystem::path &path) {
@@ -718,17 +725,17 @@ namespace kernel32 {
 
 	unsigned int WIN_FUNC GetACP() {
 		DEBUG_LOG("GetACP\n");
-		// return 65001; // utf-8
-		// return 437;   // OEM United States
-		// return 1200;  // Unicode (BMP of ISO 10646)
-		// return 850; 	 // OEM Multilingual Latin 1; Western European (DOS)
-		return 28591; // ISO/IEC 8859-1
+		// return 65001;	// utf-8
+		// return 437;		// OEM United States
+		// return 1200;		// Unicode (BMP of ISO 10646)
+		// return 850;		// OEM Multilingual Latin 1; Western European (DOS)
+		return 28591;		// ISO/IEC 8859-1
 	}
 
 	typedef struct _cpinfo {
-	  unsigned int  MaxCharSize;
-	  unsigned char DefaultChar[2];
-	  unsigned char LeadByte[12];
+		unsigned int  MaxCharSize;
+		unsigned char DefaultChar[2];
+		unsigned char LeadByte[12];
 	} CPINFO, *LPCPINFO;
 
 	unsigned int WIN_FUNC GetCPInfo(unsigned int codePage, CPINFO* lpCPInfo) {
@@ -762,7 +769,7 @@ namespace kernel32 {
 
 	unsigned int WIN_FUNC FreeEnvironmentStringsW(void *penv) {
 		DEBUG_LOG("FreeEnvironmentStringsW: %p\n", penv);
-		free(penv); // ?
+		free(penv);
 		return 1;
 	}
 
@@ -772,7 +779,7 @@ namespace kernel32 {
 		if (processorFeature == 0) // PF_FLOATING_POINT_PRECISION_ERRATA
 			return 1;
 
-		// sure, we have that feature...
+		// sure.. we have that feature...
 		return 1;
 	}
 

@@ -21,3 +21,16 @@ jobs:
           unzip GC_WII_COMPILERS.zip
           MWCIncludes=. ./wibo GC/2.7/mwcceppc.exe -c test/test.c
           file test.o
+
+      - name: Upload build
+        uses: actions/upload-artifact@v2
+        with:
+          name: wibo
+          path: wibo
+
+      - name: Update release
+        uses: johnwbyrd/update-release@v1.0.0
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          files: wibo

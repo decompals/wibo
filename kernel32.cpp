@@ -4,6 +4,8 @@
 #include <filesystem>
 #include <string>
 #include <malloc.h>
+#include <stdarg.h>
+#include <system_error>
 
 namespace kernel32 {
 
@@ -826,6 +828,39 @@ namespace kernel32 {
 		free(lpMem);
 		return 1;
 	}
+
+	unsigned int WIN_FUNC FormatMessageA(unsigned int dwFlags, void *lpSource, unsigned int dwMessageId,
+										 unsigned int dwLanguageId, char *lpBuffer, unsigned int nSize, char *arg0, ...) {
+
+		DEBUG_LOG("FormatMessageA: flags: %u, message id: %u\n", dwFlags, dwMessageId);
+
+		// TODO:
+		// va_list arguments;
+		// va_start(arguments, arg0);
+		// va_end(arguments);
+
+		if (dwFlags & 0x00000100) {
+			// FORMAT_MESSAGE_ALLOCATE_BUFFER
+		} else if (dwFlags & 0x00002000) {
+			// FORMAT_MESSAGE_ARGUMENT_ARRAY
+		} else if (dwFlags & 0x00000800) {
+			// FORMAT_MESSAGE_FROM_HMODULE
+		} else if (dwFlags & 0x00000400) {
+			// FORMAT_MESSAGE_FROM_STRING
+		} else if (dwFlags & 0x00001000) {
+			// FORMAT_MESSAGE_FROM_SYSTEM
+			std::string message = std::system_category().message(dwMessageId);
+			size_t length = message.length();
+			strcpy(lpBuffer, message.c_str());
+			return length;
+		} else if (dwFlags & 0x00000200) {
+			// FORMAT_MESSAGE_IGNORE_INSERTS
+		} else {
+			// unhandled?
+		}
+
+		return 0;
+	}
 }
 
 void *wibo::resolveKernel32(const char *name) {
@@ -896,6 +931,6 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "GetProcAddress") == 0) return (void *) kernel32::GetProcAddress;
 	if (strcmp(name, "HeapAlloc") == 0) return (void *) kernel32::HeapAlloc;
 	if (strcmp(name, "HeapFree") == 0) return (void *) kernel32::HeapFree;
-
+	if (strcmp(name, "FormatMessageA") == 0) return (void *) kernel32::FormatMessageA;
 	return 0;
 }

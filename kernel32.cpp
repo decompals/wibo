@@ -297,14 +297,41 @@ namespace kernel32 {
 			str.erase(0, 2);
 		}
 
-		// Return as-is if exists, else lowercase the path
+		// Return as-is if it exists, else traverse the filesystem looking for
+		// a path that matches case insensitively
 		std::filesystem::path path = std::filesystem::path(str);
 		if (std::filesystem::exists(path)) {
 			return path;
-		} else {
-			std::transform(str.begin(), str.end(), str.begin(), ::tolower);
-			return std::filesystem::path(str);
 		}
+
+		path = path.lexically_normal();
+		std::filesystem::path newPath = ".";
+		bool followingExisting = true;
+		for (auto component : path) {
+			std::filesystem::path newPath2 = newPath / component;
+			if (followingExisting && !std::filesystem::exists(newPath2) && (component != ".." && component != "." && component != "")) {
+				followingExisting = false;
+				try {
+					for (std::filesystem::path entry : std::filesystem::directory_iterator{newPath}) {
+						if (strcasecmp(entry.filename().c_str(), component.c_str()) == 0) {
+							followingExisting = true;
+							newPath2 = entry;
+							break;
+						}
+					}
+				} catch (const std::filesystem::filesystem_error&) {
+					// not a directory
+				}
+			}
+			newPath = newPath2;
+		}
+		if (followingExisting) {
+			DEBUG_LOG("Resolved case-insensitive path: %s\n", newPath.c_str());
+		} else {
+			DEBUG_LOG("Failed to resolve path: %s\n", newPath.c_str());
+		}
+
+		return newPath;
 	}
 
 	std::string pathToWindows(const std::filesystem::path &path) {

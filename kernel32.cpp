@@ -249,6 +249,23 @@ namespace kernel32 {
 		}
 	}
 
+	unsigned int WIN_FUNC SetStdHandle(uint32_t nStdHandle, FILE *handle) {
+		switch (nStdHandle) {
+			case ((uint32_t) -10): // STD_INPUT_HANDLE
+				stdin = handle;
+				break;
+			case ((uint32_t) -11): // STD_OUTPUT_HANDLE
+				stdout = handle;
+				break;
+			case ((uint32_t) -12): // STD_ERROR_HANDLE
+				stderr = handle;
+				break;
+			default:
+				return 0; // fail
+		}
+		return 1; // success
+	}
+
 	unsigned int WIN_FUNC DuplicateHandle(void *hSourceProcessHandle, void *hSourceHandle, void *hTargetProcessHandle, void **lpTargetHandle, unsigned int dwDesiredAccess, unsigned int bInheritHandle, unsigned int dwOptions) {
 		// This is kinda silly...
 		if (hSourceHandle == stdin || hSourceHandle == stdout || hSourceHandle == stderr) {
@@ -834,6 +851,7 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "GetEnvironmentStrings") == 0) return (void *) kernel32::GetEnvironmentStrings;
 	if (strcmp(name, "FreeEnvironmentStringsA") == 0) return (void *) kernel32::FreeEnvironmentStringsA;
 	if (strcmp(name, "GetStdHandle") == 0) return (void *) kernel32::GetStdHandle;
+	if (strcmp(name, "SetStdHandle") == 0) return (void *) kernel32::SetStdHandle;
 	if (strcmp(name, "DuplicateHandle") == 0) return (void *) kernel32::DuplicateHandle;
 	if (strcmp(name, "CloseHandle") == 0) return (void *) kernel32::CloseHandle;
 	if (strcmp(name, "GetFullPathNameA") == 0) return (void *) kernel32::GetFullPathNameA;

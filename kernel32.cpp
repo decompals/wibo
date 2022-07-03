@@ -475,6 +475,9 @@ namespace kernel32 {
 				case ENOTDIR:
 					wibo::lastError = 3; // ERROR_PATH_NOT_FOUND
 					break;
+				default:
+					wibo::lastError = 50; // ERROR_NOT_SUPPORTED
+					break;
 			}
 			return (FILE *) 0xFFFFFFFF; // INVALID_HANDLE_VALUE
 		}
@@ -725,6 +728,7 @@ namespace kernel32 {
 			assert(lpAddress == NULL);
 			void *mem = 0;
 			posix_memalign(&mem, 0x1000, dwSize);
+			memset(mem, 0, dwSize);
 			DEBUG_LOG("VirtualAlloc returning %p\n", mem);
 			return mem;
 		} else {
@@ -771,10 +775,7 @@ namespace kernel32 {
 
 	unsigned int WIN_FUNC GetACP() {
 		DEBUG_LOG("GetACP\n");
-		// return 65001;	// utf-8
-		// return 437;		// OEM United States
 		// return 1200;		// Unicode (BMP of ISO 10646)
-		// return 850;		// OEM Multilingual Latin 1; Western European (DOS)
 		return 28591;		// ISO/IEC 8859-1
 	}
 
@@ -857,14 +858,9 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC FormatMessageA(unsigned int dwFlags, void *lpSource, unsigned int dwMessageId,
-										 unsigned int dwLanguageId, char *lpBuffer, unsigned int nSize, char *arg0, ...) {
+										 unsigned int dwLanguageId, char *lpBuffer, unsigned int nSize, va_list *argument) {
 
 		DEBUG_LOG("FormatMessageA: flags: %u, message id: %u\n", dwFlags, dwMessageId);
-
-		// TODO:
-		// va_list arguments;
-		// va_start(arguments, arg0);
-		// va_end(arguments);
 
 		if (dwFlags & 0x00000100) {
 			// FORMAT_MESSAGE_ALLOCATE_BUFFER
@@ -886,6 +882,7 @@ namespace kernel32 {
 			// unhandled?
 		}
 
+		*lpBuffer = '\0';
 		return 0;
 	}
 }

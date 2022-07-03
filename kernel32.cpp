@@ -885,6 +885,22 @@ namespace kernel32 {
 		*lpBuffer = '\0';
 		return 0;
 	}
+
+	int WIN_FUNC CompareStringA(int Locale, unsigned int dwCmpFlags, const char *lpString1, unsigned int cchCount1, const char *lpString2, unsigned int cchCount2) {
+		DEBUG_LOG("CompareStringA: '%s' vs '%s' (%u)\n", lpString1, lpString2, dwCmpFlags);
+		// too simple?
+		return strcmp(lpString1, lpString2);
+	}
+
+	int WIN_FUNC CompareStringW(int Locale, unsigned int dwCmpFlags, const char *lpString1, unsigned int cchCount1, const char *lpString2, unsigned int cchCount2) {
+		DEBUG_LOG("CompareStringW: '%s' vs '%s' (%u)\n", lpString1, lpString2, dwCmpFlags);
+		return strcmp(lpString1, lpString2);
+	}
+
+	unsigned int WIN_FUNC SetEnvironmentVariableA(const char *lpName, const char *lpValue) {
+		DEBUG_LOG("SetEnvironmentVariableA: %s=%s\n", lpName, lpValue);
+		return setenv(lpName, lpValue, 1 /* OVERWRITE */);
+	}
 }
 
 void *wibo::resolveKernel32(const char *name) {
@@ -956,5 +972,9 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "HeapAlloc") == 0) return (void *) kernel32::HeapAlloc;
 	if (strcmp(name, "HeapFree") == 0) return (void *) kernel32::HeapFree;
 	if (strcmp(name, "FormatMessageA") == 0) return (void *) kernel32::FormatMessageA;
+	if (strcmp(name, "CompareStringA") == 0) return (void *) kernel32::CompareStringA;
+	if (strcmp(name, "CompareStringW") == 0) return (void *) kernel32::CompareStringW;
+	if (strcmp(name, "SetEnvironmentVariableA") == 0) return (void *) kernel32::SetEnvironmentVariableA;
+
 	return 0;
 }

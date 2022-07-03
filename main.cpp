@@ -47,27 +47,27 @@ DEFINE_STUBS(3, 0) DEFINE_STUBS(3, 1) DEFINE_STUBS(3, 2) DEFINE_STUBS(3, 3)
 #undef DEFINE_STUBS
 
 void *wibo::resolveStubByName(const char *dllName, const char *funcName) {
-	if (strcmp(dllName, "KERNEL32.dll") == 0) {
+	if (strcasecmp(dllName, "KERNEL32.dll") == 0) {
 		void *func = wibo::resolveKernel32(funcName);
 		if (func)
 			return func;
 	}
-	if (strcmp(dllName, "USER32.dll") == 0) {
+	if (strcasecmp(dllName, "USER32.dll") == 0) {
 		void *func = wibo::resolveUser32(funcName);
 		if (func)
 			return func;
 	}
-	if (strcmp(dllName, "ADVAPI32.dll") == 0) {
+	if (strcasecmp(dllName, "ADVAPI32.dll") == 0) {
 		void *func = wibo::resolveAdvApi32(funcName);
 		if (func)
 			return func;
 	}
-	if (strcmp(dllName, "VERSION.dll") == 0) {
+	if (strcasecmp(dllName, "VERSION.dll") == 0) {
 		void *func = wibo::resolveVersion(funcName);
 		if (func)
 			return func;
 	}
-	if (strcmp(dllName, "ole32.dll") == 0) {
+	if (strcasecmp(dllName, "ole32.dll") == 0) {
 		void *func = wibo::resolveOle32(funcName);
 		if (func)
 			return func;

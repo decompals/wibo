@@ -4,14 +4,21 @@
 #include <filesystem>
 #include <string>
 #include <malloc.h>
+#include <stdarg.h>
+#include <system_error>
 
 namespace kernel32 {
+
 	uint32_t WIN_FUNC GetLastError() {
 		return wibo::lastError;
 	}
 
 	void *WIN_FUNC GetCurrentProcess() {
 		return (void *) 0xFFFFFFFF;
+	}
+
+	unsigned int WIN_FUNC GetCurrentThreadId() {
+		return 1001; // a handy placeholder
 	}
 
 	void WIN_FUNC ExitProcess(unsigned int uExitCode) {
@@ -72,7 +79,7 @@ namespace kernel32 {
 	static void *tlsValues[MAX_TLS_VALUES];
 	unsigned int WIN_FUNC TlsAlloc() {
 		DEBUG_LOG("TlsAlloc()\n");
-		for (int i = 0; i < MAX_TLS_VALUES; i++) {
+		for (size_t i = 0; i < MAX_TLS_VALUES; i++) {
 			if (tlsValuesUsed[i] == false) {
 				tlsValuesUsed[i] = true;
 				tlsValues[i] = 0;
@@ -165,6 +172,7 @@ namespace kernel32 {
 	}
 
 	char *WIN_FUNC GetEnvironmentStrings() {
+		DEBUG_LOG("GetEnvironmentStrings\n");
 		// Step 1, figure out the size of the buffer we need.
 		size_t bufSize = 0;
 		char **work = environ;
@@ -192,6 +200,37 @@ namespace kernel32 {
 		return buffer;
 	}
 
+	uint16_t* WIN_FUNC GetEnvironmentStringsW() {
+		DEBUG_LOG("GetEnvironmentStringsW\n");
+		// Step 1, figure out the size of the buffer we need.
+		size_t bufSizeW = 0;
+		char **work = environ;
+
+		while (*work) {
+			// "hello|" -> " h e l l o|"
+			bufSizeW += strlen(*work) + 1;
+			work++;
+		}
+		bufSizeW++;
+
+		// Step 2, actually build that buffer
+		uint16_t *buffer = (uint16_t *) malloc(bufSizeW * 2);
+		uint16_t *ptr = buffer;
+		work = environ;
+
+		while (*work) {
+			size_t strSize = strlen(*work);
+			for (size_t i = 0; i < strSize; i++) {
+				*ptr++ = (*work)[i];
+			}
+			*ptr++ = 0; // NUL terminate
+			work++;
+		}
+		*ptr = 0; // an extra null at the end
+
+		return buffer;
+	}
+
 	void WIN_FUNC FreeEnvironmentStringsA(char *buffer) {
 		free(buffer);
 	}
@@ -210,6 +249,23 @@ namespace kernel32 {
 			default:
 				return (void *) 0xFFFFFFFF;
 		}
+	}
+
+	unsigned int WIN_FUNC SetStdHandle(uint32_t nStdHandle, FILE *handle) {
+		switch (nStdHandle) {
+			case ((uint32_t) -10): // STD_INPUT_HANDLE
+				stdin = handle;
+				break;
+			case ((uint32_t) -11): // STD_OUTPUT_HANDLE
+				stdout = handle;
+				break;
+			case ((uint32_t) -12): // STD_ERROR_HANDLE
+				stderr = handle;
+				break;
+			default:
+				return 0; // fail
+		}
+		return 1; // success
 	}
 
 	unsigned int WIN_FUNC DuplicateHandle(void *hSourceProcessHandle, void *hSourceHandle, void *hTargetProcessHandle, void **lpTargetHandle, unsigned int dwDesiredAccess, unsigned int bInheritHandle, unsigned int dwOptions) {
@@ -241,7 +297,41 @@ namespace kernel32 {
 			str.erase(0, 2);
 		}
 
-		return std::filesystem::path(str);
+		// Return as-is if it exists, else traverse the filesystem looking for
+		// a path that matches case insensitively
+		std::filesystem::path path = std::filesystem::path(str);
+		if (std::filesystem::exists(path)) {
+			return path;
+		}
+
+		path = path.lexically_normal();
+		std::filesystem::path newPath = ".";
+		bool followingExisting = true;
+		for (auto component : path) {
+			std::filesystem::path newPath2 = newPath / component;
+			if (followingExisting && !std::filesystem::exists(newPath2) && (component != ".." && component != "." && component != "")) {
+				followingExisting = false;
+				try {
+					for (std::filesystem::path entry : std::filesystem::directory_iterator{newPath}) {
+						if (strcasecmp(entry.filename().c_str(), component.c_str()) == 0) {
+							followingExisting = true;
+							newPath2 = entry;
+							break;
+						}
+					}
+				} catch (const std::filesystem::filesystem_error&) {
+					// not a directory
+				}
+			}
+			newPath = newPath2;
+		}
+		if (followingExisting) {
+			DEBUG_LOG("Resolved case-insensitive path: %s\n", newPath.c_str());
+		} else {
+			DEBUG_LOG("Failed to resolve path: %s\n", newPath.c_str());
+		}
+
+		return newPath;
 	}
 
 	std::string pathToWindows(const std::filesystem::path &path) {
@@ -323,7 +413,7 @@ namespace kernel32 {
 #if 0
 		printf("writing:\n");
 		for (unsigned int i = 0; i < nNumberOfBytesToWrite; i++) {
-			printf("%d ", ((const char*)lpBuffer)[i]);
+			printf("%c", ((const char*)lpBuffer)[i]);
 		}
 		printf("\n");
 #endif
@@ -353,22 +443,44 @@ namespace kernel32 {
 			unsigned int dwFlagsAndAttributes,
 			void *hTemplateFile) {
 		std::string path = pathFromWindows(lpFileName);
-		DEBUG_LOG("CreateFileA %s (%s) 0x%x %u %p %u %u\n",
+		DEBUG_LOG("CreateFileA(filename=%s (%s), desiredAccess=0x%x, shareMode=%u, securityAttributes=%p, creationDisposition=%u, flagsAndAttributes=%u)\n",
 				lpFileName, path.c_str(),
 				dwDesiredAccess, dwShareMode, lpSecurityAttributes,
 				dwCreationDisposition, dwFlagsAndAttributes);
-		if (dwDesiredAccess == 0x80000000 && dwShareMode == 1) { // read
-			return fopen(path.c_str(), "rb");
+		FILE *result = 0;
+		if (dwDesiredAccess == 0x80000000) { // read
+			result = fopen(path.c_str(), "rb");
+		} else if (dwDesiredAccess == 0x40000000) { // write
+			result = fopen(path.c_str(), "wb");
+		} else if (dwDesiredAccess == 0xc0000000) { // read/write
+			result = fopen(path.c_str(), "wb+");
+		} else {
+			assert(0);
 		}
-		if (dwDesiredAccess == 0x40000000 && dwShareMode == 2) { // write
-			return fopen(path.c_str(), "wb");
+
+		if (result) {
+			wibo::lastError = 0;
+			return result;
+		} else {
+			switch (errno) {
+				case EACCES:
+					wibo::lastError = 5; // ERROR_ACCESS_DENIED
+					break;
+				case EEXIST:
+					wibo::lastError = 183; // ERROR_ALREADY_EXISTS
+					break;
+				case ENOENT:
+					wibo::lastError = 2; // ERROR_FILE_NOT_FOUND
+					break;
+				case ENOTDIR:
+					wibo::lastError = 3; // ERROR_PATH_NOT_FOUND
+					break;
+				default:
+					wibo::lastError = 50; // ERROR_NOT_SUPPORTED
+					break;
+			}
+			return (FILE *) 0xFFFFFFFF; // INVALID_HANDLE_VALUE
 		}
-		if (dwDesiredAccess == 0xc0000000 && dwShareMode == 1) { // read/write
-			return fopen(path.c_str(), "wb+");
-		}
-		assert(0);
-		wibo::lastError = 0;
-		return 0;
 	}
 
 	int WIN_FUNC DeleteFileA(const char* lpFileName) {
@@ -382,11 +494,20 @@ namespace kernel32 {
 		DEBUG_LOG("SetFilePointer %d %d %d\n", lDistanceToMove, (lpDistanceToMoveHigh ? *lpDistanceToMoveHigh : -1), dwMoveMethod);
 		assert(!lpDistanceToMoveHigh);
 		FILE *fp = (FILE*) hFile;
+		wibo::lastError = 0;
 		int r = fseek(fp, lDistanceToMove,
 				dwMoveMethod == 0 ? SEEK_SET :
 				dwMoveMethod == 1 ? SEEK_CUR :
 				SEEK_END);
-		assert(r >= 0);
+
+		if (r < 0) {
+			if (errno == EINVAL)
+				wibo::lastError = 131; // ERROR_NEGATIVE_SEEK
+			else
+				wibo::lastError = 87; // ERROR_INVALID_PARAMETER
+			return 0xFFFFFFFF; // INVALID_SET_FILE_POINTER
+		}
+
 		r = ftell(fp);
 		assert(r >= 0);
 		return r;
@@ -543,7 +664,7 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC GetModuleFileNameA(void* hModule, char* lpFilename, unsigned int nSize) {
-		DEBUG_LOG("GetModuleFileNameA %p\n", hModule);
+		DEBUG_LOG("GetModuleFileNameA %p (%s)\n", hModule, lpFilename);
 		wibo::lastError = 0;
 		return 0;
 	}
@@ -577,11 +698,215 @@ namespace kernel32 {
 		DEBUG_LOG("FreeLibrary %p\n", hLibModule);
 		return 1;
 	}
+
+	int WIN_FUNC GetVersion() {
+		DEBUG_LOG("GetVersion\n");
+		return 1;
+	}
+
+	void *WIN_FUNC HeapCreate(unsigned int flOptions, unsigned int dwInitialSize, unsigned int dwMaximumSize) {
+		DEBUG_LOG("HeapCreate %u %u %u\n", flOptions, dwInitialSize, dwMaximumSize);
+		if (flOptions & 0x00000001) {
+			// HEAP_NO_SERIALIZE
+		}
+		if (flOptions & 0x00040000) {
+			// HEAP_CREATE_ENABLE_EXECUTE
+		}
+		if (flOptions & 0x00000004) {
+			// HEAP_GENERATE_EXCEPTIONS
+		}
+
+		// return a dummy value
+		wibo::lastError = 0;
+		return (void *) 0x12345678;
+	}
+
+	void *WIN_FUNC VirtualAlloc(void *lpAddress, unsigned int dwSize, unsigned int flAllocationType, unsigned int flProtect) {
+		DEBUG_LOG("VirtualAlloc %p %u %u %u\n",lpAddress, dwSize, flAllocationType, flProtect);
+		if (flAllocationType & 0x2000 || lpAddress == NULL) { // MEM_RESERVE
+			// do this for now...
+			assert(lpAddress == NULL);
+			void *mem = 0;
+			posix_memalign(&mem, 0x1000, dwSize);
+			memset(mem, 0, dwSize);
+			DEBUG_LOG("VirtualAlloc returning %p\n", mem);
+			return mem;
+		} else {
+			assert(lpAddress != NULL);
+			return lpAddress;
+		}
+	}
+
+	typedef struct _STARTUPINFOA {
+		unsigned int   cb;
+	    char          *lpReserved;
+	    char          *lpDesktop;
+	    char          *lpTitle;
+	    unsigned int   dwX;
+	    unsigned int   dwY;
+	    unsigned int   dwXSize;
+	    unsigned int   dwYSize;
+	    unsigned int   dwXCountChars;
+	    unsigned int   dwYCountChars;
+	    unsigned int   dwFillAttribute;
+	    unsigned int   dwFlags;
+	    unsigned short wShowWindow;
+	    unsigned short cbReserved2;
+	    unsigned char  lpReserved2;
+	    void          *hStdInput;
+	    void          *hStdOutput;
+	    void          *hStdError;
+	} STARTUPINFOA, *LPSTARTUPINFOA;
+
+	void WIN_FUNC GetStartupInfoA(STARTUPINFOA *lpStartupInfo) {
+		DEBUG_LOG("GetStartupInfoA\n");
+		memset(lpStartupInfo, 0, sizeof(STARTUPINFOA));
+	}
+
+	unsigned short WIN_FUNC GetFileType(void *hFile) {
+		DEBUG_LOG("GetFileType %p\n", hFile);
+		return 2; // FILE_TYPE_CHAR
+	}
+
+	unsigned int WIN_FUNC SetHandleCount(unsigned int uNumber) {
+		DEBUG_LOG("SetHandleCount %p\n", uNumber);
+		return uNumber + 10;
+	}
+
+	unsigned int WIN_FUNC GetACP() {
+		DEBUG_LOG("GetACP\n");
+		// return 1200;		// Unicode (BMP of ISO 10646)
+		return 28591;		// ISO/IEC 8859-1
+	}
+
+	typedef struct _cpinfo {
+		unsigned int  MaxCharSize;
+		unsigned char DefaultChar[2];
+		unsigned char LeadByte[12];
+	} CPINFO, *LPCPINFO;
+
+	unsigned int WIN_FUNC GetCPInfo(unsigned int codePage, CPINFO* lpCPInfo) {
+		DEBUG_LOG("GetCPInfo: %u\n", codePage);
+		lpCPInfo->MaxCharSize = 1;
+		lpCPInfo->DefaultChar[0] = 0;
+		return 1; // success
+	}
+
+	unsigned int WIN_FUNC WideCharToMultiByte(unsigned int codePage, unsigned int dwFlags, uint16_t *lpWideCharStr, int cchWideChar, char *lpMultiByteStr, int cbMultiByte, char *lpDefaultChar, unsigned int *lpUsedDefaultChar) {
+		DEBUG_LOG("WideCharToMultiByte(codePage=%u, flags=%x, wcs=%p, wideChar=%d, mbs=%p, multiByte=%d, defaultChar=%p, usedDefaultChar=%p)\n", codePage, dwFlags, lpWideCharStr, cchWideChar, lpMultiByteStr, cbMultiByte, lpDefaultChar, lpUsedDefaultChar);
+
+		if (cchWideChar == -1) {
+			// determine how long the string actually is
+			cchWideChar = 0;
+			while (lpWideCharStr[cchWideChar] != 0)
+				++cchWideChar;
+		}
+
+		if (cbMultiByte == 0) {
+			return cchWideChar + 1;
+		}
+		for (int i = 0; i < cchWideChar; i++) {
+			lpMultiByteStr[i] = lpWideCharStr[i];
+		}
+		lpMultiByteStr[cchWideChar] = 0;
+		DEBUG_LOG("Converted string: [%s]\n", lpMultiByteStr);
+
+		return cbMultiByte;
+	}
+
+	unsigned int WIN_FUNC FreeEnvironmentStringsW(void *penv) {
+		DEBUG_LOG("FreeEnvironmentStringsW: %p\n", penv);
+		free(penv);
+		return 1;
+	}
+
+	unsigned int WIN_FUNC IsProcessorFeaturePresent(unsigned int processorFeature) {
+		DEBUG_LOG("IsProcessorFeaturePresent: %u\n", processorFeature);
+
+		if (processorFeature == 0) // PF_FLOATING_POINT_PRECISION_ERRATA
+			return 1;
+
+		// sure.. we have that feature...
+		return 1;
+	}
+
+	void *WIN_FUNC GetProcAddress(void *hModule, char *lpProcName) {
+		DEBUG_LOG("GetProcAddress: %s from %p\n", lpProcName, hModule);
+
+		if ((unsigned int)hModule == 1) {
+			if (strcmp(lpProcName, "IsProcessorFeaturePresent") == 0) return (void *) IsProcessorFeaturePresent;
+		}
+
+		return NULL;
+	}
+
+	void *WIN_FUNC HeapAlloc(void *hHeap, unsigned int dwFlags, size_t dwBytes) {
+		DEBUG_LOG("HeapAlloc(heap=%p, flags=%x, bytes=%u)\n", hHeap, dwFlags, dwBytes);
+
+		void *mem = malloc(dwBytes);
+		if (mem && (dwFlags & 8))
+			memset(mem, 0, dwBytes);
+
+		DEBUG_LOG("HeapAlloc returning %p\n", mem);
+		return mem;
+	}
+
+	unsigned int WIN_FUNC HeapFree(void *hHeap, unsigned int dwFlags, void *lpMem) {
+		DEBUG_LOG("HeapFree(heap=%p, flags=%x, mem=%p)\n", hHeap, dwFlags, lpMem);
+		free(lpMem);
+		return 1;
+	}
+
+	unsigned int WIN_FUNC FormatMessageA(unsigned int dwFlags, void *lpSource, unsigned int dwMessageId,
+										 unsigned int dwLanguageId, char *lpBuffer, unsigned int nSize, va_list *argument) {
+
+		DEBUG_LOG("FormatMessageA: flags: %u, message id: %u\n", dwFlags, dwMessageId);
+
+		if (dwFlags & 0x00000100) {
+			// FORMAT_MESSAGE_ALLOCATE_BUFFER
+		} else if (dwFlags & 0x00002000) {
+			// FORMAT_MESSAGE_ARGUMENT_ARRAY
+		} else if (dwFlags & 0x00000800) {
+			// FORMAT_MESSAGE_FROM_HMODULE
+		} else if (dwFlags & 0x00000400) {
+			// FORMAT_MESSAGE_FROM_STRING
+		} else if (dwFlags & 0x00001000) {
+			// FORMAT_MESSAGE_FROM_SYSTEM
+			std::string message = std::system_category().message(dwMessageId);
+			size_t length = message.length();
+			strcpy(lpBuffer, message.c_str());
+			return length;
+		} else if (dwFlags & 0x00000200) {
+			// FORMAT_MESSAGE_IGNORE_INSERTS
+		} else {
+			// unhandled?
+		}
+
+		*lpBuffer = '\0';
+		return 0;
+	}
+
+	int WIN_FUNC CompareStringA(int Locale, unsigned int dwCmpFlags, const char *lpString1, unsigned int cchCount1, const char *lpString2, unsigned int cchCount2) {
+		DEBUG_LOG("CompareStringA: '%s' vs '%s' (%u)\n", lpString1, lpString2, dwCmpFlags);
+		// too simple?
+		return strcmp(lpString1, lpString2);
+	}
+
+	int WIN_FUNC CompareStringW(int Locale, unsigned int dwCmpFlags, const char *lpString1, unsigned int cchCount1, const char *lpString2, unsigned int cchCount2) {
+		DEBUG_LOG("CompareStringW: '%s' vs '%s' (%u)\n", lpString1, lpString2, dwCmpFlags);
+		return strcmp(lpString1, lpString2);
+	}
+
+	unsigned int WIN_FUNC SetEnvironmentVariableA(const char *lpName, const char *lpValue) {
+		DEBUG_LOG("SetEnvironmentVariableA: %s=%s\n", lpName, lpValue);
+		return setenv(lpName, lpValue, 1 /* OVERWRITE */);
+	}
 }
 
 void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "GetLastError") == 0) return (void *) kernel32::GetLastError;
 	if (strcmp(name, "GetCurrentProcess") == 0) return (void *) kernel32::GetCurrentProcess;
+	if (strcmp(name, "GetCurrentThreadId") == 0) return (void *) kernel32::GetCurrentThreadId;
 	if (strcmp(name, "ExitProcess") == 0) return (void *) kernel32::ExitProcess;
 	if (strcmp(name, "CreateProcessA") == 0) return (void *) kernel32::CreateProcessA;
 	if (strcmp(name, "GetSystemDefaultLangID") == 0) return (void *) kernel32::GetSystemDefaultLangID;
@@ -601,6 +926,7 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "GetEnvironmentStrings") == 0) return (void *) kernel32::GetEnvironmentStrings;
 	if (strcmp(name, "FreeEnvironmentStringsA") == 0) return (void *) kernel32::FreeEnvironmentStringsA;
 	if (strcmp(name, "GetStdHandle") == 0) return (void *) kernel32::GetStdHandle;
+	if (strcmp(name, "SetStdHandle") == 0) return (void *) kernel32::SetStdHandle;
 	if (strcmp(name, "DuplicateHandle") == 0) return (void *) kernel32::DuplicateHandle;
 	if (strcmp(name, "CloseHandle") == 0) return (void *) kernel32::CloseHandle;
 	if (strcmp(name, "GetFullPathNameA") == 0) return (void *) kernel32::GetFullPathNameA;
@@ -631,5 +957,24 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "SizeofResource") == 0) return (void *) kernel32::SizeofResource;
 	if (strcmp(name, "LoadLibraryA") == 0) return (void *) kernel32::LoadLibraryA;
 	if (strcmp(name, "FreeLibrary") == 0) return (void *) kernel32::FreeLibrary;
+	if (strcmp(name, "GetVersion") == 0) return (void *) kernel32::GetVersion;
+	if (strcmp(name, "HeapCreate") == 0) return (void *) kernel32::HeapCreate;
+	if (strcmp(name, "VirtualAlloc") == 0) return (void *) kernel32::VirtualAlloc;
+	if (strcmp(name, "GetStartupInfoA") == 0) return (void *) kernel32::GetStartupInfoA;
+	if (strcmp(name, "GetFileType") == 0) return (void *) kernel32::GetFileType;
+	if (strcmp(name, "SetHandleCount") == 0) return (void *) kernel32::SetHandleCount;
+	if (strcmp(name, "GetACP") == 0) return (void *) kernel32::GetACP;
+	if (strcmp(name, "GetCPInfo") == 0) return (void *) kernel32::GetCPInfo;
+	if (strcmp(name, "GetEnvironmentStringsW") == 0) return (void *) kernel32::GetEnvironmentStringsW;
+	if (strcmp(name, "WideCharToMultiByte") == 0) return (void *) kernel32::WideCharToMultiByte;
+	if (strcmp(name, "FreeEnvironmentStringsW") == 0) return (void *) kernel32::FreeEnvironmentStringsW;
+	if (strcmp(name, "GetProcAddress") == 0) return (void *) kernel32::GetProcAddress;
+	if (strcmp(name, "HeapAlloc") == 0) return (void *) kernel32::HeapAlloc;
+	if (strcmp(name, "HeapFree") == 0) return (void *) kernel32::HeapFree;
+	if (strcmp(name, "FormatMessageA") == 0) return (void *) kernel32::FormatMessageA;
+	if (strcmp(name, "CompareStringA") == 0) return (void *) kernel32::CompareStringA;
+	if (strcmp(name, "CompareStringW") == 0) return (void *) kernel32::CompareStringW;
+	if (strcmp(name, "SetEnvironmentVariableA") == 0) return (void *) kernel32::SetEnvironmentVariableA;
+
 	return 0;
 }

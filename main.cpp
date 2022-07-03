@@ -1,4 +1,5 @@
 #include "common.h"
+#include "files.h"
 #include <asm/ldt.h>
 #include <filesystem>
 #include <errno.h>
@@ -117,6 +118,8 @@ int main(int argc, char **argv) {
 	if (getenv("WIBO_DEBUG")) {
 		wibo::debugEnabled = true;
 	}
+
+	files::init();
 
 	// Create TIB
 	TIB tib;

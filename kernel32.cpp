@@ -1,4 +1,5 @@
 #include "common.h"
+#include "files.h"
 #include <algorithm>
 #include <ctype.h>
 #include <filesystem>
@@ -239,116 +240,39 @@ namespace kernel32 {
 	 * I/O
 	 */
 	void *WIN_FUNC GetStdHandle(uint32_t nStdHandle) {
-		switch (nStdHandle) {
-			case ((uint32_t) -10): // STD_INPUT_HANDLE
-				return stdin;
-			case ((uint32_t) -11): // STD_OUTPUT_HANDLE
-				return stdout;
-			case ((uint32_t) -12): // STD_ERROR_HANDLE
-				return stderr;
-			default:
-				return (void *) 0xFFFFFFFF;
-		}
+		return files::getStdHandle(nStdHandle);
 	}
 
-	unsigned int WIN_FUNC SetStdHandle(uint32_t nStdHandle, FILE *handle) {
-		switch (nStdHandle) {
-			case ((uint32_t) -10): // STD_INPUT_HANDLE
-				stdin = handle;
-				break;
-			case ((uint32_t) -11): // STD_OUTPUT_HANDLE
-				stdout = handle;
-				break;
-			case ((uint32_t) -12): // STD_ERROR_HANDLE
-				stderr = handle;
-				break;
-			default:
-				return 0; // fail
-		}
-		return 1; // success
+	unsigned int WIN_FUNC SetStdHandle(uint32_t nStdHandle, void *hHandle) {
+		return files::setStdHandle(nStdHandle, hHandle);
 	}
 
 	unsigned int WIN_FUNC DuplicateHandle(void *hSourceProcessHandle, void *hSourceHandle, void *hTargetProcessHandle, void **lpTargetHandle, unsigned int dwDesiredAccess, unsigned int bInheritHandle, unsigned int dwOptions) {
-		// This is kinda silly...
-		if (hSourceHandle == stdin || hSourceHandle == stdout || hSourceHandle == stderr) {
-			// Just pretend we duplicated it, why not
-			*lpTargetHandle = hSourceHandle;
+		DEBUG_LOG("DuplicateHandle(source=%p)\n", hSourceHandle);
+		FILE *fp = files::fpFromHandle(hSourceHandle);
+		if (fp == stdin || fp == stdout || fp == stderr) {
+			// we never close standard handles so they are fine to duplicate
+			*lpTargetHandle = files::allocFpHandle(fp);
 			return 1;
 		}
-
-		// This probably won't come up
-		DEBUG_LOG("Unhandled DuplicateHandle(source=%p)\n", hSourceHandle);
-		return 0;
+		// other handles are more problematic; fail for now
+		printf("failed to duplicate handle\n");
+		assert(0);
 	}
 
 	int WIN_FUNC CloseHandle(void *hObject) {
-		// we *probably* won't run out of file descriptors even if we never close files
-		DEBUG_LOG("CloseHandle\n");
+		DEBUG_LOG("CloseHandle %p\n", hObject);
+		FILE *fp = files::fpFromHandle(hObject, true);
+		if (fp && fp != stdin && fp != stdout && fp != stderr) {
+			fclose(fp);
+		}
 		return 1;
-	}
-
-	std::filesystem::path pathFromWindows(const char *inStr) {
-		// Convert to forward slashes
-		std::string str = inStr;
-		std::replace(str.begin(), str.end(), '\\', '/');
-
-		// Remove the drive letter
-		if (str.starts_with("c:/") || str.starts_with("C:/")) {
-			str.erase(0, 2);
-		}
-
-		// Return as-is if it exists, else traverse the filesystem looking for
-		// a path that matches case insensitively
-		std::filesystem::path path = std::filesystem::path(str);
-		if (std::filesystem::exists(path)) {
-			return path;
-		}
-
-		path = path.lexically_normal();
-		std::filesystem::path newPath = ".";
-		bool followingExisting = true;
-		for (auto component : path) {
-			std::filesystem::path newPath2 = newPath / component;
-			if (followingExisting && !std::filesystem::exists(newPath2) && (component != ".." && component != "." && component != "")) {
-				followingExisting = false;
-				try {
-					for (std::filesystem::path entry : std::filesystem::directory_iterator{newPath}) {
-						if (strcasecmp(entry.filename().c_str(), component.c_str()) == 0) {
-							followingExisting = true;
-							newPath2 = entry;
-							break;
-						}
-					}
-				} catch (const std::filesystem::filesystem_error&) {
-					// not a directory
-				}
-			}
-			newPath = newPath2;
-		}
-		if (followingExisting) {
-			DEBUG_LOG("Resolved case-insensitive path: %s\n", newPath.c_str());
-		} else {
-			DEBUG_LOG("Failed to resolve path: %s\n", newPath.c_str());
-		}
-
-		return newPath;
-	}
-
-	std::string pathToWindows(const std::filesystem::path &path) {
-		std::string str = path;
-
-		if (path.is_absolute()) {
-			str.insert(0, "C:");
-		}
-
-		std::replace(str.begin(), str.end(), '/', '\\');
-		return str;
 	}
 
 	unsigned int WIN_FUNC GetFullPathNameA(const char *lpFileName, unsigned int nBufferLength, char *lpBuffer, char **lpFilePart) {
 		DEBUG_LOG("GetFullPathNameA(%s)...\n", lpFileName);
-		std::filesystem::path absPath = std::filesystem::absolute(pathFromWindows(lpFileName));
-		std::string absStr = pathToWindows(absPath);
+		std::filesystem::path absPath = std::filesystem::absolute(files::pathFromWindows(lpFileName));
+		std::string absStr = files::pathToWindows(absPath);
 		DEBUG_LOG("AbsPath: %s - %s\n", absPath.c_str(), absStr.c_str());
 
 		// Enough space?
@@ -372,14 +296,14 @@ namespace kernel32 {
 	}
 
 	void *WIN_FUNC FindFirstFileA(const char *lpFileName, void *lpFindFileData) {
-		auto path = pathFromWindows(lpFileName);
+		auto path = files::pathFromWindows(lpFileName);
 		DEBUG_LOG("FindFirstFileA %s (%s)\n", lpFileName, path.c_str());
 		wibo::lastError = 2; // ERROR_FILE_NOT_FOUND
 		return (void *) 0xFFFFFFFF;
 	}
 
 	unsigned int WIN_FUNC GetFileAttributesA(const char *lpFileName) {
-		auto path = pathFromWindows(lpFileName);
+		auto path = files::pathFromWindows(lpFileName);
 		DEBUG_LOG("GetFileAttributesA(%s)... (%s)\n", lpFileName, path.c_str());
 		auto status = std::filesystem::status(path);
 
@@ -402,11 +326,10 @@ namespace kernel32 {
 	unsigned int WIN_FUNC WriteFile(void *hFile, const void *lpBuffer, unsigned int nNumberOfBytesToWrite, unsigned int *lpNumberOfBytesWritten, void *lpOverlapped) {
 		DEBUG_LOG("WriteFile %d\n", nNumberOfBytesToWrite);
 		assert(!lpOverlapped);
-		// for now, we VERY naively assume that the handle is a FILE*
-		// haha this is gonna come back and bite me, isn't it
 		wibo::lastError = 0;
 
-		size_t written = fwrite(lpBuffer, 1, nNumberOfBytesToWrite, (FILE *) hFile);
+		FILE *fp = files::fpFromHandle(hFile);
+		size_t written = fwrite(lpBuffer, 1, nNumberOfBytesToWrite, fp);
 		if (lpNumberOfBytesWritten)
 			*lpNumberOfBytesWritten = written;
 
@@ -429,7 +352,8 @@ namespace kernel32 {
 		assert(!lpOverlapped);
 		wibo::lastError = 0;
 
-		size_t read = fread(lpBuffer, 1, nNumberOfBytesToRead, (FILE *) hFile);
+		FILE *fp = files::fpFromHandle(hFile);
+		size_t read = fread(lpBuffer, 1, nNumberOfBytesToRead, fp);
 		*lpNumberOfBytesRead = read;
 		return 1;
 	}
@@ -442,25 +366,25 @@ namespace kernel32 {
 			unsigned int dwCreationDisposition,
 			unsigned int dwFlagsAndAttributes,
 			void *hTemplateFile) {
-		std::string path = pathFromWindows(lpFileName);
+		std::string path = files::pathFromWindows(lpFileName);
 		DEBUG_LOG("CreateFileA(filename=%s (%s), desiredAccess=0x%x, shareMode=%u, securityAttributes=%p, creationDisposition=%u, flagsAndAttributes=%u)\n",
 				lpFileName, path.c_str(),
 				dwDesiredAccess, dwShareMode, lpSecurityAttributes,
 				dwCreationDisposition, dwFlagsAndAttributes);
-		FILE *result = 0;
+		FILE *fp;
 		if (dwDesiredAccess == 0x80000000) { // read
-			result = fopen(path.c_str(), "rb");
+			fp = fopen(path.c_str(), "rb");
 		} else if (dwDesiredAccess == 0x40000000) { // write
-			result = fopen(path.c_str(), "wb");
+			fp = fopen(path.c_str(), "wb");
 		} else if (dwDesiredAccess == 0xc0000000) { // read/write
-			result = fopen(path.c_str(), "wb+");
+			fp = fopen(path.c_str(), "wb+");
 		} else {
 			assert(0);
 		}
 
-		if (result) {
+		if (fp) {
 			wibo::lastError = 0;
-			return result;
+			return files::allocFpHandle(fp);
 		} else {
 			switch (errno) {
 				case EACCES:
@@ -479,12 +403,12 @@ namespace kernel32 {
 					wibo::lastError = 50; // ERROR_NOT_SUPPORTED
 					break;
 			}
-			return (FILE *) 0xFFFFFFFF; // INVALID_HANDLE_VALUE
+			return (void *) 0xFFFFFFFF; // INVALID_HANDLE_VALUE
 		}
 	}
 
 	int WIN_FUNC DeleteFileA(const char* lpFileName) {
-		std::string path = pathFromWindows(lpFileName);
+		std::string path = files::pathFromWindows(lpFileName);
 		DEBUG_LOG("DeleteFileA %s (%s)\n", lpFileName, path.c_str());
 		unlink(path.c_str());
 		return 1;
@@ -493,7 +417,7 @@ namespace kernel32 {
 	unsigned int WIN_FUNC SetFilePointer(void *hFile, int lDistanceToMove, int *lpDistanceToMoveHigh, int dwMoveMethod) {
 		DEBUG_LOG("SetFilePointer %d %d %d\n", lDistanceToMove, (lpDistanceToMoveHigh ? *lpDistanceToMoveHigh : -1), dwMoveMethod);
 		assert(!lpDistanceToMoveHigh);
-		FILE *fp = (FILE*) hFile;
+		FILE *fp = files::fpFromHandle(hFile);
 		wibo::lastError = 0;
 		int r = fseek(fp, lDistanceToMove,
 				dwMoveMethod == 0 ? SEEK_SET :
@@ -518,7 +442,7 @@ namespace kernel32 {
 	 */
 	unsigned int WIN_FUNC GetFileSize(void *hFile, unsigned int *lpFileSizeHigh) {
 		DEBUG_LOG("GetFileSize\n");
-		FILE *fp = (FILE*)hFile;
+		FILE *fp = files::fpFromHandle(hFile);
 		long pos = ftell(fp);
 		assert(pos >= 0);
 		int r = fseek(fp, 0L, SEEK_END);
@@ -667,7 +591,7 @@ namespace kernel32 {
         DEBUG_LOG("GetCurrentDirectoryA\n");
 
         std::filesystem::path cwd = std::filesystem::current_path();
-		std::string path = pathToWindows(cwd);
+		std::string path = files::pathToWindows(cwd);
 
 		assert(path.size() < uSize);
 
@@ -678,7 +602,7 @@ namespace kernel32 {
 	void* WIN_FUNC GetModuleHandleA(const char* lpModuleName) {
 		DEBUG_LOG("GetModuleHandleA %s\n", lpModuleName);
 		// wibo::lastError = 0;
-		return (void*)1;
+		return (void*)0x100001;
 	}
 
 	unsigned int WIN_FUNC GetModuleFileNameA(void* hModule, char* lpFilename, unsigned int nSize) {
@@ -689,17 +613,17 @@ namespace kernel32 {
 
 	void* WIN_FUNC FindResourceA(void* hModule, const char* lpName, const char* lpType) {
 		DEBUG_LOG("FindResourceA %p %s %s\n", hModule, lpName, lpType);
-		return (void*)2;
+		return (void*)0x100002;
 	}
 
 	void* WIN_FUNC LoadResource(void* hModule, void* res) {
 		DEBUG_LOG("LoadResource %p %p\n", hModule, res);
-		return (void*)3;
+		return (void*)0x100003;
 	}
 
 	void* WIN_FUNC LockResource(void* res) {
 		DEBUG_LOG("LockResource %p\n", res);
-		return (void*)4;
+		return (void*)0x100004;
 	}
 
 	unsigned int WIN_FUNC SizeofResource(void* hModule, void* res) {
@@ -709,7 +633,7 @@ namespace kernel32 {
 
 	void* WIN_FUNC LoadLibraryA(const char* lpLibFileName) {
 		DEBUG_LOG("LoadLibraryA %s\n", lpLibFileName);
-		return (void*)5;
+		return (void*)0x100005;
 	}
 
 	int WIN_FUNC FreeLibrary(void* hLibModule) {
@@ -736,7 +660,7 @@ namespace kernel32 {
 
 		// return a dummy value
 		wibo::lastError = 0;
-		return (void *) 0x12345678;
+		return (void *) 0x100006;
 	}
 
 	void *WIN_FUNC VirtualAlloc(void *lpAddress, unsigned int dwSize, unsigned int flAllocationType, unsigned int flProtect) {

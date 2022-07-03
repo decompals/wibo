@@ -586,6 +586,24 @@ namespace kernel32 {
 		return 0;
 	}
 
+	int WIN_FUNC FileTimeToSystemTime(const FILETIME *lpFileTime, SYSTEMTIME *lpSystemTime) {
+		DEBUG_LOG("FileTimeToSystemTime\n");
+		lpSystemTime->wYear = 0;
+		lpSystemTime->wMonth = 0;
+		lpSystemTime->wDayOfWeek = 0;
+		lpSystemTime->wDay = 0;
+		lpSystemTime->wHour = 0;
+		lpSystemTime->wMinute = 0;
+		lpSystemTime->wSecond = 0;
+		lpSystemTime->wMilliseconds = 0;
+		return 1;
+	}
+
+	int WIN_FUNC SetFileTime(void *hFile, const FILETIME *lpCreationTime, const FILETIME *lpLastAccessTime, const FILETIME *lpLastWriteTime) {
+		DEBUG_LOG("SetFileTime\n");
+		return 1;
+	}
+
 	struct TIME_ZONE_INFORMATION {
 		int Bias;
 		short StandardName[32];
@@ -942,6 +960,8 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "GetSystemTime") == 0) return (void *) kernel32::GetSystemTime;
 	if (strcmp(name, "GetLocalTime") == 0) return (void *) kernel32::GetLocalTime;
 	if (strcmp(name, "SystemTimeToFileTime") == 0) return (void *) kernel32::SystemTimeToFileTime;
+	if (strcmp(name, "FileTimeToSystemTime") == 0) return (void *) kernel32::FileTimeToSystemTime;
+	if (strcmp(name, "SetFileTime") == 0) return (void *) kernel32::SetFileTime;
 	if (strcmp(name, "GetTickCount") == 0) return (void *) kernel32::GetTickCount;
 	if (strcmp(name, "GetTimeZoneInformation") == 0) return (void *) kernel32::GetTimeZoneInformation;
 	if (strcmp(name, "SetConsoleCtrlHandler") == 0) return (void *) kernel32::SetConsoleCtrlHandler;

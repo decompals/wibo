@@ -366,7 +366,7 @@ namespace kernel32 {
 			unsigned int dwCreationDisposition,
 			unsigned int dwFlagsAndAttributes,
 			void *hTemplateFile) {
-		std::string path = files::pathFromWindows(lpFileName);
+		std::string path = files::pathFromWindows(lpFileName).u8string();
 		DEBUG_LOG("CreateFileA(filename=%s (%s), desiredAccess=0x%x, shareMode=%u, securityAttributes=%p, creationDisposition=%u, flagsAndAttributes=%u)\n",
 				lpFileName, path.c_str(),
 				dwDesiredAccess, dwShareMode, lpSecurityAttributes,
@@ -408,7 +408,7 @@ namespace kernel32 {
 	}
 
 	int WIN_FUNC DeleteFileA(const char* lpFileName) {
-		std::string path = files::pathFromWindows(lpFileName);
+		std::string path = files::pathFromWindows(lpFileName).u8string();
 		DEBUG_LOG("DeleteFileA %s (%s)\n", lpFileName, path.c_str());
 		unlink(path.c_str());
 		return 1;

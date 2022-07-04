@@ -35,7 +35,7 @@ namespace files {
 				followingExisting = false;
 				try {
 					for (std::filesystem::path entry : std::filesystem::directory_iterator{newPath}) {
-						if (strcasecmp(entry.filename().c_str(), component.c_str()) == 0) {
+						if (strcasecmp(entry.filename().u8string().c_str(), component.u8string().c_str()) == 0) {
 							followingExisting = true;
 							newPath2 = entry;
 							break;
@@ -57,7 +57,7 @@ namespace files {
 	}
 
 	std::string pathToWindows(const std::filesystem::path &path) {
-		std::string str = path;
+		std::string str = path.u8string();
 
 		if (path.is_absolute()) {
 			str.insert(0, "Z:");

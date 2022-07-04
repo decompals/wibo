@@ -2,10 +2,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <assert.h>
 
+#ifdef _MSC_VER
+#define WIN_FUNC __stdcall
+// Use windows funcs that do (almost) the same thing
+#define strncasecmp _strnicmp
+#define strcasecmp _stricmp
+#define malloc_usable_size _msize
+#else
+#include <unistd.h>
 #define WIN_FUNC __attribute__((stdcall))
+#endif
+
 #define DEBUG_LOG(...) wibo::debug_log(__VA_ARGS__)
 
 namespace wibo {

@@ -3,3 +3,6 @@ build/
 *.o
 
 .vscode/
+# CLion
+.idea/
+cmake-build-*/

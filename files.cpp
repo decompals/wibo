@@ -106,8 +106,6 @@ namespace files {
 	}
 
 	unsigned int setStdHandle(uint32_t nStdHandle, void *hHandle) {
-		FILE *fp = fpFromHandle(hHandle);
-		assert(fp);
 		switch (nStdHandle) {
 			case ((uint32_t) -10): // STD_INPUT_HANDLE
 				stdinHandle = hHandle;

@@ -1,6 +1,7 @@
 all: wibo
 
 CXXFLAGS = -Wall -g -m32 -std=c++2a -lstdc++ -MD
+LDFLAGS = -lstdc++fs
 
 BUILD_DIR := build
 CPP_FILES := $(wildcard *.cpp)
@@ -14,7 +15,7 @@ $(BUILD_DIR)/%.o: %.cpp | $(BUILD_DIR)
 	$(CXX) -c $(CXXFLAGS) $< -o $@
 
 wibo: $(O_FILES)
-	$(CXX) $(CXXFLAGS) $^ -o $@
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
 
 clean:
 	$(RM) -r $(BUILD_DIR) wibo

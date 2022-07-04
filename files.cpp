@@ -1,5 +1,6 @@
 #include "common.h"
 #include "files.h"
+#include <algorithm>
 
 namespace files {
 	static FILE *handleFps[0x10000];
@@ -14,7 +15,7 @@ namespace files {
 		std::replace(str.begin(), str.end(), '\\', '/');
 
 		// Remove the drive letter
-		if (str.starts_with("c:/") || str.starts_with("C:/")) {
+		if (str.rfind("c:/", 0) == 0 || str.rfind("C:/", 0) == 0) {
 			str.erase(0, 2);
 		}
 

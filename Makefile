@@ -1,6 +1,6 @@
 all: wibo
 
-CXXFLAGS = -Wall -g -m32 -std=c++2a -lstdc++ -MD
+CXXFLAGS = -Wall -g -m32 -std=c++17 -lstdc++ -MD
 LDFLAGS = -lstdc++fs
 
 BUILD_DIR := build

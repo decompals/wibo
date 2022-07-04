@@ -15,7 +15,7 @@ namespace files {
 		std::replace(str.begin(), str.end(), '\\', '/');
 
 		// Remove the drive letter
-		if (str.rfind("c:/", 0) == 0 || str.rfind("C:/", 0) == 0) {
+		if (str.rfind("z:/", 0) == 0 || str.rfind("Z:/", 0) == 0) {
 			str.erase(0, 2);
 		}
 
@@ -29,7 +29,7 @@ namespace files {
 		path = path.lexically_normal();
 		std::filesystem::path newPath = ".";
 		bool followingExisting = true;
-		for (auto component : path) {
+		for (const auto& component : path) {
 			std::filesystem::path newPath2 = newPath / component;
 			if (followingExisting && !std::filesystem::exists(newPath2) && (component != ".." && component != "." && component != "")) {
 				followingExisting = false;
@@ -60,7 +60,7 @@ namespace files {
 		std::string str = path;
 
 		if (path.is_absolute()) {
-			str.insert(0, "C:");
+			str.insert(0, "Z:");
 		}
 
 		std::replace(str.begin(), str.end(), '/', '\\');

@@ -7,6 +7,7 @@
 #include <malloc.h>
 #include <stdarg.h>
 #include <system_error>
+#include <sys/stat.h>
 
 namespace kernel32 {
 
@@ -442,19 +443,18 @@ namespace kernel32 {
 	 */
 	unsigned int WIN_FUNC GetFileSize(void *hFile, unsigned int *lpFileSizeHigh) {
 		DEBUG_LOG("GetFileSize\n");
+		struct stat64 st;
 		FILE *fp = files::fpFromHandle(hFile);
-		long pos = ftell(fp);
-		assert(pos >= 0);
-		int r = fseek(fp, 0L, SEEK_END);
-		assert(r == 0);
-		long sz = ftell(fp);
-		assert(sz >= 0);
-		fseek(fp, pos, SEEK_SET);
-		if (lpFileSizeHigh) {
-			*lpFileSizeHigh = 0;
+		fflush(fp);
+		if (fstat64(fileno(fp), &st) == -1 || !S_ISREG(st.st_mode)) {
+			wibo::lastError = 2; // ERROR_FILE_NOT_FOUND (?)
+			return ~0u; // INVALID_FILE_SIZE
 		}
-		DEBUG_LOG("-> %d\n", (int)sz);
-		return (unsigned int)sz;
+		DEBUG_LOG("-> %ld\n", st.st_size);
+		if (lpFileSizeHigh != nullptr) {
+			*lpFileSizeHigh = st.st_size >> 32;
+		}
+		return st.st_size;
 	}
 
 	struct FILETIME {

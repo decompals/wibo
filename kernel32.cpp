@@ -440,6 +440,7 @@ namespace kernel32 {
 	int WIN_FUNC SetEndOfFile(void *hFile) {
 		DEBUG_LOG("SetEndOfFile\n");
 		FILE *fp = files::fpFromHandle(hFile);
+		fflush(fp);
 		return ftruncate(fileno(fp), ftell(fp)) == 0;
 	}
 

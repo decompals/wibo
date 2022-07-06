@@ -4,7 +4,9 @@ A minimal, low-fuss wrapper that can run really simple command-line 32-bit Windo
 
 Don't run this on any untrusted executables, I implore you. (Or probably just don't run it at all... :p)
 
-    make && ./wibo
+    cmake -B build
+    cmake --build build
+    build/wibo
 
 ---
 

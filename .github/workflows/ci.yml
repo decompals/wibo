@@ -10,26 +10,30 @@ jobs:
       - name: Install GCC multilib
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-multilib g++-multilib
+          sudo apt-get install -y gcc-multilib g++-multilib ninja-build
+
+      - name: Configure
+        # Replace with RelWithDebInfo when -O2 crash is fixed
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
 
       - name: Build
-        run: make -j
+        run: cmake --build build
 
       - name: Test
         run: |
           wget https://cdn.discordapp.com/attachments/727918646525165659/917185027656286218/GC_WII_COMPILERS.zip
           unzip GC_WII_COMPILERS.zip
-          MWCIncludes=. ./wibo GC/2.7/mwcceppc.exe -c test/test.c
+          MWCIncludes=. build/wibo GC/2.7/mwcceppc.exe -c test/test.c
           file test.o
 
       - name: Upload build
         uses: actions/upload-artifact@v2
         with:
           name: wibo
-          path: wibo
+          path: build/wibo
 
       - name: Publish release
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: wibo
+          files: build/wibo

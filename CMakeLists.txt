@@ -13,5 +13,4 @@ add_executable(wibo
     user32.cpp
     version.cpp
     )
-target_link_libraries(wibo PRIVATE stdc++fs)
 install(PROGRAMS wibo DESTINATION bin)

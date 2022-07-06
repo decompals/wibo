@@ -438,6 +438,31 @@ namespace kernel32 {
 		return r;
 	}
 
+	int WIN_FUNC SetEndOfFile(void *hFile) {
+		DEBUG_LOG("SetEndOfFile\n");
+		FILE *fp = files::fpFromHandle(hFile);
+		fflush(fp);
+		return ftruncate(fileno(fp), ftell(fp)) == 0;
+	}
+
+	int WIN_FUNC CreateDirectoryA(const char *lpPathName, void *lpSecurityAttributes) {
+		std::string path = files::pathFromWindows(lpPathName);
+		DEBUG_LOG("CreateDirectoryA(%s, %p)\n", path.c_str(), lpSecurityAttributes);
+		return mkdir(path.c_str(), 0755) == 0;
+	}
+
+	int WIN_FUNC RemoveDirectoryA(const char *lpPathName) {
+		std::string path = files::pathFromWindows(lpPathName);
+		DEBUG_LOG("RemoveDirectoryA(%s)\n", path.c_str());
+		return rmdir(path.c_str()) == 0;
+	}
+
+	int WIN_FUNC SetFileAttributesA(const char *lpPathName, unsigned int dwFileAttributes) {
+		std::string path = files::pathFromWindows(lpPathName);
+		DEBUG_LOG("SetFileAttributesA(%s, %u)\n", path.c_str(), dwFileAttributes);
+		return 1;
+	}
+
 	/*
 	 * Time
 	 */
@@ -879,6 +904,10 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "CreateFileA") == 0) return (void *) kernel32::CreateFileA;
 	if (strcmp(name, "DeleteFileA") == 0) return (void *) kernel32::DeleteFileA;
 	if (strcmp(name, "SetFilePointer") == 0) return (void *) kernel32::SetFilePointer;
+	if (strcmp(name, "SetEndOfFile") == 0) return (void *) kernel32::SetEndOfFile;
+	if (strcmp(name, "CreateDirectoryA") == 0) return (void *) kernel32::CreateDirectoryA;
+	if (strcmp(name, "RemoveDirectoryA") == 0) return (void *) kernel32::RemoveDirectoryA;
+	if (strcmp(name, "SetFileAttributesA") == 0) return (void *) kernel32::SetFileAttributesA;
 	if (strcmp(name, "GetFileSize") == 0) return (void *) kernel32::GetFileSize;
 	if (strcmp(name, "GetFileTime") == 0) return (void *) kernel32::GetFileTime;
 	if (strcmp(name, "GetSystemTime") == 0) return (void *) kernel32::GetSystemTime;

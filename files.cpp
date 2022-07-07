@@ -2,6 +2,39 @@
 #include "files.h"
 #include <algorithm>
 
+#ifndef __cpp_lib_filesystem
+#define USE_LEXICALLY_NORMAL_POLYFILL 1
+static inline std::filesystem::path lexically_normal(const std::filesystem::path &in) {
+	std::filesystem::path dest;
+	bool lastDotDot = false;
+	for (std::filesystem::path::string_type s: in) {
+		if (s == ".") {
+			dest /= "";
+			continue;
+		} else if (s == ".." && !dest.empty()) {
+			auto root = in.root_path();
+			if (dest == root) {
+				continue;
+			} else if (*(--dest.end()) != "..") {
+				if (dest.native().back() == std::filesystem::path::preferred_separator) {
+					dest = dest.native().substr(0, dest.native().size() - 1);
+				}
+				dest.remove_filename();
+				continue;
+			}
+		}
+		if (!(s.empty() && lastDotDot)) {
+			dest /= s;
+		}
+		lastDotDot = s == "..";
+	}
+	if (dest.empty()) {
+		dest = ".";
+	}
+	return dest;
+}
+#endif
+
 namespace files {
 	static FILE *handleFps[0x10000];
 
@@ -26,7 +59,11 @@ namespace files {
 			return path;
 		}
 
+#if USE_LEXICALLY_NORMAL_POLYFILL
+		path = lexically_normal(path);
+#else
 		path = path.lexically_normal();
+#endif
 		std::filesystem::path newPath = ".";
 		bool followingExisting = true;
 		for (const auto& component : path) {

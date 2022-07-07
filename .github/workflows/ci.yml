@@ -4,20 +4,34 @@ jobs:
   build_and_test:
     name: Build and test
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        version: [jammy, focal, bionic]
+        compiler: [g++, clang++]
+
+    container:
+      image: ubuntu:${{matrix.version}}
+
     steps:
       - uses: actions/checkout@v2
 
-      - name: Install GCC multilib
+      - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-multilib g++-multilib ninja-build
+          apt-get update
+          apt-get install -y gcc-multilib g++-multilib ninja-build cmake wget clang unzip file
+          mkdir build
 
       - name: Configure
+        # bionic cmake doesn't support the -B syntax for build dir
+        working-directory: build
         # Replace with RelWithDebInfo when -O2 crash is fixed
-        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+        run: cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=${{matrix.compiler}}
 
       - name: Build
-        run: cmake --build build
+        working-directory: build
+        run: ninja
 
       - name: Test
         run: |
@@ -28,12 +42,14 @@ jobs:
 
       - name: Upload build
         uses: actions/upload-artifact@v2
+        # Only upload build compiled against oldest glibc for compatibility
+        if: matrix.compiler == 'bionic'
         with:
           name: wibo
           path: build/wibo
 
       - name: Publish release
         uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
+        if: matrix.compiler == 'bionic' && startsWith(github.ref, 'refs/tags/')
         with:
           files: build/wibo

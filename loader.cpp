@@ -1,4 +1,5 @@
 #include "common.h"
+#include <algorithm>
 #include <errno.h>
 #include <memory>
 #include <sys/mman.h>

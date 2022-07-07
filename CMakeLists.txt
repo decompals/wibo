@@ -13,4 +13,4 @@ add_executable(wibo
     user32.cpp
     version.cpp
     )
-install(PROGRAMS wibo DESTINATION bin)
+install(TARGETS wibo DESTINATION bin)

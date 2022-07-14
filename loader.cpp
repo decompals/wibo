@@ -183,8 +183,8 @@ bool wibo::Executable::loadPE(FILE *file) {
 	PEImportDirectoryEntry *dir = fromRVA<PEImportDirectoryEntry>(header32.importTable.virtualAddress);
 
 	while (dir->name) {
-		char *name = fromRVA(dir->name);
-		DEBUG_LOG("DLL Name: %s\n", name);
+		char *dllName = fromRVA(dir->name);
+		DEBUG_LOG("DLL Name: %s\n", dllName);
 		uint32_t *lookupTable = fromRVA(dir->importLookupTable);
 		uint32_t *addressTable = fromRVA(dir->importAddressTable);
 
@@ -194,12 +194,12 @@ bool wibo::Executable::loadPE(FILE *file) {
 				// Import by ordinal
 				uint16_t ordinal = lookup & 0xFFFF;
 				DEBUG_LOG("  Ordinal: %d\n", ordinal);
-				*addressTable = (uint32_t) resolveStubByOrdinal(name, ordinal);
+				*addressTable = (uint32_t) resolveFuncByOrdinal(dllName, ordinal);
 			} else {
 				// Import by name
 				PEHintNameTableEntry *hintName = fromRVA<PEHintNameTableEntry>(lookup);
 				DEBUG_LOG("  Name: %s\n", hintName->name);
-				*addressTable = (uint32_t) resolveStubByName(name, hintName->name);
+				*addressTable = (uint32_t) resolveFuncByName(dllName, hintName->name);
 			}
 			++lookupTable;
 			++addressTable;

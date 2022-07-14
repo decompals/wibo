@@ -21,59 +21,38 @@ void wibo::debug_log(const char *fmt, ...) {
 	va_end(args);
 }
 
+#define FOR_256_3(a, b, c, d) FOR_ITER((a << 6 | b << 4 | c << 2 | d))
+#define FOR_256_2(a, b) \
+	FOR_256_3(a, b, 0, 0) FOR_256_3(a, b, 0, 1) FOR_256_3(a, b, 0, 2) FOR_256_3(a, b, 0, 3) \
+	FOR_256_3(a, b, 1, 0) FOR_256_3(a, b, 1, 1) FOR_256_3(a, b, 1, 2) FOR_256_3(a, b, 1, 3) \
+	FOR_256_3(a, b, 2, 0) FOR_256_3(a, b, 2, 1) FOR_256_3(a, b, 2, 2) FOR_256_3(a, b, 2, 3) \
+	FOR_256_3(a, b, 3, 0) FOR_256_3(a, b, 3, 1) FOR_256_3(a, b, 3, 2) FOR_256_3(a, b, 3, 3)
+#define FOR_256 \
+	FOR_256_2(0, 0) FOR_256_2(0, 1) FOR_256_2(0, 2) FOR_256_2(0, 3) \
+	FOR_256_2(1, 0) FOR_256_2(1, 1) FOR_256_2(1, 2) FOR_256_2(1, 3) \
+	FOR_256_2(2, 0) FOR_256_2(2, 1) FOR_256_2(2, 2) FOR_256_2(2, 3) \
+	FOR_256_2(3, 0) FOR_256_2(3, 1) FOR_256_2(3, 2) FOR_256_2(3, 3) \
+
 static int stubIndex = 0;
 static char stubDlls[0x100][0x100];
 static char stubFuncNames[0x100][0x100];
 
 static void stubBase(int index) {
-	// should go through all the functions imported by mwcceppc.exe
-	// and create template stubs for them, at least...
 	printf("Unhandled function %s (%s)\n", stubFuncNames[index], stubDlls[index]);
 	exit(1);
 }
 
 void (*stubFuncs[0x100])(void) = {
-#define DEFINE_STUB(a, b, c, d) []() { stubBase(a << 6 | b << 4 | c << 2 | d); },
-#define DEFINE_STUBS(a, b) \
-	DEFINE_STUB(a, b, 0, 0) DEFINE_STUB(a, b, 0, 1) DEFINE_STUB(a, b, 0, 2) DEFINE_STUB(a, b, 0, 3) \
-	DEFINE_STUB(a, b, 1, 0) DEFINE_STUB(a, b, 1, 1) DEFINE_STUB(a, b, 1, 2) DEFINE_STUB(a, b, 1, 3) \
-	DEFINE_STUB(a, b, 2, 0) DEFINE_STUB(a, b, 2, 1) DEFINE_STUB(a, b, 2, 2) DEFINE_STUB(a, b, 2, 3) \
-	DEFINE_STUB(a, b, 3, 0) DEFINE_STUB(a, b, 3, 1) DEFINE_STUB(a, b, 3, 2) DEFINE_STUB(a, b, 3, 3)
-DEFINE_STUBS(0, 0) DEFINE_STUBS(0, 1) DEFINE_STUBS(0, 2) DEFINE_STUBS(0, 3)
-DEFINE_STUBS(1, 0) DEFINE_STUBS(1, 1) DEFINE_STUBS(1, 2) DEFINE_STUBS(1, 3)
-DEFINE_STUBS(2, 0) DEFINE_STUBS(2, 1) DEFINE_STUBS(2, 2) DEFINE_STUBS(2, 3)
-DEFINE_STUBS(3, 0) DEFINE_STUBS(3, 1) DEFINE_STUBS(3, 2) DEFINE_STUBS(3, 3)
+#define FOR_ITER(i) []() { stubBase(i); },
+FOR_256
+#undef FOR_ITER
 };
-#undef DEFINE_STUB
-#undef DEFINE_STUBS
 
-void *wibo::resolveStubByName(const char *dllName, const char *funcName) {
-	if (strcasecmp(dllName, "KERNEL32.dll") == 0) {
-		void *func = wibo::resolveKernel32(funcName);
-		if (func)
-			return func;
-	}
-	if (strcasecmp(dllName, "USER32.dll") == 0) {
-		void *func = wibo::resolveUser32(funcName);
-		if (func)
-			return func;
-	}
-	if (strcasecmp(dllName, "ADVAPI32.dll") == 0) {
-		void *func = wibo::resolveAdvApi32(funcName);
-		if (func)
-			return func;
-	}
-	if (strcasecmp(dllName, "VERSION.dll") == 0) {
-		void *func = wibo::resolveVersion(funcName);
-		if (func)
-			return func;
-	}
-	if (strcasecmp(dllName, "ole32.dll") == 0) {
-		void *func = wibo::resolveOle32(funcName);
-		if (func)
-			return func;
-	}
+#undef FOR_256_3
+#undef FOR_256_2
+#undef FOR_256
 
+static void *resolveMissingFunc(const char *dllName, const char *funcName) {
 	DEBUG_LOG("Missing function: %s (%s)\n", dllName, funcName);
 	assert(stubIndex < 0x100);
 	assert(strlen(dllName) < 0x100);
@@ -83,19 +62,38 @@ void *wibo::resolveStubByName(const char *dllName, const char *funcName) {
 	return (void *) stubFuncs[stubIndex++];
 }
 
-void *wibo::resolveStubByOrdinal(const char *dllName, uint16_t ordinal) {
+void *wibo::resolveFuncByName(const char *dllName, const char *funcName) {
+	void *func = nullptr;
+	if (strcasecmp(dllName, "KERNEL32.dll") == 0) {
+		func = wibo::resolveKernel32(funcName);
+	} else if (strcasecmp(dllName, "USER32.dll") == 0) {
+		func = wibo::resolveUser32(funcName);
+	} else if (strcasecmp(dllName, "ADVAPI32.dll") == 0) {
+		func = wibo::resolveAdvApi32(funcName);
+	} else if (strcasecmp(dllName, "VERSION.dll") == 0) {
+		func = wibo::resolveVersion(funcName);
+	} else if (strcasecmp(dllName, "OLE32.dll") == 0) {
+		func = wibo::resolveOle32(funcName);
+	}
+
+	if (func)
+		return func;
+	return resolveMissingFunc(dllName, funcName);
+}
+
+void *wibo::resolveFuncByOrdinal(const char *dllName, uint16_t ordinal) {
+	void *func;
 	if (strcmp(dllName, "LMGR11.dll") == 0 ||
 			strcmp(dllName, "LMGR326B.dll") == 0 ||
 			strcmp(dllName, "LMGR8C.dll") == 0) {
-		void* func = wibo::resolveLmgr(ordinal);
-		if (func)
-			return func;
+		func = wibo::resolveLmgr(ordinal);
 	}
-	assert(stubIndex < 0x100);
-	assert(strlen(dllName) < 0x100);
-	sprintf(stubFuncNames[stubIndex], "%d", ordinal);
-	strcpy(stubDlls[stubIndex], dllName);
-	return (void *) stubFuncs[stubIndex++];
+
+	if (func)
+		return func;
+	char buf[16];
+	sprintf(buf, "%d", ordinal);
+	return resolveMissingFunc(dllName, buf);
 }
 
 // Windows Thread Information Block

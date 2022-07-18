@@ -7,16 +7,17 @@ find_package(Filesystem REQUIRED)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32 -Wall")
+include_directories(.)
 add_executable(wibo
-    advapi32.cpp
+    dll/advapi32.cpp
+    dll/kernel32.cpp
+    dll/lmgr.cpp
+    dll/ole32.cpp
+    dll/user32.cpp
+    dll/version.cpp
     files.cpp
-    kernel32.cpp
-    lmgr.cpp
     loader.cpp
     main.cpp
-    ole32.cpp
-    user32.cpp
-    version.cpp
     )
 target_link_libraries(wibo PRIVATE std::filesystem)
 install(TARGETS wibo DESTINATION bin)

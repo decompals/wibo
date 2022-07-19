@@ -11,11 +11,12 @@
 
 namespace kernel32 {
 	std::string WideStringToString(const uint16_t *str) {
-		std::string res;
-
-		int i = 0;
-		while (str[i] != 0) {
-			res.push_back(str[i++] & 0xFF);
+		std::string res = "";
+		if (str != NULL) {
+			int i = 0;
+			while (str[i] != 0) {
+				res.push_back(str[i++] & 0xFF);
+			}
 		}
 		return res;
 	}
@@ -700,29 +701,35 @@ namespace kernel32 {
 	}
 
 	void* WIN_FUNC GetModuleHandleA(const char* lpModuleName) {
-		DEBUG_LOG("GetModuleHandleA %s\n", lpModuleName);
+		DEBUG_LOG("GetModuleHandleA\n");
+		// If lpModuleName is NULL, GetModuleHandle returns a handle to the file
+		// used to create the calling process (.exe file).
+
 		// wibo::lastError = 0;
 		return (void*)0x100001;
 	}
 
 	void* WIN_FUNC GetModuleHandleW(const uint16_t* lpModuleName) {
-		std::string moduleName = WideStringToString(lpModuleName);
-		DEBUG_LOG("GetModuleHandleW %s\n", moduleName.c_str());
+		DEBUG_LOG("GetModuleHandleW\n");
+
 		// wibo::lastError = 0;
 		return (void*)0x100007;
 	}
 
 	unsigned int WIN_FUNC GetModuleFileNameA(void* hModule, char* lpFilename, unsigned int nSize) {
-		DEBUG_LOG("GetModuleFileNameA %p\n", hModule);
-		//
-		*lpFilename = 0; // NUL terminate
+		DEBUG_LOG("GetModuleFileNameA (hModule=%p, nSize=%i)\n", hModule, nSize);
+
+		*lpFilename = 0; // just NUL terminate
+
 		wibo::lastError = 0;
 		return 0;
 	}
 
 	unsigned int WIN_FUNC GetModuleFileNameW(void* hModule, uint16_t* lpFilename, unsigned int nSize) {
-		DEBUG_LOG("GetModuleFileNameW %p\n", hModule);
-		*lpFilename = 0; // NUL terminate
+		DEBUG_LOG("GetModuleFileNameW (hModule=%p, nSize=%i)\n", hModule, nSize);
+
+		*lpFilename = 0; // just NUL terminate
+
 		wibo::lastError = 0;
 		return 0;
 	}
@@ -909,20 +916,33 @@ namespace kernel32 {
 		DEBUG_LOG("MultiByteToWideChar(codePage=%u, dwFlags=%u, multiByte=%d, wideChar=%d)\n", codePage, dwFlags, cbMultiByte, cchWideChar);
 
 		// assert (dwFlags == 1); // MB_PRECOMPOSED
-		if (lpWideCharStr == 0) {
-			// return required buffer length
-			return 1;
+		int i = 0;
+		if (lpWideCharStr == 0) { // return required buffer length
+			while (lpMultiByteStr[i] != 0) {
+				i++;
+			}
+		} else { // else copy source into destination
+			while (i < cchWideChar) {
+				lpWideCharStr[i] = lpMultiByteStr[i];
+				i++;
+			}
+			lpWideCharStr[i] = 0; // NUL terminate
 		}
-		*lpWideCharStr = 0; // NUL terminate
-		return 1;
+		return i;
 	}
 
 	unsigned int WIN_FUNC GetStringTypeW(unsigned int dwInfoType, const char *lpSrcStr, int cchSrc, char *lpCharType) {
-		DEBUG_LOG("GetStringTypeW (lpCharType=%u, lpSrcStr=%p, cchSrc=%i, lpCharType=%p)\n", lpCharType, lpSrcStr, cchSrc, lpCharType);
+		DEBUG_LOG("GetStringTypeW (dwInfoType=%u, lpSrcStr=%p, cchSrc=%i, lpCharType=%p)\n", dwInfoType, lpSrcStr, cchSrc, lpCharType);
 
-		assert(lpCharType);
-		*lpCharType = 0;
-		return 0;
+		int strLen = cchSrc < 0 ? strlen(lpSrcStr) : cchSrc;
+		int i = 0;
+		while (i < strLen) {
+			lpCharType[i] = lpSrcStr[i];
+			i++;
+		}
+		lpCharType[i] = 0; // NUL terminate
+
+		return 1;
 	}
 
 	unsigned int WIN_FUNC FreeEnvironmentStringsW(void *penv) {
@@ -953,6 +973,8 @@ namespace kernel32 {
 			// if (strcmp(lpProcName, "InitializeCriticalSectionEx") == 0) return (void *) InitializeCriticalSectionEx;
 			// if (strcmp(lpProcName, "FlsSetValue") == 0) return (void *) FlsSetValue;
 			// if (strcmp(lpProcName, "FlsFree") == 0) return (void *) FlsFree;
+			// if (strcmp(lpProcName, "LCMapStringEx") == 0) return (void *) LCMapStringEx;
+			// if (strcmp(lpProcName, "LocaleNameToLCID") == 0) return (void *) LocaleNameToLCID;
 		}
 
 		return NULL;

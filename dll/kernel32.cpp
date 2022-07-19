@@ -928,7 +928,7 @@ namespace kernel32 {
 			}
 			lpWideCharStr[i] = 0; // NUL terminate
 		}
-		return i;
+		return i + 1;
 	}
 
 	unsigned int WIN_FUNC GetStringTypeW(unsigned int dwInfoType, const char *lpSrcStr, int cchSrc, char *lpCharType) {
@@ -968,14 +968,12 @@ namespace kernel32 {
 	void *WIN_FUNC GetProcAddress(void *hModule, char *lpProcName) {
 		DEBUG_LOG("GetProcAddress: %s from %p\n", lpProcName, hModule);
 
-		if ((unsigned int)hModule == 0x100005) {
-			if (strcmp(lpProcName, "IsProcessorFeaturePresent") == 0) return (void *) IsProcessorFeaturePresent;
-			// if (strcmp(lpProcName, "InitializeCriticalSectionEx") == 0) return (void *) InitializeCriticalSectionEx;
-			// if (strcmp(lpProcName, "FlsSetValue") == 0) return (void *) FlsSetValue;
-			// if (strcmp(lpProcName, "FlsFree") == 0) return (void *) FlsFree;
-			// if (strcmp(lpProcName, "LCMapStringEx") == 0) return (void *) LCMapStringEx;
-			// if (strcmp(lpProcName, "LocaleNameToLCID") == 0) return (void *) LocaleNameToLCID;
-		}
+		if (strcmp(lpProcName, "IsProcessorFeaturePresent") == 0) return (void *) IsProcessorFeaturePresent;
+		// if (strcmp(lpProcName, "InitializeCriticalSectionEx") == 0) return (void *) InitializeCriticalSectionEx;
+		// if (strcmp(lpProcName, "FlsSetValue") == 0) return (void *) FlsSetValue;
+		// if (strcmp(lpProcName, "FlsFree") == 0) return (void *) FlsFree;
+		// if (strcmp(lpProcName, "LCMapStringEx") == 0) return (void *) LCMapStringEx;
+		// if (strcmp(lpProcName, "LocaleNameToLCID") == 0) return (void *) LocaleNameToLCID;
 
 		return NULL;
 	}
@@ -988,6 +986,14 @@ namespace kernel32 {
 			memset(mem, 0, dwBytes);
 
 		DEBUG_LOG("HeapAlloc returning %p\n", mem);
+		return mem;
+	}
+
+	void *WIN_FUNC HeapReAlloc(void *hHeap, unsigned int dwFlags, void *lpMem, size_t dwBytes) {
+		DEBUG_LOG("HeapReAlloc(heap=%p, flags=%x, mem=%p, bytes=%u)\n", hHeap, dwFlags, lpMem, dwBytes);
+		void *mem = realloc(lpMem, dwBytes);
+		if (mem && (dwFlags & 8))
+			memset(mem, 0, dwBytes);
 		return mem;
 	}
 
@@ -1223,6 +1229,8 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "HeapCreate") == 0) return (void *) kernel32::HeapCreate;
 	if (strcmp(name, "GetProcessHeap") == 0) return (void *) kernel32::GetProcessHeap;
 	if (strcmp(name, "HeapAlloc") == 0) return (void *) kernel32::HeapAlloc;
+	if (strcmp(name, "HeapReAlloc") == 0) return (void *) kernel32::HeapReAlloc;
+
 	if (strcmp(name, "HeapFree") == 0) return (void *) kernel32::HeapFree;
 
 	// memoryapi.h

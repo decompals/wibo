@@ -10,14 +10,21 @@
 #include <sys/stat.h>
 
 namespace kernel32 {
-	std::string WideStringToString(const uint16_t *str) {
-		std::string res = "";
-		if (str != NULL) {
-			int i = 0;
-			while (str[i] != 0) {
-				res.push_back(str[i++] & 0xFF);
-			}
+	char *WideStringToString(const uint16_t *src) {
+		char *res = NULL;
+
+		int len = 0;
+		if (src != NULL) {
+			while (src[len] != 0) {
+				len++;
+			};
 		}
+		res = (char *)malloc(len + 1);
+		for (int i = 0; i < len; i++) {
+			res[i] = src[i] & 0xFF;
+		}
+		res[len] = 0; // NUL terminate
+
 		return res;
 	}
 
@@ -26,6 +33,7 @@ namespace kernel32 {
 	}
 
 	void WIN_FUNC SetLastError(unsigned int dwErrCode) {
+		DEBUG_LOG("SetLastError %u\n", dwErrCode);
 		wibo::lastError = dwErrCode;
 	}
 
@@ -125,7 +133,7 @@ namespace kernel32 {
 
 	unsigned int WIN_FUNC InitializeCriticalSectionAndSpinCount(CRITICAL_SECTION *lpCriticalSection, unsigned int dwSpinCount) {
 		DEBUG_LOG("InitializeCriticalSectionAndSpinCount (%i)\n", dwSpinCount);
-		// probably can't get away with doing nothing...?
+		// can we get away with doing nothing...?
 		memset(lpCriticalSection, 0, sizeof(CRITICAL_SECTION));
 		lpCriticalSection->SpinCount = dwSpinCount;
 
@@ -236,11 +244,11 @@ namespace kernel32 {
 		DEBUG_LOG("GetCommandLineW\n");
 		char *cmdLine = GetCommandLineA();
 		int len = strlen(cmdLine);
-		uint16_t *res = (uint16_t*)malloc((len + 1) * sizeof(uint16_t));
+		uint16_t *res = (uint16_t*)malloc((len + 1) * 2);
 		for (int i = 0; i < len; i++) {
 			res[i] = cmdLine[i];
 		}
-		*res = 0; // NUL terminate
+		res[len] = 0; // NUL terminate
 		return res;
 	}
 
@@ -760,8 +768,9 @@ namespace kernel32 {
 	}
 
 	void* WIN_FUNC LoadLibraryExW(const uint16_t* lpLibFileName, void* hFile, unsigned int dwFlags) {
-		std::string filename = WideStringToString(lpLibFileName);
-		DEBUG_LOG("LoadLibraryExW: %s\n", filename.c_str());
+		char *filename = WideStringToString(lpLibFileName);
+		DEBUG_LOG("LoadLibraryExW: %s\n", filename);
+		free(filename);
 
 		return (void*)0x100005;
 	}
@@ -926,12 +935,12 @@ namespace kernel32 {
 				lpWideCharStr[i] = lpMultiByteStr[i];
 				i++;
 			}
-			lpWideCharStr[i] = 0; // NUL terminate
+			lpWideCharStr[cchWideChar] = 0; // NUL terminate
 		}
 		return i + 1;
 	}
 
-	unsigned int WIN_FUNC GetStringTypeW(unsigned int dwInfoType, const char *lpSrcStr, int cchSrc, char *lpCharType) {
+	unsigned int WIN_FUNC GetStringTypeW(unsigned int dwInfoType, const char *lpSrcStr, int cchSrc, uint16_t *lpCharType) {
 		DEBUG_LOG("GetStringTypeW (dwInfoType=%u, lpSrcStr=%p, cchSrc=%i, lpCharType=%p)\n", dwInfoType, lpSrcStr, cchSrc, lpCharType);
 
 		int strLen = cchSrc < 0 ? strlen(lpSrcStr) : cchSrc;
@@ -940,7 +949,7 @@ namespace kernel32 {
 			lpCharType[i] = lpSrcStr[i];
 			i++;
 		}
-		lpCharType[i] = 0; // NUL terminate
+		lpCharType[strLen] = 0; // NUL terminate
 
 		return 1;
 	}
@@ -1044,11 +1053,14 @@ namespace kernel32 {
 	}
 
 	int WIN_FUNC CompareStringW(int Locale, unsigned int dwCmpFlags, const uint16_t *lpString1, unsigned int cchCount1, const uint16_t *lpString2, unsigned int cchCount2) {
-		const char *str1 = WideStringToString(lpString1).c_str();
-		const char *str2 = WideStringToString(lpString2).c_str();
+		char *str1 = WideStringToString(lpString1);
+		char *str2 = WideStringToString(lpString2);
 
 		DEBUG_LOG("CompareStringW: '%s' vs '%s' (%u)\n", str1, str2, dwCmpFlags);
-		return strcmp(str1, str2);
+		int res = strcmp(str1, str2);
+		free(str1);
+		free(str2);
+		return res;
 	}
 
 	int WIN_FUNC IsValidCodePage(unsigned int CodePage) {

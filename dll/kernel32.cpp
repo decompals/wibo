@@ -785,6 +785,29 @@ namespace kernel32 {
 		return 1;
 	}
 
+	typedef struct {
+		uint32_t dwOSVersionInfoSize;
+		uint32_t dwMajorVersion;
+		uint32_t dwMinorVersion;
+		uint32_t dwBuildNumber;
+		uint32_t dwPlatformId;
+		char szCSDVersion[128];
+		/**
+		 * If dwOSVersionInfoSize indicates more members (i.e. we have an OSVERSIONINFOEXA):
+		 * uint16_t wServicePackMajor;
+		 * uint16_t wServicePackMinor;
+		 * uint16_t wSuiteMask;
+		 * uint8_t wProductType;
+		 * uint8_t wReserved;
+		 */
+	} OSVERSIONINFOA;
+
+	int WIN_FUNC GetVersionExA(OSVERSIONINFOA* lpVersionInformation) {
+		DEBUG_LOG("GetVersionExA\n");
+		memset(lpVersionInformation, 0, lpVersionInformation->dwOSVersionInfoSize);
+		return 1;
+	}
+
 	void *WIN_FUNC HeapCreate(unsigned int flOptions, unsigned int dwInitialSize, unsigned int dwMaximumSize) {
 		DEBUG_LOG("HeapCreate %u %u %u\n", flOptions, dwInitialSize, dwMaximumSize);
 		if (flOptions & 0x00000001) {
@@ -1218,6 +1241,7 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "GetSystemDirectoryA") == 0) return (void *) kernel32::GetSystemDirectoryA;
 	if (strcmp(name, "GetWindowsDirectoryA") == 0) return (void *) kernel32::GetWindowsDirectoryA;
 	if (strcmp(name, "GetVersion") == 0) return (void *) kernel32::GetVersion;
+	if (strcmp(name, "GetVersionExA") == 0) return (void *) kernel32::GetVersionExA;
 
 	// timezoneapi.h
 	if (strcmp(name, "SystemTimeToFileTime") == 0) return (void *) kernel32::SystemTimeToFileTime;

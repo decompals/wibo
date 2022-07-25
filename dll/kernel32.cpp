@@ -10,7 +10,7 @@
 #include <sys/stat.h>
 
 namespace kernel32 {
-	char *WideStringToString(const uint16_t *src) {
+	char *wideStringToString(const uint16_t *src) {
 		char *res = NULL;
 
 		int len = 0;
@@ -22,6 +22,19 @@ namespace kernel32 {
 		res = (char *)malloc(len + 1);
 		for (int i = 0; i < len; i++) {
 			res[i] = src[i] & 0xFF;
+		}
+		res[len] = 0; // NUL terminate
+
+		return res;
+	}
+
+	static uint16_t *stringToWideString(const char *src) {
+		uint16_t *res = nullptr;
+
+		int len = strlen(src);
+		res = (uint16_t *)malloc((len + 1) * 2);
+		for (int i = 0; i < len; i++) {
+			res[i] = src[i];
 		}
 		res[len] = 0; // NUL terminate
 
@@ -237,19 +250,13 @@ namespace kernel32 {
 	 * Environment
 	 */
 	char *WIN_FUNC GetCommandLineA() {
+		DEBUG_LOG("GetCommandLineA\n");
 		return wibo::commandLine;
 	}
 
 	uint16_t *WIN_FUNC GetCommandLineW() {
 		DEBUG_LOG("GetCommandLineW\n");
-		char *cmdLine = GetCommandLineA();
-		int len = strlen(cmdLine);
-		uint16_t *res = (uint16_t*)malloc((len + 1) * 2);
-		for (int i = 0; i < len; i++) {
-			res[i] = cmdLine[i];
-		}
-		res[len] = 0; // NUL terminate
-		return res;
+		return stringToWideString(GetCommandLineA());
 	}
 
 	char *WIN_FUNC GetEnvironmentStrings() {
@@ -709,16 +716,22 @@ namespace kernel32 {
 	}
 
 	void* WIN_FUNC GetModuleHandleA(const char* lpModuleName) {
-		DEBUG_LOG("GetModuleHandleA\n");
+		DEBUG_LOG("GetModuleHandleA %s\n", lpModuleName);
 		// If lpModuleName is NULL, GetModuleHandle returns a handle to the file
 		// used to create the calling process (.exe file).
+
+		// assert(lpModuleName == 0);
 
 		// wibo::lastError = 0;
 		return (void*)0x100001;
 	}
 
 	void* WIN_FUNC GetModuleHandleW(const uint16_t* lpModuleName) {
-		DEBUG_LOG("GetModuleHandleW\n");
+		char *moduleName = wideStringToString(lpModuleName);
+		DEBUG_LOG("GetModuleHandleW: %s\n", moduleName);
+		free(moduleName);
+
+		// assert(lpModuleName == 0);
 
 		// wibo::lastError = 0;
 		return (void*)0x100007;
@@ -768,7 +781,7 @@ namespace kernel32 {
 	}
 
 	void* WIN_FUNC LoadLibraryExW(const uint16_t* lpLibFileName, void* hFile, unsigned int dwFlags) {
-		char *filename = WideStringToString(lpLibFileName);
+		char *filename = wideStringToString(lpLibFileName);
 		DEBUG_LOG("LoadLibraryExW: %s\n", filename);
 		free(filename);
 
@@ -966,13 +979,25 @@ namespace kernel32 {
 	unsigned int WIN_FUNC GetStringTypeW(unsigned int dwInfoType, const char *lpSrcStr, int cchSrc, uint16_t *lpCharType) {
 		DEBUG_LOG("GetStringTypeW (dwInfoType=%u, lpSrcStr=%p, cchSrc=%i, lpCharType=%p)\n", dwInfoType, lpSrcStr, cchSrc, lpCharType);
 
-		int strLen = cchSrc < 0 ? strlen(lpSrcStr) : cchSrc;
+		assert(dwInfoType == 1); // CT_CTYPE1
+
+		int strLen = cchSrc < 0 ? strlen(lpSrcStr) + 1 : cchSrc;
 		int i = 0;
 		while (i < strLen) {
-			lpCharType[i] = lpSrcStr[i];
+			char c = lpSrcStr[i];
+
+			bool upper = ('A' <= c && c <= 'Z');
+			bool lower = ('a' <= c && c <= 'z');
+			bool alpha = (lower || upper);
+			bool digit = ('0' <= c && c <= '9');
+			bool space = (c == ' ' || c == '\n' || c == '\t' || c == '\r' || c == '\f' || c == '\v');
+			bool blank = (c == ' ' || c == '\t');
+			bool hex = (digit || ('A' <= c && c <= 'F') || ('a' <= c && c <= 'f'));
+			bool cntrl = ((0 <= c && c < 0x20) || c == 127);
+			bool punct = (!cntrl && !digit && !alpha);
+			lpCharType[i] = (upper ? 1 : 0) | (lower ? 2 : 0) | (digit ? 4 : 0) | (space ? 8 : 0) | (punct ? 0x10 : 0) | (cntrl ? 0x20 : 0) | (blank ? 0x40 : 0) | (hex ? 0x80 : 0) | (alpha ? 0x100 : 0);
 			i++;
 		}
-		lpCharType[strLen] = 0; // NUL terminate
 
 		return 1;
 	}
@@ -1076,8 +1101,8 @@ namespace kernel32 {
 	}
 
 	int WIN_FUNC CompareStringW(int Locale, unsigned int dwCmpFlags, const uint16_t *lpString1, unsigned int cchCount1, const uint16_t *lpString2, unsigned int cchCount2) {
-		char *str1 = WideStringToString(lpString1);
-		char *str2 = WideStringToString(lpString2);
+		char *str1 = wideStringToString(lpString1);
+		char *str2 = wideStringToString(lpString2);
 
 		DEBUG_LOG("CompareStringW: '%s' vs '%s' (%u)\n", str1, str2, dwCmpFlags);
 		int res = strcmp(str1, str2);

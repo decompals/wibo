@@ -990,7 +990,7 @@ namespace kernel32 {
 
 		if (wibo::debugEnabled) {
 			std::string s(lpMultiByteStr, lpMultiByteStr + cchWideChar);
-			DEBUG_LOG("Converted string: [%s]\n", s.c_str());
+			DEBUG_LOG("Converted string: [%s] (len %d)\n", s.c_str(), cchWideChar);
 		}
 
 		return cchWideChar;
@@ -1010,7 +1010,7 @@ namespace kernel32 {
 
 		if (wibo::debugEnabled) {
 			std::string s(lpMultiByteStr, lpMultiByteStr + cbMultiByte);
-			DEBUG_LOG("Converting string: [%s]\n", s.c_str());
+			DEBUG_LOG("Converting string: [%s] (len %d)\n", s.c_str(), cbMultiByte);
 		}
 
 		assert(cbMultiByte <= cchWideChar);
@@ -1025,8 +1025,10 @@ namespace kernel32 {
 
 		assert(dwInfoType == 1); // CT_CTYPE1
 
-		int strLen = cchSrc < 0 ? wstrlen(lpSrcStr) + 1 : cchSrc;
-		for (int i = 0; i < strLen; i++) {
+		if (cchSrc < 0)
+			cchSrc = wstrlen(lpSrcStr);
+
+		for (int i = 0; i < cchSrc; i++) {
 			uint16_t c = lpSrcStr[i];
 			assert(c < 256);
 
@@ -1184,7 +1186,7 @@ namespace kernel32 {
 		std::string ret;
 		// https://www.pinvoke.net/default.aspx/Enums/LCType.html
 		if (LCType == 4100) { // LOCALE_IDEFAULTANSICODEPAGE
-			// GetACP
+			// Latin1; ref GetACP
 			ret = "28591";
 		}
 		if (LCType == 4097) { // LOCALE_SENGLANGUAGE
@@ -1204,7 +1206,7 @@ namespace kernel32 {
 
 	int WIN_FUNC GetUserDefaultLCID() {
 		DEBUG_LOG("GetUserDefaultLCID\n");
-		return 0;
+		return 1;
 	}
 
 	int WIN_FUNC LCMapStringW(int Locale, unsigned int dwMapFlags, const uint16_t* lpSrcStr, int cchSrc, uint16_t* lpDestStr, int cchDest) {

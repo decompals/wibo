@@ -720,7 +720,9 @@ namespace kernel32 {
 		// If lpModuleName is NULL, GetModuleHandle returns a handle to the file
 		// used to create the calling process (.exe file).
 
-		// assert(lpModuleName == 0);
+		if (lpModuleName == 0) {
+			return wibo::mainModule->imageBuffer;
+		}
 
 		// wibo::lastError = 0;
 		return (void*)0x100001;
@@ -731,10 +733,12 @@ namespace kernel32 {
 		DEBUG_LOG("GetModuleHandleW: %s\n", moduleName);
 		free(moduleName);
 
-		// assert(lpModuleName == 0);
+		if (lpModuleName == 0) {
+			return wibo::mainModule->imageBuffer;
+		}
 
 		// wibo::lastError = 0;
-		return (void*)0x100007;
+		return (void*)0x100001;
 	}
 
 	unsigned int WIN_FUNC GetModuleFileNameA(void* hModule, char* lpFilename, unsigned int nSize) {

@@ -10,14 +10,14 @@
 #include <sys/stat.h>
 
 namespace kernel32 {
-	int wstrlen(const uint16_t *str) {
+	static int wstrlen(const uint16_t *str) {
 		int len = 0;
 		while (str[len] != 0)
 			++len;
 		return len;
 	}
 
-	void *doAlloc(unsigned int dwBytes, bool zero) {
+	static void *doAlloc(unsigned int dwBytes, bool zero) {
 		if (dwBytes == 0)
 			dwBytes = 1;
 		void *ret = malloc(dwBytes);
@@ -27,7 +27,7 @@ namespace kernel32 {
 		return ret;
 	}
 
-	void *doRealloc(void *mem, unsigned int dwBytes, bool zero) {
+	static void *doRealloc(void *mem, unsigned int dwBytes, bool zero) {
 		if (dwBytes == 0)
 			dwBytes = 1;
 		size_t oldSize = malloc_usable_size(mem);
@@ -39,9 +39,11 @@ namespace kernel32 {
 		return ret;
 	}
 
-	char *wideStringToString(const uint16_t *src) {
-		int len = src ? wstrlen(src) : 0;
-		char *res = (char *)malloc(len + 1);
+	static std::string wideStringToString(const uint16_t *src, int len = -1) {
+		if (len < 0) {
+			len = src ? wstrlen(src) : 0;
+		}
+		std::string res(len + 1, '\0');
 		for (int i = 0; i < len; i++) {
 			res[i] = src[i] & 0xFF;
 		}
@@ -61,6 +63,28 @@ namespace kernel32 {
 		res[len] = 0; // NUL terminate
 
 		return res;
+	}
+
+	static int doCompareString(const std::string &a, const std::string &b, unsigned int dwCmpFlags) {
+		for (size_t i = 0; ; i++) {
+			if (i == a.size()) {
+				if (i == b.size()) {
+					return 2; // CSTR_EQUAL
+				}
+				return 1; // CSTR_LESS_THAN
+			}
+			if (i == b.size()) {
+				return 3; // CSTR_GREATER_THAN
+			}
+			unsigned char c = a[i], d = b[i];
+			if (dwCmpFlags & 1) { // NORM_IGNORECASE
+				if ('a' <= c && c <= 'z') c -= 'a' - 'A';
+				if ('a' <= d && d <= 'z') d -= 'a' - 'A';
+			}
+			if (c != d) {
+				return c < d ? 1 : 3;
+			}
+		}
 	}
 
 	uint32_t WIN_FUNC GetLastError() {
@@ -724,10 +748,11 @@ namespace kernel32 {
 
 	void* WIN_FUNC GetModuleHandleA(const char* lpModuleName) {
 		DEBUG_LOG("GetModuleHandleA %s\n", lpModuleName);
-		// If lpModuleName is NULL, GetModuleHandle returns a handle to the file
-		// used to create the calling process (.exe file).
 
-		if (lpModuleName == 0) {
+		if (!lpModuleName) {
+			// If lpModuleName is NULL, GetModuleHandle returns a handle to the file
+			// used to create the calling process (.exe file).
+			// This handle needs to equal the actual image buffer, from which data can be read.
 			return wibo::mainModule->imageBuffer;
 		}
 
@@ -736,11 +761,12 @@ namespace kernel32 {
 	}
 
 	void* WIN_FUNC GetModuleHandleW(const uint16_t* lpModuleName) {
-		char *moduleName = wideStringToString(lpModuleName);
-		DEBUG_LOG("GetModuleHandleW: %s\n", moduleName);
-		free(moduleName);
+		if (wibo::debugEnabled) {
+			std::string moduleName = lpModuleName ? wideStringToString(lpModuleName) : "<null>";
+			DEBUG_LOG("GetModuleHandleW: %s\n", moduleName.c_str());
+		}
 
-		if (lpModuleName == 0) {
+		if (!lpModuleName) {
 			return wibo::mainModule->imageBuffer;
 		}
 
@@ -792,9 +818,10 @@ namespace kernel32 {
 	}
 
 	void* WIN_FUNC LoadLibraryExW(const uint16_t* lpLibFileName, void* hFile, unsigned int dwFlags) {
-		char *filename = wideStringToString(lpLibFileName);
-		DEBUG_LOG("LoadLibraryExW: %s\n", filename);
-		free(filename);
+		if (wibo::debugEnabled) {
+			std::string filename = wideStringToString(lpLibFileName);
+			DEBUG_LOG("LoadLibraryExW: %s\n", filename);
+		}
 
 		return (void*)0x100005;
 	}
@@ -957,7 +984,7 @@ namespace kernel32 {
 			return cchWideChar;
 		}
 		for (int i = 0; i < cchWideChar; i++) {
-			lpMultiByteStr[i] = lpWideCharStr[i];
+			lpMultiByteStr[i] = lpWideCharStr[i] & 0xFF;
 		}
 		if (cchWideChar > 0 && lpMultiByteStr[cchWideChar - 1] == 0) {
 			DEBUG_LOG("Converted string: [%s]\n", lpMultiByteStr);
@@ -1105,20 +1132,23 @@ namespace kernel32 {
 	}
 
 	int WIN_FUNC CompareStringA(int Locale, unsigned int dwCmpFlags, const char *lpString1, unsigned int cchCount1, const char *lpString2, unsigned int cchCount2) {
-		DEBUG_LOG("CompareStringA: '%s' vs '%s' (%u)\n", lpString1, lpString2, dwCmpFlags);
-		// too simple?
-		return strcmp(lpString1, lpString2);
+		if (cchCount1 < 0)
+			cchCount1 = strlen(lpString1);
+		if (cchCount2 < 0)
+			cchCount2 = strlen(lpString2);
+		std::string str1(lpString1, lpString1 + cchCount1);
+		std::string str2(lpString2, lpString2 + cchCount2);
+
+		DEBUG_LOG("CompareStringA: '%s' vs '%s' (%u)\n", str1.c_str(), str2.c_str(), dwCmpFlags);
+		return doCompareString(str1, str2, dwCmpFlags);
 	}
 
 	int WIN_FUNC CompareStringW(int Locale, unsigned int dwCmpFlags, const uint16_t *lpString1, unsigned int cchCount1, const uint16_t *lpString2, unsigned int cchCount2) {
-		char *str1 = wideStringToString(lpString1);
-		char *str2 = wideStringToString(lpString2);
+		std::string str1 = wideStringToString(lpString1, cchCount1);
+		std::string str2 = wideStringToString(lpString2, cchCount2);
 
-		DEBUG_LOG("CompareStringW: '%s' vs '%s' (%u)\n", str1, str2, dwCmpFlags);
-		int res = strcmp(str1, str2);
-		free(str1);
-		free(str2);
-		return res;
+		DEBUG_LOG("CompareStringW: '%s' vs '%s' (%u)\n", str1.c_str(), str2.c_str(), dwCmpFlags);
+		return doCompareString(str1, str2, dwCmpFlags);
 	}
 
 	int WIN_FUNC IsValidCodePage(unsigned int CodePage) {

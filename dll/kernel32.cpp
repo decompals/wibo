@@ -10,6 +10,28 @@
 #include <sys/stat.h>
 
 namespace kernel32 {
+	void *doAlloc(unsigned int dwBytes, bool zero) {
+		if (dwBytes == 0)
+			dwBytes = 1;
+		void *ret = malloc(dwBytes);
+		if (ret && zero) {
+			memset(ret, 0, malloc_usable_size(ret));
+		}
+		return ret;
+	}
+
+	void *doRealloc(void *mem, unsigned int dwBytes, bool zero) {
+		if (dwBytes == 0)
+			dwBytes = 1;
+		size_t oldSize = malloc_usable_size(mem);
+		void *ret = realloc(mem, dwBytes);
+		size_t newSize = malloc_usable_size(ret);
+		if (ret && zero && newSize > oldSize) {
+			memset((char*)ret + oldSize, 0, newSize - oldSize);
+		}
+		return ret;
+	}
+
 	char *wideStringToString(const uint16_t *src) {
 		char *res = NULL;
 
@@ -209,15 +231,8 @@ namespace kernel32 {
 			return 0;
 		} else {
 			// GMEM_FIXED - this is simpler
-			if (dwBytes == 0)
-				dwBytes = 1;
-			assert(dwBytes > 0);
-			void *buffer = malloc(dwBytes);
-			if (buffer && (uFlags & 0x40)) {
-				// GMEM_ZEROINT
-				memset(buffer, 0, malloc_usable_size(buffer));
-			}
-			return buffer;
+			bool zero = uFlags & 0x40; // GMEM_ZEROINT
+			return doAlloc(dwBytes, zero);
 		}
 	}
 	void *WIN_FUNC GlobalFree(void *hMem) {
@@ -229,16 +244,8 @@ namespace kernel32 {
 		if (uFlags & 0x80) { // GMEM_MODIFY
 			assert(0);
 		} else {
-			if (dwBytes == 0)
-				dwBytes = 1;
-			size_t oldSize = malloc_usable_size(hMem);
-			void *buffer = realloc(hMem, dwBytes);
-			size_t newSize = malloc_usable_size(buffer);
-			if (buffer && (uFlags & 0x40) && newSize > oldSize) {
-				// GMEM_ZEROINT
-				memset((char*)buffer + oldSize, 0, newSize - oldSize);
-			}
-			return buffer;
+			bool zero = uFlags & 0x40; // GMEM_ZEROINT
+			return doRealloc(hMem, dwBytes, zero);
 		}
 	}
 
@@ -1042,20 +1049,17 @@ namespace kernel32 {
 	void *WIN_FUNC HeapAlloc(void *hHeap, unsigned int dwFlags, size_t dwBytes) {
 		DEBUG_LOG("HeapAlloc(heap=%p, flags=%x, bytes=%u)\n", hHeap, dwFlags, dwBytes);
 
-		void *mem = malloc(dwBytes);
-		if (mem && (dwFlags & 8))
-			memset(mem, 0, dwBytes);
-
+		void *mem = doAlloc(dwBytes, dwFlags & 8);
 		DEBUG_LOG("HeapAlloc returning %p\n", mem);
 		return mem;
 	}
 
 	void *WIN_FUNC HeapReAlloc(void *hHeap, unsigned int dwFlags, void *lpMem, size_t dwBytes) {
 		DEBUG_LOG("HeapReAlloc(heap=%p, flags=%x, mem=%p, bytes=%u)\n", hHeap, dwFlags, lpMem, dwBytes);
-		void *mem = realloc(lpMem, dwBytes);
-		if (mem && (dwFlags & 8))
-			memset(mem, 0, dwBytes);
-		return mem;
+		void *ret = doRealloc(lpMem, dwBytes, dwFlags & 8);
+		DEBUG_LOG("HeapReAlloc returning %p\n", ret);
+		return ret;
+	}
 	}
 
 	void *WIN_FUNC GetProcessHeap() {

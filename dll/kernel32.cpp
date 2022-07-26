@@ -10,16 +10,40 @@
 #include <sys/stat.h>
 
 namespace kernel32 {
-	char *wideStringToString(const uint16_t *src) {
-		char *res = NULL;
-
+	static int wstrlen(const uint16_t *str) {
 		int len = 0;
-		if (src != NULL) {
-			while (src[len] != 0) {
-				len++;
-			};
+		while (str[len] != 0)
+			++len;
+		return len;
+	}
+
+	static void *doAlloc(unsigned int dwBytes, bool zero) {
+		if (dwBytes == 0)
+			dwBytes = 1;
+		void *ret = malloc(dwBytes);
+		if (ret && zero) {
+			memset(ret, 0, malloc_usable_size(ret));
 		}
-		res = (char *)malloc(len + 1);
+		return ret;
+	}
+
+	static void *doRealloc(void *mem, unsigned int dwBytes, bool zero) {
+		if (dwBytes == 0)
+			dwBytes = 1;
+		size_t oldSize = malloc_usable_size(mem);
+		void *ret = realloc(mem, dwBytes);
+		size_t newSize = malloc_usable_size(ret);
+		if (ret && zero && newSize > oldSize) {
+			memset((char*)ret + oldSize, 0, newSize - oldSize);
+		}
+		return ret;
+	}
+
+	static std::string wideStringToString(const uint16_t *src, int len = -1) {
+		if (len < 0) {
+			len = src ? wstrlen(src) : 0;
+		}
+		std::string res(len + 1, '\0');
 		for (int i = 0; i < len; i++) {
 			res[i] = src[i] & 0xFF;
 		}
@@ -34,11 +58,33 @@ namespace kernel32 {
 		int len = strlen(src);
 		res = (uint16_t *)malloc((len + 1) * 2);
 		for (int i = 0; i < len; i++) {
-			res[i] = src[i];
+			res[i] = src[i] & 0xFF;
 		}
 		res[len] = 0; // NUL terminate
 
 		return res;
+	}
+
+	static int doCompareString(const std::string &a, const std::string &b, unsigned int dwCmpFlags) {
+		for (size_t i = 0; ; i++) {
+			if (i == a.size()) {
+				if (i == b.size()) {
+					return 2; // CSTR_EQUAL
+				}
+				return 1; // CSTR_LESS_THAN
+			}
+			if (i == b.size()) {
+				return 3; // CSTR_GREATER_THAN
+			}
+			unsigned char c = a[i], d = b[i];
+			if (dwCmpFlags & 1) { // NORM_IGNORECASE
+				if ('a' <= c && c <= 'z') c -= 'a' - 'A';
+				if ('a' <= d && d <= 'z') d -= 'a' - 'A';
+			}
+			if (c != d) {
+				return c < d ? 1 : 3;
+			}
+		}
 	}
 
 	uint32_t WIN_FUNC GetLastError() {
@@ -209,15 +255,8 @@ namespace kernel32 {
 			return 0;
 		} else {
 			// GMEM_FIXED - this is simpler
-			if (dwBytes == 0)
-				dwBytes = 1;
-			assert(dwBytes > 0);
-			void *buffer = malloc(dwBytes);
-			if (buffer && (uFlags & 0x40)) {
-				// GMEM_ZEROINT
-				memset(buffer, 0, malloc_usable_size(buffer));
-			}
-			return buffer;
+			bool zero = uFlags & 0x40; // GMEM_ZEROINT
+			return doAlloc(dwBytes, zero);
 		}
 	}
 	void *WIN_FUNC GlobalFree(void *hMem) {
@@ -229,16 +268,8 @@ namespace kernel32 {
 		if (uFlags & 0x80) { // GMEM_MODIFY
 			assert(0);
 		} else {
-			if (dwBytes == 0)
-				dwBytes = 1;
-			size_t oldSize = malloc_usable_size(hMem);
-			void *buffer = realloc(hMem, dwBytes);
-			size_t newSize = malloc_usable_size(buffer);
-			if (buffer && (uFlags & 0x40) && newSize > oldSize) {
-				// GMEM_ZEROINT
-				memset((char*)buffer + oldSize, 0, newSize - oldSize);
-			}
-			return buffer;
+			bool zero = uFlags & 0x40; // GMEM_ZEROINT
+			return doRealloc(hMem, dwBytes, zero);
 		}
 	}
 
@@ -309,7 +340,7 @@ namespace kernel32 {
 		while (*work) {
 			size_t strSize = strlen(*work);
 			for (size_t i = 0; i < strSize; i++) {
-				*ptr++ = (*work)[i];
+				*ptr++ = (*work)[i] & 0xFF;
 			}
 			*ptr++ = 0; // NUL terminate
 			work++;
@@ -382,11 +413,62 @@ namespace kernel32 {
 		}
 	}
 
-	void *WIN_FUNC FindFirstFileA(const char *lpFileName, void *lpFindFileData) {
+	struct FILETIME {
+		unsigned int dwLowDateTime;
+		unsigned int dwHighDateTime;
+	};
+
+	static const uint64_t UNIX_TIME_ZERO = 11644473600LL * 10000000;
+	static const FILETIME defaultFiletime = {
+		(unsigned int)UNIX_TIME_ZERO,
+		(unsigned int)(UNIX_TIME_ZERO >> 32)
+	};
+
+	template<typename CharType>
+	struct WIN32_FIND_DATA {
+		uint32_t dwFileAttributes;
+		FILETIME ftCreationTime;
+		FILETIME ftLastAccessTime;
+		FILETIME ftLastWriteTime;
+		uint32_t nFileSizeHigh;
+		uint32_t nFileSizeLow;
+		uint32_t dwReserved0;
+		uint32_t dwReserved1;
+		CharType cFileName[260];
+		CharType cAlternateFileName[14];
+		uint32_t dwFileType;
+		uint32_t dwCreatorType;
+		uint16_t wFinderFlags;
+	};
+
+	void *WIN_FUNC FindFirstFileA(const char *lpFileName, WIN32_FIND_DATA<char> *lpFindFileData) {
+		// This should handle wildcards too, but whatever.
 		auto path = files::pathFromWindows(lpFileName);
 		DEBUG_LOG("FindFirstFileA %s (%s)\n", lpFileName, path.c_str());
+
+		lpFindFileData->ftCreationTime = defaultFiletime;
+		lpFindFileData->ftLastAccessTime = defaultFiletime;
+		lpFindFileData->ftLastWriteTime = defaultFiletime;
+
+		auto status = std::filesystem::status(path);
+		if (status.type() == std::filesystem::file_type::regular) {
+			lpFindFileData->dwFileAttributes = 0x80; // FILE_ATTRIBUTE_NORMAL
+			auto fileSize = std::filesystem::file_size(path);
+			lpFindFileData->nFileSizeHigh = (uint32_t)(fileSize >> 32);
+			lpFindFileData->nFileSizeLow = (uint32_t)fileSize;
+			assert(path.string().size() < 260);
+			strcpy(lpFindFileData->cFileName, path.c_str());
+			strcpy(lpFindFileData->cAlternateFileName, "8P3FMTFN.BAD");
+			lpFindFileData->dwFileType = lpFindFileData->dwCreatorType = lpFindFileData->wFinderFlags = 0;
+			return (void *) 1;
+		}
+
 		wibo::lastError = 2; // ERROR_FILE_NOT_FOUND
 		return (void *) 0xFFFFFFFF;
+	}
+
+	int WIN_FUNC FindClose(void *hFindFile) {
+		return 1;
 	}
 
 	unsigned int WIN_FUNC GetFileAttributesA(const char *lpFileName) {
@@ -568,16 +650,11 @@ namespace kernel32 {
 		return st.st_size;
 	}
 
-	struct FILETIME {
-		unsigned int dwLowDateTime;
-		unsigned int dwHighDateTime;
-	};
-
 	int WIN_FUNC GetFileTime(void *hFile, FILETIME *lpCreationTime, FILETIME *lpLastAccessTime, FILETIME *lpLastWriteTime) {
 		DEBUG_LOG("GetFileTime %p %p %p\n", lpCreationTime, lpLastAccessTime, lpLastWriteTime);
-		if (lpCreationTime) lpCreationTime->dwLowDateTime = lpCreationTime->dwHighDateTime = 0;
-		if (lpLastAccessTime) lpLastAccessTime->dwLowDateTime = lpLastAccessTime->dwHighDateTime = 0;
-		if (lpLastWriteTime) lpLastWriteTime->dwLowDateTime = lpLastWriteTime->dwHighDateTime = 0;
+		if (lpCreationTime) *lpCreationTime = defaultFiletime;
+		if (lpLastAccessTime) *lpLastAccessTime = defaultFiletime;
+		if (lpLastWriteTime) *lpLastWriteTime = defaultFiletime;
 		return 1;
 	}
 
@@ -611,14 +688,13 @@ namespace kernel32 {
 
 	int WIN_FUNC SystemTimeToFileTime(const SYSTEMTIME *lpSystemTime, FILETIME *lpFileTime) {
 		DEBUG_LOG("SystemTimeToFileTime\n");
-		lpFileTime->dwLowDateTime = 0;
-		lpFileTime->dwHighDateTime = 0;
+		*lpFileTime = defaultFiletime;
 		return 1;
 	}
 
 	void WIN_FUNC GetSystemTimeAsFileTime(FILETIME *lpSystemTimeAsFileTime) {
-		lpSystemTimeAsFileTime->dwLowDateTime = 0;
-		lpSystemTimeAsFileTime->dwHighDateTime = 0;
+		DEBUG_LOG("GetSystemTimeAsFileTime\n");
+		*lpSystemTimeAsFileTime = defaultFiletime;
 	}
 
 	int WIN_FUNC GetTickCount() {
@@ -641,6 +717,12 @@ namespace kernel32 {
 
 	int WIN_FUNC SetFileTime(void *hFile, const FILETIME *lpCreationTime, const FILETIME *lpLastAccessTime, const FILETIME *lpLastWriteTime) {
 		DEBUG_LOG("SetFileTime\n");
+		return 1;
+	}
+
+	int FileTimeToLocalFileTime(const FILETIME *lpFileTime, FILETIME *lpLocalFileTime) {
+		// we live on Iceland
+		*lpLocalFileTime = *lpFileTime;
 		return 1;
 	}
 
@@ -717,10 +799,11 @@ namespace kernel32 {
 
 	void* WIN_FUNC GetModuleHandleA(const char* lpModuleName) {
 		DEBUG_LOG("GetModuleHandleA %s\n", lpModuleName);
-		// If lpModuleName is NULL, GetModuleHandle returns a handle to the file
-		// used to create the calling process (.exe file).
 
-		if (lpModuleName == 0) {
+		if (!lpModuleName) {
+			// If lpModuleName is NULL, GetModuleHandle returns a handle to the file
+			// used to create the calling process (.exe file).
+			// This handle needs to equal the actual image buffer, from which data can be read.
 			return wibo::mainModule->imageBuffer;
 		}
 
@@ -729,11 +812,12 @@ namespace kernel32 {
 	}
 
 	void* WIN_FUNC GetModuleHandleW(const uint16_t* lpModuleName) {
-		char *moduleName = wideStringToString(lpModuleName);
-		DEBUG_LOG("GetModuleHandleW: %s\n", moduleName);
-		free(moduleName);
+		if (wibo::debugEnabled) {
+			std::string moduleName = lpModuleName ? wideStringToString(lpModuleName) : "<null>";
+			DEBUG_LOG("GetModuleHandleW: %s\n", moduleName.c_str());
+		}
 
-		if (lpModuleName == 0) {
+		if (!lpModuleName) {
 			return wibo::mainModule->imageBuffer;
 		}
 
@@ -785,9 +869,10 @@ namespace kernel32 {
 	}
 
 	void* WIN_FUNC LoadLibraryExW(const uint16_t* lpLibFileName, void* hFile, unsigned int dwFlags) {
-		char *filename = wideStringToString(lpLibFileName);
-		DEBUG_LOG("LoadLibraryExW: %s\n", filename);
-		free(filename);
+		if (wibo::debugEnabled) {
+			std::string filename = wideStringToString(lpLibFileName);
+			DEBUG_LOG("LoadLibraryExW: %s\n", filename.c_str());
+		}
 
 		return (void*)0x100005;
 	}
@@ -922,8 +1007,9 @@ namespace kernel32 {
 
 	unsigned int WIN_FUNC GetACP() {
 		DEBUG_LOG("GetACP\n");
-		// return 1200;		// Unicode (BMP of ISO 10646)
-		return 28591;		// ISO/IEC 8859-1
+		// return 65001;    // UTF-8
+		// return 1200;     // Unicode (BMP of ISO 10646)
+		return 28591;       // Latin1 (ISO/IEC 8859-1)
 	}
 
 	typedef struct _cpinfo {
@@ -943,52 +1029,59 @@ namespace kernel32 {
 		DEBUG_LOG("WideCharToMultiByte(codePage=%u, flags=%x, wcs=%p, wideChar=%d, mbs=%p, multiByte=%d, defaultChar=%p, usedDefaultChar=%p)\n", codePage, dwFlags, lpWideCharStr, cchWideChar, lpMultiByteStr, cbMultiByte, lpDefaultChar, lpUsedDefaultChar);
 
 		if (cchWideChar == -1) {
-			// determine how long the string actually is
-			cchWideChar = 0;
-			while (lpWideCharStr[cchWideChar] != 0)
-				++cchWideChar;
+			cchWideChar = wstrlen(lpWideCharStr) + 1;
 		}
 
 		if (cbMultiByte == 0) {
-			return cchWideChar + 1;
+			return cchWideChar;
 		}
 		for (int i = 0; i < cchWideChar; i++) {
-			lpMultiByteStr[i] = lpWideCharStr[i];
+			lpMultiByteStr[i] = lpWideCharStr[i] & 0xFF;
 		}
-		lpMultiByteStr[cchWideChar] = 0;
-		DEBUG_LOG("Converted string: [%s]\n", lpMultiByteStr);
 
-		return cbMultiByte;
+		if (wibo::debugEnabled) {
+			std::string s(lpMultiByteStr, lpMultiByteStr + cchWideChar);
+			DEBUG_LOG("Converted string: [%s] (len %d)\n", s.c_str(), cchWideChar);
+		}
+
+		return cchWideChar;
 	}
 
 	unsigned int WIN_FUNC MultiByteToWideChar(unsigned int codePage, unsigned int dwFlags, const char *lpMultiByteStr, int cbMultiByte, uint16_t *lpWideCharStr, int cchWideChar) {
 		DEBUG_LOG("MultiByteToWideChar(codePage=%u, dwFlags=%u, multiByte=%d, wideChar=%d)\n", codePage, dwFlags, cbMultiByte, cchWideChar);
 
-		// assert (dwFlags == 1); // MB_PRECOMPOSED
-		int i = 0;
-		if (lpWideCharStr == 0) { // return required buffer length
-			while (lpMultiByteStr[i] != 0) {
-				i++;
-			}
-		} else { // else copy source into destination
-			while (i < cchWideChar) {
-				lpWideCharStr[i] = lpMultiByteStr[i];
-				i++;
-			}
-			lpWideCharStr[cchWideChar] = 0; // NUL terminate
+		if (cbMultiByte == -1) {
+			cbMultiByte = strlen(lpMultiByteStr) + 1;
 		}
-		return i + 1;
+
+		// assert (dwFlags == 1); // MB_PRECOMPOSED
+		if (cchWideChar == 0) {
+			return cbMultiByte;
+		}
+
+		if (wibo::debugEnabled) {
+			std::string s(lpMultiByteStr, lpMultiByteStr + cbMultiByte);
+			DEBUG_LOG("Converting string: [%s] (len %d)\n", s.c_str(), cbMultiByte);
+		}
+
+		assert(cbMultiByte <= cchWideChar);
+		for (int i = 0; i < cbMultiByte; i++) {
+			lpWideCharStr[i] = lpMultiByteStr[i] & 0xFF;
+		}
+		return cbMultiByte;
 	}
 
-	unsigned int WIN_FUNC GetStringTypeW(unsigned int dwInfoType, const char *lpSrcStr, int cchSrc, uint16_t *lpCharType) {
+	unsigned int WIN_FUNC GetStringTypeW(unsigned int dwInfoType, const uint16_t *lpSrcStr, int cchSrc, uint16_t *lpCharType) {
 		DEBUG_LOG("GetStringTypeW (dwInfoType=%u, lpSrcStr=%p, cchSrc=%i, lpCharType=%p)\n", dwInfoType, lpSrcStr, cchSrc, lpCharType);
 
 		assert(dwInfoType == 1); // CT_CTYPE1
 
-		int strLen = cchSrc < 0 ? strlen(lpSrcStr) + 1 : cchSrc;
-		int i = 0;
-		while (i < strLen) {
-			char c = lpSrcStr[i];
+		if (cchSrc < 0)
+			cchSrc = wstrlen(lpSrcStr);
+
+		for (int i = 0; i < cchSrc; i++) {
+			uint16_t c = lpSrcStr[i];
+			assert(c < 256);
 
 			bool upper = ('A' <= c && c <= 'Z');
 			bool lower = ('a' <= c && c <= 'z');
@@ -997,10 +1090,9 @@ namespace kernel32 {
 			bool space = (c == ' ' || c == '\n' || c == '\t' || c == '\r' || c == '\f' || c == '\v');
 			bool blank = (c == ' ' || c == '\t');
 			bool hex = (digit || ('A' <= c && c <= 'F') || ('a' <= c && c <= 'f'));
-			bool cntrl = ((0 <= c && c < 0x20) || c == 127);
+			bool cntrl = (c < 0x20 || c == 127);
 			bool punct = (!cntrl && !digit && !alpha);
 			lpCharType[i] = (upper ? 1 : 0) | (lower ? 2 : 0) | (digit ? 4 : 0) | (space ? 8 : 0) | (punct ? 0x10 : 0) | (cntrl ? 0x20 : 0) | (blank ? 0x40 : 0) | (hex ? 0x80 : 0) | (alpha ? 0x100 : 0);
-			i++;
 		}
 
 		return 1;
@@ -1042,20 +1134,21 @@ namespace kernel32 {
 	void *WIN_FUNC HeapAlloc(void *hHeap, unsigned int dwFlags, size_t dwBytes) {
 		DEBUG_LOG("HeapAlloc(heap=%p, flags=%x, bytes=%u)\n", hHeap, dwFlags, dwBytes);
 
-		void *mem = malloc(dwBytes);
-		if (mem && (dwFlags & 8))
-			memset(mem, 0, dwBytes);
-
+		void *mem = doAlloc(dwBytes, dwFlags & 8);
 		DEBUG_LOG("HeapAlloc returning %p\n", mem);
 		return mem;
 	}
 
 	void *WIN_FUNC HeapReAlloc(void *hHeap, unsigned int dwFlags, void *lpMem, size_t dwBytes) {
 		DEBUG_LOG("HeapReAlloc(heap=%p, flags=%x, mem=%p, bytes=%u)\n", hHeap, dwFlags, lpMem, dwBytes);
-		void *mem = realloc(lpMem, dwBytes);
-		if (mem && (dwFlags & 8))
-			memset(mem, 0, dwBytes);
-		return mem;
+		void *ret = doRealloc(lpMem, dwBytes, dwFlags & 8);
+		DEBUG_LOG("HeapReAlloc returning %p\n", ret);
+		return ret;
+	}
+
+	unsigned int WIN_FUNC HeapSize(void *hHeap, unsigned int dwFlags, void *lpMem) {
+		DEBUG_LOG("HeapSize(heap=%p, flags=%x, mem=%p)\n", hHeap, dwFlags, lpMem);
+		return malloc_usable_size(lpMem);
 	}
 
 	void *WIN_FUNC GetProcessHeap() {
@@ -1098,21 +1191,33 @@ namespace kernel32 {
 		return 0;
 	}
 
+	int WIN_FUNC GetComputerNameA(char *lpBuffer, unsigned int *nSize) {
+		DEBUG_LOG("GetComputerNameA\n");
+		if (*nSize < 9)
+			return 0;
+		strcpy(lpBuffer, "COMPNAME");
+		*nSize = 8;
+		return 1;
+	}
+
 	int WIN_FUNC CompareStringA(int Locale, unsigned int dwCmpFlags, const char *lpString1, unsigned int cchCount1, const char *lpString2, unsigned int cchCount2) {
-		DEBUG_LOG("CompareStringA: '%s' vs '%s' (%u)\n", lpString1, lpString2, dwCmpFlags);
-		// too simple?
-		return strcmp(lpString1, lpString2);
+		if (cchCount1 < 0)
+			cchCount1 = strlen(lpString1);
+		if (cchCount2 < 0)
+			cchCount2 = strlen(lpString2);
+		std::string str1(lpString1, lpString1 + cchCount1);
+		std::string str2(lpString2, lpString2 + cchCount2);
+
+		DEBUG_LOG("CompareStringA: '%s' vs '%s' (%u)\n", str1.c_str(), str2.c_str(), dwCmpFlags);
+		return doCompareString(str1, str2, dwCmpFlags);
 	}
 
 	int WIN_FUNC CompareStringW(int Locale, unsigned int dwCmpFlags, const uint16_t *lpString1, unsigned int cchCount1, const uint16_t *lpString2, unsigned int cchCount2) {
-		char *str1 = wideStringToString(lpString1);
-		char *str2 = wideStringToString(lpString2);
+		std::string str1 = wideStringToString(lpString1, cchCount1);
+		std::string str2 = wideStringToString(lpString2, cchCount2);
 
-		DEBUG_LOG("CompareStringW: '%s' vs '%s' (%u)\n", str1, str2, dwCmpFlags);
-		int res = strcmp(str1, str2);
-		free(str1);
-		free(str2);
-		return res;
+		DEBUG_LOG("CompareStringW: '%s' vs '%s' (%u)\n", str1.c_str(), str2.c_str(), dwCmpFlags);
+		return doCompareString(str1, str2, dwCmpFlags);
 	}
 
 	int WIN_FUNC IsValidCodePage(unsigned int CodePage) {
@@ -1121,10 +1226,56 @@ namespace kernel32 {
 		return 1;
 	}
 
-	int WIN_FUNC LCMapStringW(int Locale, unsigned int dwMapFlags, const char* lpSrcStr, int cchSrc, char* lpDestStr, int cchDest) {
-		DEBUG_LOG("LCMapStringW: (locale=%i, flags=%u, src=%i, dest=%i)\n", Locale, dwMapFlags, cchSrc, cchDest);
+	int WIN_FUNC IsValidLocale(unsigned int Locale, unsigned int dwFlags) {
+		DEBUG_LOG("IsValidLocale: %u %u\n", Locale, dwFlags);
+		// Yep, this locale is both supported (dwFlags=1) and installed (dwFlags=2)
+		return 1;
+	}
+
+	int WIN_FUNC GetLocaleInfoA(unsigned int Locale, int LCType, char *lpLCData, int cchData) {
+		DEBUG_LOG("GetLocaleInfoA %d %d\n", Locale, LCType);
+		std::string ret;
+		// https://www.pinvoke.net/default.aspx/Enums/LCType.html
+		if (LCType == 4100) { // LOCALE_IDEFAULTANSICODEPAGE
+			// Latin1; ref GetACP
+			ret = "28591";
+		}
+		if (LCType == 4097) { // LOCALE_SENGLANGUAGE
+			ret = "Lang";
+		}
+		if (LCType == 4098) { // LOCALE_SENGCOUNTRY
+			ret = "Country";
+		}
+
+		if (!cchData) {
+			return ret.size() + 1;
+		} else {
+			memcpy(lpLCData, ret.c_str(), ret.size() + 1);
+			return 1;
+		}
+	}
+
+	int WIN_FUNC GetUserDefaultLCID() {
+		DEBUG_LOG("GetUserDefaultLCID\n");
+		return 1;
+	}
+
+	int WIN_FUNC LCMapStringW(int Locale, unsigned int dwMapFlags, const uint16_t* lpSrcStr, int cchSrc, uint16_t* lpDestStr, int cchDest) {
+		DEBUG_LOG("LCMapStringW: (locale=%i, flags=%u, src=%p, dest=%p)\n", Locale, dwMapFlags, cchSrc, cchDest);
+		if (cchSrc < 0) {
+			cchSrc = wstrlen(lpSrcStr) + 1;
+		}
 		// DEBUG_LOG("lpSrcStr: %s\n", lpSrcStr);
-		return 0;
+		return 0; // fail
+	}
+
+	int WIN_FUNC LCMapStringA(int Locale, unsigned int dwMapFlags, const char* lpSrcStr, int cchSrc, char* lpDestStr, int cchDest) {
+		DEBUG_LOG("LCMapStringA: (locale=%i, flags=%u, src=%p, dest=%p)\n", Locale, dwMapFlags, cchSrc, cchDest);
+		if (cchSrc < 0) {
+			cchSrc = strlen(lpSrcStr) + 1;
+		}
+		// DEBUG_LOG("lpSrcStr: %s\n", lpSrcStr);
+		return 0; // fail
 	}
 
 	unsigned int WIN_FUNC SetEnvironmentVariableA(const char *lpName, const char *lpValue) {
@@ -1179,6 +1330,12 @@ namespace kernel32 {
 		posix_memalign((void**)&ListHead, 16, sizeof(SLIST_HEADER));
 		memset(ListHead, 0, sizeof(SLIST_HEADER));
 	}
+
+	void WIN_FUNC RtlUnwind(void *TargetFrame, void *TargetIp, void *ExceptionRecord, void *ReturnValue) {
+		DEBUG_LOG("RtlUnwind %p %p %p %p\n", TargetFrame, TargetIp, ExceptionRecord, ReturnValue);
+		printf("Aborting due to exception\n");
+		exit(1);
+	}
 }
 
 void *wibo::resolveKernel32(const char *name) {
@@ -1206,8 +1363,12 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "GetCPInfo") == 0) return (void *) kernel32::GetCPInfo;
 	if (strcmp(name, "CompareStringA") == 0) return (void *) kernel32::CompareStringA;
 	if (strcmp(name, "CompareStringW") == 0) return (void *) kernel32::CompareStringW;
+	if (strcmp(name, "IsValidLocale") == 0) return (void *) kernel32::IsValidLocale;
 	if (strcmp(name, "IsValidCodePage") == 0) return (void *) kernel32::IsValidCodePage;
 	if (strcmp(name, "LCMapStringW") == 0) return (void *) kernel32::LCMapStringW;
+	if (strcmp(name, "LCMapStringA") == 0) return (void *) kernel32::LCMapStringA;
+	if (strcmp(name, "GetLocaleInfoA") == 0) return (void *) kernel32::GetLocaleInfoA;
+	if (strcmp(name, "GetUserDefaultLCID") == 0) return (void *) kernel32::GetUserDefaultLCID;
 
 	// synchapi.h
 	if (strcmp(name, "InitializeCriticalSection") == 0) return (void *) kernel32::InitializeCriticalSection;
@@ -1226,6 +1387,7 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "FindResourceA") == 0) return (void *) kernel32::FindResourceA;
 	if (strcmp(name, "SetHandleCount") == 0) return (void *) kernel32::SetHandleCount;
 	if (strcmp(name, "FormatMessageA") == 0) return (void *) kernel32::FormatMessageA;
+	if (strcmp(name, "GetComputerNameA") == 0) return (void *) kernel32::GetComputerNameA;
 
 	// processenv.h
 	if (strcmp(name, "GetCommandLineA") == 0) return (void *) kernel32::GetCommandLineA;
@@ -1247,6 +1409,7 @@ void *wibo::resolveKernel32(const char *name) {
 	// fileapi.h
 	if (strcmp(name, "GetFullPathNameA") == 0) return (void *) kernel32::GetFullPathNameA;
 	if (strcmp(name, "FindFirstFileA") == 0) return (void *) kernel32::FindFirstFileA;
+	if (strcmp(name, "FindClose") == 0) return (void *) kernel32::FindClose;
 	if (strcmp(name, "GetFileAttributesA") == 0) return (void *) kernel32::GetFileAttributesA;
 	if (strcmp(name, "WriteFile") == 0) return (void *) kernel32::WriteFile;
 	if (strcmp(name, "ReadFile") == 0) return (void *) kernel32::ReadFile;
@@ -1261,6 +1424,7 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "GetFileTime") == 0) return (void *) kernel32::GetFileTime;
 	if (strcmp(name, "SetFileTime") == 0) return (void *) kernel32::SetFileTime;
 	if (strcmp(name, "GetFileType") == 0) return (void *) kernel32::GetFileType;
+	if (strcmp(name, "FileTimeToLocalFileTime") == 0) return (void *) kernel32::FileTimeToLocalFileTime;
 
 	// sysinfoapi.h
 	if (strcmp(name, "GetSystemTime") == 0) return (void *) kernel32::GetSystemTime;
@@ -1295,6 +1459,7 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "GetProcessHeap") == 0) return (void *) kernel32::GetProcessHeap;
 	if (strcmp(name, "HeapAlloc") == 0) return (void *) kernel32::HeapAlloc;
 	if (strcmp(name, "HeapReAlloc") == 0) return (void *) kernel32::HeapReAlloc;
+	if (strcmp(name, "HeapSize") == 0) return (void *) kernel32::HeapSize;
 
 	if (strcmp(name, "HeapFree") == 0) return (void *) kernel32::HeapFree;
 
@@ -1318,6 +1483,9 @@ void *wibo::resolveKernel32(const char *name) {
 
 	// interlockedapi.h
 	if (strcmp(name, "InitializeSListHead") == 0) return (void *) kernel32::InitializeSListHead;
+
+	// winnt.h
+	if (strcmp(name, "RtlUnwind") == 0) return (void *) kernel32::RtlUnwind;
 
 	return 0;
 }

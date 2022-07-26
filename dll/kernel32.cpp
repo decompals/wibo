@@ -1131,6 +1131,15 @@ namespace kernel32 {
 		return 0;
 	}
 
+	int WIN_FUNC GetComputerNameA(char *lpBuffer, unsigned int *nSize) {
+		DEBUG_LOG("GetComputerNameA");
+		if (*nSize < 9)
+			return 0;
+		strcpy(lpBuffer, "COMPNAME");
+		*nSize = 8;
+		return 1;
+	}
+
 	int WIN_FUNC CompareStringA(int Locale, unsigned int dwCmpFlags, const char *lpString1, unsigned int cchCount1, const char *lpString2, unsigned int cchCount2) {
 		if (cchCount1 < 0)
 			cchCount1 = strlen(lpString1);
@@ -1236,6 +1245,12 @@ namespace kernel32 {
 		posix_memalign((void**)&ListHead, 16, sizeof(SLIST_HEADER));
 		memset(ListHead, 0, sizeof(SLIST_HEADER));
 	}
+
+	void WIN_FUNC RtlUnwind(void *TargetFrame, void *TargetIp, void *ExceptionRecord, void *ReturnValue) {
+		DEBUG_LOG("RtlUnwind %p %p %p %p", TargetFrame, TargetIp, ExceptionRecord, ReturnValue);
+		printf("Aborting due to exception\n");
+		exit(1);
+	}
 }
 
 void *wibo::resolveKernel32(const char *name) {
@@ -1285,6 +1300,7 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "FindResourceA") == 0) return (void *) kernel32::FindResourceA;
 	if (strcmp(name, "SetHandleCount") == 0) return (void *) kernel32::SetHandleCount;
 	if (strcmp(name, "FormatMessageA") == 0) return (void *) kernel32::FormatMessageA;
+	if (strcmp(name, "GetComputerNameA") == 0) return (void *) kernel32::GetComputerNameA;
 
 	// processenv.h
 	if (strcmp(name, "GetCommandLineA") == 0) return (void *) kernel32::GetCommandLineA;
@@ -1378,6 +1394,9 @@ void *wibo::resolveKernel32(const char *name) {
 
 	// interlockedapi.h
 	if (strcmp(name, "InitializeSListHead") == 0) return (void *) kernel32::InitializeSListHead;
+
+	// winnt.h
+	if (strcmp(name, "RtlUnwind") == 0) return (void *) kernel32::RtlUnwind;
 
 	return 0;
 }

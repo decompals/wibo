@@ -17,7 +17,7 @@ void wibo::debug_log(const char *fmt, ...) {
 	va_list args;
 	va_start(args, fmt);
 	if (wibo::debugEnabled)
-		vprintf(fmt, args);
+		vfprintf(stderr, fmt, args);
 	va_end(args);
 }
 

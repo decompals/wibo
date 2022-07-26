@@ -987,11 +987,10 @@ namespace kernel32 {
 		for (int i = 0; i < cchWideChar; i++) {
 			lpMultiByteStr[i] = lpWideCharStr[i] & 0xFF;
 		}
-		if (cchWideChar > 0 && lpMultiByteStr[cchWideChar - 1] == 0) {
-			DEBUG_LOG("Converted string: [%s]\n", lpMultiByteStr);
-		} else if (wibo::debugEnabled) {
+
+		if (wibo::debugEnabled) {
 			std::string s(lpMultiByteStr, lpMultiByteStr + cchWideChar);
-			DEBUG_LOG("Converted string: [%s] (not nul terminated)\n", s.c_str());
+			DEBUG_LOG("Converted string: [%s]\n", s.c_str());
 		}
 
 		return cchWideChar;
@@ -1000,18 +999,25 @@ namespace kernel32 {
 	unsigned int WIN_FUNC MultiByteToWideChar(unsigned int codePage, unsigned int dwFlags, const char *lpMultiByteStr, int cbMultiByte, uint16_t *lpWideCharStr, int cchWideChar) {
 		DEBUG_LOG("MultiByteToWideChar(codePage=%u, dwFlags=%u, multiByte=%d, wideChar=%d)\n", codePage, dwFlags, cbMultiByte, cchWideChar);
 
-		// assert (dwFlags == 1); // MB_PRECOMPOSED
-		int i = 0;
-		if (lpWideCharStr == 0) { // return required buffer length
-			i = strlen(lpMultiByteStr);
-		} else { // else copy source into destination
-			while (i < cchWideChar) {
-				lpWideCharStr[i] = lpMultiByteStr[i] & 0xFF;
-				i++;
-			}
-			lpWideCharStr[cchWideChar] = 0; // NUL terminate
+		if (cbMultiByte == -1) {
+			cbMultiByte = strlen(lpMultiByteStr) + 1;
 		}
-		return i + 1;
+
+		// assert (dwFlags == 1); // MB_PRECOMPOSED
+		if (cchWideChar == 0) {
+			return cbMultiByte;
+		}
+
+		if (wibo::debugEnabled) {
+			std::string s(lpMultiByteStr, lpMultiByteStr + cbMultiByte);
+			DEBUG_LOG("Converting string: [%s]\n", s.c_str());
+		}
+
+		assert(cbMultiByte <= cchWideChar);
+		for (int i = 0; i < cbMultiByte; i++) {
+			lpWideCharStr[i] = lpMultiByteStr[i] & 0xFF;
+		}
+		return cbMultiByte;
 	}
 
 	unsigned int WIN_FUNC GetStringTypeW(unsigned int dwInfoType, const uint16_t *lpSrcStr, int cchSrc, uint16_t *lpCharType) {

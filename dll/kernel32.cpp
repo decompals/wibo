@@ -956,8 +956,9 @@ namespace kernel32 {
 
 	unsigned int WIN_FUNC GetACP() {
 		DEBUG_LOG("GetACP\n");
-		// return 1200;		// Unicode (BMP of ISO 10646)
-		return 28591;		// ISO/IEC 8859-1
+		// return 65001;    // UTF-8
+		// return 1200;     // Unicode (BMP of ISO 10646)
+		return 28591;       // Latin1 (ISO/IEC 8859-1)
 	}
 
 	typedef struct _cpinfo {
@@ -1132,7 +1133,7 @@ namespace kernel32 {
 	}
 
 	int WIN_FUNC GetComputerNameA(char *lpBuffer, unsigned int *nSize) {
-		DEBUG_LOG("GetComputerNameA");
+		DEBUG_LOG("GetComputerNameA\n");
 		if (*nSize < 9)
 			return 0;
 		strcpy(lpBuffer, "COMPNAME");
@@ -1166,13 +1167,38 @@ namespace kernel32 {
 		return 1;
 	}
 
+	int WIN_FUNC IsValidLocale(unsigned int Locale, unsigned int dwFlags) {
+		DEBUG_LOG("IsValidLocale: %u %u\n", Locale, dwFlags);
+		// Yep, this locale is both supported (dwFlags=1) and installed (dwFlags=2)
+		return 1;
+	}
+
 	int WIN_FUNC GetLocaleInfoA(unsigned int Locale, int LCType, char *lpLCData, int cchData) {
+		DEBUG_LOG("GetLocaleInfoA %d %d\n", Locale, LCType);
+		std::string ret;
+		// https://www.pinvoke.net/default.aspx/Enums/LCType.html
+		if (LCType == 4100) { // LOCALE_IDEFAULTANSICODEPAGE
+			// GetACP
+			ret = "28591";
+		}
+		if (LCType == 4097) { // LOCALE_SENGLANGUAGE
+			ret = "Lang";
+		}
+		if (LCType == 4098) { // LOCALE_SENGCOUNTRY
+			ret = "Country";
+		}
+
 		if (!cchData) {
-			return 1;
+			return ret.size() + 1;
 		} else {
-			*lpLCData = 0;
+			memcpy(lpLCData, ret.c_str(), ret.size() + 1);
 			return 1;
 		}
+	}
+
+	int WIN_FUNC GetUserDefaultLCID() {
+		DEBUG_LOG("GetUserDefaultLCID\n");
+		return 0;
 	}
 
 	int WIN_FUNC LCMapStringW(int Locale, unsigned int dwMapFlags, const uint16_t* lpSrcStr, int cchSrc, uint16_t* lpDestStr, int cchDest) {
@@ -1247,7 +1273,7 @@ namespace kernel32 {
 	}
 
 	void WIN_FUNC RtlUnwind(void *TargetFrame, void *TargetIp, void *ExceptionRecord, void *ReturnValue) {
-		DEBUG_LOG("RtlUnwind %p %p %p %p", TargetFrame, TargetIp, ExceptionRecord, ReturnValue);
+		DEBUG_LOG("RtlUnwind %p %p %p %p\n", TargetFrame, TargetIp, ExceptionRecord, ReturnValue);
 		printf("Aborting due to exception\n");
 		exit(1);
 	}
@@ -1278,10 +1304,12 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "GetCPInfo") == 0) return (void *) kernel32::GetCPInfo;
 	if (strcmp(name, "CompareStringA") == 0) return (void *) kernel32::CompareStringA;
 	if (strcmp(name, "CompareStringW") == 0) return (void *) kernel32::CompareStringW;
+	if (strcmp(name, "IsValidLocale") == 0) return (void *) kernel32::IsValidLocale;
 	if (strcmp(name, "IsValidCodePage") == 0) return (void *) kernel32::IsValidCodePage;
 	if (strcmp(name, "LCMapStringW") == 0) return (void *) kernel32::LCMapStringW;
 	if (strcmp(name, "LCMapStringA") == 0) return (void *) kernel32::LCMapStringA;
 	if (strcmp(name, "GetLocaleInfoA") == 0) return (void *) kernel32::GetLocaleInfoA;
+	if (strcmp(name, "GetUserDefaultLCID") == 0) return (void *) kernel32::GetUserDefaultLCID;
 
 	// synchapi.h
 	if (strcmp(name, "InitializeCriticalSection") == 0) return (void *) kernel32::InitializeCriticalSection;

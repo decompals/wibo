@@ -986,15 +986,15 @@ namespace kernel32 {
 		return i + 1;
 	}
 
-	unsigned int WIN_FUNC GetStringTypeW(unsigned int dwInfoType, const char *lpSrcStr, int cchSrc, uint16_t *lpCharType) {
+	unsigned int WIN_FUNC GetStringTypeW(unsigned int dwInfoType, const uint16_t *lpSrcStr, int cchSrc, uint16_t *lpCharType) {
 		DEBUG_LOG("GetStringTypeW (dwInfoType=%u, lpSrcStr=%p, cchSrc=%i, lpCharType=%p)\n", dwInfoType, lpSrcStr, cchSrc, lpCharType);
 
 		assert(dwInfoType == 1); // CT_CTYPE1
 
-		int strLen = cchSrc < 0 ? strlen(lpSrcStr) + 1 : cchSrc;
-		int i = 0;
-		while (i < strLen) {
-			char c = lpSrcStr[i];
+		int strLen = cchSrc < 0 ? wstrlen(lpSrcStr) + 1 : cchSrc;
+		for (int i = 0; i < strLen; i++) {
+			uint16_t c = lpSrcStr[i];
+			assert(c < 256);
 
 			bool upper = ('A' <= c && c <= 'Z');
 			bool lower = ('a' <= c && c <= 'z');
@@ -1003,10 +1003,9 @@ namespace kernel32 {
 			bool space = (c == ' ' || c == '\n' || c == '\t' || c == '\r' || c == '\f' || c == '\v');
 			bool blank = (c == ' ' || c == '\t');
 			bool hex = (digit || ('A' <= c && c <= 'F') || ('a' <= c && c <= 'f'));
-			bool cntrl = ((0 <= c && c < 0x20) || c == 127);
+			bool cntrl = (c < 0x20 || c == 127);
 			bool punct = (!cntrl && !digit && !alpha);
 			lpCharType[i] = (upper ? 1 : 0) | (lower ? 2 : 0) | (digit ? 4 : 0) | (space ? 8 : 0) | (punct ? 0x10 : 0) | (cntrl ? 0x20 : 0) | (blank ? 0x40 : 0) | (hex ? 0x80 : 0) | (alpha ? 0x100 : 0);
-			i++;
 		}
 
 		return 1;

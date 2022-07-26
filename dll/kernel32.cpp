@@ -56,7 +56,7 @@ namespace kernel32 {
 		int len = strlen(src);
 		res = (uint16_t *)malloc((len + 1) * 2);
 		for (int i = 0; i < len; i++) {
-			res[i] = src[i];
+			res[i] = src[i] & 0xFF;
 		}
 		res[len] = 0; // NUL terminate
 
@@ -316,7 +316,7 @@ namespace kernel32 {
 		while (*work) {
 			size_t strSize = strlen(*work);
 			for (size_t i = 0; i < strSize; i++) {
-				*ptr++ = (*work)[i];
+				*ptr++ = (*work)[i] & 0xFF;
 			}
 			*ptr++ = 0; // NUL terminate
 			work++;
@@ -975,12 +975,10 @@ namespace kernel32 {
 		// assert (dwFlags == 1); // MB_PRECOMPOSED
 		int i = 0;
 		if (lpWideCharStr == 0) { // return required buffer length
-			while (lpMultiByteStr[i] != 0) {
-				i++;
-			}
+			i = strlen(lpMultiByteStr);
 		} else { // else copy source into destination
 			while (i < cchWideChar) {
-				lpWideCharStr[i] = lpMultiByteStr[i];
+				lpWideCharStr[i] = lpMultiByteStr[i] & 0xFF;
 				i++;
 			}
 			lpWideCharStr[cchWideChar] = 0; // NUL terminate

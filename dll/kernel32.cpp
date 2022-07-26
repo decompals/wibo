@@ -10,6 +10,13 @@
 #include <sys/stat.h>
 
 namespace kernel32 {
+	int wstrlen(const uint16_t *str) {
+		int len = 0;
+		while (str[len] != 0)
+			++len;
+		return len;
+	}
+
 	void *doAlloc(unsigned int dwBytes, bool zero) {
 		if (dwBytes == 0)
 			dwBytes = 1;
@@ -33,15 +40,8 @@ namespace kernel32 {
 	}
 
 	char *wideStringToString(const uint16_t *src) {
-		char *res = NULL;
-
-		int len = 0;
-		if (src != NULL) {
-			while (src[len] != 0) {
-				len++;
-			};
-		}
-		res = (char *)malloc(len + 1);
+		int len = src ? wstrlen(src) : 0;
+		char *res = (char *)malloc(len + 1);
 		for (int i = 0; i < len; i++) {
 			res[i] = src[i] & 0xFF;
 		}
@@ -950,22 +950,23 @@ namespace kernel32 {
 		DEBUG_LOG("WideCharToMultiByte(codePage=%u, flags=%x, wcs=%p, wideChar=%d, mbs=%p, multiByte=%d, defaultChar=%p, usedDefaultChar=%p)\n", codePage, dwFlags, lpWideCharStr, cchWideChar, lpMultiByteStr, cbMultiByte, lpDefaultChar, lpUsedDefaultChar);
 
 		if (cchWideChar == -1) {
-			// determine how long the string actually is
-			cchWideChar = 0;
-			while (lpWideCharStr[cchWideChar] != 0)
-				++cchWideChar;
+			cchWideChar = wstrlen(lpWideCharStr) + 1;
 		}
 
 		if (cbMultiByte == 0) {
-			return cchWideChar + 1;
+			return cchWideChar;
 		}
 		for (int i = 0; i < cchWideChar; i++) {
 			lpMultiByteStr[i] = lpWideCharStr[i];
 		}
-		lpMultiByteStr[cchWideChar] = 0;
-		DEBUG_LOG("Converted string: [%s]\n", lpMultiByteStr);
+		if (cchWideChar > 0 && lpMultiByteStr[cchWideChar - 1] == 0) {
+			DEBUG_LOG("Converted string: [%s]\n", lpMultiByteStr);
+		} else if (wibo::debugEnabled) {
+			std::string s(lpMultiByteStr, lpMultiByteStr + cchWideChar);
+			DEBUG_LOG("Converted string: [%s] (not nul terminated)\n", s.c_str());
+		}
 
-		return cbMultiByte;
+		return cchWideChar;
 	}
 
 	unsigned int WIN_FUNC MultiByteToWideChar(unsigned int codePage, unsigned int dwFlags, const char *lpMultiByteStr, int cbMultiByte, uint16_t *lpWideCharStr, int cchWideChar) {

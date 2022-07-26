@@ -1061,6 +1061,10 @@ namespace kernel32 {
 		DEBUG_LOG("HeapReAlloc returning %p\n", ret);
 		return ret;
 	}
+
+	unsigned int WIN_FUNC HeapSize(void *hHeap, unsigned int dwFlags, void *lpMem) {
+		DEBUG_LOG("HeapSize(heap=%p, flags=%x, mem=%p)\n", hHeap, dwFlags, lpMem);
+		return malloc_usable_size(lpMem);
 	}
 
 	void *WIN_FUNC GetProcessHeap() {
@@ -1126,10 +1130,31 @@ namespace kernel32 {
 		return 1;
 	}
 
-	int WIN_FUNC LCMapStringW(int Locale, unsigned int dwMapFlags, const char* lpSrcStr, int cchSrc, char* lpDestStr, int cchDest) {
-		DEBUG_LOG("LCMapStringW: (locale=%i, flags=%u, src=%i, dest=%i)\n", Locale, dwMapFlags, cchSrc, cchDest);
+	int WIN_FUNC GetLocaleInfoA(unsigned int Locale, int LCType, char *lpLCData, int cchData) {
+		if (!cchData) {
+			return 1;
+		} else {
+			*lpLCData = 0;
+			return 1;
+		}
+	}
+
+	int WIN_FUNC LCMapStringW(int Locale, unsigned int dwMapFlags, const uint16_t* lpSrcStr, int cchSrc, uint16_t* lpDestStr, int cchDest) {
+		DEBUG_LOG("LCMapStringW: (locale=%i, flags=%u, src=%p, dest=%p)\n", Locale, dwMapFlags, cchSrc, cchDest);
+		if (cchSrc < 0) {
+			cchSrc = wstrlen(lpSrcStr) + 1;
+		}
 		// DEBUG_LOG("lpSrcStr: %s\n", lpSrcStr);
-		return 0;
+		return 0; // fail
+	}
+
+	int WIN_FUNC LCMapStringA(int Locale, unsigned int dwMapFlags, const char* lpSrcStr, int cchSrc, char* lpDestStr, int cchDest) {
+		DEBUG_LOG("LCMapStringA: (locale=%i, flags=%u, src=%p, dest=%p)\n", Locale, dwMapFlags, cchSrc, cchDest);
+		if (cchSrc < 0) {
+			cchSrc = strlen(lpSrcStr) + 1;
+		}
+		// DEBUG_LOG("lpSrcStr: %s\n", lpSrcStr);
+		return 0; // fail
 	}
 
 	unsigned int WIN_FUNC SetEnvironmentVariableA(const char *lpName, const char *lpValue) {
@@ -1213,6 +1238,8 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "CompareStringW") == 0) return (void *) kernel32::CompareStringW;
 	if (strcmp(name, "IsValidCodePage") == 0) return (void *) kernel32::IsValidCodePage;
 	if (strcmp(name, "LCMapStringW") == 0) return (void *) kernel32::LCMapStringW;
+	if (strcmp(name, "LCMapStringA") == 0) return (void *) kernel32::LCMapStringA;
+	if (strcmp(name, "GetLocaleInfoA") == 0) return (void *) kernel32::GetLocaleInfoA;
 
 	// synchapi.h
 	if (strcmp(name, "InitializeCriticalSection") == 0) return (void *) kernel32::InitializeCriticalSection;
@@ -1300,6 +1327,7 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "GetProcessHeap") == 0) return (void *) kernel32::GetProcessHeap;
 	if (strcmp(name, "HeapAlloc") == 0) return (void *) kernel32::HeapAlloc;
 	if (strcmp(name, "HeapReAlloc") == 0) return (void *) kernel32::HeapReAlloc;
+	if (strcmp(name, "HeapSize") == 0) return (void *) kernel32::HeapSize;
 
 	if (strcmp(name, "HeapFree") == 0) return (void *) kernel32::HeapFree;
 

@@ -97,9 +97,16 @@ namespace user32 {
 		DEBUG_LOG("returning: %s\n", lpBuffer);
 		return len;
 	}
+
+	int WIN_FUNC MessageBoxA(void *hwnd, const char *lpText, const char *lpCaption, unsigned int uType) {
+		printf("MESSAGE BOX: [%s] %s\n", lpCaption, lpText);
+		fflush(stdout);
+		return 1;
+	}
 }
 
 void *wibo::resolveUser32(const char *name) {
 	if (strcmp(name, "LoadStringA") == 0) return (void *) user32::LoadStringA;
+	if (strcmp(name, "MessageBoxA") == 0) return (void *) user32::MessageBoxA;
 	return 0;
 }

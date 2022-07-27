@@ -9,6 +9,10 @@
 #define WIN_FUNC __attribute__((stdcall))
 #define DEBUG_LOG(...) wibo::debug_log(__VA_ARGS__)
 
+namespace user32 {
+	int WIN_FUNC MessageBoxA(void *hwnd, const char *lpText, const char *lpCaption, unsigned int uType);
+}
+
 namespace wibo {
 	extern uint32_t lastError;
 	extern char *commandLine;

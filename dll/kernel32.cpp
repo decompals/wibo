@@ -1127,6 +1127,7 @@ namespace kernel32 {
 		// if (strcmp(lpProcName, "FlsFree") == 0) return (void *) FlsFree;
 		// if (strcmp(lpProcName, "LCMapStringEx") == 0) return (void *) LCMapStringEx;
 		// if (strcmp(lpProcName, "LocaleNameToLCID") == 0) return (void *) LocaleNameToLCID;
+		if (strcmp(lpProcName, "MessageBoxA") == 0) return (void *) user32::MessageBoxA;
 
 		return NULL;
 	}

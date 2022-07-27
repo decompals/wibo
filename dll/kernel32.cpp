@@ -110,6 +110,7 @@ namespace kernel32 {
 	}
 
 	void WIN_FUNC ExitProcess(unsigned int uExitCode) {
+		DEBUG_LOG("ExitProcess %d\n", uExitCode);
 		exit(uExitCode);
 	}
 
@@ -351,6 +352,7 @@ namespace kernel32 {
 	}
 
 	void WIN_FUNC FreeEnvironmentStringsA(char *buffer) {
+		DEBUG_LOG("FreeEnvironmentStringsA\n");
 		free(buffer);
 	}
 
@@ -358,10 +360,12 @@ namespace kernel32 {
 	 * I/O
 	 */
 	void *WIN_FUNC GetStdHandle(uint32_t nStdHandle) {
+		DEBUG_LOG("GetStdHandle %d\n", nStdHandle);
 		return files::getStdHandle(nStdHandle);
 	}
 
 	unsigned int WIN_FUNC SetStdHandle(uint32_t nStdHandle, void *hHandle) {
+		DEBUG_LOG("SetStdHandle %d %p\n", nStdHandle, hHandle);
 		return files::setStdHandle(nStdHandle, hHandle);
 	}
 
@@ -629,9 +633,6 @@ namespace kernel32 {
 		return 1;
 	}
 
-	/*
-	 * Time
-	 */
 	unsigned int WIN_FUNC GetFileSize(void *hFile, unsigned int *lpFileSizeHigh) {
 		DEBUG_LOG("GetFileSize\n");
 		struct stat64 st;
@@ -648,6 +649,9 @@ namespace kernel32 {
 		return st.st_size;
 	}
 
+	/*
+	 * Time
+	 */
 	int WIN_FUNC GetFileTime(void *hFile, FILETIME *lpCreationTime, FILETIME *lpLastAccessTime, FILETIME *lpLastWriteTime) {
 		DEBUG_LOG("GetFileTime %p %p %p\n", lpCreationTime, lpLastAccessTime, lpLastWriteTime);
 		if (lpCreationTime) *lpCreationTime = defaultFiletime;

@@ -436,9 +436,6 @@ namespace kernel32 {
 		uint32_t dwReserved1;
 		CharType cFileName[260];
 		CharType cAlternateFileName[14];
-		uint32_t dwFileType;
-		uint32_t dwCreatorType;
-		uint16_t wFinderFlags;
 	};
 
 	void *WIN_FUNC FindFirstFileA(const char *lpFileName, WIN32_FIND_DATA<char> *lpFindFileData) {
@@ -459,7 +456,6 @@ namespace kernel32 {
 			assert(path.string().size() < 260);
 			strcpy(lpFindFileData->cFileName, path.c_str());
 			strcpy(lpFindFileData->cAlternateFileName, "8P3FMTFN.BAD");
-			lpFindFileData->dwFileType = lpFindFileData->dwCreatorType = lpFindFileData->wFinderFlags = 0;
 			return (void *) 1;
 		}
 

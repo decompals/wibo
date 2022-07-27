@@ -436,9 +436,6 @@ namespace kernel32 {
 		uint32_t dwReserved1;
 		CharType cFileName[260];
 		CharType cAlternateFileName[14];
-		uint32_t dwFileType;
-		uint32_t dwCreatorType;
-		uint16_t wFinderFlags;
 	};
 
 	void *WIN_FUNC FindFirstFileA(const char *lpFileName, WIN32_FIND_DATA<char> *lpFindFileData) {
@@ -456,10 +453,10 @@ namespace kernel32 {
 			auto fileSize = std::filesystem::file_size(path);
 			lpFindFileData->nFileSizeHigh = (uint32_t)(fileSize >> 32);
 			lpFindFileData->nFileSizeLow = (uint32_t)fileSize;
-			assert(path.string().size() < 260);
-			strcpy(lpFindFileData->cFileName, path.c_str());
+			auto fileName = path.filename().string();
+			assert(fileName.size() < 260);
+			strcpy(lpFindFileData->cFileName, fileName.c_str());
 			strcpy(lpFindFileData->cAlternateFileName, "8P3FMTFN.BAD");
-			lpFindFileData->dwFileType = lpFindFileData->dwCreatorType = lpFindFileData->wFinderFlags = 0;
 			return (void *) 1;
 		}
 
@@ -468,6 +465,7 @@ namespace kernel32 {
 	}
 
 	int WIN_FUNC FindClose(void *hFindFile) {
+		DEBUG_LOG("FindClose\n");
 		return 1;
 	}
 
@@ -721,6 +719,7 @@ namespace kernel32 {
 	}
 
 	int FileTimeToLocalFileTime(const FILETIME *lpFileTime, FILETIME *lpLocalFileTime) {
+		DEBUG_LOG("FileTimeToLocalFileTime\n");
 		// we live on Iceland
 		*lpLocalFileTime = *lpFileTime;
 		return 1;
@@ -737,6 +736,7 @@ namespace kernel32 {
 	};
 
 	int WIN_FUNC GetTimeZoneInformation(TIME_ZONE_INFORMATION *lpTimeZoneInformation) {
+		DEBUG_LOG("GetTimeZoneInformation\n");
 		memset(lpTimeZoneInformation, 0, sizeof(*lpTimeZoneInformation));
 		return 0;
 	}
@@ -745,6 +745,7 @@ namespace kernel32 {
 	 * Console Nonsense
 	 */
 	unsigned int WIN_FUNC SetConsoleCtrlHandler(void *HandlerRoutine, unsigned int Add) {
+		DEBUG_LOG("SetConsoleCtrlHandler\n");
 		// This is a function that gets called when doing ^C
 		// We might want to call this later (being mindful that it'll be stdcall I think)
 
@@ -1127,6 +1128,7 @@ namespace kernel32 {
 		// if (strcmp(lpProcName, "FlsFree") == 0) return (void *) FlsFree;
 		// if (strcmp(lpProcName, "LCMapStringEx") == 0) return (void *) LCMapStringEx;
 		// if (strcmp(lpProcName, "LocaleNameToLCID") == 0) return (void *) LocaleNameToLCID;
+		if (strcmp(lpProcName, "MessageBoxA") == 0) return (void *) user32::MessageBoxA;
 
 		return NULL;
 	}

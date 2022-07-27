@@ -453,8 +453,9 @@ namespace kernel32 {
 			auto fileSize = std::filesystem::file_size(path);
 			lpFindFileData->nFileSizeHigh = (uint32_t)(fileSize >> 32);
 			lpFindFileData->nFileSizeLow = (uint32_t)fileSize;
-			assert(path.string().size() < 260);
-			strcpy(lpFindFileData->cFileName, path.c_str());
+			auto fileName = path.filename().string();
+			assert(fileName.size() < 260);
+			strcpy(lpFindFileData->cFileName, fileName.c_str());
 			strcpy(lpFindFileData->cAlternateFileName, "8P3FMTFN.BAD");
 			return (void *) 1;
 		}

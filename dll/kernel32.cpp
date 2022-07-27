@@ -825,7 +825,7 @@ namespace kernel32 {
 	void* WIN_FUNC LoadLibraryExW(const uint16_t* lpLibFileName, void* hFile, unsigned int dwFlags) {
 		if (wibo::debugEnabled) {
 			std::string filename = wideStringToString(lpLibFileName);
-			DEBUG_LOG("LoadLibraryExW: %s\n", filename);
+			DEBUG_LOG("LoadLibraryExW: %s\n", filename.c_str());
 		}
 
 		return (void*)0x100005;

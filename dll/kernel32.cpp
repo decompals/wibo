@@ -413,11 +413,62 @@ namespace kernel32 {
 		}
 	}
 
-	void *WIN_FUNC FindFirstFileA(const char *lpFileName, void *lpFindFileData) {
+	struct FILETIME {
+		unsigned int dwLowDateTime;
+		unsigned int dwHighDateTime;
+	};
+
+	static const uint64_t UNIX_TIME_ZERO = 11644473600LL * 10000000;
+	static const FILETIME defaultFiletime = {
+		(unsigned int)UNIX_TIME_ZERO,
+		(unsigned int)(UNIX_TIME_ZERO >> 32)
+	};
+
+	template<typename CharType>
+	struct WIN32_FIND_DATA {
+		uint32_t dwFileAttributes;
+		FILETIME ftCreationTime;
+		FILETIME ftLastAccessTime;
+		FILETIME ftLastWriteTime;
+		uint32_t nFileSizeHigh;
+		uint32_t nFileSizeLow;
+		uint32_t dwReserved0;
+		uint32_t dwReserved1;
+		CharType cFileName[260];
+		CharType cAlternateFileName[14];
+		uint32_t dwFileType;
+		uint32_t dwCreatorType;
+		uint16_t wFinderFlags;
+	};
+
+	void *WIN_FUNC FindFirstFileA(const char *lpFileName, WIN32_FIND_DATA<char> *lpFindFileData) {
+		// This should handle wildcards too, but whatever.
 		auto path = files::pathFromWindows(lpFileName);
 		DEBUG_LOG("FindFirstFileA %s (%s)\n", lpFileName, path.c_str());
+
+		lpFindFileData->ftCreationTime = defaultFiletime;
+		lpFindFileData->ftLastAccessTime = defaultFiletime;
+		lpFindFileData->ftLastWriteTime = defaultFiletime;
+
+		auto status = std::filesystem::status(path);
+		if (status.type() == std::filesystem::file_type::regular) {
+			lpFindFileData->dwFileAttributes = 0x80; // FILE_ATTRIBUTE_NORMAL
+			auto fileSize = std::filesystem::file_size(path);
+			lpFindFileData->nFileSizeHigh = (uint32_t)(fileSize >> 32);
+			lpFindFileData->nFileSizeLow = (uint32_t)fileSize;
+			assert(path.string().size() < 260);
+			strcpy(lpFindFileData->cFileName, path.c_str());
+			strcpy(lpFindFileData->cAlternateFileName, "8P3FMTFN.BAD");
+			lpFindFileData->dwFileType = lpFindFileData->dwCreatorType = lpFindFileData->wFinderFlags = 0;
+			return (void *) 1;
+		}
+
 		wibo::lastError = 2; // ERROR_FILE_NOT_FOUND
 		return (void *) 0xFFFFFFFF;
+	}
+
+	int WIN_FUNC FindClose(void *hFindFile) {
+		return 1;
 	}
 
 	unsigned int WIN_FUNC GetFileAttributesA(const char *lpFileName) {
@@ -599,17 +650,6 @@ namespace kernel32 {
 		return st.st_size;
 	}
 
-	struct FILETIME {
-		unsigned int dwLowDateTime;
-		unsigned int dwHighDateTime;
-	};
-
-	static const uint64_t UNIX_TIME_ZERO = 11644473600LL * 10000000;
-	static const FILETIME defaultFiletime = {
-		(unsigned int)UNIX_TIME_ZERO,
-		(unsigned int)(UNIX_TIME_ZERO >> 32)
-	};
-
 	int WIN_FUNC GetFileTime(void *hFile, FILETIME *lpCreationTime, FILETIME *lpLastAccessTime, FILETIME *lpLastWriteTime) {
 		DEBUG_LOG("GetFileTime %p %p %p\n", lpCreationTime, lpLastAccessTime, lpLastWriteTime);
 		if (lpCreationTime) *lpCreationTime = defaultFiletime;
@@ -677,6 +717,12 @@ namespace kernel32 {
 
 	int WIN_FUNC SetFileTime(void *hFile, const FILETIME *lpCreationTime, const FILETIME *lpLastAccessTime, const FILETIME *lpLastWriteTime) {
 		DEBUG_LOG("SetFileTime\n");
+		return 1;
+	}
+
+	int FileTimeToLocalFileTime(const FILETIME *lpFileTime, FILETIME *lpLocalFileTime) {
+		// we live on Iceland
+		*lpLocalFileTime = *lpFileTime;
 		return 1;
 	}
 
@@ -1363,6 +1409,7 @@ void *wibo::resolveKernel32(const char *name) {
 	// fileapi.h
 	if (strcmp(name, "GetFullPathNameA") == 0) return (void *) kernel32::GetFullPathNameA;
 	if (strcmp(name, "FindFirstFileA") == 0) return (void *) kernel32::FindFirstFileA;
+	if (strcmp(name, "FindClose") == 0) return (void *) kernel32::FindClose;
 	if (strcmp(name, "GetFileAttributesA") == 0) return (void *) kernel32::GetFileAttributesA;
 	if (strcmp(name, "WriteFile") == 0) return (void *) kernel32::WriteFile;
 	if (strcmp(name, "ReadFile") == 0) return (void *) kernel32::ReadFile;
@@ -1377,6 +1424,7 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "GetFileTime") == 0) return (void *) kernel32::GetFileTime;
 	if (strcmp(name, "SetFileTime") == 0) return (void *) kernel32::SetFileTime;
 	if (strcmp(name, "GetFileType") == 0) return (void *) kernel32::GetFileType;
+	if (strcmp(name, "FileTimeToLocalFileTime") == 0) return (void *) kernel32::FileTimeToLocalFileTime;
 
 	// sysinfoapi.h
 	if (strcmp(name, "GetSystemTime") == 0) return (void *) kernel32::GetSystemTime;

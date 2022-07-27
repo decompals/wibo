@@ -604,11 +604,17 @@ namespace kernel32 {
 		unsigned int dwHighDateTime;
 	};
 
+	static const uint64_t UNIX_TIME_ZERO = 11644473600LL * 10000000;
+	static const FILETIME defaultFiletime = {
+		(unsigned int)UNIX_TIME_ZERO,
+		(unsigned int)(UNIX_TIME_ZERO >> 32)
+	};
+
 	int WIN_FUNC GetFileTime(void *hFile, FILETIME *lpCreationTime, FILETIME *lpLastAccessTime, FILETIME *lpLastWriteTime) {
 		DEBUG_LOG("GetFileTime %p %p %p\n", lpCreationTime, lpLastAccessTime, lpLastWriteTime);
-		if (lpCreationTime) lpCreationTime->dwLowDateTime = lpCreationTime->dwHighDateTime = 0;
-		if (lpLastAccessTime) lpLastAccessTime->dwLowDateTime = lpLastAccessTime->dwHighDateTime = 0;
-		if (lpLastWriteTime) lpLastWriteTime->dwLowDateTime = lpLastWriteTime->dwHighDateTime = 0;
+		if (lpCreationTime) *lpCreationTime = defaultFiletime;
+		if (lpLastAccessTime) *lpLastAccessTime = defaultFiletime;
+		if (lpLastWriteTime) *lpLastWriteTime = defaultFiletime;
 		return 1;
 	}
 
@@ -642,14 +648,13 @@ namespace kernel32 {
 
 	int WIN_FUNC SystemTimeToFileTime(const SYSTEMTIME *lpSystemTime, FILETIME *lpFileTime) {
 		DEBUG_LOG("SystemTimeToFileTime\n");
-		lpFileTime->dwLowDateTime = 0;
-		lpFileTime->dwHighDateTime = 0;
+		*lpFileTime = defaultFiletime;
 		return 1;
 	}
 
 	void WIN_FUNC GetSystemTimeAsFileTime(FILETIME *lpSystemTimeAsFileTime) {
-		lpSystemTimeAsFileTime->dwLowDateTime = 0;
-		lpSystemTimeAsFileTime->dwHighDateTime = 0;
+		DEBUG_LOG("GetSystemTimeAsFileTime\n");
+		*lpSystemTimeAsFileTime = defaultFiletime;
 	}
 
 	int WIN_FUNC GetTickCount() {

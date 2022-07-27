@@ -43,7 +43,7 @@ namespace kernel32 {
 		if (len < 0) {
 			len = src ? wstrlen(src) : 0;
 		}
-		std::string res(len + 1, '\0');
+		std::string res(len, '\0');
 		for (int i = 0; i < len; i++) {
 			res[i] = src[i] & 0xFF;
 		}
@@ -943,7 +943,7 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC VirtualFree(void *lpAddress, unsigned int dwSize, int dwFreeType) {
-		DEBUG_LOG("VirtualAlloc %p %u %i\n", lpAddress, dwSize, dwFreeType);
+		DEBUG_LOG("VirtualFree %p %u %i\n", lpAddress, dwSize, dwFreeType);
 		return 1;
 	}
 

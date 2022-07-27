@@ -43,12 +43,10 @@ namespace kernel32 {
 		if (len < 0) {
 			len = src ? wstrlen(src) : 0;
 		}
-		std::string res(len + 1, '\0');
+		std::string res(len, '\0');
 		for (int i = 0; i < len; i++) {
 			res[i] = src[i] & 0xFF;
 		}
-		res[len] = 0; // NUL terminate
-
 		return res;
 	}
 
@@ -948,6 +946,11 @@ namespace kernel32 {
 		}
 	}
 
+	unsigned int WIN_FUNC VirtualFree(void *lpAddress, unsigned int dwSize, int dwFreeType) {
+		DEBUG_LOG("VirtualFree %p %u %i\n", lpAddress, dwSize, dwFreeType);
+		return 1;
+	}
+
 	typedef struct _STARTUPINFOA {
 		unsigned int   cb;
 		char		  *lpReserved;
@@ -1471,6 +1474,7 @@ void *wibo::resolveKernel32(const char *name) {
 
 	// memoryapi.h
 	if (strcmp(name, "VirtualAlloc") == 0) return (void *) kernel32::VirtualAlloc;
+	if (strcmp(name, "VirtualFree") == 0) return (void *) kernel32::VirtualFree;
 
 	// stringapiset.h
 	if (strcmp(name, "WideCharToMultiByte") == 0) return (void *) kernel32::WideCharToMultiByte;

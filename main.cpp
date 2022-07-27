@@ -96,15 +96,46 @@ void *wibo::resolveFuncByOrdinal(const char *dllName, uint16_t ordinal) {
 	return resolveMissingFunc(dllName, buf);
 }
 
+struct UNICODE_STRING {
+	unsigned short Length;
+	unsigned short MaximumLength;
+	uint16_t *Buffer;
+};
+
+struct RTL_USER_PROCESS_PARAMETERS {
+	char Reserved1[16];
+	void *Reserved2[10];
+	UNICODE_STRING ImagePathName;
+	UNICODE_STRING CommandLine;
+};
+
+struct PEB {
+	char Reserved1[2];
+	char BeingDebugged;
+	char Reserved2[1];
+	void *Reserved3[2];
+	void *Ldr;
+	RTL_USER_PROCESS_PARAMETERS *ProcessParameters;
+	char Reserved4[104];
+	void *Reserved5[52];
+	void *PostProcessInitRoutine;
+	char Reserved6[128];
+	void *Reserved7[1];
+	unsigned int SessionId;
+};
+
 // Windows Thread Information Block
 struct TIB {
-	void *sehFrame;
-	void *stackBase;
-	void *stackLimit;
-	void *subSystemTib;
-	void *fiberData;
-	void *arbitraryDataSlot;
-	TIB *tib;
+	/* 0x00 */ void *sehFrame;
+	/* 0x04 */ void *stackBase;
+	/* 0x08 */ void *stackLimit;
+	/* 0x0C */ void *subSystemTib;
+	/* 0x10 */ void *fiberData;
+	/* 0x14 */ void *arbitraryDataSlot;
+	/* 0x18 */ TIB *tib;
+	/*      */ char pad[0x14];
+	/* 0x30 */ PEB *peb;
+	/*      */ char pad2[0x1000];
 };
 
 int main(int argc, char **argv) {
@@ -121,7 +152,11 @@ int main(int argc, char **argv) {
 
 	// Create TIB
 	TIB tib;
+	memset(&tib, 0, sizeof(tib));
 	tib.tib = &tib;
+	tib.peb = (PEB*)calloc(sizeof(PEB), 1);
+	tib.peb->ProcessParameters = (RTL_USER_PROCESS_PARAMETERS*)calloc(sizeof(RTL_USER_PROCESS_PARAMETERS), 1);
+	DEBUG_LOG("Setting up TIB with base address: 0x%x\n", &tib);
 
 	struct user_desc tibDesc;
 	tibDesc.entry_number = 0;

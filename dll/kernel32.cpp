@@ -372,7 +372,9 @@ namespace kernel32 {
 		FILE *fp = files::fpFromHandle(hSourceHandle);
 		if (fp == stdin || fp == stdout || fp == stderr) {
 			// we never close standard handles so they are fine to duplicate
-			*lpTargetHandle = files::allocFpHandle(fp);
+			void *handle = files::allocFpHandle(fp);
+			DEBUG_LOG("-> %p\n", handle);
+			*lpTargetHandle = handle;
 			return 1;
 		}
 		// other handles are more problematic; fail for now
@@ -493,7 +495,7 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC WriteFile(void *hFile, const void *lpBuffer, unsigned int nNumberOfBytesToWrite, unsigned int *lpNumberOfBytesWritten, void *lpOverlapped) {
-		DEBUG_LOG("WriteFile %d\n", nNumberOfBytesToWrite);
+		DEBUG_LOG("WriteFile %p %d\n", hFile, nNumberOfBytesToWrite);
 		assert(!lpOverlapped);
 		wibo::lastError = 0;
 
@@ -517,7 +519,7 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC ReadFile(void *hFile, void *lpBuffer, unsigned int nNumberOfBytesToRead, unsigned int *lpNumberOfBytesRead, void *lpOverlapped) {
-		DEBUG_LOG("ReadFile %d\n", nNumberOfBytesToRead);
+		DEBUG_LOG("ReadFile %p %d\n", hFile, nNumberOfBytesToRead);
 		assert(!lpOverlapped);
 		wibo::lastError = 0;
 
@@ -553,7 +555,9 @@ namespace kernel32 {
 
 		if (fp) {
 			wibo::lastError = 0;
-			return files::allocFpHandle(fp);
+			void *handle = files::allocFpHandle(fp);
+			DEBUG_LOG("-> %p\n", handle);
+			return handle;
 		} else {
 			switch (errno) {
 				case EACCES:
@@ -584,7 +588,7 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC SetFilePointer(void *hFile, int lDistanceToMove, int *lpDistanceToMoveHigh, int dwMoveMethod) {
-		DEBUG_LOG("SetFilePointer %d %d %d\n", lDistanceToMove, (lpDistanceToMoveHigh ? *lpDistanceToMoveHigh : -1), dwMoveMethod);
+		DEBUG_LOG("SetFilePointer %p %d %d\n", hFile, lDistanceToMove, dwMoveMethod);
 		assert(!lpDistanceToMoveHigh);
 		FILE *fp = files::fpFromHandle(hFile);
 		wibo::lastError = 0;
@@ -905,9 +909,11 @@ namespace kernel32 {
 		return 1;
 	}
 
-	int WIN_FUNC GetVersion() {
+	const unsigned int MAJOR_VER = 6, MINOR_VER = 2, BUILD_NUMBER = 0; // Windows 8
+
+	unsigned int WIN_FUNC GetVersion() {
 		DEBUG_LOG("GetVersion\n");
-		return 1;
+		return MAJOR_VER | MINOR_VER << 8 | 5 << 16 | BUILD_NUMBER << 24;
 	}
 
 	typedef struct {
@@ -930,6 +936,10 @@ namespace kernel32 {
 	int WIN_FUNC GetVersionExA(OSVERSIONINFOA* lpVersionInformation) {
 		DEBUG_LOG("GetVersionExA\n");
 		memset(lpVersionInformation, 0, lpVersionInformation->dwOSVersionInfoSize);
+		lpVersionInformation->dwMajorVersion = MAJOR_VER;
+		lpVersionInformation->dwMinorVersion = MINOR_VER;
+		lpVersionInformation->dwBuildNumber = BUILD_NUMBER;
+		lpVersionInformation->dwPlatformId = 2;
 		return 1;
 	}
 
@@ -958,7 +968,7 @@ namespace kernel32 {
 			void *mem = 0;
 			posix_memalign(&mem, 0x1000, dwSize);
 			memset(mem, 0, dwSize);
-			DEBUG_LOG("VirtualAlloc returning %p\n", mem);
+			DEBUG_LOG("-> %p\n", mem);
 			return mem;
 		} else {
 			assert(lpAddress != NULL);
@@ -1025,7 +1035,7 @@ namespace kernel32 {
 
 	unsigned short WIN_FUNC GetFileType(void *hFile) {
 		DEBUG_LOG("GetFileType %p\n", hFile);
-		return 2; // FILE_TYPE_CHAR
+		return 1; // FILE_TYPE_DISK
 	}
 
 	unsigned int WIN_FUNC SetHandleCount(unsigned int uNumber) {

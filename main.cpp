@@ -138,6 +138,9 @@ struct TIB {
 	/*      */ char pad2[0x1000];
 };
 
+// Make this global to ease debugging
+TIB tib;
+
 int main(int argc, char **argv) {
 	if (argc <= 1) {
 		printf("Usage: ./wibo program.exe ...\n");
@@ -151,12 +154,10 @@ int main(int argc, char **argv) {
 	files::init();
 
 	// Create TIB
-	TIB tib;
 	memset(&tib, 0, sizeof(tib));
 	tib.tib = &tib;
 	tib.peb = (PEB*)calloc(sizeof(PEB), 1);
 	tib.peb->ProcessParameters = (RTL_USER_PROCESS_PARAMETERS*)calloc(sizeof(RTL_USER_PROCESS_PARAMETERS), 1);
-	DEBUG_LOG("Setting up TIB with base address: 0x%x\n", &tib);
 
 	struct user_desc tibDesc;
 	tibDesc.entry_number = 0;

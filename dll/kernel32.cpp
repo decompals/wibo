@@ -90,7 +90,7 @@ namespace kernel32 {
 	}
 
 	void WIN_FUNC SetLastError(unsigned int dwErrCode) {
-		DEBUG_LOG("SetLastError %u\n", dwErrCode);
+		// DEBUG_LOG("SetLastError %u\n", dwErrCode);
 		wibo::lastError = dwErrCode;
 	}
 
@@ -746,6 +746,12 @@ namespace kernel32 {
 	/*
 	 * Console Nonsense
 	 */
+	int WIN_FUNC GetConsoleMode(void *hConsoleHandle, unsigned int *lpMode) {
+		DEBUG_LOG("GetConsoleMode %p", hConsoleHandle);
+		*lpMode = 0;
+		return 1;
+	}
+
 	unsigned int WIN_FUNC SetConsoleCtrlHandler(void *HandlerRoutine, unsigned int Add) {
 		DEBUG_LOG("SetConsoleCtrlHandler\n");
 		// This is a function that gets called when doing ^C
@@ -797,6 +803,20 @@ namespace kernel32 {
 		assert(path.size() < uSize);
 
 		strcpy(lpBuffer, path.c_str());
+		return path.size();
+	}
+
+	unsigned int WIN_FUNC GetCurrentDirectoryW(unsigned int uSize, uint16_t *lpBuffer) {
+		DEBUG_LOG("GetCurrentDirectoryW\n");
+
+		std::filesystem::path cwd = std::filesystem::current_path();
+		std::string path = files::pathToWindows(cwd);
+
+		assert(path.size() < uSize);
+		const char *pathCstr = path.c_str();
+		for (size_t i = 0; i < path.size() + 1; i++) {
+			lpBuffer[i] = pathCstr[i] & 0xFF;
+		}
 		return path.size();
 	}
 
@@ -1165,6 +1185,11 @@ namespace kernel32 {
 		return (void *) 0x100006;
 	}
 
+	int WIN_FUNC HeapSetInformation(void *HeapHandle, int HeapInformationClass, void *HeapInformation, size_t HeapInformationLength) {
+		DEBUG_LOG("HeapSetInformation %p %d\n", HeapHandle, HeapInformationClass);
+		return 1;
+	}
+
 	unsigned int WIN_FUNC HeapFree(void *hHeap, unsigned int dwFlags, void *lpMem) {
 		DEBUG_LOG("HeapFree(heap=%p, flags=%x, mem=%p)\n", hHeap, dwFlags, lpMem);
 		free(lpMem);
@@ -1207,6 +1232,14 @@ namespace kernel32 {
 		strcpy(lpBuffer, "COMPNAME");
 		*nSize = 8;
 		return 1;
+	}
+
+	void *WIN_FUNC EncodePointer(void *Ptr) {
+		return Ptr;
+	}
+
+	void *WIN_FUNC DecodePointer(void *Ptr) {
+		return Ptr;
 	}
 
 	int WIN_FUNC CompareStringA(int Locale, unsigned int dwCmpFlags, const char *lpString1, unsigned int cchCount1, const char *lpString2, unsigned int cchCount2) {
@@ -1298,6 +1331,11 @@ namespace kernel32 {
 		return 1;
 	}
 
+	int WIN_FUNC QueryPerformanceFrequency(uint64_t *lpFrequency) {
+		*lpFrequency = 1;
+		return 1;
+	}
+
 	unsigned int WIN_FUNC IsDebuggerPresent() {
 		DEBUG_LOG("IsDebuggerPresent\n");
 		// If the current process is not running in the context of a debugger, the return value is zero.
@@ -1344,6 +1382,14 @@ namespace kernel32 {
 		DEBUG_LOG("RtlUnwind %p %p %p %p\n", TargetFrame, TargetIp, ExceptionRecord, ReturnValue);
 		printf("Aborting due to exception\n");
 		exit(1);
+	}
+
+	int WIN_FUNC InterlockedIncrement(int *Addend) {
+		return *Addend += 1;
+	}
+
+	int WIN_FUNC InterlockedDecrement(int *Addend) {
+		return *Addend -= 1;
 	}
 }
 
@@ -1393,10 +1439,13 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "GlobalFree") == 0) return (void *) kernel32::GlobalFree;
 	if (strcmp(name, "GlobalFlags") == 0) return (void *) kernel32::GlobalFlags;
 	if (strcmp(name, "GetCurrentDirectoryA") == 0) return (void *) kernel32::GetCurrentDirectoryA;
+	if (strcmp(name, "GetCurrentDirectoryW") == 0) return (void *) kernel32::GetCurrentDirectoryW;
 	if (strcmp(name, "FindResourceA") == 0) return (void *) kernel32::FindResourceA;
 	if (strcmp(name, "SetHandleCount") == 0) return (void *) kernel32::SetHandleCount;
 	if (strcmp(name, "FormatMessageA") == 0) return (void *) kernel32::FormatMessageA;
 	if (strcmp(name, "GetComputerNameA") == 0) return (void *) kernel32::GetComputerNameA;
+	if (strcmp(name, "EncodePointer") == 0) return (void *) kernel32::EncodePointer;
+	if (strcmp(name, "DecodePointer") == 0) return (void *) kernel32::DecodePointer;
 
 	// processenv.h
 	if (strcmp(name, "GetCommandLineA") == 0) return (void *) kernel32::GetCommandLineA;
@@ -1412,6 +1461,7 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "SetStdHandle") == 0) return (void *) kernel32::SetStdHandle;
 	if (strcmp(name, "DuplicateHandle") == 0) return (void *) kernel32::DuplicateHandle;
 	if (strcmp(name, "CloseHandle") == 0) return (void *) kernel32::CloseHandle;
+	if (strcmp(name, "GetConsoleMode") == 0) return (void *) kernel32::GetConsoleMode;
 	if (strcmp(name, "SetConsoleCtrlHandler") == 0) return (void *) kernel32::SetConsoleCtrlHandler;
 	if (strcmp(name, "GetConsoleScreenBufferInfo") == 0) return (void *) kernel32::GetConsoleScreenBufferInfo;
 
@@ -1466,10 +1516,10 @@ void *wibo::resolveKernel32(const char *name) {
 	// heapapi.h
 	if (strcmp(name, "HeapCreate") == 0) return (void *) kernel32::HeapCreate;
 	if (strcmp(name, "GetProcessHeap") == 0) return (void *) kernel32::GetProcessHeap;
+	if (strcmp(name, "HeapSetInformation") == 0) return (void *) kernel32::HeapSetInformation;
 	if (strcmp(name, "HeapAlloc") == 0) return (void *) kernel32::HeapAlloc;
 	if (strcmp(name, "HeapReAlloc") == 0) return (void *) kernel32::HeapReAlloc;
 	if (strcmp(name, "HeapSize") == 0) return (void *) kernel32::HeapSize;
-
 	if (strcmp(name, "HeapFree") == 0) return (void *) kernel32::HeapFree;
 
 	// memoryapi.h
@@ -1483,6 +1533,7 @@ void *wibo::resolveKernel32(const char *name) {
 
 	// profileapi.h
 	if (strcmp(name, "QueryPerformanceCounter") == 0) return (void *) kernel32::QueryPerformanceCounter;
+	if (strcmp(name, "QueryPerformanceFrequency") == 0) return (void *) kernel32::QueryPerformanceFrequency;
 
 	// debugapi.h
 	if (strcmp(name, "IsDebuggerPresent") == 0) return (void *) kernel32::IsDebuggerPresent;
@@ -1496,6 +1547,8 @@ void *wibo::resolveKernel32(const char *name) {
 
 	// winnt.h
 	if (strcmp(name, "RtlUnwind") == 0) return (void *) kernel32::RtlUnwind;
+	if (strcmp(name, "InterlockedIncrement") == 0) return (void *) kernel32::InterlockedIncrement;
+	if (strcmp(name, "InterlockedDecrement") == 0) return (void *) kernel32::InterlockedDecrement;
 
 	return 0;
 }

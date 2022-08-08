@@ -580,6 +580,38 @@ namespace kernel32 {
 		}
 	}
 
+	void *WIN_FUNC CreateFileMappingA(
+			void *hFile,
+			void *lpFileMappingAttributes,
+			unsigned int flProtect,
+			unsigned int dwMaximumSizeHigh,
+			unsigned int dwMaximumSizeLow,
+			const char *lpName) {
+		DEBUG_LOG("CreateFileMappingA(%p, %p, %u, %u, %u, %s)\n", hFile, lpFileMappingAttributes, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow, lpName);
+		wibo::lastError = 0;
+		void* ret = doAlloc(dwMaximumSizeHigh, 1);
+		return ret;
+	}
+
+	void *WIN_FUNC MapViewOfFile(
+			void *hFileMappingObject,
+			unsigned int dwDesiredAccess,
+			unsigned int dwFileOffsetHigh,
+			unsigned int dwFileOffsetLow,
+			unsigned int dwNumberOfBytesToMap) {
+		DEBUG_LOG("MapViewOfFile(%p, %u, %u, %u, %u)\n", hFileMappingObject, dwDesiredAccess, dwFileOffsetHigh, dwFileOffsetLow, dwNumberOfBytesToMap);
+		wibo::lastError = 0;
+		void *ret = doAlloc(dwNumberOfBytesToMap, 1);
+		return ret;
+	}
+
+	int WIN_FUNC UnmapViewOfFile(void *lpBaseAddress) {
+		DEBUG_LOG("UnmapViewOfFile(%p)\n", lpBaseAddress);
+		wibo::lastError = 0;
+		free(lpBaseAddress);
+		return 1;
+	}
+
 	int WIN_FUNC DeleteFileA(const char* lpFileName) {
 		std::string path = files::pathFromWindows(lpFileName);
 		DEBUG_LOG("DeleteFileA %s (%s)\n", lpFileName, path.c_str());
@@ -1483,6 +1515,9 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "WriteFile") == 0) return (void *) kernel32::WriteFile;
 	if (strcmp(name, "ReadFile") == 0) return (void *) kernel32::ReadFile;
 	if (strcmp(name, "CreateFileA") == 0) return (void *) kernel32::CreateFileA;
+	if (strcmp(name, "CreateFileMappingA") == 0) return (void *) kernel32::CreateFileMappingA;
+	if (strcmp(name, "MapViewOfFile") == 0) return (void *) kernel32::MapViewOfFile;
+	if (strcmp(name, "UnmapViewOfFile") == 0) return (void *) kernel32::UnmapViewOfFile;
 	if (strcmp(name, "DeleteFileA") == 0) return (void *) kernel32::DeleteFileA;
 	if (strcmp(name, "SetFilePointer") == 0) return (void *) kernel32::SetFilePointer;
 	if (strcmp(name, "SetEndOfFile") == 0) return (void *) kernel32::SetEndOfFile;

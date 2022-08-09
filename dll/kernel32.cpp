@@ -7,6 +7,7 @@
 #include <malloc.h>
 #include <stdarg.h>
 #include <system_error>
+#include <sys/mman.h>
 #include <sys/stat.h>
 
 namespace kernel32 {
@@ -588,9 +589,21 @@ namespace kernel32 {
 			unsigned int dwMaximumSizeLow,
 			const char *lpName) {
 		DEBUG_LOG("CreateFileMappingA(%p, %p, %u, %u, %u, %s)\n", hFile, lpFileMappingAttributes, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow, lpName);
-		wibo::lastError = 0;
-		void* ret = doAlloc(dwMaximumSizeHigh, 1);
-		return ret;
+
+		unsigned long long int size = (long long int) dwMaximumSizeHigh << 32 | dwMaximumSizeLow;
+		if (size == 0) {
+			// TODO determine size of hFile
+			size = 1;
+		}
+
+		if ((int) hFile == -1) { // INVALID_HANDLE_VALUE ?
+			void* alloced = doAlloc(size, 0);
+			return alloced;
+		}
+
+		// TODO do properly
+		void* mmapped = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, 0, 0);
+		return mmapped;
 	}
 
 	void *WIN_FUNC MapViewOfFile(
@@ -600,14 +613,11 @@ namespace kernel32 {
 			unsigned int dwFileOffsetLow,
 			unsigned int dwNumberOfBytesToMap) {
 		DEBUG_LOG("MapViewOfFile(%p, %u, %u, %u, %u)\n", hFileMappingObject, dwDesiredAccess, dwFileOffsetHigh, dwFileOffsetLow, dwNumberOfBytesToMap);
-		wibo::lastError = 0;
-		void *ret = doAlloc(dwNumberOfBytesToMap, 1);
-		return ret;
+		return (void*)((unsigned int) hFileMappingObject + dwFileOffsetLow);
 	}
 
 	int WIN_FUNC UnmapViewOfFile(void *lpBaseAddress) {
 		DEBUG_LOG("UnmapViewOfFile(%p)\n", lpBaseAddress);
-		wibo::lastError = 0;
 		free(lpBaseAddress);
 		return 1;
 	}

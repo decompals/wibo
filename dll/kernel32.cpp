@@ -405,7 +405,9 @@ namespace kernel32 {
 				fclose(fp);
 			}
 		} else if (data.type == handles::TYPE_MAPPED) {
-			munmap(data.ptr, data.size);
+			if (data.ptr != (void *) 0x1) {
+				munmap(data.ptr, data.size);
+			}
 		}
 		return 1;
 	}
@@ -662,10 +664,14 @@ namespace kernel32 {
 
 		int64_t size = (int64_t) dwMaximumSizeHigh << 32 | dwMaximumSizeLow;
 
-		void* mmapped;
+		void *mmapped;
 
 		if (hFile == (void*) -1) { // INVALID_HANDLE_VALUE
-			mmapped = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+			if (size == 0) {
+				mmapped = (void *) 0x1;
+			} else {
+				mmapped = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+			}
 		} else {
 			int fd = fileno(files::fpFromHandle(hFile));
 
@@ -675,7 +681,12 @@ namespace kernel32 {
 					return (void*) -1;
 				}
 			}
-			mmapped = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
+
+			if (size == 0) {
+				mmapped = (void *) 0x1;
+			} else {
+				mmapped = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
+			}
 		}
 
 		assert(mmapped != MAP_FAILED);

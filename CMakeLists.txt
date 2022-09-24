@@ -16,6 +16,7 @@ add_executable(wibo
     dll/user32.cpp
     dll/version.cpp
     files.cpp
+    handles.cpp
     loader.cpp
     main.cpp
     )

@@ -1,9 +1,10 @@
 #include "common.h"
 #include "files.h"
+#include "handles.h"
 #include <algorithm>
+#include <map>
 
 namespace files {
-	static FILE *handleFps[0x10000];
 
 	static void *stdinHandle;
 	static void *stdoutHandle;
@@ -68,28 +69,19 @@ namespace files {
 	}
 
 	FILE *fpFromHandle(void *handle, bool pop) {
-		uintptr_t index = (uintptr_t)handle;
-		if (index > 0 && index < 0x10000) {
-			FILE *ret = handleFps[index];
-			if (pop)
-				handleFps[index] = 0;
-			return ret;
-		}
-		if (pop)
+		handles::Data data = handles::dataFromHandle(handle, pop);
+		if (data.type == handles::TYPE_FILE) {
+			return (FILE*)data.ptr;
+		} else if (data.type == handles::TYPE_UNUSED && pop) {
 			return 0;
-		printf("Invalid file handle %p\n", handle);
-		assert(0);
+		} else {
+			printf("Invalid file handle %p\n", handle);
+			assert(0);
+		}
 	}
 
 	void *allocFpHandle(FILE *fp) {
-		for (int i = 1; i < 0x10000; i++) {
-			if (!handleFps[i]) {
-				handleFps[i] = fp;
-				return (void*)i;
-			}
-		}
-		printf("Out of file handles\n");
-		assert(0);
+		return handles::allocDataHandle(handles::Data{handles::TYPE_FILE, fp, 0});
 	}
 
 	void *getStdHandle(uint32_t nStdHandle) {

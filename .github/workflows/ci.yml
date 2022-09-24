@@ -11,8 +11,8 @@ jobs:
 
       - name: Install GCC multilib
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-multilib g++-multilib ninja-build
+          apt-get update
+          apt-get install -y gcc-multilib g++-multilib ninja-build
 
       - name: Configure
         # Replace with RelWithDebInfo when -O2 crash is fixed

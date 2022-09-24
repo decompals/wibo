@@ -1,12 +1,15 @@
 #include "common.h"
 #include "files.h"
+#include "handles.h"
 #include <algorithm>
 #include <ctype.h>
 #include <filesystem>
+#include <fnmatch.h>
 #include <string>
 #include <malloc.h>
 #include <stdarg.h>
 #include <system_error>
+#include <sys/mman.h>
 #include <sys/stat.h>
 
 namespace kernel32 {
@@ -83,6 +86,17 @@ namespace kernel32 {
 				return c < d ? 1 : 3;
 			}
 		}
+	}
+
+	int64_t getFileSize(void* hFile) {
+		FILE *fp = files::fpFromHandle(hFile);
+		struct stat64 st;
+		fflush(fp);
+		if (fstat64(fileno(fp), &st) == -1 || !S_ISREG(st.st_mode)) {
+			wibo::lastError = 2; // ERROR_FILE_NOT_FOUND (?)
+			return -1; // INVALID_FILE_SIZE
+		}
+		return st.st_size;
 	}
 
 	uint32_t WIN_FUNC GetLastError() {
@@ -384,9 +398,14 @@ namespace kernel32 {
 
 	int WIN_FUNC CloseHandle(void *hObject) {
 		DEBUG_LOG("CloseHandle %p\n", hObject);
-		FILE *fp = files::fpFromHandle(hObject, true);
-		if (fp && fp != stdin && fp != stdout && fp != stderr) {
-			fclose(fp);
+		auto data = handles::dataFromHandle(hObject, true);
+		if (data.type == handles::TYPE_FILE) {
+			FILE *fp = (FILE *) data.ptr;
+			if (!(fp == stdin || fp == stdout || fp == stderr)) {
+				fclose(fp);
+			}
+		} else if (data.type == handles::TYPE_MAPPED) {
+			munmap(data.ptr, data.size);
 		}
 		return 1;
 	}
@@ -442,6 +461,41 @@ namespace kernel32 {
 		CharType cAlternateFileName[14];
 	};
 
+	struct FindFirstFileHandle {
+		std::filesystem::directory_iterator it;
+		std::string pattern;
+	};
+
+	bool findNextFile(FindFirstFileHandle *handle) {
+		while (handle->it != std::filesystem::directory_iterator()) {
+			std::filesystem::path path = *handle->it;
+			if (fnmatch(handle->pattern.c_str(), path.filename().c_str(), 0) == 0) {
+				return true;
+			}
+			handle->it++;
+		}
+		return false;
+	}
+
+	void setFindFileDataFromPath(WIN32_FIND_DATA<char>* data, const std::filesystem::path &path) {
+		auto status = std::filesystem::status(path);
+		uint64_t fileSize = 0;
+		data->dwFileAttributes = 0;
+		if (std::filesystem::is_directory(status)) {
+			data->dwFileAttributes |= 0x10;
+		}
+		if (std::filesystem::is_regular_file(status)) {
+			data->dwFileAttributes |= 0x80;
+			fileSize = std::filesystem::file_size(path);
+		}
+		data->nFileSizeHigh = (uint32_t)(fileSize >> 32);
+		data->nFileSizeLow = (uint32_t)fileSize;
+		auto fileName = path.filename().string();
+		assert(fileName.size() < 260);
+		strcpy(data->cFileName, fileName.c_str());
+		strcpy(data->cAlternateFileName, "8P3FMTFN.BAD");
+	}
+
 	void *WIN_FUNC FindFirstFileA(const char *lpFileName, WIN32_FIND_DATA<char> *lpFindFileData) {
 		// This should handle wildcards too, but whatever.
 		auto path = files::pathFromWindows(lpFileName);
@@ -453,23 +507,40 @@ namespace kernel32 {
 
 		auto status = std::filesystem::status(path);
 		if (status.type() == std::filesystem::file_type::regular) {
-			lpFindFileData->dwFileAttributes = 0x80; // FILE_ATTRIBUTE_NORMAL
-			auto fileSize = std::filesystem::file_size(path);
-			lpFindFileData->nFileSizeHigh = (uint32_t)(fileSize >> 32);
-			lpFindFileData->nFileSizeLow = (uint32_t)fileSize;
-			auto fileName = path.filename().string();
-			assert(fileName.size() < 260);
-			strcpy(lpFindFileData->cFileName, fileName.c_str());
-			strcpy(lpFindFileData->cAlternateFileName, "8P3FMTFN.BAD");
+			setFindFileDataFromPath(lpFindFileData, path);
 			return (void *) 1;
 		}
 
-		wibo::lastError = 2; // ERROR_FILE_NOT_FOUND
-		return (void *) 0xFFFFFFFF;
+		FindFirstFileHandle *handle = new FindFirstFileHandle();
+		std::filesystem::directory_iterator it(path.parent_path());
+		handle->it = it;
+		handle->pattern = path.filename().string();
+
+		if (!findNextFile(handle)) {
+			wibo::lastError = 2; // ERROR_FILE_NOT_FOUND
+			delete handle;
+			return (void *) 0xFFFFFFFF;
+		}
+
+		setFindFileDataFromPath(lpFindFileData, *handle->it++);
+		return handle;
+	}
+
+	int WIN_FUNC FindNextFileA(void *hFindFile, WIN32_FIND_DATA<char> *lpFindFileData) {
+		FindFirstFileHandle *handle = (FindFirstFileHandle *) hFindFile;
+		if (!findNextFile(handle)) {
+			return 0;
+		}
+
+		setFindFileDataFromPath(lpFindFileData, *handle->it++);
+		return 1;
 	}
 
 	int WIN_FUNC FindClose(void *hFindFile) {
 		DEBUG_LOG("FindClose\n");
+		if (hFindFile != (void *) 1) {
+			delete (FindFirstFileHandle *)hFindFile;
+		}
 		return 1;
 	}
 
@@ -580,6 +651,55 @@ namespace kernel32 {
 		}
 	}
 
+	void *WIN_FUNC CreateFileMappingA(
+			void *hFile,
+			void *lpFileMappingAttributes,
+			unsigned int flProtect,
+			unsigned int dwMaximumSizeHigh,
+			unsigned int dwMaximumSizeLow,
+			const char *lpName) {
+		DEBUG_LOG("CreateFileMappingA(%p, %p, %u, %u, %u, %s)\n", hFile, lpFileMappingAttributes, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow, lpName);
+
+		int64_t size = (int64_t) dwMaximumSizeHigh << 32 | dwMaximumSizeLow;
+
+		void* mmapped;
+
+		if (hFile == (void*) -1) { // INVALID_HANDLE_VALUE
+			mmapped = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+		} else {
+			int fd = fileno(files::fpFromHandle(hFile));
+
+			if (size == 0) {
+				size = getFileSize(hFile);
+				if (size == -1) {
+					return (void*) -1;
+				}
+			}
+			mmapped = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
+		}
+
+		assert(mmapped != MAP_FAILED);
+		return handles::allocDataHandle({handles::TYPE_MAPPED, mmapped, (unsigned int) size});
+	}
+
+	void *WIN_FUNC MapViewOfFile(
+			void *hFileMappingObject,
+			unsigned int dwDesiredAccess,
+			unsigned int dwFileOffsetHigh,
+			unsigned int dwFileOffsetLow,
+			unsigned int dwNumberOfBytesToMap) {
+		DEBUG_LOG("MapViewOfFile(%p, %u, %u, %u, %u)\n", hFileMappingObject, dwDesiredAccess, dwFileOffsetHigh, dwFileOffsetLow, dwNumberOfBytesToMap);
+
+		handles::Data data = handles::dataFromHandle(hFileMappingObject, false);
+		assert(data.type == handles::TYPE_MAPPED);
+		return (void*)((unsigned int) data.ptr + dwFileOffsetLow);
+	}
+
+	int WIN_FUNC UnmapViewOfFile(void *lpBaseAddress) {
+		DEBUG_LOG("UnmapViewOfFile(%p)\n", lpBaseAddress);
+		return 1;
+	}
+
 	int WIN_FUNC DeleteFileA(const char* lpFileName) {
 		std::string path = files::pathFromWindows(lpFileName);
 		DEBUG_LOG("DeleteFileA %s (%s)\n", lpFileName, path.c_str());
@@ -637,18 +757,15 @@ namespace kernel32 {
 
 	unsigned int WIN_FUNC GetFileSize(void *hFile, unsigned int *lpFileSizeHigh) {
 		DEBUG_LOG("GetFileSize\n");
-		struct stat64 st;
-		FILE *fp = files::fpFromHandle(hFile);
-		fflush(fp);
-		if (fstat64(fileno(fp), &st) == -1 || !S_ISREG(st.st_mode)) {
-			wibo::lastError = 2; // ERROR_FILE_NOT_FOUND (?)
-			return ~0u; // INVALID_FILE_SIZE
+		int64_t size = getFileSize(hFile);
+		if (size == -1) {
+			return 0xFFFFFFFF; // INVALID_FILE_SIZE
 		}
-		DEBUG_LOG("-> %ld\n", st.st_size);
+		DEBUG_LOG("-> %ld\n", size);
 		if (lpFileSizeHigh != nullptr) {
-			*lpFileSizeHigh = st.st_size >> 32;
+			*lpFileSizeHigh = size >> 32;
 		}
-		return st.st_size;
+		return size;
 	}
 
 	/*
@@ -1478,11 +1595,15 @@ void *wibo::resolveKernel32(const char *name) {
 	// fileapi.h
 	if (strcmp(name, "GetFullPathNameA") == 0) return (void *) kernel32::GetFullPathNameA;
 	if (strcmp(name, "FindFirstFileA") == 0) return (void *) kernel32::FindFirstFileA;
+	if (strcmp(name, "FindNextFileA") == 0) return (void *) kernel32::FindNextFileA;
 	if (strcmp(name, "FindClose") == 0) return (void *) kernel32::FindClose;
 	if (strcmp(name, "GetFileAttributesA") == 0) return (void *) kernel32::GetFileAttributesA;
 	if (strcmp(name, "WriteFile") == 0) return (void *) kernel32::WriteFile;
 	if (strcmp(name, "ReadFile") == 0) return (void *) kernel32::ReadFile;
 	if (strcmp(name, "CreateFileA") == 0) return (void *) kernel32::CreateFileA;
+	if (strcmp(name, "CreateFileMappingA") == 0) return (void *) kernel32::CreateFileMappingA;
+	if (strcmp(name, "MapViewOfFile") == 0) return (void *) kernel32::MapViewOfFile;
+	if (strcmp(name, "UnmapViewOfFile") == 0) return (void *) kernel32::UnmapViewOfFile;
 	if (strcmp(name, "DeleteFileA") == 0) return (void *) kernel32::DeleteFileA;
 	if (strcmp(name, "SetFilePointer") == 0) return (void *) kernel32::SetFilePointer;
 	if (strcmp(name, "SetEndOfFile") == 0) return (void *) kernel32::SetEndOfFile;

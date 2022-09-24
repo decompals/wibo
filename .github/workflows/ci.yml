@@ -12,11 +12,11 @@ jobs:
       - name: Install GCC multilib
         run: |
           apt-get update
-          apt-get install -y cmake gcc-multilib g++-multilib ninja-build
+          apt-get install -y cmake gcc-multilib g++-multilib
 
       - name: Configure
         # Replace with RelWithDebInfo when -O2 crash is fixed
-        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug
 
       - name: Build
         run: cmake --build build

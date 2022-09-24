@@ -12,7 +12,7 @@ jobs:
       - name: Install GCC multilib
         run: |
           apt-get update
-          apt-get install -y cmake gcc-multilib g++-multilib ninja-build wget unzip file
+          apt-get install -y cmake file gcc-multilib g++-multilib unzip wget
 
       - name: Configure
         run: |

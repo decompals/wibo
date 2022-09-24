@@ -5,7 +5,7 @@ jobs:
     name: Build and test
     runs-on: ubuntu-latest
     container:
-      image: ubuntu:bionic
+      image: ubuntu:focal
     steps:
       - uses: actions/checkout@v2
 
@@ -13,16 +13,16 @@ jobs:
         run: |
           apt-get update
           apt-get install -y cmake gcc-multilib g++-multilib ninja-build wget unzip file
-          mkdir build
 
       - name: Configure
-        working-directory: build
+        run: |
+          mkdir build
+          cd build
         # Replace with RelWithDebInfo when -O2 crash is fixed
-        run: cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Debug
+          cmake .. -DCMAKE_BUILD_TYPE=Debug
 
       - name: Build
-        working-directory: build
-        run: ninja
+        run: cmake --build build
 
       - name: Test
         run: |

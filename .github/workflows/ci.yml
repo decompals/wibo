@@ -5,21 +5,22 @@ jobs:
     name: Build and test
     runs-on: ubuntu-latest
     container:
-      image: ubuntu:focal
+      image: ubuntu:bionic
     steps:
       - uses: actions/checkout@v2
 
       - name: Install GCC multilib
         run: |
           apt-get update
-          apt-get install -y cmake gcc-multilib g++-multilib
+          apt-get install -y cmake gcc-multilib g++-multilib ninja-build wget unzip file
 
       - name: Configure
         # Replace with RelWithDebInfo when -O2 crash is fixed
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug
+        run: cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Debug
 
       - name: Build
-        run: cmake --build build
+        working-directory: build
+        run: ninja
 
       - name: Test
         run: |

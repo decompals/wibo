@@ -13,8 +13,10 @@ jobs:
         run: |
           apt-get update
           apt-get install -y cmake gcc-multilib g++-multilib ninja-build wget unzip file
+          mkdir build
 
       - name: Configure
+        working-directory: build
         # Replace with RelWithDebInfo when -O2 crash is fixed
         run: cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Debug
 

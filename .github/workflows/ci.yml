@@ -15,10 +15,10 @@ jobs:
           apt-get install -y cmake file gcc-multilib g++-multilib unzip wget
 
       - name: Configure
+        # Replace with RelWithDebInfo when -O2 crash is fixed
         run: |
           mkdir build
           cd build
-        # Replace with RelWithDebInfo when -O2 crash is fixed
           cmake .. -DCMAKE_BUILD_TYPE=Debug
 
       - name: Build

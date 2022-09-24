@@ -4,6 +4,8 @@ jobs:
   build_and_test:
     name: Build and test
     runs-on: ubuntu-latest
+    container:
+      image: ubuntu:bionic
     steps:
       - uses: actions/checkout@v2
 

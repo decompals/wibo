@@ -675,9 +675,10 @@ namespace kernel32 {
 					return (void*) -1;
 				}
 			}
-			mmapped = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+			mmapped = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
 		}
 
+		assert(mmapped != MAP_FAILED);
 		return handles::allocDataHandle({handles::TYPE_MAPPED, mmapped, (unsigned int) size});
 	}
 

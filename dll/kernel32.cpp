@@ -932,7 +932,11 @@ namespace kernel32 {
 		std::filesystem::path cwd = std::filesystem::current_path();
 		std::string path = files::pathToWindows(cwd);
 
-		assert(path.size() < uSize);
+		// If the buffer is too small, return the required buffer size.
+		// (Add 1 to include the NUL terminator)
+		if (path.size() + 1 > uSize) {
+			return path.size() + 1;
+		}
 
 		strcpy(lpBuffer, path.c_str());
 		return path.size();

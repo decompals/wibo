@@ -438,6 +438,22 @@ namespace kernel32 {
 		}
 	}
 
+	unsigned int WIN_FUNC GetShortPathNameA(const char* lpszLongPath, char* lpszShortPath, unsigned int cchBuffer) {
+		DEBUG_LOG("GetShortPathNameA(%s)...\n",lpszShortPath);
+    	std::filesystem::path absPath = std::filesystem::absolute(files::pathFromWindows(lpszLongPath));
+		std::string absStr = files::pathToWindows(absPath);
+
+    	if (absStr.length() + 1 > cchBuffer)
+    	{
+    	    return absStr.length()+1;
+    	}
+    	else
+    	{
+    	    strcpy(lpszShortPath, absStr.c_str());
+    	    return absStr.length();
+    	}
+	}
+
 	struct FILETIME {
 		unsigned int dwLowDateTime;
 		unsigned int dwHighDateTime;
@@ -1609,6 +1625,7 @@ void *wibo::resolveKernel32(const char *name) {
 
 	// fileapi.h
 	if (strcmp(name, "GetFullPathNameA") == 0) return (void *) kernel32::GetFullPathNameA;
+	if (strcmp(name, "GetShortPathNameA") == 0) return (void *) kernel32::GetShortPathNameA;
 	if (strcmp(name, "FindFirstFileA") == 0) return (void *) kernel32::FindFirstFileA;
 	if (strcmp(name, "FindNextFileA") == 0) return (void *) kernel32::FindNextFileA;
 	if (strcmp(name, "FindClose") == 0) return (void *) kernel32::FindClose;

@@ -440,18 +440,18 @@ namespace kernel32 {
 
 	unsigned int WIN_FUNC GetShortPathNameA(const char* lpszLongPath, char* lpszShortPath, unsigned int cchBuffer) {
 		DEBUG_LOG("GetShortPathNameA(%s)...\n",lpszShortPath);
-    	std::filesystem::path absPath = std::filesystem::absolute(files::pathFromWindows(lpszLongPath));
+		std::filesystem::path absPath = std::filesystem::absolute(files::pathFromWindows(lpszLongPath));
 		std::string absStr = files::pathToWindows(absPath);
 
-    	if (absStr.length() + 1 > cchBuffer)
-    	{
-    	    return absStr.length()+1;
-    	}
-    	else
-    	{
-    	    strcpy(lpszShortPath, absStr.c_str());
-    	    return absStr.length();
-    	}
+		if (absStr.length() + 1 > cchBuffer)
+		{
+			return absStr.length()+1;
+		}
+		else
+		{
+			strcpy(lpszShortPath, absStr.c_str());
+			return absStr.length();
+		}
 	}
 
 	struct FILETIME {

@@ -8,8 +8,7 @@ RUN apk add --no-cache cmake ninja g++ linux-headers binutils
 COPY . /wibo
 
 # Build static binary
-# Replace with RelWithDebInfo when -O2 crash is fixed
-RUN cmake -S /wibo -B /wibo/build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-static" \
+RUN cmake -S /wibo -B /wibo/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-static" \
     && cmake --build /wibo/build \
     && strip -g /wibo/build/wibo
 

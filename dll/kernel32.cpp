@@ -875,7 +875,7 @@ namespace kernel32 {
 		return 1;
 	}
 
-	int FileTimeToLocalFileTime(const FILETIME *lpFileTime, FILETIME *lpLocalFileTime) {
+	int WIN_FUNC FileTimeToLocalFileTime(const FILETIME *lpFileTime, FILETIME *lpLocalFileTime) {
 		DEBUG_LOG("FileTimeToLocalFileTime\n");
 		// we live on Iceland
 		*lpLocalFileTime = *lpFileTime;

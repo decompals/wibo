@@ -933,17 +933,45 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC GetSystemDirectoryA(char *lpBuffer, unsigned int uSize) {
-		strcpy(lpBuffer, "C:\\Windows\\System32");
-		return strlen(lpBuffer);
+		DEBUG_LOG("GetSystemDirectoryA(%p, %u)\n", lpBuffer, uSize);
+		if (lpBuffer == nullptr) {
+			return 0;
+		}
+
+		const char* systemDir = "C:\\Windows\\System32";
+		const auto len = strlen(systemDir);
+
+		// If the buffer is too small, return the required buffer size.
+		// (Add 1 to include the NUL terminator)
+		if (uSize < len + 1) {
+			return len + 1;
+		}
+
+		strcpy(lpBuffer, systemDir);
+		return len;
 	}
 
 	unsigned int WIN_FUNC GetWindowsDirectoryA(char *lpBuffer, unsigned int uSize) {
-		strcpy(lpBuffer, "C:\\Windows");
-		return strlen(lpBuffer);
+		DEBUG_LOG("GetWindowsDirectoryA(%p, %u)\n", lpBuffer, uSize);
+		if (lpBuffer == nullptr) {
+			return 0;
+		}
+
+		const char* systemDir = "C:\\Windows";
+		const auto len = strlen(systemDir);
+
+		// If the buffer is too small, return the required buffer size.
+		// (Add 1 to include the NUL terminator)
+		if (uSize < len + 1) {
+			return len + 1;
+		}
+
+		strcpy(lpBuffer, systemDir);
+		return len;
 	}
 
 	unsigned int WIN_FUNC GetCurrentDirectoryA(unsigned int uSize, char *lpBuffer) {
-		DEBUG_LOG("GetCurrentDirectoryA\n");
+		DEBUG_LOG("GetCurrentDirectoryA(%u, %p)\n", uSize, lpBuffer);
 
 		std::filesystem::path cwd = std::filesystem::current_path();
 		std::string path = files::pathToWindows(cwd);

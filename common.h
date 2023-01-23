@@ -6,7 +6,10 @@
 #include <unistd.h>
 #include <assert.h>
 
-#define WIN_FUNC __attribute__((stdcall))
+// On Windows, the incoming stack is aligned to a 4 byte boundary.
+// force_align_arg_pointer will realign the stack to match GCC's 16 byte alignment.
+#define WIN_ENTRY __attribute__((force_align_arg_pointer))
+#define WIN_FUNC WIN_ENTRY __attribute__((stdcall))
 #define DEBUG_LOG(...) wibo::debug_log(__VA_ARGS__)
 
 namespace user32 {

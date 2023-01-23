@@ -22,7 +22,7 @@ namespace files {
 
 		// Return as-is if it exists, else traverse the filesystem looking for
 		// a path that matches case insensitively
-		std::filesystem::path path = std::filesystem::path(str);
+		std::filesystem::path path = std::filesystem::path(str).lexically_normal();
 		if (std::filesystem::exists(path)) {
 			return path;
 		}
@@ -58,7 +58,7 @@ namespace files {
 	}
 
 	std::string pathToWindows(const std::filesystem::path &path) {
-		std::string str = path;
+		std::string str = path.lexically_normal();
 
 		if (path.is_absolute()) {
 			str.insert(0, "Z:");

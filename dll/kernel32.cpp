@@ -565,6 +565,13 @@ namespace kernel32 {
 	unsigned int WIN_FUNC GetFileAttributesA(const char *lpFileName) {
 		auto path = files::pathFromWindows(lpFileName);
 		DEBUG_LOG("GetFileAttributesA(%s)... (%s)\n", lpFileName, path.c_str());
+
+		// See ole32::CoCreateInstance
+		if (endsWith(path, "/license.dat")) {
+			DEBUG_LOG("MWCC license override\n");
+			return 0x80; // FILE_ATTRIBUTE_NORMAL
+		}
+
 		auto status = std::filesystem::status(path);
 
 		wibo::lastError = 0;
@@ -868,7 +875,7 @@ namespace kernel32 {
 		return 1;
 	}
 
-	int FileTimeToLocalFileTime(const FILETIME *lpFileTime, FILETIME *lpLocalFileTime) {
+	int WIN_FUNC FileTimeToLocalFileTime(const FILETIME *lpFileTime, FILETIME *lpLocalFileTime) {
 		DEBUG_LOG("FileTimeToLocalFileTime\n");
 		// we live on Iceland
 		*lpLocalFileTime = *lpFileTime;

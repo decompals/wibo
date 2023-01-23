@@ -177,8 +177,13 @@ int main(int argc, char **argv) {
 	// Build a command line
 	std::string cmdLine;
 	for (int i = 1; i < argc; i++) {
-		if (i != 1) cmdLine += ' ';
-		std::string arg = argv[i];
+		std::string arg;
+		if (i == 1) {
+			arg = files::pathToWindows(std::filesystem::absolute(argv[1]));
+		} else {
+			cmdLine += ' ';
+			arg = argv[i];
+		}
 		bool needQuotes = arg.find_first_of("\\\" \t\n") != std::string::npos;
 		if (needQuotes)
 			cmdLine += '"';

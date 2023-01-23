@@ -4,25 +4,18 @@ jobs:
   build_and_test:
     name: Build and test
     runs-on: ubuntu-latest
-    container:
-      image: ubuntu:focal
     steps:
       - uses: actions/checkout@v2
 
-      - name: Install GCC multilib
+      - name: Install dependencies
         run: |
-          apt-get update
-          apt-get install -y cmake file gcc-multilib g++-multilib unzip wget
-
-      - name: Configure
-        # Replace with RelWithDebInfo when -O2 crash is fixed
-        run: |
-          mkdir build
-          cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Debug
+          sudo apt-get update
+          sudo apt-get install -y file unzip wget
 
       - name: Build
-        run: cmake --build build
+        env:
+          DOCKER_BUILDKIT: 1
+        run: docker build --target export --output build .
 
       - name: Test
         run: |

@@ -1,4 +1,5 @@
 #include <filesystem>
+#include <string>
 
 namespace files {
 	std::filesystem::path pathFromWindows(const char *inStr);
@@ -8,4 +9,8 @@ namespace files {
 	void *getStdHandle(uint32_t nStdHandle);
 	unsigned int setStdHandle(uint32_t nStdHandle, void *hHandle);
 	void init();
+}
+
+static bool endsWith(const std::string &str, const std::string &suffix) {
+	return str.size() >= suffix.size() && str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0;
 }

@@ -102,6 +102,7 @@ struct UNICODE_STRING {
 	uint16_t *Buffer;
 };
 
+// Run Time Library (RTL)
 struct RTL_USER_PROCESS_PARAMETERS {
 	char Reserved1[16];
 	void *Reserved2[10];
@@ -109,6 +110,7 @@ struct RTL_USER_PROCESS_PARAMETERS {
 	UNICODE_STRING CommandLine;
 };
 
+// Windows Process Environment Block (PEB)
 struct PEB {
 	char Reserved1[2];
 	char BeingDebugged;
@@ -124,7 +126,7 @@ struct PEB {
 	unsigned int SessionId;
 };
 
-// Windows Thread Information Block
+// Windows Thread Information Block (TIB)
 struct TIB {
 	/* 0x00 */ void *sehFrame;
 	/* 0x04 */ void *stackBase;

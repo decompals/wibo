@@ -108,17 +108,29 @@ namespace kernel32 {
 		wibo::lastError = dwErrCode;
 	}
 
+	// @brief returns a pseudo handle to the current process
 	void *WIN_FUNC GetCurrentProcess() {
+		// pseudo handle is always returned, and is -1 (a special constant)
 		return (void *) 0xFFFFFFFF;
 	}
 
-	int WIN_FUNC GetCurrentProcessId() {
-		DEBUG_LOG("GetCurrentProcessId\n");
-		return 1;
+	// @brief DWORD (unsigned int) returns a process identifier of the calling process.
+	unsigned int WIN_FUNC GetCurrentProcessId() {
+		uint32_t pid = getpid();
+		DEBUG_LOG("Current processID is: %d\n", pid);
+
+		return pid;
 	}
 
 	unsigned int WIN_FUNC GetCurrentThreadId() {
-		return 1001; // a handy placeholder
+		pthread_t thread_id;
+		thread_id = pthread_self();
+		DEBUG_LOG("Current thread ID is: %lu\n", thread_id);
+
+		// Cast thread_id to unsigned int to fit a DWORD
+		unsigned int u_thread_id = (unsigned int) thread_id;
+		
+		return u_thread_id;
 	}
 
 	void WIN_FUNC ExitProcess(unsigned int uExitCode) {
@@ -438,6 +450,14 @@ namespace kernel32 {
 		}
 	}
 
+	/**
+	 * @brief GetShortPathNameA: Retrieves the short path form of the specified path
+	 * 
+	 * @param[in] lpszLongPath The path string
+	 * @param[out] lpszShortPath A pointer to a buffer to receive
+	 * @param[in] cchBuffer The size of the buffer that lpszShortPath points to
+	 * @return unsigned int 
+	 */
 	unsigned int WIN_FUNC GetShortPathNameA(const char* lpszLongPath, char* lpszShortPath, unsigned int cchBuffer) {
 		DEBUG_LOG("GetShortPathNameA(%s)...\n",lpszShortPath);
 		std::filesystem::path absPath = std::filesystem::absolute(files::pathFromWindows(lpszLongPath));

@@ -1171,6 +1171,10 @@ namespace kernel32 {
 			void *mem = 0;
 			posix_memalign(&mem, 0x1000, dwSize);
 			memset(mem, 0, dwSize);
+
+			// Windows only fences off the lower 2GB of the 32-bit address space for the private use of processes.
+			assert(mem < (void*)0x80000000);
+
 			DEBUG_LOG("-> %p\n", mem);
 			return mem;
 		} else {

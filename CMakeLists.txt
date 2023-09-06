@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.13)
 
-if (NOT CMAKE_BUILD_TYPE)
+if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Debug" CACHE STRING
-            "Build type options: Debug Release RelWithDebInfo MinSizeRel" FORCE)
-endif ()
+        "Build type options: Debug Release RelWithDebInfo MinSizeRel" FORCE)
+endif()
 
 project(wibo LANGUAGES CXX)
 
@@ -21,10 +21,11 @@ add_executable(wibo
     dll/ole32.cpp
     dll/user32.cpp
     dll/version.cpp
+    dll/msvcrt.cpp
     files.cpp
     handles.cpp
     loader.cpp
     main.cpp
-    )
+)
 target_link_libraries(wibo PRIVATE std::filesystem)
 install(TARGETS wibo DESTINATION bin)

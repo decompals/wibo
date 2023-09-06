@@ -76,6 +76,8 @@ void *wibo::resolveFuncByName(const char *dllName, const char *funcName) {
 		func = wibo::resolveVersion(funcName);
 	} else if (strcasecmp(dllName, "OLE32.dll") == 0) {
 		func = wibo::resolveOle32(funcName);
+	} else if (strcasecmp(dllName, "MSVCRT.dll") == 0) {
+		func = wibo::resolveMsvcrt(funcName);
 	}
 
 	if (func)

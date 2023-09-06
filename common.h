@@ -29,6 +29,7 @@ namespace wibo {
 	void *resolveOle32(const char *name);
 	void *resolveAdvApi32(const char *name);
 	void *resolveLmgr(uint16_t ordinal);
+	void *resolveMsvcrt(const char *name);
 	void *resolveFuncByName(const char *dllName, const char *funcName);
 	void *resolveFuncByOrdinal(const char *dllName, uint16_t ordinal);
 

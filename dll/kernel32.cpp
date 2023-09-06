@@ -550,6 +550,13 @@ namespace kernel32 {
 		}
 
 		FindFirstFileHandle *handle = new FindFirstFileHandle();
+
+		if (!std::filesystem::exists(path.parent_path())) {
+			wibo::lastError = 3; // ERROR_PATH_NOT_FOUND
+			delete handle;
+			return (void *) 0xFFFFFFFF;
+		}
+
 		std::filesystem::directory_iterator it(path.parent_path());
 		handle->it = it;
 		handle->pattern = path.filename().string();
@@ -562,6 +569,28 @@ namespace kernel32 {
 
 		setFindFileDataFromPath(lpFindFileData, *handle->it++);
 		return handle;
+	}
+
+	typedef enum _FINDEX_INFO_LEVELS {
+		FindExInfoStandard,
+		FindExInfoBasic,
+		FindExInfoMaxInfoLevel
+	} FINDEX_INFO_LEVELS;
+
+	typedef enum _FINDEX_SEARCH_OPS {
+		FindExSearchNameMatch,
+		FindExSearchLimitToDirectories,
+		FindExSearchLimitToDevices,
+		FindExSearchMaxSearchOp
+	} FINDEX_SEARCH_OPS;
+
+	void *WIN_FUNC FindFirstFileExA(const char *lpFileName, FINDEX_INFO_LEVELS fInfoLevelId, void *lpFindFileData, FINDEX_SEARCH_OPS fSearchOp, void *lpSearchFilter, unsigned int dwAdditionalFlags) {
+		assert(fInfoLevelId == FindExInfoStandard);
+
+		auto path = files::pathFromWindows(lpFileName);
+		DEBUG_LOG("FindFirstFileExA %s (%s)\n", lpFileName, path.c_str());
+
+		return FindFirstFileA(lpFileName, (WIN32_FIND_DATA<char> *) lpFindFileData);
 	}
 
 	int WIN_FUNC FindNextFileA(void *hFindFile, WIN32_FIND_DATA<char> *lpFindFileData) {
@@ -1525,7 +1554,7 @@ namespace kernel32 {
 			cchSrc = wstrlen(lpSrcStr) + 1;
 		}
 		// DEBUG_LOG("lpSrcStr: %s\n", lpSrcStr);
-		return 0; // fail
+		return 1; // success
 	}
 
 	int WIN_FUNC LCMapStringA(int Locale, unsigned int dwMapFlags, const char* lpSrcStr, int cchSrc, char* lpDestStr, int cchDest) {
@@ -1595,9 +1624,26 @@ namespace kernel32 {
 		memset(ListHead, 0, sizeof(SLIST_HEADER));
 	}
 
-	void WIN_FUNC RtlUnwind(void *TargetFrame, void *TargetIp, void *ExceptionRecord, void *ReturnValue) {
+	typedef struct _EXCEPTION_RECORD {
+		unsigned int                    ExceptionCode;
+		unsigned int                    ExceptionFlags;
+		struct _EXCEPTION_RECORD *ExceptionRecord;
+		void*                    ExceptionAddress;
+		unsigned int                    NumberParameters;
+		void*                ExceptionInformation[15];
+	} EXCEPTION_RECORD;
+
+	void WIN_FUNC RtlUnwind(void *TargetFrame, void *TargetIp, EXCEPTION_RECORD *ExceptionRecord, void *ReturnValue) {
 		DEBUG_LOG("RtlUnwind %p %p %p %p\n", TargetFrame, TargetIp, ExceptionRecord, ReturnValue);
-		printf("Aborting due to exception\n");
+		DEBUG_LOG("Code: %x\n", ExceptionRecord->ExceptionCode);
+
+		if (ExceptionRecord->ExceptionCode == 0x80000026) {
+			// STATUS_LONGJUMP - VCRT uses SEH to implement longjmp
+			DEBUG_LOG("Ignoring longjmp triggered through RtlUnwind");
+			return;
+		}
+
+		printf("Aborting due to exception (code %x)\n", ExceptionRecord->ExceptionCode);
 		exit(1);
 	}
 
@@ -1607,6 +1653,12 @@ namespace kernel32 {
 
 	int WIN_FUNC InterlockedDecrement(int *Addend) {
 		return *Addend -= 1;
+	}
+
+	int WIN_FUNC InterlockedExchange(int *Target, int Value) {
+		int initial = *Target;
+		*Target = Value;
+		return initial;
 	}
 }
 
@@ -1686,6 +1738,7 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "GetFullPathNameA") == 0) return (void *) kernel32::GetFullPathNameA;
 	if (strcmp(name, "GetShortPathNameA") == 0) return (void *) kernel32::GetShortPathNameA;
 	if (strcmp(name, "FindFirstFileA") == 0) return (void *) kernel32::FindFirstFileA;
+	if (strcmp(name, "FindFirstFileExA") == 0) return (void *) kernel32::FindFirstFileExA;
 	if (strcmp(name, "FindNextFileA") == 0) return (void *) kernel32::FindNextFileA;
 	if (strcmp(name, "FindClose") == 0) return (void *) kernel32::FindClose;
 	if (strcmp(name, "GetFileAttributesA") == 0) return (void *) kernel32::GetFileAttributesA;
@@ -1771,6 +1824,7 @@ void *wibo::resolveKernel32(const char *name) {
 	if (strcmp(name, "RtlUnwind") == 0) return (void *) kernel32::RtlUnwind;
 	if (strcmp(name, "InterlockedIncrement") == 0) return (void *) kernel32::InterlockedIncrement;
 	if (strcmp(name, "InterlockedDecrement") == 0) return (void *) kernel32::InterlockedDecrement;
+	if (strcmp(name, "InterlockedExchange") == 0) return (void *) kernel32::InterlockedExchange;
 
 	return 0;
 }

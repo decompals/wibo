@@ -1635,16 +1635,7 @@ namespace kernel32 {
 
 	void WIN_FUNC RtlUnwind(void *TargetFrame, void *TargetIp, EXCEPTION_RECORD *ExceptionRecord, void *ReturnValue) {
 		DEBUG_LOG("RtlUnwind %p %p %p %p\n", TargetFrame, TargetIp, ExceptionRecord, ReturnValue);
-		DEBUG_LOG("Code: %x\n", ExceptionRecord->ExceptionCode);
-
-		if (ExceptionRecord->ExceptionCode == 0x80000026) {
-			// STATUS_LONGJUMP - VCRT uses SEH to implement longjmp
-			DEBUG_LOG("Ignoring longjmp triggered through RtlUnwind");
-			return;
-		}
-
-		printf("Aborting due to exception (code %x)\n", ExceptionRecord->ExceptionCode);
-		exit(1);
+		DEBUG_LOG("WARNING: Silently returning from RtlUnwind - exception handlers and clean up code may not be run");
 	}
 
 	int WIN_FUNC InterlockedIncrement(int *Addend) {

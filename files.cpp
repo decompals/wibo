@@ -15,6 +15,11 @@ namespace files {
 		std::string str = inStr;
 		std::replace(str.begin(), str.end(), '\\', '/');
 
+		// Remove "//?/" prefix
+		if (str.rfind("//?/", 0) == 0) {
+			str.erase(0, 4);
+		}
+
 		// Remove the drive letter
 		if (str.rfind("z:/", 0) == 0 || str.rfind("Z:/", 0) == 0) {
 			str.erase(0, 2);

@@ -29,8 +29,18 @@ namespace ole32 {
 	}
 }
 
-void *wibo::resolveOle32(const char *name) {
+static void *resolveByName(const char *name) {
 	if (strcmp(name, "CoInitialize") == 0) return (void *) ole32::CoInitialize;
 	if (strcmp(name, "CoCreateInstance") == 0) return (void *) ole32::CoCreateInstance;
-	return 0;
+	return nullptr;
 }
+
+wibo::Module lib_ole32 = {
+	(const char *[]){
+		"ole32",
+		"ole32.dll",
+		nullptr,
+	},
+	resolveByName,
+	nullptr,
+};

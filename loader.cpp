@@ -188,22 +188,24 @@ bool wibo::Executable::loadPE(FILE *file) {
 		uint32_t *lookupTable = fromRVA(dir->importLookupTable);
 		uint32_t *addressTable = fromRVA(dir->importAddressTable);
 
+		HMODULE module = loadModule(dllName);
 		while (*lookupTable) {
 			uint32_t lookup = *lookupTable;
 			if (lookup & 0x80000000) {
 				// Import by ordinal
 				uint16_t ordinal = lookup & 0xFFFF;
 				DEBUG_LOG("  Ordinal: %d\n", ordinal);
-				*addressTable = (uint32_t) resolveFuncByOrdinal(dllName, ordinal);
+				*addressTable = reinterpret_cast<uintptr_t>(resolveFuncByOrdinal(module, ordinal));
 			} else {
 				// Import by name
 				PEHintNameTableEntry *hintName = fromRVA<PEHintNameTableEntry>(lookup);
 				DEBUG_LOG("  Name: %s\n", hintName->name);
-				*addressTable = (uint32_t) resolveFuncByName(dllName, hintName->name);
+				*addressTable = reinterpret_cast<uintptr_t>(resolveFuncByName(module, hintName->name));
 			}
 			++lookupTable;
 			++addressTable;
 		}
+		freeModule(module);
 
 		++dir;
 	}

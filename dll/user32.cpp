@@ -105,8 +105,18 @@ namespace user32 {
 	}
 }
 
-void *wibo::resolveUser32(const char *name) {
+static void *resolveByName(const char *name) {
 	if (strcmp(name, "LoadStringA") == 0) return (void *) user32::LoadStringA;
 	if (strcmp(name, "MessageBoxA") == 0) return (void *) user32::MessageBoxA;
-	return 0;
+	return nullptr;
 }
+
+wibo::Module lib_user32 = {
+	(const char *[]){
+		"user32",
+		"user32.dll",
+		nullptr,
+	},
+	resolveByName,
+	nullptr,
+};

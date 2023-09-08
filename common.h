@@ -38,6 +38,7 @@ typedef unsigned char UCHAR;
 typedef UCHAR *PUCHAR;
 typedef size_t SIZE_T;
 typedef SIZE_T *PSIZE_T;
+typedef unsigned char BYTE;
 
 #define TRUE 1
 #define FALSE 0

@@ -1711,6 +1711,11 @@ namespace kernel32 {
 		return 1;
 	}
 
+	BOOL WIN_FUNC IsDBCSLeadByte(BYTE TestChar) {
+		DEBUG_LOG("IsDBCSLeadByte(%u)\n", TestChar);
+		return FALSE; // We're not multibyte (yet?)
+	}
+
 	int WIN_FUNC LCMapStringW(int Locale, unsigned int dwMapFlags, const uint16_t* lpSrcStr, int cchSrc, uint16_t* lpDestStr, int cchDest) {
 		DEBUG_LOG("LCMapStringW: (locale=%i, flags=%u, src=%p, dest=%p)\n", Locale, dwMapFlags, cchSrc, cchDest);
 		if (cchSrc < 0) {
@@ -1872,6 +1877,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "LCMapStringA") == 0) return (void *) kernel32::LCMapStringA;
 	if (strcmp(name, "GetLocaleInfoA") == 0) return (void *) kernel32::GetLocaleInfoA;
 	if (strcmp(name, "GetUserDefaultLCID") == 0) return (void *) kernel32::GetUserDefaultLCID;
+	if (strcmp(name, "IsDBCSLeadByte") == 0) return (void *) kernel32::IsDBCSLeadByte;
 
 	// synchapi.h
 	if (strcmp(name, "InitializeCriticalSection") == 0) return (void *) kernel32::InitializeCriticalSection;

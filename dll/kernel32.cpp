@@ -540,7 +540,7 @@ namespace kernel32 {
 
 		const DWORD absStrWLen = wstrlen(absStrW);
 		const DWORD absStrWSize = absStrWLen * 2;
-		if ((absStrWSize + 1) <= nBufferLength) {
+		if ((absStrWSize + 2) <= nBufferLength) {
 			wstrncpy(lpBuffer, absStrW, (int)absStrWLen);
 			assert(!lpFilePart);
 			free(absStrW);
@@ -875,7 +875,8 @@ namespace kernel32 {
 		return r;
 	}
 
-	DWORD WIN_FUNC SetFilePointerEx(HANDLE hFile, LARGE_INTEGER lDistanceToMove, PLARGE_INTEGER lpDistanceToMoveHigh, DWORD dwMoveMethod) {
+	BOOL WIN_FUNC SetFilePointerEx(HANDLE hFile, LARGE_INTEGER lDistanceToMove, PLARGE_INTEGER lpDistanceToMoveHigh,
+								   DWORD dwMoveMethod) {
 		assert(!lpDistanceToMoveHigh || *lpDistanceToMoveHigh == 0);
 		DEBUG_LOG("SetFilePointerEx(%p, %ld, %d)\n", hFile, lDistanceToMove, dwMoveMethod);
 		FILE *fp = files::fpFromHandle(hFile);
@@ -892,7 +893,7 @@ namespace kernel32 {
 
 		r = ftell(fp);
 		assert(r >= 0);
-		return r;
+		return TRUE;
 	}
 
 	int WIN_FUNC SetEndOfFile(void *hFile) {
@@ -1764,13 +1765,14 @@ namespace kernel32 {
 		}
 		unsigned int len = strlen(value) * 2;
 		if (nSize == 0) {
-			return len + 1;
+			return len + 2;
 		}
 		if (nSize < len) {
 			return len;
 		}
 		const uint16_t *wideValue = stringToWideString(value);
-		memcpy(lpBuffer, wideValue, len + 1);
+		memcpy(lpBuffer, wideValue, len + 2);
+		free((void *)wideValue);
 		return len;
 	}
 

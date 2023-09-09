@@ -9,7 +9,7 @@ namespace version {
 	}
 }
 
-void *resolveByName(const char *name) {
+static void *resolveByName(const char *name) {
 	if (strcmp(name, "GetFileVersionInfoSizeA") == 0) return (void *) version::GetFileVersionInfoSizeA;
 	return nullptr;
 }

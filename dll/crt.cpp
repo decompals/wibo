@@ -17,8 +17,7 @@ typedef enum _crt_argv_mode {
 
 namespace crt {
 
-int _commode;
-void (*_crt_atexit_func)();
+int _commode = 0;
 
 void WIN_ENTRY _initterm(const _PVFV *ppfn, const _PVFV *end) {
 	do {
@@ -49,7 +48,7 @@ int WIN_ENTRY _set_fmode(int mode) {
 int *WIN_ENTRY __p__commode() { return &_commode; }
 
 int WIN_ENTRY _crt_atexit(void (*func)()) {
-	_crt_atexit_func = func;
+	DEBUG_LOG("STUB: _crt_atexit(%p)\n", func);
 	return 0;
 }
 

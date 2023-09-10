@@ -9,7 +9,17 @@ namespace version {
 	}
 }
 
-void *wibo::resolveVersion(const char *name) {
+static void *resolveByName(const char *name) {
 	if (strcmp(name, "GetFileVersionInfoSizeA") == 0) return (void *) version::GetFileVersionInfoSizeA;
-	return 0;
+	return nullptr;
 }
+
+wibo::Module lib_version = {
+	(const char *[]){
+		"version",
+		"version.dll",
+		nullptr,
+	},
+	resolveByName,
+	nullptr,
+};

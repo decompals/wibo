@@ -13,7 +13,7 @@ namespace lmgr {
 	}
 }
 
-void *wibo::resolveLmgr(uint16_t ordinal) {
+static void *resolveByOrdinal(uint16_t ordinal) {
 	switch (ordinal) {
 	case 189:
 		return (void*)lmgr::lp_checkin;
@@ -22,3 +22,17 @@ void *wibo::resolveLmgr(uint16_t ordinal) {
 	}
 	return 0;
 }
+
+wibo::Module lib_lmgr = {
+	(const char *[]){
+		"lmgr11",
+		"lmgr11.dll",
+		"lmgr326b",
+		"lmgr326b.dll",
+		"lmgr8c",
+		"lmgr8c.dll",
+		nullptr,
+	},
+	nullptr,
+	resolveByOrdinal,
+};

@@ -7,8 +7,17 @@ namespace advapi32 {
 	}
 }
 
-void *wibo::resolveAdvApi32(const char *name) {
+static void *resolveByName(const char *name) {
 	if (strcmp(name, "RegOpenKeyExA") == 0) return (void *) advapi32::RegOpenKeyExA;
-	return 0;
+	return nullptr;
 }
 
+wibo::Module lib_advapi32 = {
+	(const char *[]){
+		"advapi32",
+		"advapi32.dll",
+		nullptr,
+	},
+	resolveByName,
+	nullptr,
+};

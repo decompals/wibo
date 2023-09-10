@@ -1,4 +1,4 @@
-# WiBo
+# wibo
 
 A minimal, low-fuss wrapper that can run really simple command-line 32-bit Windows binaries on Linux - with less faff and less dependencies than WINE.
 

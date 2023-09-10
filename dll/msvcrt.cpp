@@ -17,10 +17,20 @@ namespace msvcrt {
 	}
 }
 
-void *wibo::resolveMsvcrt(const char *name) {
+
+static void *resolveByName(const char *name) {
 	if (strcmp(name, "__set_app_type") == 0) return (void *) msvcrt::__set_app_type;
 	if (strcmp(name, "__p__fmode") == 0) return (void *) msvcrt::__p__fmode;
 	if (strcmp(name, "__p__commode") == 0) return (void *) msvcrt::__p__commode;
-	return 0;
+	return nullptr;
 }
 
+wibo::Module lib_msvcrt = {
+	(const char *[]){
+		"msvcrt40",
+		"msvcrt40.dll",
+		nullptr,
+	},
+	resolveByName,
+	nullptr,
+};

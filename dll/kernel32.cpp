@@ -917,7 +917,7 @@ namespace kernel32 {
 				wibo::lastError = ERROR_NEGATIVE_SEEK;
 			else
 				wibo::lastError = ERROR_INVALID_PARAMETER;
-			return INVALID_SET_FILE_POINTER;
+			return FALSE;
 		}
 
 		r = ftell(fp);

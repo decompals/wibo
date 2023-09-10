@@ -4,8 +4,8 @@ namespace msvcrt {
 	int _commode;
 	int _fmode;
 
+	// Stub because we're only ever a console application
 	void WIN_FUNC __set_app_type(int at) {
-
 	}
 
 	int* WIN_FUNC __p__fmode() {

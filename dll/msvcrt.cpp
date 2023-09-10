@@ -23,3 +23,4 @@ void *wibo::resolveMsvcrt(const char *name) {
 	if (strcmp(name, "__p__commode") == 0) return (void *) msvcrt::__p__commode;
 	return 0;
 }
+

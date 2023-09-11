@@ -20,12 +20,13 @@ add_executable(wibo
     dll/crt.cpp
     dll/kernel32.cpp
     dll/lmgr.cpp
+    dll/mscoree.cpp
+    dll/msvcrt.cpp
     dll/ntdll.cpp
     dll/ole32.cpp
     dll/user32.cpp
     dll/vcruntime.cpp
     dll/version.cpp
-    dll/msvcrt.cpp
     files.cpp
     handles.cpp
     loader.cpp

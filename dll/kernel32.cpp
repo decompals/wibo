@@ -34,15 +34,15 @@ typedef struct _EXCEPTION_POINTERS {
 typedef LONG (*PVECTORED_EXCEPTION_HANDLER)(PEXCEPTION_POINTERS ExceptionInfo);
 
 namespace kernel32 {
-	static int wstrlen(const uint16_t *str) {
-		int len = 0;
+	static size_t wstrlen(const uint16_t *str) {
+		size_t len = 0;
 		while (str[len] != 0)
 			++len;
 		return len;
 	}
 
-	static int wstrncpy(uint16_t *dst, const uint16_t *src, int n) {
-		int i = 0;
+	static size_t wstrncpy(uint16_t *dst, const uint16_t *src, size_t n) {
+		size_t i = 0;
 		while (i < n && src[i] != 0) {
 			dst[i] = src[i];
 			++i;
@@ -538,17 +538,15 @@ namespace kernel32 {
 		const auto absStrW = stringToWideString(absStr.c_str());
 		DEBUG_LOG("-> %s\n", absStr.c_str());
 
-		const DWORD absStrWLen = wstrlen(absStrW);
-		const DWORD absStrWSize = absStrWLen * 2;
-		if ((absStrWSize + 2) <= nBufferLength) {
-			wstrncpy(lpBuffer, absStrW, (int)absStrWLen);
-			assert(!lpFilePart);
+		const auto len = wstrlen(absStrW);
+		if (nBufferLength < len + 1) {
 			free(absStrW);
-			return absStrWSize;
-		} else {
-			free(absStrW);
-			return absStrWSize + 2;
+			return len + 1;
 		}
+		wstrncpy(lpBuffer, absStrW, len + 1);
+		assert(!lpFilePart);
+		free(absStrW);
+		return len;
 	}
 
 	/**
@@ -1792,16 +1790,14 @@ namespace kernel32 {
 		if (!value) {
 			return 0;
 		}
-		unsigned int len = strlen(value) * 2;
-		if (nSize == 0) {
-			return len + 2;
+		uint16_t *wideValue = stringToWideString(value);
+		const auto len = wstrlen(wideValue);
+		if (nSize < len + 1) {
+			free(wideValue);
+			return len + 1;
 		}
-		if (nSize < len) {
-			return len;
-		}
-		const uint16_t *wideValue = stringToWideString(value);
-		memcpy(lpBuffer, wideValue, len + 2);
-		free((void *)wideValue);
+		wstrncpy(lpBuffer, wideValue, len + 1);
+		free(wideValue);
 		return len;
 	}
 

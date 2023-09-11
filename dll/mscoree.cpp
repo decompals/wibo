@@ -1,7 +1,7 @@
 #include "common.h"
 
 namespace mscoree {
-	int* WIN_FUNC CorExitProcess(int exitCode) {
+	void WIN_FUNC CorExitProcess(int exitCode) {
 		exit(exitCode);
 	}
 }

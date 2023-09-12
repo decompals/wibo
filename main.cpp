@@ -77,6 +77,7 @@ extern const wibo::Module lib_bcrypt;
 extern const wibo::Module lib_crt;
 extern const wibo::Module lib_kernel32;
 extern const wibo::Module lib_lmgr;
+extern const wibo::Module lib_mscoree;
 extern const wibo::Module lib_msvcrt;
 extern const wibo::Module lib_ntdll;
 extern const wibo::Module lib_ole32;
@@ -89,6 +90,7 @@ const wibo::Module * wibo::modules[] = {
 	&lib_crt,
 	&lib_kernel32,
 	&lib_lmgr,
+	&lib_mscoree,
 	&lib_msvcrt,
 	&lib_ntdll,
 	&lib_ole32,

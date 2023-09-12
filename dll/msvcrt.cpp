@@ -27,8 +27,12 @@ static void *resolveByName(const char *name) {
 
 wibo::Module lib_msvcrt = {
 	(const char *[]){
+		"msvcrt",
+		"msvcrt.dll",
 		"msvcrt40",
 		"msvcrt40.dll",
+		"msvcr70",
+		"msvcr70.dll",
 		nullptr,
 	},
 	resolveByName,

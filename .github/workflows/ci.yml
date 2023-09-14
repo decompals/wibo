@@ -19,7 +19,7 @@ jobs:
 
       - name: Test
         run: |
-          wget https://cdn.discordapp.com/attachments/727918646525165659/917185027656286218/GC_WII_COMPILERS.zip
+          wget https://cdn.discordapp.com/attachments/727918646525165659/1129759991696457728/GC_WII_COMPILERS.zip
           unzip GC_WII_COMPILERS.zip
           MWCIncludes=. build/wibo GC/2.7/mwcceppc.exe -c test/test.c -Itest
           file test.o

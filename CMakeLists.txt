@@ -27,6 +27,7 @@ add_executable(wibo
     dll/version.cpp
     dll/msvcrt.cpp
     files.cpp
+    processes.cpp
     handles.cpp
     loader.cpp
     main.cpp

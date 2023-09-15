@@ -13,15 +13,22 @@
 uint32_t wibo::lastError = 0;
 char** wibo::argv;
 int wibo::argc;
+char *wibo::executableName;
 char *wibo::commandLine;
 wibo::Executable *wibo::mainModule = 0;
 bool wibo::debugEnabled = false;
+unsigned int wibo::debugIndent = 0;
 
 void wibo::debug_log(const char *fmt, ...) {
 	va_list args;
 	va_start(args, fmt);
-	if (wibo::debugEnabled)
+	if (wibo::debugEnabled) {
+		for (size_t i = 0; i < wibo::debugIndent; i++)
+			fprintf(stderr, "\t");
+
 		vfprintf(stderr, fmt, args);
+	}
+	
 	va_end(args);
 }
 
@@ -196,6 +203,11 @@ int main(int argc, char **argv) {
 		wibo::debugEnabled = true;
 	}
 
+	if (getenv("WIBO_DEBUG_INDENT")) {
+		wibo::debugIndent = std::stoul(getenv("WIBO_DEBUG_INDENT"));
+	}
+
+
 	files::init();
 
 	// Create TIB
@@ -262,6 +274,7 @@ int main(int argc, char **argv) {
 	wibo::commandLine = cmdLine.data();
 	DEBUG_LOG("Command line: %s\n", wibo::commandLine);
 
+	wibo::executableName = argv[0];
 	wibo::argv = argv + 1;
 	wibo::argc = argc - 1;
 

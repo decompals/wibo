@@ -1,9 +1,10 @@
+#include <cstdint>
 #include <sched.h>
 
 namespace processes {
     struct Process {
         pid_t pid;
-        unsigned int exitCode;
+        uint32_t exitCode;
     };
 
     void *allocProcessHandle(pid_t pid);

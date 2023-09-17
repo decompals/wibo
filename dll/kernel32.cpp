@@ -238,7 +238,7 @@ namespace kernel32 {
 			bInheritHandles,
 			dwCreationFlags,
 			lpEnvironment,
-			lpCurrentDirectory,
+			lpCurrentDirectory ? lpCurrentDirectory : "<none>",
  			lpStartupInfo,
  			lpProcessInformation
  		);
@@ -300,7 +300,16 @@ namespace kernel32 {
 		
 		int status;
 		waitpid(process->pid, &status, 0);
-		process->exitCode = WEXITSTATUS(status);
+
+		if (WIFEXITED(status)) {
+			process->exitCode = WEXITSTATUS(status);
+		} else {
+			// If we're here, *something* has caused our child process to exit abnormally
+			// Specific exit codes don't really map onto any of these situations - we just know it's bad.
+			// Specify a non-zero exit code to alert our parent process something's gone wrong.
+			DEBUG_LOG("WaitForSingleObject: Child process exited abnormally - returning exit code 1.");
+			process->exitCode = 1; 
+		}
 
 		return 0;
 	}

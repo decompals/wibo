@@ -289,7 +289,7 @@ namespace kernel32 {
  	}
 
 	unsigned int WIN_FUNC WaitForSingleObject(void *hHandle, unsigned int dwMilliseconds) {
-		DEBUG_LOG("WaitForSingleObject (%u)\n", hHandle, dwMilliseconds);
+		DEBUG_LOG("WaitForSingleObject (%u)\n", dwMilliseconds);
 		
 		// TODO - wait on other objects?
 

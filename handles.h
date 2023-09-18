@@ -5,6 +5,7 @@ namespace handles {
         TYPE_UNUSED,
 		TYPE_FILE,
 		TYPE_MAPPED,
+        TYPE_PROCESS
 	};
 
     struct Data {

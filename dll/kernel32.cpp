@@ -1,7 +1,9 @@
 #include "common.h"
 #include "files.h"
+#include "processes.h"
 #include "handles.h"
 #include <algorithm>
+#include <cstdlib>
 #include <ctype.h>
 #include <filesystem>
 #include <fnmatch.h>
@@ -11,6 +13,8 @@
 #include <system_error>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <spawn.h>
 
 typedef union _RTL_RUN_ONCE {
 	PVOID Ptr;
@@ -198,32 +202,115 @@ namespace kernel32 {
 		exit(uExitCode);
 	}
 
-	int WIN_FUNC CreateProcessA(
-		const char *lpApplicationName,
-		char *lpCommandLine,
-		void *lpProcessAttributes,
-		void *lpThreadAttributes,
-		int bInheritHandles,
-		int dwCreationFlags,
-		void *lpEnvironment,
-		const char *lpCurrentDirectory,
-		void *lpStartupInfo,
-		void *lpProcessInformation
-	) {
-		printf("CreateProcessA %s \"%s\" %p %p %d 0x%x %p %s %p %p\n",
-			lpApplicationName,
-			lpCommandLine,
-			lpProcessAttributes,
+	BOOL WIN_FUNC GetExitCodeProcess(HANDLE hProcess, LPDWORD lpExitCode) {
+		DEBUG_LOG("GetExitCodeProcess\n");
+
+		processes::Process* process = processes::processFromHandle(hProcess, false);
+		*lpExitCode = process->exitCode;
+		return 1; // success in retrieval
+	}
+
+	struct PROCESS_INFORMATION {
+		HANDLE hProcess;
+		HANDLE hThread;
+		DWORD  dwProcessId;
+		DWORD  dwThreadId;
+	};
+
+
+ 	BOOL WIN_FUNC CreateProcessA(
+		LPCSTR lpApplicationName,
+		LPSTR lpCommandLine,
+ 		void *lpProcessAttributes,
+ 		void *lpThreadAttributes,
+		BOOL bInheritHandles,
+		DWORD dwCreationFlags,
+		LPVOID lpEnvironment,
+		LPCSTR lpCurrentDirectory,
+ 		void *lpStartupInfo,
+		PROCESS_INFORMATION *lpProcessInformation
+ 	) {
+		DEBUG_LOG("CreateProcessA %s \"%s\" %p %p %d 0x%x %p %s %p %p\n",
+ 			lpApplicationName,
+ 			lpCommandLine,
+ 			lpProcessAttributes,
 			lpThreadAttributes,
 			bInheritHandles,
 			dwCreationFlags,
 			lpEnvironment,
 			lpCurrentDirectory ? lpCurrentDirectory : "<none>",
-			lpStartupInfo,
-			lpProcessInformation
-		);
-		printf("Cannot handle process creation, aborting\n");
-		exit(1);
+ 			lpStartupInfo,
+ 			lpProcessInformation
+ 		);
+
+		// Argument parsing
+		// First: how many arguments do we have?
+		size_t argc = 2;
+
+		for (size_t i = 1; i < strlen(lpCommandLine); i++) {
+			if (isspace(lpCommandLine[i]) && !isspace(lpCommandLine[i - 1]))
+				argc++;
+		}
+
+		char **argv = (char **) calloc(argc + 1, sizeof(char*));
+		argv[0] = wibo::executableName;
+		argv[1] = (char *) files::pathFromWindows(lpApplicationName).string().c_str();
+
+		char* arg = strtok(lpCommandLine, " ");
+		size_t current_arg_index = 2;
+
+		while (arg != NULL) {
+			// We're deliberately discarding the first token here
+			// to prevent from doubling up on the target executable name
+			// (it appears as lpApplicationName, and as the first token in lpCommandLine)
+			arg = strtok(NULL, " ");
+			argv[current_arg_index++] = arg;
+		}
+
+		argv[argc] = NULL; // Last element in argv should be a null pointer
+
+		// YET TODO: take into account process / thread attributes, environment variables
+		// working directory, etc.
+		setenv("WIBO_DEBUG_INDENT", std::to_string(wibo::debugIndent + 1).c_str(), true);
+
+		pid_t pid;
+		if (posix_spawn(&pid, wibo::executableName, NULL, NULL, argv, environ)) {
+			return 0;
+		};
+
+		*lpProcessInformation = {
+			.hProcess = processes::allocProcessHandle(pid),
+			.hThread = nullptr,
+			.dwProcessId = (DWORD) pid,
+			.dwThreadId = 42
+		};
+
+		return 1;
+ 	}
+
+	unsigned int WIN_FUNC WaitForSingleObject(void *hHandle, unsigned int dwMilliseconds) {
+		DEBUG_LOG("WaitForSingleObject (%u)\n", dwMilliseconds);
+		
+		// TODO - wait on other objects?
+
+		// TODO: wait for less than forever
+		assert(dwMilliseconds == 0xffffffff); 
+
+		processes::Process* process = processes::processFromHandle(hHandle, false);
+		
+		int status;
+		waitpid(process->pid, &status, 0);
+
+		if (WIFEXITED(status)) {
+			process->exitCode = WEXITSTATUS(status);
+		} else {
+			// If we're here, *something* has caused our child process to exit abnormally
+			// Specific exit codes don't really map onto any of these situations - we just know it's bad.
+			// Specify a non-zero exit code to alert our parent process something's gone wrong.
+			DEBUG_LOG("WaitForSingleObject: Child process exited abnormally - returning exit code 1.");
+			process->exitCode = 1; 
+		}
+
 		return 0;
 	}
 
@@ -498,6 +585,8 @@ namespace kernel32 {
 			if (data.ptr != (void *) 0x1) {
 				munmap(data.ptr, data.size);
 			}
+		} else if (data.type == handles::TYPE_PROCESS) {
+			delete (processes::Process*) data.ptr;
 		}
 		return TRUE;
 	}
@@ -1895,6 +1984,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "GetCurrentProcessId") == 0) return (void *) kernel32::GetCurrentProcessId;
 	if (strcmp(name, "GetCurrentThreadId") == 0) return (void *) kernel32::GetCurrentThreadId;
 	if (strcmp(name, "ExitProcess") == 0) return (void *) kernel32::ExitProcess;
+	if (strcmp(name, "GetExitCodeProcess") == 0) return (void *) kernel32::GetExitCodeProcess;
 	if (strcmp(name, "CreateProcessA") == 0) return (void *) kernel32::CreateProcessA;
 	if (strcmp(name, "TlsAlloc") == 0) return (void *) kernel32::TlsAlloc;
 	if (strcmp(name, "TlsFree") == 0) return (void *) kernel32::TlsFree;
@@ -1934,6 +2024,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "AcquireSRWLockExclusive") == 0) return (void *) kernel32::AcquireSRWLockExclusive;
 	if (strcmp(name, "ReleaseSRWLockExclusive") == 0) return (void *) kernel32::ReleaseSRWLockExclusive;
 	if (strcmp(name, "TryAcquireSRWLockExclusive") == 0) return (void *) kernel32::TryAcquireSRWLockExclusive;
+	if (strcmp(name, "WaitForSingleObject") == 0) return (void *) kernel32::WaitForSingleObject;
 
 	// winbase.h
 	if (strcmp(name, "GlobalAlloc") == 0) return (void *) kernel32::GlobalAlloc;

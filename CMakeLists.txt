@@ -28,6 +28,7 @@ add_executable(wibo
     dll/vcruntime.cpp
     dll/version.cpp
     files.cpp
+    processes.cpp
     handles.cpp
     loader.cpp
     main.cpp

@@ -1800,8 +1800,7 @@ namespace kernel32 {
 		return 1;
 	}
 
-	int WIN_FUNC GetLocaleInfoA(unsigned int Locale, int LCType, char *lpLCData, int cchData) {
-		DEBUG_LOG("GetLocaleInfoA %d %d\n", Locale, LCType);
+	std::string str_for_LCType(int LCType) {
 		std::string ret;
 		// https://www.pinvoke.net/default.aspx/Enums/LCType.html
 		if (LCType == 4100) { // LOCALE_IDEFAULTANSICODEPAGE
@@ -1814,6 +1813,12 @@ namespace kernel32 {
 		if (LCType == 4098) { // LOCALE_SENGCOUNTRY
 			ret = "Country";
 		}
+		return ret;
+	}
+
+	int WIN_FUNC GetLocaleInfoA(unsigned int Locale, int LCType, char *lpLCData, int cchData) {
+		DEBUG_LOG("GetLocaleInfoA %d %d\n", Locale, LCType);
+		std::string ret = str_for_LCType(LCType);
 
 		if (!cchData) {
 			return ret.size() + 1;
@@ -1823,8 +1828,17 @@ namespace kernel32 {
 		}
 	}
 
-	int WIN_FUNC GetLocaleInfoW(unsigned int Locale, int LCType, char *lpLCData, int cchData) {
-		return GetLocaleInfoA(Locale, LCType, lpLCData, cchData); // lol
+	int WIN_FUNC GetLocaleInfoW(unsigned int Locale, int LCType, wchar_t *lpLCData, int cchData) {
+		DEBUG_LOG("GetLocaleInfoW %d %d\n", Locale, LCType);
+		std::string info = str_for_LCType(LCType);
+		std::wstring ret(ret.begin(), ret.end());
+
+		if (!cchData) {
+			return ret.size() + 1;
+		} else {
+			memcpy(lpLCData, ret.c_str(), ret.size() + sizeof(wchar_t));
+			return 1;
+		}
 	}
 
 	int WIN_FUNC GetUserDefaultLCID() {

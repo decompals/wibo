@@ -1823,6 +1823,10 @@ namespace kernel32 {
 		}
 	}
 
+	int WIN_FUNC GetLocaleInfoW(unsigned int Locale, int LCType, char *lpLCData, int cchData) {
+		return GetLocaleInfoA(Locale, LCType, lpLCData, cchData); // lol
+	}
+
 	int WIN_FUNC GetUserDefaultLCID() {
 		DEBUG_LOG("GetUserDefaultLCID\n");
 		return 1;
@@ -2007,6 +2011,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "LCMapStringW") == 0) return (void *) kernel32::LCMapStringW;
 	if (strcmp(name, "LCMapStringA") == 0) return (void *) kernel32::LCMapStringA;
 	if (strcmp(name, "GetLocaleInfoA") == 0) return (void *) kernel32::GetLocaleInfoA;
+	if (strcmp(name, "GetLocaleInfoW") == 0) return (void *) kernel32::GetLocaleInfoW;
 	if (strcmp(name, "GetUserDefaultLCID") == 0) return (void *) kernel32::GetUserDefaultLCID;
 	if (strcmp(name, "IsDBCSLeadByte") == 0) return (void *) kernel32::IsDBCSLeadByte;
 

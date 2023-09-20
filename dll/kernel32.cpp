@@ -1801,42 +1801,45 @@ namespace kernel32 {
 	}
 
 	std::string str_for_LCType(int LCType) {
-		std::string ret;
 		// https://www.pinvoke.net/default.aspx/Enums/LCType.html
 		if (LCType == 4100) { // LOCALE_IDEFAULTANSICODEPAGE
 			// Latin1; ref GetACP
-			ret = "28591";
+			return "28591";
 		}
 		if (LCType == 4097) { // LOCALE_SENGLANGUAGE
-			ret = "Lang";
+			return "Lang";
 		}
 		if (LCType == 4098) { // LOCALE_SENGCOUNTRY
-			ret = "Country";
+			return "Country";
 		}
-		return ret;
+		assert(false); // something better?
 	}
 
-	int WIN_FUNC GetLocaleInfoA(unsigned int Locale, int LCType, char *lpLCData, int cchData) {
+	int WIN_FUNC GetLocaleInfoA(unsigned int Locale, int LCType, LPSTR lpLCData, int cchData) {
 		DEBUG_LOG("GetLocaleInfoA %d %d\n", Locale, LCType);
 		std::string ret = str_for_LCType(LCType);
+		size_t len = ret.size() + 1;
 
 		if (!cchData) {
-			return ret.size() + 1;
+			return len;
 		} else {
-			memcpy(lpLCData, ret.c_str(), ret.size() + 1);
+			assert(len <= cchData);
+			memcpy(lpLCData, ret.c_str(), len);
 			return 1;
 		}
 	}
 
-	int WIN_FUNC GetLocaleInfoW(unsigned int Locale, int LCType, wchar_t *lpLCData, int cchData) {
+	int WIN_FUNC GetLocaleInfoW(unsigned int Locale, int LCType, LPWSTR lpLCData, int cchData) {
 		DEBUG_LOG("GetLocaleInfoW %d %d\n", Locale, LCType);
 		std::string info = str_for_LCType(LCType);
-		std::wstring ret(ret.begin(), ret.end());
+		LPWSTR ret = stringToWideString(info.c_str());
+		size_t len = (info.size() + 1) * sizeof(uint16_t);
 
 		if (!cchData) {
-			return ret.size() + 1;
+			return len;
 		} else {
-			memcpy(lpLCData, ret.c_str(), ret.size() + sizeof(wchar_t));
+			assert(len <= cchData);
+			memcpy(lpLCData, ret, len);
 			return 1;
 		}
 	}

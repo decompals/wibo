@@ -1791,7 +1791,7 @@ namespace kernel32 {
 		DEBUG_LOG("GetLocaleInfoW %d %d\n", Locale, LCType);
 		std::string info = str_for_LCType(LCType);
 		auto ret = stringToWideString(info.c_str());
-		size_t len = info.size() + 1;
+		size_t len = ret.size();
 
 		if (!cchData) {
 			return len;
@@ -1860,10 +1860,11 @@ namespace kernel32 {
 		}
 		auto wideValue = stringToWideString(value);
 		const auto len = wstrlen(wideValue.data());
-		if (nSize < len + 1) {
-			return len + 1;
+		const auto wvSize = wideValue.size();
+		if (nSize < wvSize) {
+			return wvSize;
 		}
-		wstrncpy(lpBuffer, wideValue.data(), len + 1);
+		wstrncpy(lpBuffer, wideValue.data(), wvSize);
 		return len;
 	}
 

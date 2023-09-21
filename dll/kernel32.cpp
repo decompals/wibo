@@ -1859,13 +1859,12 @@ namespace kernel32 {
 			return 0;
 		}
 		auto wideValue = stringToWideString(value);
-		const auto len = wstrlen(wideValue.data());
-		const auto wvSize = wideValue.size();
-		if (nSize < wvSize) {
-			return wvSize;
+		const auto len = wideValue.size();
+		if (nSize < len) {
+			return len;
 		}
-		wstrncpy(lpBuffer, wideValue.data(), wvSize);
-		return len;
+		wstrncpy(lpBuffer, wideValue.data(), len);
+		return len - 1;
 	}
 
 	unsigned int WIN_FUNC QueryPerformanceCounter(unsigned long int *lpPerformanceCount) {

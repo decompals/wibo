@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fnmatch.h>
 #include <string>
+#include "strutil.h"
 #include <malloc.h>
 #include <stdarg.h>
 #include <system_error>
@@ -39,24 +40,6 @@ typedef struct _EXCEPTION_POINTERS {
 typedef LONG (*PVECTORED_EXCEPTION_HANDLER)(PEXCEPTION_POINTERS ExceptionInfo);
 
 namespace kernel32 {
-	static size_t wstrlen(const uint16_t *str) {
-		size_t len = 0;
-		while (str[len] != 0)
-			++len;
-		return len;
-	}
-
-	static size_t wstrncpy(uint16_t *dst, const uint16_t *src, size_t n) {
-		size_t i = 0;
-		while (i < n && src[i] != 0) {
-			dst[i] = src[i];
-			++i;
-		}
-		if (i < n)
-			dst[i] = 0;
-		return i;
-	}
-
 	static void *doAlloc(unsigned int dwBytes, bool zero) {
 		if (dwBytes == 0)
 			dwBytes = 1;
@@ -77,29 +60,6 @@ namespace kernel32 {
 			memset((char*)ret + oldSize, 0, newSize - oldSize);
 		}
 		return ret;
-	}
-
-	static std::string wideStringToString(const uint16_t *src, int len = -1) {
-		if (len < 0) {
-			len = src ? wstrlen(src) : 0;
-		}
-		std::string res(len, '\0');
-		for (int i = 0; i < len; i++) {
-			res[i] = src[i] & 0xFF;
-		}
-		return res;
-	}
-
-	static std::vector<uint16_t> stringToWideString(const char *src) {
-		int len = strlen(src);
-		std::vector<uint16_t> res(len + 1);
-
-		for (size_t i = 0; i < res.size(); i++) {
-			res[i] = src[i] & 0xFF;
-		}
-		res[len] = 0; // NUL terminate
-
-		return res;
 	}
 
 	static int doCompareString(const std::string &a, const std::string &b, unsigned int dwCmpFlags) {
@@ -477,7 +437,7 @@ namespace kernel32 {
 
 	LPWSTR WIN_FUNC GetCommandLineW() {
 		DEBUG_LOG("GetCommandLineW -> ");
-		return stringToWideString(GetCommandLineA()).data();
+		return wibo::commandLineW.data();
 	}
 
 	char *WIN_FUNC GetEnvironmentStrings() {
@@ -624,14 +584,14 @@ namespace kernel32 {
 		const auto lpFileNameA = wideStringToString(lpFileName);
 		std::filesystem::path absPath = std::filesystem::absolute(files::pathFromWindows(lpFileNameA.c_str()));
 		std::string absStr = files::pathToWindows(absPath);
-		const auto absStrW = stringToWideString(absStr.c_str()).data();
+		const auto absStrW = stringToWideString(absStr.c_str());
 		DEBUG_LOG("-> %s\n", absStr.c_str());
 
-		const auto len = wstrlen(absStrW);
+		const auto len = wstrlen(absStrW.data());
 		if (nBufferLength < len + 1) {
 			return len + 1;
 		}
-		wstrncpy(lpBuffer, absStrW, len + 1);
+		wstrncpy(lpBuffer, absStrW.data(), len + 1);
 		assert(!lpFilePart);
 		return len;
 	}
@@ -1821,7 +1781,7 @@ namespace kernel32 {
 		if (!cchData) {
 			return len;
 		} else {
-			assert(len <= cchData);
+			assert(len <= (size_t) cchData);
 			memcpy(lpLCData, ret.c_str(), len);
 			return 1;
 		}
@@ -1830,14 +1790,14 @@ namespace kernel32 {
 	int WIN_FUNC GetLocaleInfoW(unsigned int Locale, int LCType, LPWSTR lpLCData, int cchData) {
 		DEBUG_LOG("GetLocaleInfoW %d %d\n", Locale, LCType);
 		std::string info = str_for_LCType(LCType);
-		LPWSTR ret = stringToWideString(info.c_str()).data();
+		auto ret = stringToWideString(info.c_str());
 		size_t len = info.size() + 1;
 
 		if (!cchData) {
 			return len;
 		} else {
-			assert(len <= cchData);
-			memcpy(lpLCData, ret, len * sizeof(*ret));
+			assert(len <= (size_t) cchData);
+			memcpy(lpLCData, ret.data(), len * sizeof(*ret.data()));
 			return 1;
 		}
 	}
@@ -1898,12 +1858,12 @@ namespace kernel32 {
 		if (!value) {
 			return 0;
 		}
-		uint16_t *wideValue = stringToWideString(value).data();
-		const auto len = wstrlen(wideValue);
+		auto wideValue = stringToWideString(value);
+		const auto len = wstrlen(wideValue.data());
 		if (nSize < len + 1) {
 			return len + 1;
 		}
-		wstrncpy(lpBuffer, wideValue, len + 1);
+		wstrncpy(lpBuffer, wideValue.data(), len + 1);
 		return len;
 	}
 

@@ -6,6 +6,7 @@
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <vector>
 
 // On Windows, the incoming stack is aligned to a 4 byte boundary.
 // force_align_arg_pointer will realign the stack to match GCC's 16 byte alignment.
@@ -74,6 +75,7 @@ namespace wibo {
 	extern int argc;
 	extern char *executableName;
 	extern char *commandLine;
+	extern std::vector<uint16_t> commandLineW;
 	extern bool debugEnabled;
 	extern unsigned int debugIndent;
 

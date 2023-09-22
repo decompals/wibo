@@ -4,17 +4,20 @@
 #include <filesystem>
 #include <errno.h>
 #include <memory>
+#include "strutil.h"
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <stdarg.h>
 #include <iostream>
 #include <fstream>
+#include <vector>
 
 uint32_t wibo::lastError = 0;
 char** wibo::argv;
 int wibo::argc;
 char *wibo::executableName;
 char *wibo::commandLine;
+std::vector<uint16_t> wibo::commandLineW;
 wibo::Executable *wibo::mainModule = 0;
 bool wibo::debugEnabled = false;
 unsigned int wibo::debugIndent = 0;
@@ -274,6 +277,7 @@ int main(int argc, char **argv) {
 	cmdLine += '\0';
 
 	wibo::commandLine = cmdLine.data();
+	wibo::commandLineW = stringToWideString(wibo::commandLine);
 	DEBUG_LOG("Command line: %s\n", wibo::commandLine);
 
 	wibo::executableName = argv[0];

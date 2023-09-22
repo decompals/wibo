@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fnmatch.h>
 #include <string>
+#include "strutil.h"
 #include <malloc.h>
 #include <stdarg.h>
 #include <system_error>
@@ -15,6 +16,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <spawn.h>
+#include <vector>
 
 typedef union _RTL_RUN_ONCE {
 	PVOID Ptr;
@@ -38,24 +40,6 @@ typedef struct _EXCEPTION_POINTERS {
 typedef LONG (*PVECTORED_EXCEPTION_HANDLER)(PEXCEPTION_POINTERS ExceptionInfo);
 
 namespace kernel32 {
-	static size_t wstrlen(const uint16_t *str) {
-		size_t len = 0;
-		while (str[len] != 0)
-			++len;
-		return len;
-	}
-
-	static size_t wstrncpy(uint16_t *dst, const uint16_t *src, size_t n) {
-		size_t i = 0;
-		while (i < n && src[i] != 0) {
-			dst[i] = src[i];
-			++i;
-		}
-		if (i < n)
-			dst[i] = 0;
-		return i;
-	}
-
 	static void *doAlloc(unsigned int dwBytes, bool zero) {
 		if (dwBytes == 0)
 			dwBytes = 1;
@@ -76,30 +60,6 @@ namespace kernel32 {
 			memset((char*)ret + oldSize, 0, newSize - oldSize);
 		}
 		return ret;
-	}
-
-	static std::string wideStringToString(const uint16_t *src, int len = -1) {
-		if (len < 0) {
-			len = src ? wstrlen(src) : 0;
-		}
-		std::string res(len, '\0');
-		for (int i = 0; i < len; i++) {
-			res[i] = src[i] & 0xFF;
-		}
-		return res;
-	}
-
-	static uint16_t *stringToWideString(const char *src) {
-		uint16_t *res = nullptr;
-
-		int len = strlen(src);
-		res = (uint16_t *)malloc((len + 1) * 2);
-		for (int i = 0; i < len; i++) {
-			res[i] = src[i] & 0xFF;
-		}
-		res[len] = 0; // NUL terminate
-
-		return res;
 	}
 
 	static int doCompareString(const std::string &a, const std::string &b, unsigned int dwCmpFlags) {
@@ -477,7 +437,7 @@ namespace kernel32 {
 
 	LPWSTR WIN_FUNC GetCommandLineW() {
 		DEBUG_LOG("GetCommandLineW -> ");
-		return stringToWideString(GetCommandLineA());
+		return wibo::commandLineW.data();
 	}
 
 	char *WIN_FUNC GetEnvironmentStrings() {
@@ -627,14 +587,12 @@ namespace kernel32 {
 		const auto absStrW = stringToWideString(absStr.c_str());
 		DEBUG_LOG("-> %s\n", absStr.c_str());
 
-		const auto len = wstrlen(absStrW);
+		const auto len = wstrlen(absStrW.data());
 		if (nBufferLength < len + 1) {
-			free(absStrW);
 			return len + 1;
 		}
-		wstrncpy(lpBuffer, absStrW, len + 1);
+		wstrncpy(lpBuffer, absStrW.data(), len + 1);
 		assert(!lpFilePart);
-		free(absStrW);
 		return len;
 	}
 
@@ -1800,25 +1758,46 @@ namespace kernel32 {
 		return 1;
 	}
 
-	int WIN_FUNC GetLocaleInfoA(unsigned int Locale, int LCType, char *lpLCData, int cchData) {
-		DEBUG_LOG("GetLocaleInfoA %d %d\n", Locale, LCType);
-		std::string ret;
+	std::string str_for_LCType(int LCType) {
 		// https://www.pinvoke.net/default.aspx/Enums/LCType.html
 		if (LCType == 4100) { // LOCALE_IDEFAULTANSICODEPAGE
 			// Latin1; ref GetACP
-			ret = "28591";
+			return "28591";
 		}
 		if (LCType == 4097) { // LOCALE_SENGLANGUAGE
-			ret = "Lang";
+			return "Lang";
 		}
 		if (LCType == 4098) { // LOCALE_SENGCOUNTRY
-			ret = "Country";
+			return "Country";
 		}
+		assert(false);
+	}
+
+	int WIN_FUNC GetLocaleInfoA(unsigned int Locale, int LCType, LPSTR lpLCData, int cchData) {
+		DEBUG_LOG("GetLocaleInfoA %d %d\n", Locale, LCType);
+		std::string ret = str_for_LCType(LCType);
+		size_t len = ret.size() + 1;
 
 		if (!cchData) {
-			return ret.size() + 1;
+			return len;
 		} else {
-			memcpy(lpLCData, ret.c_str(), ret.size() + 1);
+			assert(len <= (size_t) cchData);
+			memcpy(lpLCData, ret.c_str(), len);
+			return 1;
+		}
+	}
+
+	int WIN_FUNC GetLocaleInfoW(unsigned int Locale, int LCType, LPWSTR lpLCData, int cchData) {
+		DEBUG_LOG("GetLocaleInfoW %d %d\n", Locale, LCType);
+		std::string info = str_for_LCType(LCType);
+		auto ret = stringToWideString(info.c_str());
+		size_t len = ret.size();
+
+		if (!cchData) {
+			return len;
+		} else {
+			assert(len <= (size_t) cchData);
+			memcpy(lpLCData, ret.data(), len * sizeof(*ret.data()));
 			return 1;
 		}
 	}
@@ -1879,15 +1858,13 @@ namespace kernel32 {
 		if (!value) {
 			return 0;
 		}
-		uint16_t *wideValue = stringToWideString(value);
-		const auto len = wstrlen(wideValue);
-		if (nSize < len + 1) {
-			free(wideValue);
-			return len + 1;
+		auto wideValue = stringToWideString(value);
+		const auto len = wideValue.size();
+		if (nSize < len) {
+			return len;
 		}
-		wstrncpy(lpBuffer, wideValue, len + 1);
-		free(wideValue);
-		return len;
+		wstrncpy(lpBuffer, wideValue.data(), len);
+		return len - 1;
 	}
 
 	unsigned int WIN_FUNC QueryPerformanceCounter(unsigned long int *lpPerformanceCount) {
@@ -2007,6 +1984,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "LCMapStringW") == 0) return (void *) kernel32::LCMapStringW;
 	if (strcmp(name, "LCMapStringA") == 0) return (void *) kernel32::LCMapStringA;
 	if (strcmp(name, "GetLocaleInfoA") == 0) return (void *) kernel32::GetLocaleInfoA;
+	if (strcmp(name, "GetLocaleInfoW") == 0) return (void *) kernel32::GetLocaleInfoW;
 	if (strcmp(name, "GetUserDefaultLCID") == 0) return (void *) kernel32::GetUserDefaultLCID;
 	if (strcmp(name, "IsDBCSLeadByte") == 0) return (void *) kernel32::IsDBCSLeadByte;
 

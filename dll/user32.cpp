@@ -57,8 +57,7 @@ namespace user32 {
 		return (unsigned int*)(rsrcBase + langEntry);
 	}
 
-	static const char *getStringFromTable(unsigned int uID) {
-		wibo::Executable *mod = wibo::mainModule;
+	static const char *getStringFromTable(wibo::Executable *mod, unsigned int uID) {
 		unsigned int tableID = (uID >> 4) + 1;
 		unsigned int entryID = uID & 15;
 		unsigned int* stringTable = getResourceByID(mod, 6, tableID, 1033);
@@ -82,7 +81,11 @@ namespace user32 {
 
 	int WIN_FUNC LoadStringA(void* hInstance, unsigned int uID, char* lpBuffer, int cchBufferMax) {
 		DEBUG_LOG("LoadStringA %p %d %d\n", hInstance, uID, cchBufferMax);
-		const char* s = getStringFromTable(uID);
+		wibo::Executable *mod = wibo::executableFromModule(hInstance);
+		if (!mod) {
+			return 0;
+		}
+		const char* s = getStringFromTable(mod, uID);
 		if (!s) {
 			return 0;
 		}

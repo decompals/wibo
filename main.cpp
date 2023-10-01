@@ -31,7 +31,7 @@ void wibo::debug_log(const char *fmt, ...) {
 
 		vfprintf(stderr, fmt, args);
 	}
-	
+
 	va_end(args);
 }
 
@@ -110,11 +110,6 @@ const wibo::Module * wibo::modules[] = {
 	nullptr,
 };
 
-struct ModuleInfo {
-	std::string name;
-	const wibo::Module* module = nullptr;
-};
-
 HMODULE wibo::loadModule(const char *dllName) {
 	auto *result = new ModuleInfo;
 	result->name = dllName;
@@ -149,6 +144,29 @@ void *wibo::resolveFuncByOrdinal(HMODULE module, uint16_t ordinal) {
 			return func;
 	}
 	return resolveMissingFuncOrdinal(info->name.c_str(), ordinal);
+}
+
+wibo::Executable *wibo::executableFromModule(HMODULE module) {
+	if (module == nullptr || module == wibo::mainModule->imageBuffer) {
+		return wibo::mainModule;
+	} else {
+		auto info = static_cast<wibo::ModuleInfo *>(module);
+		if (!info->executable) {
+			DEBUG_LOG("wibo::executableFromModule: loading %s\n", info->name.c_str());
+			info->executable = std::make_unique<wibo::Executable>();
+			const auto path = files::pathFromWindows(info->name.c_str());
+			FILE *f = fopen(path.c_str(), "rb");
+			if (!f) {
+				perror("wibo::executableFromModule");
+				return nullptr;
+			}
+			if (!info->executable->loadPE(f, false)) {
+				DEBUG_LOG("wibo::executableFromModule: failed to load %s\n", path.c_str());
+				return nullptr;
+			}
+		}
+		return info->executable.get();
+	}
 }
 
 struct UNICODE_STRING {
@@ -295,7 +313,7 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-	exec.loadPE(f);
+	exec.loadPE(f, true);
 	fclose(f);
 
 	// 32-bit windows only reserves the lowest 2GB of memory for use by a process (https://www.tenouk.com/WinVirtualAddressSpace.html)

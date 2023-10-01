@@ -1,5 +1,7 @@
 #include "common.h"
 
+#include <vector>
+
 typedef void (*_PVFV)();
 typedef int (*_PIFV)();
 
@@ -18,6 +20,8 @@ typedef enum _crt_argv_mode {
 namespace crt {
 
 int _commode = 0;
+
+std::vector<_PVFV> atexitFuncs;
 
 void WIN_ENTRY _initterm(const _PVFV *ppfn, const _PVFV *end) {
 	do {
@@ -48,7 +52,8 @@ int WIN_ENTRY _set_fmode(int mode) {
 int *WIN_ENTRY __p__commode() { return &_commode; }
 
 int WIN_ENTRY _crt_atexit(void (*func)()) {
-	DEBUG_LOG("STUB: _crt_atexit(%p)\n", func);
+	DEBUG_LOG("_crt_atexit(%p)\n", func);
+	atexitFuncs.push_back(func);
 	return 0;
 }
 
@@ -85,6 +90,15 @@ int *WIN_ENTRY __p___argc() { return &wibo::argc; }
 
 size_t WIN_ENTRY strlen(const char *str) { return ::strlen(str); }
 
+void WIN_ENTRY exit(int status) {
+	DEBUG_LOG("exit(%i)\n", status);
+	for (auto it = atexitFuncs.rbegin(); it != atexitFuncs.rend(); ++it) {
+		DEBUG_LOG("Calling atexit function %p\n", *it);
+		(*it)();
+	}
+	::exit(status);
+}
+
 } // namespace crt
 
 static void *resolveByName(const char *name) {
@@ -118,6 +132,8 @@ static void *resolveByName(const char *name) {
 		return (void *)crt::__p___argc;
 	if (strcmp(name, "strlen") == 0)
 		return (void *)crt::strlen;
+	if (strcmp(name, "exit") == 0)
+		return (void *)crt::exit;
 	return nullptr;
 }
 

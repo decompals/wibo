@@ -250,14 +250,14 @@ namespace kernel32 {
 
 	unsigned int WIN_FUNC WaitForSingleObject(void *hHandle, unsigned int dwMilliseconds) {
 		DEBUG_LOG("WaitForSingleObject (%u)\n", dwMilliseconds);
-		
+
 		// TODO - wait on other objects?
 
 		// TODO: wait for less than forever
-		assert(dwMilliseconds == 0xffffffff); 
+		assert(dwMilliseconds == 0xffffffff);
 
 		processes::Process* process = processes::processFromHandle(hHandle, false);
-		
+
 		int status;
 		waitpid(process->pid, &status, 0);
 
@@ -268,7 +268,7 @@ namespace kernel32 {
 			// Specific exit codes don't really map onto any of these situations - we just know it's bad.
 			// Specify a non-zero exit code to alert our parent process something's gone wrong.
 			DEBUG_LOG("WaitForSingleObject: Child process exited abnormally - returning exit code 1.");
-			process->exitCode = 1; 
+			process->exitCode = 1;
 		}
 
 		return 0;
@@ -366,30 +366,42 @@ namespace kernel32 {
 			}
 		}
 		DEBUG_LOG("...returning nothing\n");
-		return 0xFFFFFFFF;
+		wibo::lastError = 1;
+		return 0xFFFFFFFF; // TLS_OUT_OF_INDEXES
 	}
+
 	unsigned int WIN_FUNC TlsFree(unsigned int dwTlsIndex) {
 		DEBUG_LOG("TlsFree(%u)\n", dwTlsIndex);
 		if (dwTlsIndex >= 0 && dwTlsIndex < MAX_TLS_VALUES && tlsValuesUsed[dwTlsIndex]) {
 			tlsValuesUsed[dwTlsIndex] = false;
 			return 1;
 		} else {
+			wibo::lastError = 1;
 			return 0;
 		}
 	}
+
 	void *WIN_FUNC TlsGetValue(unsigned int dwTlsIndex) {
-		// DEBUG_LOG("TlsGetValue(%u)\n", dwTlsIndex);
-		if (dwTlsIndex >= 0 && dwTlsIndex < MAX_TLS_VALUES && tlsValuesUsed[dwTlsIndex])
-			return tlsValues[dwTlsIndex];
-		else
-			return 0;
+		// DEBUG_LOG("TlsGetValue(%u)", dwTlsIndex);
+		void *result = nullptr;
+		if (dwTlsIndex >= 0 && dwTlsIndex < MAX_TLS_VALUES && tlsValuesUsed[dwTlsIndex]) {
+			result = tlsValues[dwTlsIndex];
+			// See https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-TlsGetValue#return-value
+			wibo::lastError = ERROR_SUCCESS;
+		} else {
+			wibo::lastError = 1;
+		}
+		// DEBUG_LOG(" -> %p\n", result);
+		return result;
 	}
+
 	unsigned int WIN_FUNC TlsSetValue(unsigned int dwTlsIndex, void *lpTlsValue) {
 		// DEBUG_LOG("TlsSetValue(%u, %p)\n", dwTlsIndex, lpTlsValue);
 		if (dwTlsIndex >= 0 && dwTlsIndex < MAX_TLS_VALUES && tlsValuesUsed[dwTlsIndex]) {
 			tlsValues[dwTlsIndex] = lpTlsValue;
 			return 1;
 		} else {
+			wibo::lastError = 1;
 			return 0;
 		}
 	}

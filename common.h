@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
+#include <memory>
 
 // On Windows, the incoming stack is aligned to a 4 byte boundary.
 // force_align_arg_pointer will realign the stack to match GCC's 16 byte alignment.
@@ -98,7 +99,7 @@ namespace wibo {
 	struct Executable {
 		Executable();
 		~Executable();
-		bool loadPE(FILE *file);
+		bool loadPE(FILE *file, bool exec);
 
 		void *imageBuffer;
 		size_t imageSize;
@@ -115,6 +116,12 @@ namespace wibo {
 			return fromRVA<T>((uint32_t) rva);
 		}
 	};
+	struct ModuleInfo {
+		std::string name;
+		const wibo::Module* module = nullptr;
+		std::unique_ptr<wibo::Executable> executable;
+	};
 
 	extern Executable *mainModule;
-}
+	Executable *executableFromModule(HMODULE module);
+} // namespace wibo

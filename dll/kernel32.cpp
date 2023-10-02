@@ -1323,7 +1323,7 @@ namespace kernel32 {
 		}
 
 		std::string path;
-		if (hModule == nullptr || hModule == wibo::mainModule->imageBuffer) {
+		if (wibo::isMainModule(hModule)) {
 			const auto exePath = files::pathFromWindows(wibo::argv[0]);
 			const auto absPath = std::filesystem::absolute(exePath);
 			path = files::pathToWindows(absPath);

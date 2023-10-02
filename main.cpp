@@ -147,7 +147,7 @@ void *wibo::resolveFuncByOrdinal(HMODULE module, uint16_t ordinal) {
 }
 
 wibo::Executable *wibo::executableFromModule(HMODULE module) {
-	if (module == nullptr || module == wibo::mainModule->imageBuffer) {
+	if (wibo::isMainModule(module)) {
 		return wibo::mainModule;
 	} else {
 		auto info = static_cast<wibo::ModuleInfo *>(module);

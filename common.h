@@ -125,4 +125,12 @@ namespace wibo {
 
 	extern Executable *mainModule;
 	Executable *executableFromModule(HMODULE module);
+
+	/**
+	 * HMODULE will be `nullptr` or `mainModule->imageBuffer` if it's the main module,
+	 * otherwise it will be a pointer to a `wibo::ModuleInfo`.
+	 */
+	inline bool isMainModule(HMODULE hModule) {
+		return hModule == nullptr || hModule == mainModule->imageBuffer;
+	}
 } // namespace wibo

@@ -345,6 +345,7 @@ int main(int argc, char **argv) {
 	tib.peb->ProcessParameters = (RTL_USER_PROCESS_PARAMETERS*)calloc(sizeof(RTL_USER_PROCESS_PARAMETERS), 1);
 
 	struct user_desc tibDesc;
+	memset(&tibDesc, 0, sizeof tibDesc);
 	tibDesc.entry_number = 0;
 	tibDesc.base_addr = (unsigned int) &tib;
 	tibDesc.limit = 0x1000;

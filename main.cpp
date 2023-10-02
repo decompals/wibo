@@ -219,7 +219,55 @@ struct TIB {
 // Make this global to ease debugging
 TIB tib;
 
+static bool blockUpper2GB() {
+	DEBUG_LOG("Blocking upper 2GB address space\n");
+
+	// 32-bit windows only reserves the lowest 2GB of memory for use by a process (https://www.tenouk.com/WinVirtualAddressSpace.html)
+	// Linux, on the other hand, will happily allow nearly the entire 4GB address space to be used.
+	// In order to prevent windows programs from being very confused as to why it's being handed
+	// addresses in "invalid" memory, let's map the upper 2GB of memory to ensure libc can't allocate
+	// anything there
+	std::ifstream procMap("/proc/self/maps");
+	std::string procLine;
+
+	// Reserve an absurd amount to avoid any possible reallocation
+	procLine.reserve(0x8000);
+
+	unsigned int lastMapEnd = 0;
+
+	const unsigned int FILL_MEMORY_ABOVE = 0x80000000; // 2GB
+
+	while (getline(procMap, procLine)) {
+		std::size_t idx = 0;
+		unsigned int mapStart = std::stoul(procLine, &idx, 16);
+		unsigned int mapEnd = std::stoul(procLine.substr(idx + 1), nullptr, 16);
+
+		// The empty space we want to map out is now between lastMapEnd and mapStart
+		unsigned int holdingMapStart = lastMapEnd;
+		unsigned int holdingMapEnd = mapStart;
+
+		if ((holdingMapEnd - holdingMapStart) != 0 && holdingMapEnd > FILL_MEMORY_ABOVE) {
+			holdingMapStart = std::max(holdingMapStart, FILL_MEMORY_ABOVE);
+
+			void* holdingMap = mmap((void*) holdingMapStart, holdingMapEnd - holdingMapStart, PROT_READ, MAP_ANONYMOUS|MAP_FIXED_NOREPLACE|MAP_PRIVATE, -1, 0);
+
+			if (holdingMap == MAP_FAILED) {
+				perror("Failed to create holding map");
+				return false;
+			}
+		}
+
+		lastMapEnd = mapEnd;
+	}
+
+	return true;
+}
+
 int main(int argc, char **argv) {
+	if (!blockUpper2GB()) {
+		return 1;
+	}
+
 	if (argc <= 1) {
 		printf("Usage: ./wibo program.exe ...\n");
 		return 1;
@@ -318,42 +366,6 @@ int main(int argc, char **argv) {
 
 	exec.loadPE(f, true);
 	fclose(f);
-
-	// 32-bit windows only reserves the lowest 2GB of memory for use by a process (https://www.tenouk.com/WinVirtualAddressSpace.html)
-	// Linux, on the other hand, will happily allow nearly the entire 4GB address space to be used.
-	// In order to prevent windows programs from being very confused as to why it's being handed
-	// addresses in "invalid" memory, let's map the upper 2GB of memory to ensure libc can't allocate
-	// anything there.
-	std::ifstream procMap("/proc/self/maps");
-	std::string procLine;
-	unsigned int lastMapEnd = 0;
-
-	const unsigned int FILL_MEMORY_ABOVE = 0x80000000; // 2GB
-
-	while (getline(procMap, procLine)) {
-		std::size_t idx = 0;
-  		unsigned int mapStart = std::stoul(procLine, &idx, 16);
-		unsigned int mapEnd = std::stoul(procLine.substr(idx + 1), nullptr, 16);
-
-		// The empty space we want to map out is now between lastMapEnd and mapStart
-		unsigned int holdingMapStart = lastMapEnd;
-		unsigned int holdingMapEnd = mapStart;
-
-		if ((holdingMapEnd - holdingMapStart) != 0 && holdingMapEnd > FILL_MEMORY_ABOVE) {
-			holdingMapStart = std::max(holdingMapStart, FILL_MEMORY_ABOVE);
-
-			void* holdingMap = mmap((void*) holdingMapStart, holdingMapEnd - holdingMapStart, PROT_READ, MAP_ANONYMOUS|MAP_FIXED|MAP_PRIVATE, -1, 0);
-
-			if (holdingMap == MAP_FAILED) {
-				perror("Failed to create holding map");
-				return 1;
-			}
-		}
-
-		lastMapEnd = mapEnd;
-	}
-
-	procMap.close();
 
 	uint16_t tibSegment = (tibDesc.entry_number << 3) | 7;
 	// Invoke the damn thing

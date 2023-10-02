@@ -149,28 +149,27 @@ void *wibo::resolveFuncByOrdinal(HMODULE module, uint16_t ordinal) {
 wibo::Executable *wibo::executableFromModule(HMODULE module) {
 	if (wibo::isMainModule(module)) {
 		return wibo::mainModule;
-	} else {
-		auto info = static_cast<wibo::ModuleInfo *>(module);
-		if (!info->executable) {
-			DEBUG_LOG("wibo::executableFromModule: loading %s\n", info->name.c_str());
-			info->executable = std::make_unique<wibo::Executable>();
-			const auto path = files::pathFromWindows(info->name.c_str());
-			FILE *f = fopen(path.c_str(), "rb");
-			if (!f) {
-				perror("wibo::executableFromModule");
-				fclose(f);
-				return nullptr;
-			}
-			if (!info->executable->loadPE(f, false)) {
-				DEBUG_LOG("wibo::executableFromModule: failed to load %s\n", path.c_str());
-				info->executable.reset();
-				fclose(f);
-				return nullptr;
-			}
-			fclose(f);
-		}
-		return info->executable.get();
 	}
+
+	auto info = static_cast<wibo::ModuleInfo *>(module);
+	if (!info->executable) {
+		DEBUG_LOG("wibo::executableFromModule: loading %s\n", info->name.c_str());
+		auto executable = std::make_unique<wibo::Executable>();
+		const auto path = files::pathFromWindows(info->name.c_str());
+		FILE *f = fopen(path.c_str(), "rb");
+		if (!f) {
+			perror("wibo::executableFromModule");
+			return nullptr;
+		}
+		bool result = executable->loadPE(f, false);
+		fclose(f);
+		if (!result) {
+			DEBUG_LOG("wibo::executableFromModule: failed to load %s\n", path.c_str());
+			return nullptr;
+		}
+		info->executable = std::move(executable);
+	}
+	return info->executable.get();
 }
 
 struct UNICODE_STRING {

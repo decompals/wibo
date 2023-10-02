@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
+#include <memory>
 
 // On Windows, the incoming stack is aligned to a 4 byte boundary.
 // force_align_arg_pointer will realign the stack to match GCC's 16 byte alignment.
@@ -53,6 +54,7 @@ typedef unsigned char BYTE;
 #define ERROR_HANDLE_EOF 38
 #define ERROR_NOT_SUPPORTED 50
 #define ERROR_INVALID_PARAMETER 87
+#define ERROR_INSUFFICIENT_BUFFER 122
 #define ERROR_NEGATIVE_SEEK 131
 #define ERROR_ALREADY_EXISTS 183
 
@@ -98,7 +100,7 @@ namespace wibo {
 	struct Executable {
 		Executable();
 		~Executable();
-		bool loadPE(FILE *file);
+		bool loadPE(FILE *file, bool exec);
 
 		void *imageBuffer;
 		size_t imageSize;
@@ -115,6 +117,20 @@ namespace wibo {
 			return fromRVA<T>((uint32_t) rva);
 		}
 	};
+	struct ModuleInfo {
+		std::string name;
+		const wibo::Module* module = nullptr;
+		std::unique_ptr<wibo::Executable> executable;
+	};
 
 	extern Executable *mainModule;
-}
+	Executable *executableFromModule(HMODULE module);
+
+	/**
+	 * HMODULE will be `nullptr` or `mainModule->imageBuffer` if it's the main module,
+	 * otherwise it will be a pointer to a `wibo::ModuleInfo`.
+	 */
+	inline bool isMainModule(HMODULE hModule) {
+		return hModule == nullptr || hModule == mainModule->imageBuffer;
+	}
+} // namespace wibo

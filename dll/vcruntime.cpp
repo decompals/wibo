@@ -8,6 +8,8 @@ void *WIN_ENTRY memset(void *dest, int ch, size_t count) { return ::memset(dest,
 
 int WIN_ENTRY memcmp(const void *buf1, const void *buf2, size_t count) { return ::memcmp(buf1, buf2, count); }
 
+void *WIN_ENTRY memmove(void *dest, const void *src, size_t count) { return ::memmove(dest, src, count); }
+
 } // namespace vcruntime
 
 static void *resolveByName(const char *name) {
@@ -17,6 +19,8 @@ static void *resolveByName(const char *name) {
 		return (void *)vcruntime::memset;
 	if (strcmp(name, "memcmp") == 0)
 		return (void *)vcruntime::memcmp;
+	if (strcmp(name, "memmove") == 0)
+		return (void *)vcruntime::memmove;
 	return nullptr;
 }
 

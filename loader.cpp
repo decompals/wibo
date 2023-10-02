@@ -116,7 +116,13 @@ wibo::Executable::~Executable() {
 	}
 }
 
-bool wibo::Executable::loadPE(FILE *file) {
+/**
+ * Load a PE file into memory.
+ *
+ * @param file The file to load.
+ * @param exec Whether to make the loaded image executable.
+ */
+bool wibo::Executable::loadPE(FILE *file, bool exec) {
 	// Skip to PE header
 	fseek(file, 0x3C, SEEK_SET);
 	uint32_t offsetToPE = read32(file);
@@ -145,7 +151,12 @@ bool wibo::Executable::loadPE(FILE *file) {
 
 	// Build buffer
 	imageSize = header32.sizeOfImage;
-	imageBuffer = mmap((void *) header32.imageBase, header32.sizeOfImage, PROT_READ|PROT_WRITE|PROT_EXEC, MAP_ANONYMOUS|MAP_FIXED|MAP_PRIVATE, -1, 0);
+	if (exec) {
+		imageBuffer = mmap((void *)header32.imageBase, header32.sizeOfImage, PROT_READ | PROT_WRITE | PROT_EXEC,
+						   MAP_ANONYMOUS | MAP_FIXED | MAP_PRIVATE, -1, 0);
+	} else {
+		imageBuffer = mmap(nullptr, header32.sizeOfImage, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+	}
 	memset(imageBuffer, 0, header32.sizeOfImage);
 	if (imageBuffer == MAP_FAILED) {
 		perror("Image mapping failed!");
@@ -165,7 +176,7 @@ bool wibo::Executable::loadPE(FILE *file) {
 		name[8] = 0;
 		DEBUG_LOG("Section %d: name=%s addr=%x size=%x (raw=%x) ptr=%x\n", i, name, section.virtualAddress, section.virtualSize, section.sizeOfRawData, section.pointerToRawData);
 
-		void *sectionBase = (void *) (header32.imageBase + section.virtualAddress);
+		void *sectionBase = (void *) ((uintptr_t) imageBuffer + section.virtualAddress);
 		if (section.pointerToRawData > 0 && section.sizeOfRawData > 0) {
 			// Grab this data
 			long savePos = ftell(file);
@@ -177,6 +188,11 @@ bool wibo::Executable::loadPE(FILE *file) {
 		if (strcmp(name, ".rsrc") == 0) {
 			rsrcBase = sectionBase;
 		}
+	}
+
+	if (!exec) {
+		// No need to resolve imports
+		return true;
 	}
 
 	// Handle imports

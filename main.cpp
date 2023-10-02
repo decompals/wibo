@@ -158,13 +158,16 @@ wibo::Executable *wibo::executableFromModule(HMODULE module) {
 			FILE *f = fopen(path.c_str(), "rb");
 			if (!f) {
 				perror("wibo::executableFromModule");
+				fclose(f);
 				return nullptr;
 			}
 			if (!info->executable->loadPE(f, false)) {
 				DEBUG_LOG("wibo::executableFromModule: failed to load %s\n", path.c_str());
 				info->executable.reset();
+				fclose(f);
 				return nullptr;
 			}
+			fclose(f);
 		}
 		return info->executable.get();
 	}

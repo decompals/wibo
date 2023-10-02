@@ -1315,16 +1315,42 @@ namespace kernel32 {
 		}
 	}
 
-	unsigned int WIN_FUNC GetModuleFileNameA(void* hModule, char* lpFilename, unsigned int nSize) {
+	DWORD WIN_FUNC GetModuleFileNameA(HMODULE hModule, LPSTR lpFilename, DWORD nSize) {
 		DEBUG_LOG("GetModuleFileNameA (hModule=%p, nSize=%i)\n", hModule, nSize);
+		if (lpFilename == nullptr) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
 
-		*lpFilename = 0; // just NUL terminate
+		std::string path;
+		if (hModule == nullptr || hModule == wibo::mainModule->imageBuffer) {
+			const auto exePath = files::pathFromWindows(wibo::argv[0]);
+			const auto absPath = std::filesystem::absolute(exePath);
+			path = files::pathToWindows(absPath);
+		} else {
+			path = static_cast<wibo::ModuleInfo *>(hModule)->name;
+		}
+		const size_t len = path.size();
+		if (nSize == 0) {
+			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			return 0;
+		}
 
-		wibo::lastError = 0;
-		return 0;
+		const size_t copyLen = std::min(len, nSize - 1);
+		memcpy(lpFilename, path.c_str(), copyLen);
+		if (copyLen < nSize) {
+			lpFilename[copyLen] = 0;
+		}
+		if (copyLen < len) {
+			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			return nSize;
+		}
+
+		wibo::lastError = ERROR_SUCCESS;
+		return copyLen;
 	}
 
-	unsigned int WIN_FUNC GetModuleFileNameW(void* hModule, uint16_t* lpFilename, unsigned int nSize) {
+	DWORD WIN_FUNC GetModuleFileNameW(HMODULE hModule, LPWSTR lpFilename, DWORD nSize) {
 		DEBUG_LOG("GetModuleFileNameW (hModule=%p, nSize=%i)\n", hModule, nSize);
 
 		*lpFilename = 0; // just NUL terminate

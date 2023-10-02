@@ -162,6 +162,7 @@ wibo::Executable *wibo::executableFromModule(HMODULE module) {
 			}
 			if (!info->executable->loadPE(f, false)) {
 				DEBUG_LOG("wibo::executableFromModule: failed to load %s\n", path.c_str());
+				info->executable.reset();
 				return nullptr;
 			}
 		}

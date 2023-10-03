@@ -270,12 +270,10 @@ static size_t readMaps(char* buffer) {
  * nearly the entire 4GB address space to be used. Some Windows programs rely on heap allocations to be
  * in the lower 2GB of memory, otherwise they misbehave or crash.
  *
- * Between reading /proc/self/maps and mmaping the upper 2GB, we must be extremely careful not to allocate
+ * Between reading /proc/self/maps and mmap-ing the upper 2GB, we must be extremely careful not to allocate
  * any memory, as that could cause libc to modify memory mappings while we're attempting to fill them.
- *
- * @return Whether the mapping was successful.
  */
-static bool blockUpper2GB() {
+static void blockUpper2GB() {
 	const unsigned int FILL_MEMORY_ABOVE = 0x80000000; // 2GB
 
 	DEBUG_LOG("Blocking upper 2GB address space\n");
@@ -314,15 +312,13 @@ static bool blockUpper2GB() {
 
 			if (holdingMap == MAP_FAILED) {
 				perror("Failed to create holding map");
-				return false;
+				exit(1);
 			}
 		}
 
 		lastMapEnd = mapEnd;
 		procLine = procLine.substr(newline + 1);
 	}
-
-	return true;
 }
 
 int main(int argc, char **argv) {
@@ -339,9 +335,7 @@ int main(int argc, char **argv) {
 		wibo::debugIndent = std::stoul(getenv("WIBO_DEBUG_INDENT"));
 	}
 
-	if (!blockUpper2GB()) {
-		return 1;
-	}
+	blockUpper2GB();
 	files::init();
 
 	// Create TIB

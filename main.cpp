@@ -2,15 +2,14 @@
 #include "files.h"
 #include <asm/ldt.h>
 #include <filesystem>
-#include <errno.h>
 #include <memory>
 #include "strutil.h"
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <stdarg.h>
-#include <iostream>
 #include <fstream>
 #include <vector>
+#include <charconv>
 
 uint32_t wibo::lastError = 0;
 char** wibo::argv;
@@ -227,20 +226,35 @@ static bool blockUpper2GB() {
 	// In order to prevent windows programs from being very confused as to why it's being handed
 	// addresses in "invalid" memory, let's map the upper 2GB of memory to ensure libc can't allocate
 	// anything there
-	std::ifstream procMap("/proc/self/maps");
-	std::string procLine;
-
-	// Reserve an absurd amount to avoid any possible reallocation
-	procLine.reserve(0x8000);
+	std::string procMap;
+	{
+		std::stringstream ss;
+		std::ifstream is("/proc/self/maps");
+		ss << is.rdbuf();
+		procMap = ss.str();
+	}
+	std::string_view procLine = procMap;
 
 	unsigned int lastMapEnd = 0;
 
 	const unsigned int FILL_MEMORY_ABOVE = 0x80000000; // 2GB
 
-	while (getline(procMap, procLine)) {
-		std::size_t idx = 0;
-		unsigned int mapStart = std::stoul(procLine, &idx, 16);
-		unsigned int mapEnd = std::stoul(procLine.substr(idx + 1), nullptr, 16);
+	while (true) {
+		size_t newline = procLine.find('\n');
+		if (newline == std::string::npos) {
+			break;
+		}
+
+		unsigned int mapStart = 0;
+		auto result = std::from_chars(procLine.data(), procLine.data() + procLine.size(), mapStart, 16);
+		if (result.ec != std::errc()) {
+			break;
+		}
+		unsigned int mapEnd = 0;
+		result = std::from_chars(result.ptr + 1, procLine.data() + procLine.size(), mapEnd, 16);
+		if (result.ec != std::errc()) {
+			break;
+		}
 
 		// The empty space we want to map out is now between lastMapEnd and mapStart
 		unsigned int holdingMapStart = lastMapEnd;
@@ -249,6 +263,7 @@ static bool blockUpper2GB() {
 		if ((holdingMapEnd - holdingMapStart) != 0 && holdingMapEnd > FILL_MEMORY_ABOVE) {
 			holdingMapStart = std::max(holdingMapStart, FILL_MEMORY_ABOVE);
 
+			DEBUG_LOG("Mapping %08x-%08x\n", holdingMapStart, holdingMapEnd);
 			void* holdingMap = mmap((void*) holdingMapStart, holdingMapEnd - holdingMapStart, PROT_READ, MAP_ANONYMOUS|MAP_FIXED_NOREPLACE|MAP_PRIVATE, -1, 0);
 
 			if (holdingMap == MAP_FAILED) {
@@ -258,16 +273,13 @@ static bool blockUpper2GB() {
 		}
 
 		lastMapEnd = mapEnd;
+		procLine = procLine.substr(newline + 1);
 	}
 
 	return true;
 }
 
 int main(int argc, char **argv) {
-	if (!blockUpper2GB()) {
-		return 1;
-	}
-
 	if (argc <= 1) {
 		printf("Usage: ./wibo program.exe ...\n");
 		return 1;
@@ -281,7 +293,9 @@ int main(int argc, char **argv) {
 		wibo::debugIndent = std::stoul(getenv("WIBO_DEBUG_INDENT"));
 	}
 
-
+	if (!blockUpper2GB()) {
+		return 1;
+	}
 	files::init();
 
 	// Create TIB

@@ -2,15 +2,14 @@
 #include "files.h"
 #include <asm/ldt.h>
 #include <filesystem>
-#include <errno.h>
 #include <memory>
 #include "strutil.h"
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <stdarg.h>
-#include <iostream>
-#include <fstream>
 #include <vector>
+#include <charconv>
+#include <fcntl.h>
 
 uint32_t wibo::lastError = 0;
 char** wibo::argv;
@@ -219,6 +218,109 @@ struct TIB {
 // Make this global to ease debugging
 TIB tib;
 
+const size_t MAPS_BUFFER_SIZE = 0x10000;
+
+/**
+ * Read /proc/self/maps into a buffer.
+ *
+ * While reading /proc/self/maps, we need to be extremely careful not to allocate any memory,
+ * as that could cause libc to modify memory mappings while we're attempting to fill them.
+ * To accomplish this, we use Linux syscalls directly.
+ *
+ * @param buffer The buffer to read into.
+ * @return The number of bytes read.
+ */
+static size_t readMaps(char* buffer) {
+	int fd = open("/proc/self/maps", O_RDONLY);
+	if (fd == -1) {
+		perror("Failed to open /proc/self/maps");
+		exit(1);
+	}
+
+	char *cur = buffer;
+	char *bufferEnd = buffer + MAPS_BUFFER_SIZE;
+	while (cur < bufferEnd) {
+		int ret = read(fd, cur, static_cast<size_t>(bufferEnd - cur));
+		if (ret == -1) {
+			if (errno == EINTR) {
+				continue;
+			}
+			perror("Failed to read /proc/self/maps");
+			exit(1);
+		} else if (ret == 0) {
+			break;
+		}
+		cur += ret;
+	}
+	close(fd);
+
+	if (cur == bufferEnd) {
+		fprintf(stderr, "Buffer too small while reading /proc/self/maps\n");
+		exit(1);
+	}
+	*cur = '\0';
+	return static_cast<size_t>(cur - buffer);
+}
+
+/**
+ * Map the upper 2GB of memory to prevent libc from allocating there.
+ *
+ * This is necessary because 32-bit windows only reserves the lowest 2GB of memory for use by a process
+ * (https://www.tenouk.com/WinVirtualAddressSpace.html). Linux, on the other hand, will happily allow
+ * nearly the entire 4GB address space to be used. Some Windows programs rely on heap allocations to be
+ * in the lower 2GB of memory, otherwise they misbehave or crash.
+ *
+ * Between reading /proc/self/maps and mmap-ing the upper 2GB, we must be extremely careful not to allocate
+ * any memory, as that could cause libc to modify memory mappings while we're attempting to fill them.
+ */
+static void blockUpper2GB() {
+	const unsigned int FILL_MEMORY_ABOVE = 0x80000000; // 2GB
+
+	DEBUG_LOG("Blocking upper 2GB address space\n");
+
+	// Buffer lives on the stack to avoid heap allocation
+	char buffer[MAPS_BUFFER_SIZE];
+	size_t len = readMaps(buffer);
+	std::string_view procLine(buffer, len);
+	unsigned int lastMapEnd = 0;
+	while (true) {
+		size_t newline = procLine.find('\n');
+		if (newline == std::string::npos) {
+			break;
+		}
+
+		unsigned int mapStart = 0;
+		auto result = std::from_chars(procLine.data(), procLine.data() + procLine.size(), mapStart, 16);
+		if (result.ec != std::errc()) {
+			break;
+		}
+		unsigned int mapEnd = 0;
+		result = std::from_chars(result.ptr + 1, procLine.data() + procLine.size(), mapEnd, 16);
+		if (result.ec != std::errc()) {
+			break;
+		}
+
+		// The empty space we want to map out is now between lastMapEnd and mapStart
+		unsigned int holdingMapStart = lastMapEnd;
+		unsigned int holdingMapEnd = mapStart;
+
+		if ((holdingMapEnd - holdingMapStart) != 0 && holdingMapEnd > FILL_MEMORY_ABOVE) {
+			holdingMapStart = std::max(holdingMapStart, FILL_MEMORY_ABOVE);
+
+			// DEBUG_LOG("Mapping %08x-%08x\n", holdingMapStart, holdingMapEnd);
+			void* holdingMap = mmap((void*) holdingMapStart, holdingMapEnd - holdingMapStart, PROT_READ, MAP_ANONYMOUS|MAP_FIXED|MAP_PRIVATE, -1, 0);
+
+			if (holdingMap == MAP_FAILED) {
+				perror("Failed to create holding map");
+				exit(1);
+			}
+		}
+
+		lastMapEnd = mapEnd;
+		procLine = procLine.substr(newline + 1);
+	}
+}
+
 int main(int argc, char **argv) {
 	if (argc <= 1) {
 		printf("Usage: ./wibo program.exe ...\n");
@@ -233,7 +335,7 @@ int main(int argc, char **argv) {
 		wibo::debugIndent = std::stoul(getenv("WIBO_DEBUG_INDENT"));
 	}
 
-
+	blockUpper2GB();
 	files::init();
 
 	// Create TIB
@@ -318,42 +420,6 @@ int main(int argc, char **argv) {
 
 	exec.loadPE(f, true);
 	fclose(f);
-
-	// 32-bit windows only reserves the lowest 2GB of memory for use by a process (https://www.tenouk.com/WinVirtualAddressSpace.html)
-	// Linux, on the other hand, will happily allow nearly the entire 4GB address space to be used.
-	// In order to prevent windows programs from being very confused as to why it's being handed
-	// addresses in "invalid" memory, let's map the upper 2GB of memory to ensure libc can't allocate
-	// anything there.
-	std::ifstream procMap("/proc/self/maps");
-	std::string procLine;
-	unsigned int lastMapEnd = 0;
-
-	const unsigned int FILL_MEMORY_ABOVE = 0x80000000; // 2GB
-
-	while (getline(procMap, procLine)) {
-		std::size_t idx = 0;
-  		unsigned int mapStart = std::stoul(procLine, &idx, 16);
-		unsigned int mapEnd = std::stoul(procLine.substr(idx + 1), nullptr, 16);
-
-		// The empty space we want to map out is now between lastMapEnd and mapStart
-		unsigned int holdingMapStart = lastMapEnd;
-		unsigned int holdingMapEnd = mapStart;
-
-		if ((holdingMapEnd - holdingMapStart) != 0 && holdingMapEnd > FILL_MEMORY_ABOVE) {
-			holdingMapStart = std::max(holdingMapStart, FILL_MEMORY_ABOVE);
-
-			void* holdingMap = mmap((void*) holdingMapStart, holdingMapEnd - holdingMapStart, PROT_READ, MAP_ANONYMOUS|MAP_FIXED|MAP_PRIVATE, -1, 0);
-
-			if (holdingMap == MAP_FAILED) {
-				perror("Failed to create holding map");
-				return 1;
-			}
-		}
-
-		lastMapEnd = mapEnd;
-	}
-
-	procMap.close();
 
 	uint16_t tibSegment = (tibDesc.entry_number << 3) | 7;
 	// Invoke the damn thing

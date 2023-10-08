@@ -707,12 +707,12 @@ namespace kernel32 {
 			return (void *) 1;
 		}
 
-		FindFirstFileHandle *handle = new FindFirstFileHandle();
+		auto *handle = new FindFirstFileHandle();
 
 		if (!std::filesystem::exists(path.parent_path())) {
-			wibo::lastError = 3; // ERROR_PATH_NOT_FOUND
+			wibo::lastError = ERROR_PATH_NOT_FOUND;
 			delete handle;
-			return (void *) 0xFFFFFFFF;
+			return INVALID_HANDLE_VALUE;
 		}
 
 		std::filesystem::directory_iterator it(path.parent_path());
@@ -720,9 +720,9 @@ namespace kernel32 {
 		handle->pattern = path.filename().string();
 
 		if (!findNextFile(handle)) {
-			wibo::lastError = 2; // ERROR_FILE_NOT_FOUND
+			wibo::lastError = ERROR_FILE_NOT_FOUND;
 			delete handle;
-			return (void *) 0xFFFFFFFF;
+			return INVALID_HANDLE_VALUE;
 		}
 
 		setFindFileDataFromPath(lpFindFileData, *handle->it++);
@@ -752,8 +752,15 @@ namespace kernel32 {
 	}
 
 	int WIN_FUNC FindNextFileA(void *hFindFile, WIN32_FIND_DATA<char> *lpFindFileData) {
-		FindFirstFileHandle *handle = (FindFirstFileHandle *) hFindFile;
+		// Special value from FindFirstFileA
+		if (hFindFile == (void *) 1) {
+			wibo::lastError = ERROR_NO_MORE_FILES;
+			return 0;
+		}
+
+		auto *handle = (FindFirstFileHandle *) hFindFile;
 		if (!findNextFile(handle)) {
+			wibo::lastError = ERROR_NO_MORE_FILES;
 			return 0;
 		}
 

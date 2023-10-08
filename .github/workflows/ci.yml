@@ -1,5 +1,15 @@
 name: CI
-on: [push, pull_request]
+
+on:
+  push:
+    paths-ignore:
+      - '*.md'
+      - 'LICENSE'
+  pull_request:
+
+env:
+  DOCKER_BUILDKIT: 1
+
 jobs:
   build_and_test:
     name: Build and test
@@ -12,26 +22,40 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y file unzip wget
 
-      - name: Build
-        env:
-          DOCKER_BUILDKIT: 1
-        run: docker build --target export --output build .
+      - name: Build debug
+        run: docker build --build-arg build_type=Debug --target export --output build_debug .
+
+      - name: Build release
+        run: docker build --build-arg build_type=Release --target export --output build .
 
       - name: Test
+        shell: bash
         run: |
-          wget https://cdn.discordapp.com/attachments/727918646525165659/1129759991696457728/GC_WII_COMPILERS.zip
-          unzip GC_WII_COMPILERS.zip
-          MWCIncludes=. build/wibo GC/2.7/mwcceppc.exe -c test/test.c -Itest
+          mv build_debug/wibo build/wibo_debug
+          wget -q https://cdn.discordapp.com/attachments/727918646525165659/1129759991696457728/GC_WII_COMPILERS.zip
+          unzip -q GC_WII_COMPILERS.zip
+          set -x
+          build/wibo_debug Wii/1.7/mwcceppc.exe -nodefaults -c test/test.c -Itest -o test_debug.o
+          file test_debug.o
+          build/wibo Wii/1.7/mwcceppc.exe -nodefaults -c test/test.c -Itest -o test.o
           file test.o
 
-      - name: Upload build
+      - name: Upload release
         uses: actions/upload-artifact@v3
         with:
           name: wibo
           path: build/wibo
 
+      - name: Upload debug
+        uses: actions/upload-artifact@v3
+        with:
+          name: wibo_debug
+          path: build/wibo_debug
+
       - name: Publish release
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: build/wibo
+          files: |
+            build/wibo
+            build/wibo_debug

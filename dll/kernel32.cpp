@@ -214,7 +214,8 @@ namespace kernel32 {
 
 		char **argv = (char **) calloc(argc + 1, sizeof(char*));
 		argv[0] = wibo::executableName;
-		argv[1] = (char *) files::pathFromWindows(lpApplicationName).string().c_str();
+		std::string pathStr = files::pathFromWindows(lpApplicationName).string();
+		argv[1] = (char *) pathStr.c_str();
 
 		char* arg = strtok(lpCommandLine, " ");
 		size_t current_arg_index = 2;

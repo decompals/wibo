@@ -127,7 +127,8 @@ void wibo::freeModule(HMODULE module) { delete static_cast<ModuleInfo *>(module)
 
 void *wibo::resolveFuncByName(HMODULE module, const char *funcName) {
 	auto *info = static_cast<ModuleInfo *>(module);
-	if (info && info->module && info->module->byName) {
+	assert(info);
+	if (info->module && info->module->byName) {
 		void *func = info->module->byName(funcName);
 		if (func)
 			return func;
@@ -137,7 +138,8 @@ void *wibo::resolveFuncByName(HMODULE module, const char *funcName) {
 
 void *wibo::resolveFuncByOrdinal(HMODULE module, uint16_t ordinal) {
 	auto *info = static_cast<ModuleInfo *>(module);
-	if (info && info->module && info->module->byOrdinal) {
+	assert(info);
+	if (info->module && info->module->byOrdinal) {
 		void *func = info->module->byOrdinal(ordinal);
 		if (func)
 			return func;

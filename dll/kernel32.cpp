@@ -2043,7 +2043,6 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "InitOnceBeginInitialize") == 0) return (void *) kernel32::InitOnceBeginInitialize;
 	if (strcmp(name, "AcquireSRWLockShared") == 0) return (void *) kernel32::AcquireSRWLockShared;
 	if (strcmp(name, "ReleaseSRWLockShared") == 0) return (void *) kernel32::ReleaseSRWLockShared;
-	if (strcmp(name, "ReleaseSRWLockShared") == 0) return (void *) kernel32::AcquireSRWLockShared;
 	if (strcmp(name, "AcquireSRWLockExclusive") == 0) return (void *) kernel32::AcquireSRWLockExclusive;
 	if (strcmp(name, "ReleaseSRWLockExclusive") == 0) return (void *) kernel32::ReleaseSRWLockExclusive;
 	if (strcmp(name, "TryAcquireSRWLockExclusive") == 0) return (void *) kernel32::TryAcquireSRWLockExclusive;

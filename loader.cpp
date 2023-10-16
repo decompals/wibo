@@ -107,6 +107,7 @@ uint32_t read32(FILE *file) {
 wibo::Executable::Executable() {
 	imageBuffer = nullptr;
 	imageSize = 0;
+	entryPoint = nullptr;
 	rsrcBase = 0;
 }
 

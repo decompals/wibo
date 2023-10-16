@@ -1771,7 +1771,7 @@ namespace kernel32 {
 		return TRUE;
 	}
 
-	int WIN_FUNC CompareStringA(int Locale, unsigned int dwCmpFlags, const char *lpString1, unsigned int cchCount1, const char *lpString2, unsigned int cchCount2) {
+	int WIN_FUNC CompareStringA(int Locale, unsigned int dwCmpFlags, const char *lpString1, int cchCount1, const char *lpString2, int cchCount2) {
 		if (cchCount1 < 0)
 			cchCount1 = strlen(lpString1);
 		if (cchCount2 < 0)
@@ -1783,7 +1783,7 @@ namespace kernel32 {
 		return doCompareString(str1, str2, dwCmpFlags);
 	}
 
-	int WIN_FUNC CompareStringW(int Locale, unsigned int dwCmpFlags, const uint16_t *lpString1, unsigned int cchCount1, const uint16_t *lpString2, unsigned int cchCount2) {
+	int WIN_FUNC CompareStringW(int Locale, unsigned int dwCmpFlags, const uint16_t *lpString1, int cchCount1, const uint16_t *lpString2, int cchCount2) {
 		std::string str1 = wideStringToString(lpString1, cchCount1);
 		std::string str2 = wideStringToString(lpString2, cchCount2);
 

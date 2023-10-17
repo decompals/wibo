@@ -2028,7 +2028,7 @@ namespace kernel32 {
 	void *WIN_FUNC FlsGetValue(unsigned int dwFlsIndex) {
 		// DEBUG_LOG("FlsGetValue(%u)", dwFlsIndex);
 		void *result = nullptr;
-		if (dwFlsIndex >= 0 && dwFlsIndex < MAX_TLS_VALUES && flsValuesUsed[dwFlsIndex]) {
+		if (dwFlsIndex >= 0 && dwFlsIndex < MAX_FLS_VALUES && flsValuesUsed[dwFlsIndex]) {
 			result = flsValues[dwFlsIndex];
 			// See https://learn.microsoft.com/en-us/windows/win32/api/fibersapi/nf-fibersapi-flsgetvalue
 			wibo::lastError = ERROR_SUCCESS;

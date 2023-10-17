@@ -2040,7 +2040,7 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC FlsSetValue(unsigned int dwFlsIndex, void *lpFlsData) {
-		// DEBUG_LOG("TlsSetValue(%u, %p)\n", dwTlsIndex, lpTlsValue);
+		// DEBUG_LOG("FlsSetValue(%u, %p)\n", dwFlsIndex, lpFlsValue);
 		if (dwFlsIndex >= 0 && dwFlsIndex < MAX_FLS_VALUES && flsValuesUsed[dwFlsIndex]) {
 			flsValues[dwFlsIndex] = lpFlsData;
 			return 1;

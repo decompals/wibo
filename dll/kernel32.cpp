@@ -1993,6 +1993,63 @@ namespace kernel32 {
 		*Target = Value;
 		return initial;
 	}
+
+	// These are effectively a copy/paste of the Tls* functions
+	enum { MAX_FLS_VALUES = 100 };
+	static bool flsValuesUsed[MAX_FLS_VALUES] = { false };
+	static void *flsValues[MAX_FLS_VALUES];
+	int WIN_FUNC FlsAlloc(void *lpCallback) {
+		DEBUG_LOG("FlsAlloc (lpCallback: %x)\n", lpCallback);
+		// If the function succeeds, the return value is an FLS index initialized to zero.
+		for (size_t i = 0; i < MAX_FLS_VALUES; i++) {
+			if (flsValuesUsed[i] == false) {
+				flsValuesUsed[i] = true;
+				flsValues[i] = 0;
+				DEBUG_LOG("...returning %d\n", i);
+				return i;
+			}
+		}
+		DEBUG_LOG("...returning nothing\n");
+		wibo::lastError = 1;
+		return 0xFFFFFFFF; // FLS_OUT_OF_INDEXES
+	}
+
+	unsigned int WIN_FUNC FlsFree(unsigned int dwFlsIndex) {
+		DEBUG_LOG("FlsFree(%u)\n", dwFlsIndex);
+		if (dwFlsIndex >= 0 && dwFlsIndex < MAX_FLS_VALUES && flsValuesUsed[dwFlsIndex]) {
+			flsValuesUsed[dwFlsIndex] = false;
+			return 1;
+		} else {
+			wibo::lastError = 1;
+			return 0;
+		}
+	}
+
+	void *WIN_FUNC FlsGetValue(unsigned int dwFlsIndex) {
+		// DEBUG_LOG("FlsGetValue(%u)", dwFlsIndex);
+		void *result = nullptr;
+		if (dwFlsIndex >= 0 && dwFlsIndex < MAX_FLS_VALUES && flsValuesUsed[dwFlsIndex]) {
+			result = flsValues[dwFlsIndex];
+			// See https://learn.microsoft.com/en-us/windows/win32/api/fibersapi/nf-fibersapi-flsgetvalue
+			wibo::lastError = ERROR_SUCCESS;
+		} else {
+			wibo::lastError = 1;
+		}
+		// DEBUG_LOG(" -> %p\n", result);
+		return result;
+	}
+
+	unsigned int WIN_FUNC FlsSetValue(unsigned int dwFlsIndex, void *lpFlsData) {
+		// DEBUG_LOG("FlsSetValue(%u, %p)\n", dwFlsIndex, lpFlsData);
+		if (dwFlsIndex >= 0 && dwFlsIndex < MAX_FLS_VALUES && flsValuesUsed[dwFlsIndex]) {
+			flsValues[dwFlsIndex] = lpFlsData;
+			return 1;
+		} else {
+			wibo::lastError = 1;
+			return 0;
+		}
+	}
+
 }
 
 static void *resolveByName(const char *name) {
@@ -2180,6 +2237,12 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "InterlockedIncrement") == 0) return (void *) kernel32::InterlockedIncrement;
 	if (strcmp(name, "InterlockedDecrement") == 0) return (void *) kernel32::InterlockedDecrement;
 	if (strcmp(name, "InterlockedExchange") == 0) return (void *) kernel32::InterlockedExchange;
+
+	// fibersapi.h
+	if (strcmp(name, "FlsAlloc") == 0) return (void *) kernel32::FlsAlloc;
+	if (strcmp(name, "FlsFree") == 0) return (void *) kernel32::FlsFree;
+	if (strcmp(name, "FlsSetValue") == 0) return (void *) kernel32::FlsSetValue;
+	if (strcmp(name, "FlsGetValue") == 0) return (void *) kernel32::FlsGetValue;
 
 	return 0;
 }

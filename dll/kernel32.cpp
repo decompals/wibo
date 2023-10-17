@@ -2016,7 +2016,7 @@ namespace kernel32 {
 
 	unsigned int WIN_FUNC FlsFree(unsigned int dwFlsIndex) {
 		DEBUG_LOG("FlsFree(%u)\n", dwFlsIndex);
-		if (dwFlsIndex >= 0 && dwFlsIndex < MAX_TLS_VALUES && flsValuesUsed[dwFlsIndex]) {
+		if (dwFlsIndex >= 0 && dwFlsIndex < MAX_FLS_VALUES && flsValuesUsed[dwFlsIndex]) {
 			flsValuesUsed[dwFlsIndex] = false;
 			return 1;
 		} else {

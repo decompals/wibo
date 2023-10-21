@@ -1481,6 +1481,26 @@ namespace kernel32 {
 		return 1;
 	}
 
+	unsigned int WIN_FUNC GetProcessWorkingSetSize(void *hProcess, unsigned int *lpMinimumWorkingSetSize, unsigned int *lpMaximumWorkingSetSize) {
+		DEBUG_LOG("GetProcessWorkingSetSize\n");
+		// A pointer to a variable that receives the minimum working set size of the specified process, in bytes.
+		// The virtual memory manager attempts to keep at least this much memory resident in the process whenever the process is active.
+		*lpMinimumWorkingSetSize = 32*1024*1024; // 32MB
+
+		// A pointer to a variable that receives the maximum working set size of the specified process, in bytes.
+		// The virtual memory manager attempts to keep no more than this much memory resident in the process whenever
+		// the process is active when memory is in short supply.
+		*lpMaximumWorkingSetSize = 128*1024*1024; // 128MB
+
+		// If the function succeeds, the return value is nonzero.
+		return 1;
+	}
+
+	unsigned int WIN_FUNC SetProcessWorkingSetSize(void *hProcess, unsigned int dwMinimumWorkingSetSize, unsigned int dwMaximumWorkingSetSize) {
+		DEBUG_LOG("SetProcessWorkingSetSize: min %u, max: %u\n", dwMinimumWorkingSetSize, dwMaximumWorkingSetSize);
+		return 1;
+	}
+
 	typedef struct _STARTUPINFOA {
 		unsigned int   cb;
 		char		  *lpReserved;
@@ -2050,6 +2070,11 @@ namespace kernel32 {
 		}
 	}
 
+	BOOL WIN_FUNC GetOverlappedResult(void *hFile, void *lpOverlapped, int *lpNumberOfBytesTransferred, BOOL bWait) {
+		// DEBUG_LOG("GetOverlappedResult(%p, %p, %p, %u)\n", hFile, lpOverlapped, lpNumberOfBytesTransferred, bWait);
+		return 1;
+	}
+
 }
 
 static void *resolveByName(const char *name) {
@@ -2212,6 +2237,8 @@ static void *resolveByName(const char *name) {
 	// memoryapi.h
 	if (strcmp(name, "VirtualAlloc") == 0) return (void *) kernel32::VirtualAlloc;
 	if (strcmp(name, "VirtualFree") == 0) return (void *) kernel32::VirtualFree;
+	if (strcmp(name, "GetProcessWorkingSetSize") == 0) return (void *) kernel32::GetProcessWorkingSetSize;
+	if (strcmp(name, "SetProcessWorkingSetSize") == 0) return (void *) kernel32::SetProcessWorkingSetSize;
 
 	// stringapiset.h
 	if (strcmp(name, "WideCharToMultiByte") == 0) return (void *) kernel32::WideCharToMultiByte;
@@ -2243,6 +2270,9 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "FlsFree") == 0) return (void *) kernel32::FlsFree;
 	if (strcmp(name, "FlsSetValue") == 0) return (void *) kernel32::FlsSetValue;
 	if (strcmp(name, "FlsGetValue") == 0) return (void *) kernel32::FlsGetValue;
+
+	// ioapiset.h
+	if (strcmp(name, "GetOverlappedResult") == 0) return (void *) kernel32::GetOverlappedResult;
 
 	return 0;
 }

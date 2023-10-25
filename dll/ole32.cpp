@@ -20,12 +20,11 @@ namespace ole32 {
 		const GUID *riid,
 		void **ppv
 	) {
-		// when license.dat is missing:
-		// rclsid = CLSID_ShellLink (0x21401), riid = IID_IShellLinkA (0x214ee)
-		// and then it crashes with a null pointer deref
 		DEBUG_LOG("CoCreateInstance 0x%x %p %d 0x%x %p\n", rclsid->Data1, pUnkOuter, dwClsContext, riid->Data1, *ppv);
 		*ppv = 0;
-		return 1;
+		// E_POINTER is returned when ppv is NULL, which isn't true here, but returning 1 results
+		// in a segfault with mwcceppc.exe when it's told to include directories that don't exist
+		return 0x80004003; // E_POINTER
 	}
 }
 

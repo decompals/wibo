@@ -25,7 +25,7 @@ namespace ole32 {
 		// and then it crashes with a null pointer deref
 		DEBUG_LOG("CoCreateInstance 0x%x %p %d 0x%x %p\n", rclsid->Data1, pUnkOuter, dwClsContext, riid->Data1, *ppv);
 		*ppv = 0;
-		return 1;
+		return 0x80004003; // E_POINTER
 	}
 }
 

@@ -840,6 +840,13 @@ namespace kernel32 {
 		return 1;
 	}
 
+	enum {
+		CREATE_NEW = 1,
+		CREATE_ALWAYS = 2,
+		OPEN_EXISTING = 3,
+		OPEN_ALWAYS = 4,
+		TRUNCATE_EXISTING = 5,
+	};
 	void *WIN_FUNC CreateFileA(
 			const char* lpFileName,
 			unsigned int dwDesiredAccess,
@@ -853,19 +860,72 @@ namespace kernel32 {
 				lpFileName, path.c_str(),
 				dwDesiredAccess, dwShareMode, lpSecurityAttributes,
 				dwCreationDisposition, dwFlagsAndAttributes);
+
+		wibo::lastError = 0; // possibly overwritten later in this function
+
+		// Based on https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilea#parameters
+		// and this table: https://stackoverflow.com/a/14469641
+		bool fileExists = (access(path.c_str(), F_OK) == 0);
+		bool shouldTruncate = false;
+		switch (dwCreationDisposition) {
+			case CREATE_ALWAYS:
+				if (fileExists) {
+					wibo::lastError = 183; // ERROR_ALREADY_EXISTS
+					shouldTruncate = true; // "The function overwrites the file"
+					// Function succeeds
+				}
+				break;
+			case CREATE_NEW:
+				if (fileExists) {
+					wibo::lastError = 80; // ERROR_FILE_EXISTS
+					return INVALID_HANDLE_VALUE;
+				}
+				break;
+			case OPEN_ALWAYS:
+				if (fileExists) {
+					wibo::lastError = 183; // ERROR_ALREADY_EXISTS
+					// Function succeeds
+				}
+				break;
+			case OPEN_EXISTING:
+				if (!fileExists) {
+					wibo::lastError = 2; // ERROR_FILE_NOT_FOUND
+					return INVALID_HANDLE_VALUE;
+				}
+				break;
+			case TRUNCATE_EXISTING:
+				shouldTruncate = true;
+				if (!fileExists) {
+					wibo::lastError = 2; // ERROR_FILE_NOT_FOUND
+					return INVALID_HANDLE_VALUE;
+				}
+				break;
+			default:
+				assert(0);
+		}
+
 		FILE *fp;
 		if (dwDesiredAccess == 0x80000000) { // read
 			fp = fopen(path.c_str(), "rb");
 		} else if (dwDesiredAccess == 0x40000000) { // write
-			fp = fopen(path.c_str(), "wb");
+			if (shouldTruncate || !fileExists) {
+				fp = fopen(path.c_str(), "wb");
+			} else {
+				// There is no way to fopen with only write permissions
+				// and without truncating the file...
+				fp = fopen(path.c_str(), "rb+");
+			}
 		} else if (dwDesiredAccess == 0xc0000000) { // read/write
-			fp = fopen(path.c_str(), "wb+");
+			if (shouldTruncate || !fileExists) {
+				fp = fopen(path.c_str(), "wb+");
+			} else {
+				fp = fopen(path.c_str(), "rb+");
+			}
 		} else {
 			assert(0);
 		}
 
 		if (fp) {
-			wibo::lastError = 0;
 			void *handle = files::allocFpHandle(fp);
 			DEBUG_LOG("-> %p\n", handle);
 			return handle;

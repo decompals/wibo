@@ -71,6 +71,8 @@ wibo::Module lib_msvcrt = {
 		"msvcrt40.dll",
 		"msvcr70",
 		"msvcr70.dll",
+		"msvcr71",
+		"msvcr71.dll",
 		nullptr,
 	},
 	resolveByName,

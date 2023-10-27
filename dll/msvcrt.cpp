@@ -1,6 +1,7 @@
 #include "common.h"
 
 #include <spawn.h>
+#include <string>
 
 // from https://codebrowser.dev/glibc/glibc/sysdeps/x86/fpu_control.h.html
 #define _FPU_GETCW(cw) __asm__ __volatile__ ("fnstcw %0" : "=m" (*&cw))
@@ -107,8 +108,6 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "setbuf") == 0) return (void *) msvcrt::setbuf;
 	if (strcmp(name, "_spawnvp") == 0) return (void *) msvcrt::_spawnvp;
 
-	const char* (*wibo_strchr)(const char* str, int c) = strchr;
-
 	// 1:1 mappings with linux funcs
 	if (strcmp(name, "exit") == 0) return (void *) exit;
 	if (strcmp(name, "fopen") == 0) return (void *) fopen;
@@ -120,7 +119,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "memmove") == 0) return (void *) memmove;
 	if (strcmp(name, "memset") == 0) return (void *) memset;
 	if (strcmp(name, "strcat") == 0) return (void *) strcat;
-	if (strcmp(name, "strchr") == 0) return (void *) wibo_strchr;
+	if (strcmp(name, "strchr") == 0) return (void *) strchr;
 	if (strcmp(name, "strcmp") == 0) return (void *) strcmp;
 	if (strcmp(name, "strncmp") == 0) return (void *) strncmp;
 	if (strcmp(name, "strcpy") == 0) return (void *) strcpy;

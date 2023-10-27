@@ -107,7 +107,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "setbuf") == 0) return (void *) msvcrt::setbuf;
 	if (strcmp(name, "_spawnvp") == 0) return (void *) msvcrt::_spawnvp;
 
-	char* (*wibo_strchr)(char* str, int c) = strchr;
+	const char* (*wibo_strchr)(const char* str, int c) = strchr;
 
 	// 1:1 mappings with linux funcs
 	if (strcmp(name, "exit") == 0) return (void *) exit;

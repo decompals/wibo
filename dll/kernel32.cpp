@@ -1928,6 +1928,14 @@ namespace kernel32 {
 		}
 	}
 
+	int WIN_FUNC EnumSystemLocalesA(void (*callback)(char *lpLocaleString), int dwFlags) {
+		DEBUG_LOG("EnumSystemLocalesA %p %i\n", callback, dwFlags);
+		// e.g. something like:
+		// callback("en_US");
+		// callback("ja_JP");
+		return 1;
+	}
+
 	int WIN_FUNC GetUserDefaultLCID() {
 		DEBUG_LOG("GetUserDefaultLCID\n");
 		return 1;
@@ -2173,6 +2181,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "LCMapStringA") == 0) return (void *) kernel32::LCMapStringA;
 	if (strcmp(name, "GetLocaleInfoA") == 0) return (void *) kernel32::GetLocaleInfoA;
 	if (strcmp(name, "GetLocaleInfoW") == 0) return (void *) kernel32::GetLocaleInfoW;
+	if (strcmp(name, "EnumSystemLocalesA") == 0) return (void *) kernel32::EnumSystemLocalesA;
 	if (strcmp(name, "GetUserDefaultLCID") == 0) return (void *) kernel32::GetUserDefaultLCID;
 	if (strcmp(name, "IsDBCSLeadByte") == 0) return (void *) kernel32::IsDBCSLeadByte;
 

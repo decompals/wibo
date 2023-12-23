@@ -310,7 +310,7 @@ static void blockUpper2GB() {
 			holdingMapStart = std::max(holdingMapStart, FILL_MEMORY_ABOVE);
 
 			// DEBUG_LOG("Mapping %08x-%08x\n", holdingMapStart, holdingMapEnd);
-			void* holdingMap = mmap((void*) holdingMapStart, holdingMapEnd - holdingMapStart, PROT_READ, MAP_ANONYMOUS|MAP_FIXED|MAP_PRIVATE, -1, 0);
+			void* holdingMap = mmap((void*) holdingMapStart, holdingMapEnd - holdingMapStart, PROT_READ | PROT_WRITE, MAP_ANONYMOUS|MAP_FIXED|MAP_PRIVATE, -1, 0);
 
 			if (holdingMap == MAP_FAILED) {
 				perror("Failed to create holding map");

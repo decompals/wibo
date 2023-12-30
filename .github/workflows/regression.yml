@@ -20,7 +20,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y file unzip wget
+          sudo apt-get install -y file unzip wget dos2unix binutils-arm-none-eabi binutils-powerpc-linux-gnu binutils-mips-linux-gnu
           pipx install poetry 
 
       - name: Build release

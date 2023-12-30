@@ -12,7 +12,7 @@ env:
 
 jobs:
   build_and_test:
-    name: Build and test
+    name: Regression test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +29,6 @@ jobs:
       - name: Test
         shell: bash
         run: |
-          mv build_debug/wibo build/wibo_debug
           git clone https://github.com/ConorBobbleHat/wibo-test-suite
           ./wibo-test-suite/setup.sh
           ./wibo-test-suite/run_compare_wine_wibo.sh build/wibo

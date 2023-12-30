@@ -26,10 +26,20 @@ jobs:
       - name: Build release
         run: docker build --build-arg build_type=Release --target export --output build .
 
-      - name: Test
+      - name: Clone test suite
         shell: bash
         run: |
-          git clone https://github.com/ConorBobbleHat/wibo-test-suite
+          git clone --recursive https://github.com/ConorBobbleHat/wibo-test-suite
+          
+      - name: Cache compilers
+        uses: actions/cache@v3
+        with:
+          path: wibo-test-suite/decomp.me/backend/compilers/download_cache
+          key: ${{ runner.os }}-compilers-${{ hashFiles('backend/compilers/compilers.*.yaml') }}
+
+      - name: Run test suite
+        shell: bash
+        run: |
           cd wibo-test-suite
           ./setup.sh
-          ./run_compare_wine_wibo.sh ../build/wibo
+          ./run_compare_wine_wibo.sh $(realpath ../build/wibo)

@@ -1,0 +1,35 @@
+name: Regression
+
+on:
+  push:
+    paths-ignore:
+      - '*.md'
+      - 'LICENSE'
+  pull_request:
+
+env:
+  DOCKER_BUILDKIT: 1
+
+jobs:
+  build_and_test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y file unzip wget
+          pipx install poetry 
+
+      - name: Build release
+        run: docker build --build-arg build_type=Release --target export --output build .
+
+      - name: Test
+        shell: bash
+        run: |
+          mv build_debug/wibo build/wibo_debug
+          git clone https://github.com/ConorBobbleHat/wibo-test-suite
+          ./wibo-test-suite/setup.sh
+          ./wibo-test-suite/run_compare_wine_wibo.sh build/wibo

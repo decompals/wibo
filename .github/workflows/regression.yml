@@ -35,7 +35,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: wibo-test-suite/decomp.me/backend/compilers/download_cache
-          key: ${{ runner.os }}-compilers-${{ hashFiles('backend/compilers/compilers.*.yaml') }}
+          key: ${{ runner.os }}-compilers-${{ hashFiles('wibo-test-suite/decomp.me/backend/compilers/compilers.*.yaml') }}
 
       - name: Run test suite
         shell: bash

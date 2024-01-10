@@ -1,6 +1,6 @@
 # wibo
 
-A minimal, low-fuss wrapper that can run really simple command-line 32-bit Windows binaries on Linux - with less faff and less dependencies than WINE.
+A minimal, low-fuss wrapper that can run really simple command-line 32-bit Windows binaries on Linux - with less faff and fewer dependencies than WINE.
 
 Don't run this on any untrusted executables, I implore you. (Or probably just don't run it at all... :p)
 

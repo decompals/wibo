@@ -633,6 +633,22 @@ namespace kernel32 {
 		}
 	}
 
+	DWORD WIN_FUNC GetTempPathA(DWORD nBufferLength, LPSTR lpBuffer) {
+		DEBUG_LOG("GetTempPathA\n");
+
+		if ((nBufferLength == 0) || (lpBuffer == 0)) {
+			return 0;
+		}
+
+		const char* tmp_dir;
+		if (!(tmp_dir = getenv("WIBO_TMP_DIR"))) {
+			tmp_dir = "Z:\\tmp\\";
+		}
+
+		strcpy(lpBuffer, tmp_dir);
+		return strlen(tmp_dir);
+	}
+
 	struct FILETIME {
 		unsigned int dwLowDateTime;
 		unsigned int dwHighDateTime;
@@ -2265,6 +2281,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "GetFileType") == 0) return (void *) kernel32::GetFileType;
 	if (strcmp(name, "FileTimeToLocalFileTime") == 0) return (void *) kernel32::FileTimeToLocalFileTime;
 	if (strcmp(name, "GetFileInformationByHandle") == 0) return (void *) kernel32::GetFileInformationByHandle;
+	if (strcmp(name, "GetTempPathA") == 0) return (void *) kernel32::GetTempPathA;
 
 	// sysinfoapi.h
 	if (strcmp(name, "GetSystemTime") == 0) return (void *) kernel32::GetSystemTime;

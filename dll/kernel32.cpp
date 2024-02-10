@@ -642,7 +642,7 @@ namespace kernel32 {
 
 		const char* tmp_dir;
 		if (!(tmp_dir = getenv("WIBO_TMP_DIR"))) {
-			tmp_dir = "Z:\\tmp";
+			tmp_dir = "Z:\\tmp\\";
 		}
 
 		strcpy(lpBuffer, tmp_dir);

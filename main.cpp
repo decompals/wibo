@@ -424,6 +424,8 @@ int main(int argc, char **argv) {
 	exec.loadPE(f, true);
 	fclose(f);
 
+	srand(0x5EED);
+
 	uint16_t tibSegment = (tibDesc.entry_number << 3) | 7;
 	// Invoke the damn thing
 	asm(

@@ -132,6 +132,10 @@ namespace kernel32 {
 		return (PVOID)handler;
 	}
 
+	void WIN_FUNC RaiseException(DWORD dwExceptionCode, DWORD dwExceptionFlags, DWORD nNumberOfArguments, void *lpArguments) {
+		DEBUG_LOG("STUB: RaiseException(0x%x, %u, %u, %p)\n", dwExceptionCode, dwExceptionFlags, nNumberOfArguments, lpArguments);
+	}
+
 	// @brief returns a pseudo handle to the current process
 	void *WIN_FUNC GetCurrentProcess() {
 		// pseudo handle is always returned, and is -1 (a special constant)
@@ -273,6 +277,11 @@ namespace kernel32 {
 		}
 
 		return 0;
+	}
+
+	void WIN_FUNC Sleep(DWORD dwMilliseconds) {
+		DEBUG_LOG("Sleep (%u)\n", dwMilliseconds);
+		sleep(dwMilliseconds);
 	}
 
 	int WIN_FUNC GetSystemDefaultLangID() {
@@ -647,6 +656,25 @@ namespace kernel32 {
 
 		strcpy(lpBuffer, tmp_dir);
 		return strlen(tmp_dir);
+	}
+
+	unsigned int WIN_FUNC GetTempFileNameA(LPCSTR lpPathName, LPCSTR lpPrefixString, unsigned int uUnique, LPSTR lpTempFileName) {
+		DEBUG_LOG("GetTempFileNameA: %s, %s, %u\n", lpPathName, lpPrefixString, uUnique);
+
+		if (uUnique == 0) {
+			// currently deterministic due to srand() in main.cpp
+			uUnique = rand();
+		}
+
+		std::filesystem::path filename = std::string(lpPrefixString) + std::to_string(uUnique);
+		std::filesystem::path path = files::pathFromWindows(lpPathName) / filename;
+
+		std::string pathStr = files::pathToWindows(path);
+		strcpy(lpTempFileName, pathStr.c_str());
+
+		DEBUG_LOG("GetTempFileNameA pathStr: %s\n", pathStr.c_str());
+
+		return uUnique;
 	}
 
 	struct FILETIME {
@@ -2166,6 +2194,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "GetLastError") == 0) return (void *) kernel32::GetLastError;
 	if (strcmp(name, "SetLastError") == 0) return (void *) kernel32::SetLastError;
 	if (strcmp(name, "AddVectoredExceptionHandler") == 0) return (void *) kernel32::AddVectoredExceptionHandler;
+	if (strcmp(name, "RaiseException") == 0) return (void *) kernel32::RaiseException;
 
 	// processthreadsapi.h
 	if (strcmp(name, "IsProcessorFeaturePresent") == 0) return (void *) kernel32::IsProcessorFeaturePresent;
@@ -2215,6 +2244,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "ReleaseSRWLockExclusive") == 0) return (void *) kernel32::ReleaseSRWLockExclusive;
 	if (strcmp(name, "TryAcquireSRWLockExclusive") == 0) return (void *) kernel32::TryAcquireSRWLockExclusive;
 	if (strcmp(name, "WaitForSingleObject") == 0) return (void *) kernel32::WaitForSingleObject;
+	if (strcmp(name, "Sleep") == 0) return (void *) kernel32::Sleep;
 
 	// winbase.h
 	if (strcmp(name, "GlobalAlloc") == 0) return (void *) kernel32::GlobalAlloc;
@@ -2282,6 +2312,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "FileTimeToLocalFileTime") == 0) return (void *) kernel32::FileTimeToLocalFileTime;
 	if (strcmp(name, "GetFileInformationByHandle") == 0) return (void *) kernel32::GetFileInformationByHandle;
 	if (strcmp(name, "GetTempPathA") == 0) return (void *) kernel32::GetTempPathA;
+	if (strcmp(name, "GetTempFileNameA") == 0) return (void *) kernel32::GetTempFileNameA;
 
 	// sysinfoapi.h
 	if (strcmp(name, "GetSystemTime") == 0) return (void *) kernel32::GetSystemTime;

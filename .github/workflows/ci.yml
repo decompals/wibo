@@ -32,8 +32,8 @@ jobs:
         shell: bash
         run: |
           mv build_debug/wibo build/wibo_debug
-          wget -q https://cdn.discordapp.com/attachments/727918646525165659/1129759991696457728/GC_WII_COMPILERS.zip
-          unzip -q GC_WII_COMPILERS.zip
+          wget -q https://files.decomp.dev/compilers_latest.zip
+          unzip -q compilers_latest.zip
           set -x
           build/wibo_debug Wii/1.7/mwcceppc.exe -nodefaults -c test/test.c -Itest -o test_debug.o
           file test_debug.o

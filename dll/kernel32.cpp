@@ -724,15 +724,20 @@ namespace kernel32 {
 			return (void *) 1;
 		}
 
-		auto *handle = new FindFirstFileHandle();
+		// If the parent path is empty then we assume the parent path is the current directory.
+		auto parent_path = path.parent_path();
+		if (parent_path == "") {
+			parent_path = ".";
+		}
 
-		if (!std::filesystem::exists(path.parent_path())) {
+		if (!std::filesystem::exists(parent_path)) {
 			wibo::lastError = ERROR_PATH_NOT_FOUND;
-			delete handle;
 			return INVALID_HANDLE_VALUE;
 		}
 
-		std::filesystem::directory_iterator it(path.parent_path());
+		auto *handle = new FindFirstFileHandle();
+
+		std::filesystem::directory_iterator it(parent_path);
 		handle->it = it;
 		handle->pattern = path.filename().string();
 

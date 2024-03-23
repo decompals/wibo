@@ -724,15 +724,20 @@ namespace kernel32 {
 			return (void *) 1;
 		}
 
-		auto *handle = new FindFirstFileHandle();
+		// If the parent path is empty then we assume the parent path is the current directory.
+		auto parent_path = path.parent_path();
+		if (parent_path == "") {
+			parent_path = ".";
+		}
 
-		if (!std::filesystem::exists(path.parent_path())) {
+		if (!std::filesystem::exists(parent_path)) {
 			wibo::lastError = ERROR_PATH_NOT_FOUND;
-			delete handle;
 			return INVALID_HANDLE_VALUE;
 		}
 
-		std::filesystem::directory_iterator it(path.parent_path());
+		auto *handle = new FindFirstFileHandle();
+
+		std::filesystem::directory_iterator it(parent_path);
 		handle->it = it;
 		handle->pattern = path.filename().string();
 
@@ -1912,7 +1917,39 @@ namespace kernel32 {
 		if (LCType == 4098) { // LOCALE_SENGCOUNTRY
 			return "Country";
 		}
-		assert(false);
+		if (LCType == 0x1) { // LOCALE_ILANGUAGE
+			return "0001";
+		}
+		if (LCType == 0x15) { // LOCALE_SINTLSYMBOL
+			return "Currency";
+		}
+		if (LCType == 0x14) { // LOCALE_SCURRENCY
+			return "sCurrency";
+		}
+		if (LCType == 0x16) { // LOCALE_SMONDECIMALSEP
+			return ".";
+		}
+		if (LCType == 0x17) { // LOCALE_SMONTHOUSANDSEP
+			return ",";
+		}
+		if (LCType == 0x18) { // LOCALE_SMONGROUPING
+			return ";";
+		}
+		if (LCType == 0x50) { // LOCALE_SPOSITIVESIGN
+			return "";
+		}
+		if (LCType == 0x51) { // LOCALE_SNEGATIVESIGN
+			return "-";
+		}
+		if (LCType == 0x1A) { // LOCALE_IINTLCURRDIGITS
+			return "2";
+		}
+		if (LCType == 0x19) { // LOCALE_ICURRDIGITS
+			return "2";
+		}
+
+		DEBUG_LOG("STUB: LCType 0x%X not implemented\n", LCType);
+		return "";
 	}
 
 	int WIN_FUNC GetLocaleInfoA(unsigned int Locale, int LCType, LPSTR lpLCData, int cchData) {

@@ -1150,7 +1150,19 @@ namespace kernel32 {
 
 	void WIN_FUNC GetLocalTime(SYSTEMTIME *lpSystemTime) {
 		DEBUG_LOG("GetLocalTime\n");
-		GetSystemTime(lpSystemTime);
+
+		time_t t = time(NULL);
+		struct tm *tm = localtime(&t);
+		assert(tm != NULL);
+
+		lpSystemTime->wYear = tm->tm_year + 1900;
+		lpSystemTime->wMonth = tm->tm_mon + 1;
+		lpSystemTime->wDayOfWeek = tm->tm_wday;
+		lpSystemTime->wDay = tm->tm_mday;
+		lpSystemTime->wHour = tm->tm_hour;
+		lpSystemTime->wMinute = tm->tm_min;
+		lpSystemTime->wSecond = tm->tm_sec;
+		lpSystemTime->wMilliseconds = 0;
 	}
 
 	int WIN_FUNC SystemTimeToFileTime(const SYSTEMTIME *lpSystemTime, FILETIME *lpFileTime) {

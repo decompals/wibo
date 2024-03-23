@@ -1133,13 +1133,18 @@ namespace kernel32 {
 
 	void WIN_FUNC GetSystemTime(SYSTEMTIME *lpSystemTime) {
 		DEBUG_LOG("GetSystemTime\n");
-		lpSystemTime->wYear = 0;
-		lpSystemTime->wMonth = 0;
-		lpSystemTime->wDayOfWeek = 0;
-		lpSystemTime->wDay = 0;
-		lpSystemTime->wHour = 0;
-		lpSystemTime->wMinute = 0;
-		lpSystemTime->wSecond = 0;
+
+		time_t t = time(NULL);
+		struct tm *tm = gmtime(&t);
+		assert(tm != NULL);
+
+		lpSystemTime->wYear = tm->tm_year + 1900;
+		lpSystemTime->wMonth = tm->tm_mon + 1;
+		lpSystemTime->wDayOfWeek = tm->tm_wday;
+		lpSystemTime->wDay = tm->tm_mday;
+		lpSystemTime->wHour = tm->tm_hour;
+		lpSystemTime->wMinute = tm->tm_min;
+		lpSystemTime->wSecond = tm->tm_sec;
 		lpSystemTime->wMilliseconds = 0;
 	}
 

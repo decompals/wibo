@@ -723,7 +723,10 @@ namespace kernel32 {
 		auto path = files::pathFromWindows(lpFileName);
 		DEBUG_LOG("FindFirstFileA %s (%s)\n", lpFileName, path.c_str());
 
-		assert(strchr(path.c_str(), '*') == NULL && "wildcards are not supported yet :c");
+		if (strchr(path.c_str(), '*') != NULL) {
+			printf("path: %s\n", path.c_str());
+			assert(!"wildcards are not supported yet :c");
+		}
 
 		lpFindFileData->ftCreationTime = defaultFiletime;
 		lpFindFileData->ftLastAccessTime = defaultFiletime;

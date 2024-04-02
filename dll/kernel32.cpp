@@ -1372,7 +1372,7 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC GetCurrentDirectoryA(unsigned int uSize, char *lpBuffer) {
-		DEBUG_LOG("GetCurrentDirectoryA(%u, %p)\n", uSize, lpBuffer);
+		DEBUG_LOG("GetCurrentDirectoryA(%u, %p)", uSize, lpBuffer);
 
 		std::filesystem::path cwd = std::filesystem::current_path();
 		std::string path = files::pathToWindows(cwd);
@@ -1380,9 +1380,11 @@ namespace kernel32 {
 		// If the buffer is too small, return the required buffer size.
 		// (Add 1 to include the NUL terminator)
 		if (path.size() + 1 > uSize) {
+			DEBUG_LOG(" !! Buffer too small: %i, %i\n", path.size() + 1, uSize);
 			return path.size() + 1;
 		}
 
+		DEBUG_LOG(" -> %s\n", path.c_str());
 		strcpy(lpBuffer, path.c_str());
 		return path.size();
 	}

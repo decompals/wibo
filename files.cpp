@@ -32,7 +32,6 @@ namespace files {
 			return path;
 		}
 
-		path = path.lexically_normal();
 		std::filesystem::path newPath = ".";
 		bool followingExisting = true;
 		for (const auto& component : path) {

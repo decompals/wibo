@@ -682,6 +682,13 @@ namespace kernel32 {
 	};
 
 	bool findNextFile(FindFirstFileHandle *handle) {
+		if ((handle->it != std::filesystem::directory_iterator()) && (handle->pattern == "")) {
+			// The caller (ie `FindFirstFileA`) was passed a path with a
+			// trailing period (like `include/.`). This behavior doesn't seem
+			// to be documented, so we treat it as an "find any file on this
+			// directory".
+			return true;
+		}
 		while (handle->it != std::filesystem::directory_iterator()) {
 			std::filesystem::path path = *handle->it;
 			if (fnmatch(handle->pattern.c_str(), path.filename().c_str(), 0) == 0) {
@@ -715,6 +722,8 @@ namespace kernel32 {
 		// This should handle wildcards too, but whatever.
 		auto path = files::pathFromWindows(lpFileName);
 		DEBUG_LOG("FindFirstFileA %s (%s)\n", lpFileName, path.c_str());
+
+		assert(strchr(path.c_str(), '*') == NULL && "wildcards are not supported yet :c");
 
 		lpFindFileData->ftCreationTime = defaultFiletime;
 		lpFindFileData->ftLastAccessTime = defaultFiletime;

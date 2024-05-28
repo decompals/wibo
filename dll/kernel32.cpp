@@ -119,6 +119,7 @@ namespace kernel32 {
 	}
 
 	uint32_t WIN_FUNC GetLastError() {
+		DEBUG_LOG("GetLastError() -> %u\n", wibo::lastError);
 		return wibo::lastError;
 	}
 
@@ -276,6 +277,7 @@ namespace kernel32 {
 	}
 
 	int WIN_FUNC GetSystemDefaultLangID() {
+		DEBUG_LOG("STUB GetSystemDefaultLangID\n");
 		return 0;
 	}
 
@@ -680,6 +682,13 @@ namespace kernel32 {
 	};
 
 	bool findNextFile(FindFirstFileHandle *handle) {
+		if ((handle->it != std::filesystem::directory_iterator()) && (handle->pattern == "")) {
+			// The caller (ie `FindFirstFileA`) was passed a path with a
+			// trailing period (like `include/.`). This behavior doesn't seem
+			// to be documented, so we treat it as an "find any file on this
+			// directory".
+			return true;
+		}
 		while (handle->it != std::filesystem::directory_iterator()) {
 			std::filesystem::path path = *handle->it;
 			if (fnmatch(handle->pattern.c_str(), path.filename().c_str(), 0) == 0) {
@@ -774,6 +783,7 @@ namespace kernel32 {
 	}
 
 	int WIN_FUNC FindNextFileA(void *hFindFile, WIN32_FIND_DATA<char> *lpFindFileData) {
+		DEBUG_LOG("FindNextFileA(%p, %p)\n", hFindFile, lpFindFileData);
 		// Special value from FindFirstFileA
 		if (hFindFile == (void *) 1) {
 			wibo::lastError = ERROR_NO_MORE_FILES;
@@ -1279,7 +1289,7 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC SetConsoleCtrlHandler(void *HandlerRoutine, unsigned int Add) {
-		DEBUG_LOG("SetConsoleCtrlHandler\n");
+		DEBUG_LOG("STUB SetConsoleCtrlHandler\n");
 		// This is a function that gets called when doing ^C
 		// We might want to call this later (being mindful that it'll be stdcall I think)
 
@@ -1302,6 +1312,7 @@ namespace kernel32 {
 	};
 
 	unsigned int WIN_FUNC GetConsoleScreenBufferInfo(void *hConsoleOutput, CONSOLE_SCREEN_BUFFER_INFO *lpConsoleScreenBufferInfo) {
+		DEBUG_LOG("GetConsoleScreenBufferInfo(%p, %p)\n", hConsoleOutput, lpConsoleScreenBufferInfo);
 		// Tell a lie
 		// mwcc doesn't care about anything else
 		lpConsoleScreenBufferInfo->dwSize_x = 80;
@@ -1368,7 +1379,7 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC GetCurrentDirectoryA(unsigned int uSize, char *lpBuffer) {
-		DEBUG_LOG("GetCurrentDirectoryA(%u, %p)\n", uSize, lpBuffer);
+		DEBUG_LOG("GetCurrentDirectoryA(%u, %p)", uSize, lpBuffer);
 
 		std::filesystem::path cwd = std::filesystem::current_path();
 		std::string path = files::pathToWindows(cwd);
@@ -1376,9 +1387,11 @@ namespace kernel32 {
 		// If the buffer is too small, return the required buffer size.
 		// (Add 1 to include the NUL terminator)
 		if (path.size() + 1 > uSize) {
+			DEBUG_LOG(" !! Buffer too small: %i, %i\n", path.size() + 1, uSize);
 			return path.size() + 1;
 		}
 
+		DEBUG_LOG(" -> %s\n", path.c_str());
 		strcpy(lpBuffer, path.c_str());
 		return path.size();
 	}
@@ -1786,6 +1799,7 @@ namespace kernel32 {
 			return 1;
 
 		// sure.. we have that feature...
+		DEBUG_LOG("  IsProcessorFeaturePresent: we don't know about feature %u, lying...\n", processorFeature);
 		return 1;
 	}
 

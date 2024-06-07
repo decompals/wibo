@@ -15,11 +15,6 @@ namespace files {
 		std::string str = inStr;
 		std::replace(str.begin(), str.end(), '\\', '/');
 
-		// Detect quotation marks around path, and remove them
-		if (str.length() >= 2 && str.front() == '"' && str.back() == '"') {
-			str = str.substr(1, str.length() - 2);
-		}
-
 		// Remove "//?/" prefix
 		if (str.rfind("//?/", 0) == 0) {
 			str.erase(0, 4);

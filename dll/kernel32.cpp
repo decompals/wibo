@@ -226,6 +226,20 @@ namespace kernel32 {
 			// to prevent from doubling up on the target executable name
 			// (it appears as lpApplicationName, and as the first token in lpCommandLine)
 			arg = strtok(NULL, " ");
+
+			if (arg) {
+				// Trim all quotation marks from the start and the end of the string
+				while(*arg == '\"') {
+					arg++;
+				}
+
+				char* end = arg + strlen(arg) - 1;
+				while(end > arg && *end == '\"') {
+					*end = '\0';
+					end--;
+				}
+			}
+			
 			argv[current_arg_index++] = arg;
 		}
 

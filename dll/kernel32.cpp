@@ -681,14 +681,19 @@ namespace kernel32 {
 		std::string pattern;
 	};
 
-	bool findNextFile(FindFirstFileHandle *handle) {
-		if ((handle->it != std::filesystem::directory_iterator()) && (handle->pattern == "")) {
-			// The caller (ie `FindFirstFileA`) was passed a path with a
-			// trailing period (like `include/.`). This behavior doesn't seem
-			// to be documented, so we treat it as an "find any file on this
-			// directory".
-			return true;
+	bool findNextFile(FindFirstFileHandle* handle) {
+		// Check if iterator is valid before using it
+		if (!handle || handle->it == std::filesystem::directory_iterator()) {
+			return false;
 		}
+
+		// If pattern is empty, just iterate
+		if (handle->pattern.empty()) {
+			handle->it++;
+			return handle->it != std::filesystem::directory_iterator();
+		}
+
+		// Look for a matching file with the pattern
 		while (handle->it != std::filesystem::directory_iterator()) {
 			std::filesystem::path path = *handle->it;
 			if (fnmatch(handle->pattern.c_str(), path.filename().c_str(), 0) == 0) {
@@ -696,6 +701,7 @@ namespace kernel32 {
 			}
 			handle->it++;
 		}
+
 		return false;
 	}
 

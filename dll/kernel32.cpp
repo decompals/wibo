@@ -701,6 +701,7 @@ namespace kernel32 {
 			return false;
 		}
 
+		// Early return if pattern is empty
 		if (handle->pattern.empty()) {
 			return false;
 		}

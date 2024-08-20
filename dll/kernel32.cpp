@@ -701,10 +701,14 @@ namespace kernel32 {
 			return false;
 		}
 
+		if (handle->pattern.empty()) {
+			return false;
+		}
+
 		// Look for a matching file with the pattern
 		while (handle->it != std::filesystem::directory_iterator()) {
 			std::filesystem::path path = *handle->it;
-			if (!handle->pattern.empty() && fnmatch(handle->pattern.c_str(), path.filename().c_str(), 0) == 0) {
+			if (fnmatch(handle->pattern.c_str(), path.filename().c_str(), 0) == 0) {
 				return true;
 			}
 			handle->it++;

@@ -55,6 +55,7 @@ typedef unsigned char BYTE;
 #define ERROR_HANDLE_EOF 38
 #define ERROR_NOT_SUPPORTED 50
 #define ERROR_INVALID_PARAMETER 87
+#define ERROR_BUFFER_OVERFLOW 111
 #define ERROR_INSUFFICIENT_BUFFER 122
 #define ERROR_NEGATIVE_SEEK 131
 #define ERROR_ALREADY_EXISTS 183
@@ -71,6 +72,8 @@ typedef int NTSTATUS;
 
 typedef int HRESULT;
 #define S_OK ((HRESULT)0x00000000)
+
+#define MAX_PATH (260)
 
 namespace wibo {
 	extern uint32_t lastError;

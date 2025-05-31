@@ -662,7 +662,7 @@ namespace kernel32 {
 			wibo::lastError = ERROR_BUFFER_OVERFLOW;
 			return 0;
 		}
-		char uniqueStr[11];
+		char uniqueStr[12];
 		std::filesystem::path path;
 
 		if (uUnique == 0) {

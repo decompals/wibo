@@ -662,26 +662,24 @@ namespace kernel32 {
 			wibo::lastError = ERROR_BUFFER_OVERFLOW;
 			return 0;
 		}
-		char uniqueStr[MAX_PATH];
+		char uniqueStr[11];
 		std::filesystem::path path;
 
 		if (uUnique == 0) {
 			random_shorts_engine rse;
-			bool foundAvailable = false;
-			uUnique = rse();
-			while(!foundAvailable) {
-				snprintf(uniqueStr, sizeof(uniqueStr), "%s%X.TMP", lpPrefixString, uUnique);
+			while(true) {
+				uUnique = rse();
+				snprintf(uniqueStr, sizeof(uniqueStr), "%.3s%X.TMP", lpPrefixString, uUnique);
 				path = files::pathFromWindows(lpPathName) / uniqueStr;
 				if (!std::filesystem::exists(path)) {
-					foundAvailable = true;
 					// create empty file
-					fopen(path.c_str(), "a");
+					fclose(fopen(path.c_str(), "a"));
+					break;
 				}
-				uUnique++;
 			}
 		}
 		else {
-			snprintf(uniqueStr, sizeof(uniqueStr), "%s%X.TMP", lpPrefixString, uUnique & 0xFFFF);
+			snprintf(uniqueStr, sizeof(uniqueStr), "%.3s%X.TMP", lpPrefixString, uUnique & 0xFFFF);
 			path = files::pathFromWindows(lpPathName) / uniqueStr;
 		}
 		strncpy(lpTempFileName, files::pathToWindows(path).c_str(), MAX_PATH);

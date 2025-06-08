@@ -19,6 +19,7 @@
 #include <sys/wait.h>
 #include <spawn.h>
 #include <vector>
+#include <fcntl.h>
 
 typedef union _RTL_RUN_ONCE {
 	PVOID Ptr;
@@ -662,18 +663,20 @@ namespace kernel32 {
 			wibo::lastError = ERROR_BUFFER_OVERFLOW;
 			return 0;
 		}
-		char uniqueStr[12];
+		char uniqueStr[20];
 		std::filesystem::path path;
 
 		if (uUnique == 0) {
-			random_shorts_engine rse;
+			std::random_device rd;
+			random_shorts_engine rse(rd());
 			while(true) {
 				uUnique = rse();
 				snprintf(uniqueStr, sizeof(uniqueStr), "%.3s%X.TMP", lpPrefixString, uUnique);
 				path = files::pathFromWindows(lpPathName) / uniqueStr;
-				if (!std::filesystem::exists(path)) {
-					// create empty file
-					fclose(fopen(path.c_str(), "a"));
+				// Atomically create it if it doesn't exist
+				int fd = open(path.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0644);
+				if (fd >= 0) {
+					close(fd);
 					break;
 				}
 			}

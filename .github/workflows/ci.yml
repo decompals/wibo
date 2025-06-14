@@ -41,13 +41,13 @@ jobs:
           file test.o
 
       - name: Upload release
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: wibo
           path: build/wibo
 
       - name: Upload debug
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: wibo_debug
           path: build/wibo_debug

@@ -671,6 +671,9 @@ namespace kernel32 {
 			random_shorts_engine rse(rd());
 			while(true) {
 				uUnique = rse();
+				if (uUnique == 0) {
+					continue;
+				}
 				snprintf(uniqueStr, sizeof(uniqueStr), "%.3s%X.TMP", lpPrefixString, uUnique);
 				path = files::pathFromWindows(lpPathName) / uniqueStr;
 				// Atomically create it if it doesn't exist

@@ -3,6 +3,7 @@
 #include "processes.h"
 #include "handles.h"
 #include <algorithm>
+#include <climits>
 #include <cstdlib>
 #include <ctype.h>
 #include <filesystem>
@@ -10,6 +11,7 @@
 #include <string>
 #include "strutil.h"
 #include <malloc.h>
+#include <random>
 #include <stdarg.h>
 #include <system_error>
 #include <sys/mman.h>
@@ -17,6 +19,7 @@
 #include <sys/wait.h>
 #include <spawn.h>
 #include <vector>
+#include <fcntl.h>
 
 typedef union _RTL_RUN_ONCE {
 	PVOID Ptr;
@@ -647,6 +650,46 @@ namespace kernel32 {
 			strcpy(lpszShortPath, absStr.c_str());
 			return absStr.length();
 		}
+	}
+
+	using random_shorts_engine = std::independent_bits_engine<std::default_random_engine, sizeof(unsigned short) * 8, unsigned short>;
+
+	unsigned int WIN_FUNC GetTempFileNameA(LPSTR lpPathName, LPSTR lpPrefixString, unsigned int uUnique, LPSTR lpTempFileName) {
+		DEBUG_LOG("GetTempFileNameA\n");
+		if (lpPathName == 0) {
+			return 0;
+		}
+		if (strlen(lpPathName) > MAX_PATH - 14) {
+			wibo::lastError = ERROR_BUFFER_OVERFLOW;
+			return 0;
+		}
+		char uniqueStr[20];
+		std::filesystem::path path;
+
+		if (uUnique == 0) {
+			std::random_device rd;
+			random_shorts_engine rse(rd());
+			while(true) {
+				uUnique = rse();
+				if (uUnique == 0) {
+					continue;
+				}
+				snprintf(uniqueStr, sizeof(uniqueStr), "%.3s%X.TMP", lpPrefixString, uUnique);
+				path = files::pathFromWindows(lpPathName) / uniqueStr;
+				// Atomically create it if it doesn't exist
+				int fd = open(path.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0644);
+				if (fd >= 0) {
+					close(fd);
+					break;
+				}
+			}
+		}
+		else {
+			snprintf(uniqueStr, sizeof(uniqueStr), "%.3s%X.TMP", lpPrefixString, uUnique & 0xFFFF);
+			path = files::pathFromWindows(lpPathName) / uniqueStr;
+		}
+		strncpy(lpTempFileName, files::pathToWindows(path).c_str(), MAX_PATH);
+		return uUnique;
 	}
 
 	DWORD WIN_FUNC GetTempPathA(DWORD nBufferLength, LPSTR lpBuffer) {
@@ -2368,6 +2411,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "GetFileType") == 0) return (void *) kernel32::GetFileType;
 	if (strcmp(name, "FileTimeToLocalFileTime") == 0) return (void *) kernel32::FileTimeToLocalFileTime;
 	if (strcmp(name, "GetFileInformationByHandle") == 0) return (void *) kernel32::GetFileInformationByHandle;
+	if (strcmp(name, "GetTempFileNameA") == 0) return (void *) kernel32::GetTempFileNameA;
 	if (strcmp(name, "GetTempPathA") == 0) return (void *) kernel32::GetTempPathA;
 
 	// sysinfoapi.h

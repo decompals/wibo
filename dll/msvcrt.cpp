@@ -15,6 +15,17 @@ namespace msvcrt {
 	int* WIN_FUNC __p__commode() {
 		return &_commode;
 	}
+
+	int WIN_ENTRY _initterm_e(const _PIFV *ppfn, const _PIFV *end) {
+		do {
+			if (_PIFV pfn = *++ppfn) {
+				if (int err = pfn())
+					return err;
+			}
+		} while (ppfn < end);
+
+		return 0;
+	}
 }
 
 
@@ -22,6 +33,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "__set_app_type") == 0) return (void *) msvcrt::__set_app_type;
 	if (strcmp(name, "__p__fmode") == 0) return (void *) msvcrt::__p__fmode;
 	if (strcmp(name, "__p__commode") == 0) return (void *) msvcrt::__p__commode;
+	if (strcmp(name, "_initterm_e") == 0) return (void *)msvcrt::_initterm_e;
 	return nullptr;
 }
 

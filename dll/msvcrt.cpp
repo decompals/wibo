@@ -18,7 +18,7 @@ namespace msvcrt {
 		return &_commode;
 	}
 
-	int WIN_ENTRY _initterm_e(const _PIFV *ppfn, const _PIFV *end) {
+	int WIN_FUNC _initterm_e(const _PIFV *ppfn, const _PIFV *end) {
 		do {
 			if (_PIFV pfn = *++ppfn) {
 				if (int err = pfn())

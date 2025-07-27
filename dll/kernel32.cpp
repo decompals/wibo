@@ -87,6 +87,10 @@ namespace kernel32 {
 		}
 	}
 
+	LONG InterlockedCompareExchange(volatile LONG* destination, LONG exchange, LONG comperand){
+		return __sync_val_compare_and_swap(destination, comperand, exchange);
+	}
+
 	int64_t getFileSize(void* hFile) {
 		FILE *fp = files::fpFromHandle(hFile);
 		struct stat64 st;

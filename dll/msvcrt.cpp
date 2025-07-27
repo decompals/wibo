@@ -19,8 +19,8 @@ namespace msvcrt {
 	}
 
 	int WIN_FUNC _initterm_e(const _PIFV *ppfn, const _PIFV *end) {
-		while (ppfn < end) {
-			_PIFV func = *ppfn++;
+		for (; ppfn < end; ppfn++) {
+			_PIFV func = *ppfn;
 			if (func) {
 				int err = func();
 				if (err != 0)
@@ -29,6 +29,7 @@ namespace msvcrt {
 		}
 		return 0;
 	}
+
 }
 
 

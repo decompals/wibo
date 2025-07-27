@@ -1,5 +1,7 @@
 #include "common.h"
 
+typedef int (*_PIFV)();
+
 namespace msvcrt {
 	int _commode;
 	int _fmode;

@@ -19,13 +19,14 @@ namespace msvcrt {
 	}
 
 	int WIN_FUNC _initterm_e(const _PIFV *ppfn, const _PIFV *end) {
-		do {
-			if (_PIFV pfn = *++ppfn) {
-				if (int err = pfn())
+		while (ppfn < end) {
+			_PIFV func = *ppfn++;
+			if (func) {
+				int err = func();
+				if (err != 0)
 					return err;
 			}
-		} while (ppfn < end);
-
+		}
 		return 0;
 	}
 }

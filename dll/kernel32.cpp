@@ -87,10 +87,6 @@ namespace kernel32 {
 		}
 	}
 
-	LONG InterlockedCompareExchange(volatile LONG* destination, LONG exchange, LONG comperand){
-		return __sync_val_compare_and_swap(destination, comperand, exchange);
-	}
-
 	int64_t getFileSize(void* hFile) {
 		FILE *fp = files::fpFromHandle(hFile);
 		struct stat64 st;
@@ -2232,6 +2228,15 @@ namespace kernel32 {
 		return initial;
 	}
 
+	LONG WIN_FUNC InterlockedCompareExchange(volatile LONG* destination, LONG exchange, LONG comperand){
+		LONG original = *destination;
+		if (original == comperand) {
+			*destination = exchange;
+		}
+		return original;
+		// return __sync_val_compare_and_swap(destination, comperand, exchange); if we want to maintain the atomic behavior
+	}
+
 	// These are effectively a copy/paste of the Tls* functions
 	enum { MAX_FLS_VALUES = 100 };
 	static bool flsValuesUsed[MAX_FLS_VALUES] = { false };
@@ -2485,6 +2490,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "InterlockedIncrement") == 0) return (void *) kernel32::InterlockedIncrement;
 	if (strcmp(name, "InterlockedDecrement") == 0) return (void *) kernel32::InterlockedDecrement;
 	if (strcmp(name, "InterlockedExchange") == 0) return (void *) kernel32::InterlockedExchange;
+	if (strcmp(name, "InterlockedCompareExchange") == 0) return (void*) kernel32::InterlockedCompareExchange;
 
 	// fibersapi.h
 	if (strcmp(name, "FlsAlloc") == 0) return (void *) kernel32::FlsAlloc;

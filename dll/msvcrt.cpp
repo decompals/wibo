@@ -1,4 +1,7 @@
 #include "common.h"
+#include <cstdlib>
+#include <cwchar>
+#include <stdlib.h>
 
 typedef void (*_PVFV)();
 typedef int (*_PIFV)();
@@ -49,6 +52,73 @@ namespace msvcrt {
 		DEBUG_LOG("STUB: _onexit(%p)\n", func);
 		return func;
 	}
+	
+	// wgetmainargs references:
+	// https://github.com/reactos/reactos/blob/fade0c3b8977d43f3a9e0b8887d18afcabd8e145/sdk/lib/crt/misc/getargs.c#L328
+	// https://learn.microsoft.com/en-us/cpp/c-runtime-library/getmainargs-wgetmainargs?view=msvc-170
+
+	int WIN_FUNC __wgetmainargs(int* wargc, wchar_t*** wargv, wchar_t*** wenv, int doWildcard, int* startInfo){
+		// get the regular, non-wide versions of argc/argv/env
+		// argc: the number of args in argv. always >= 1
+		// argv: array of null-terminated strings for command-line args.
+		//		argv[0] = the command to invoke the program
+		//		argv[1] = the first command-line arg
+		//		argv[argc - 1] = the last command-line arg
+		//		argv[argc] = NULL
+		// env: array of strings for user's environment variables. always terminated by NULL entry.
+		int* regular_argc = &wibo::argc;
+		char*** regular_argv = &wibo::argv;
+		char** regular_env = environ;
+
+		int argc = *regular_argc;
+		char** argv = *regular_argv;
+		char** env = regular_env;
+
+		DEBUG_LOG("Wildcard: %d\n", doWildcard);
+		if(startInfo){
+			DEBUG_LOG("Start info: %d\n", *startInfo);
+		}
+
+		std::setlocale(LC_ALL, "");
+
+		std::vector<wchar_t*> wArgs;
+		for(int i = 0; i < argc; i++){
+			const char* cur_arg = argv[i];
+			size_t wSize = strlen(cur_arg) + 1;
+			wchar_t* wStr = new wchar_t[wSize];
+			size_t result = std::mbstowcs(wStr, cur_arg, wSize);
+			if(result != (size_t)-1){
+				wArgs.push_back(wStr);
+			}	
+			else {
+				DEBUG_LOG("Bad argv[%d]: %s\n", i, cur_arg);
+			}
+		}
+		wArgs.push_back(nullptr);
+
+		std::vector<wchar_t*> wEnvs;
+		if(env){
+			for(int i = 0; env[i] != nullptr; i++){
+				const char* cur_env = env[i];
+				size_t wSize = strlen(cur_env) + 1;
+				wchar_t* wStr = new wchar_t[wSize];
+				size_t result = std::mbstowcs(wStr, cur_env, wSize);
+				if(result != (size_t)-1){
+					wEnvs.push_back(wStr);
+				}	
+				else {
+					DEBUG_LOG("Bad env[%d]: %s\n", i, cur_env);
+				}
+			}
+			wEnvs.push_back(nullptr);
+		}
+
+		if(wargc) *wargc = argc;
+		if(wargv) *wargv = wArgs.data();
+		if(wenv) *wenv = wEnvs.data();
+
+		return 0;
+	}
 
 }
 
@@ -63,6 +133,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "_initterm_e") == 0) return (void *)msvcrt::_initterm_e;
 	if (strcmp(name, "_controlfp_s") == 0) return (void *)msvcrt::_controlfp_s;
 	if (strcmp(name, "_onexit") == 0) return (void*)msvcrt::_onexit;
+	if (strcmp(name, "__wgetmainargs") == 0) return (void*)msvcrt::__wgetmainargs;
 	return nullptr;
 }
 

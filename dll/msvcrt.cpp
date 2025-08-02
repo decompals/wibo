@@ -79,44 +79,50 @@ namespace msvcrt {
 			DEBUG_LOG("Start info: %d\n", *startInfo);
 		}
 
+		if(wargc) *wargc = argc;
+
 		std::setlocale(LC_ALL, "");
 
-		std::vector<wchar_t*> wArgs;
-		for(int i = 0; i < argc; i++){
-			const char* cur_arg = argv[i];
-			size_t wSize = strlen(cur_arg) + 1;
-			wchar_t* wStr = new wchar_t[wSize];
-			size_t result = std::mbstowcs(wStr, cur_arg, wSize);
-			if(result != (size_t)-1){
-				wArgs.push_back(wStr);
-			}	
-			else {
-				DEBUG_LOG("Bad argv[%d]: %s\n", i, cur_arg);
-			}
-		}
-		wArgs.push_back(nullptr);
-
-		std::vector<wchar_t*> wEnvs;
-		if(env){
-			for(int i = 0; env[i] != nullptr; i++){
-				const char* cur_env = env[i];
-				size_t wSize = strlen(cur_env) + 1;
-				wchar_t* wStr = new wchar_t[wSize];
-				size_t result = std::mbstowcs(wStr, cur_env, wSize);
-				if(result != (size_t)-1){
-					wEnvs.push_back(wStr);
-				}	
+		if(wargv){
+			*wargv = new wchar_t*[argc + 1]; // allocate array of our future wstrings
+			for(int i = 0; i < argc; i++){
+				const char* cur_arg = argv[i];
+				size_t wSize = std::mbstowcs(nullptr, cur_arg, 0);
+				if(wSize != (size_t)-1){
+					wSize++; // for null terminator
+					wchar_t* wStr = new wchar_t[wSize];
+					std::mbstowcs(wStr, cur_arg, wSize);
+					(*wargv)[i] = wStr;
+				}
 				else {
-					DEBUG_LOG("Bad env[%d]: %s\n", i, cur_env);
+					DEBUG_LOG("Bad argv[%d]: %s\n", i, cur_arg);
+					return -1;
 				}
 			}
-			wEnvs.push_back(nullptr);
+			(*wargv)[argc] = nullptr;
 		}
 
-		if(wargc) *wargc = argc;
-		if(wargv) *wargv = wArgs.data();
-		if(wenv) *wenv = wEnvs.data();
-
+		if(wenv){
+			int count = 0;
+			for(; env[count] != nullptr; count++);
+			DEBUG_LOG("Found env count %d\n", count);
+			*wenv = new wchar_t*[count + 1]; // allocate array of our future wstrings
+			for(int i = 0; i < count; i++){
+				const char* cur_env = env[i];
+				size_t wSize = std::mbstowcs(nullptr, cur_env, 0);
+				if(wSize != (size_t)-1){
+					wSize++; // for null terminator
+					wchar_t* wStr = new wchar_t[wSize];
+					std::mbstowcs(wStr, cur_env, wSize);
+					(*wenv)[i] = wStr;
+				}
+				else {
+					DEBUG_LOG("Bad env[%d]: %s\n", i, cur_env);
+					return -1;
+				}
+			}
+			(*wenv)[count] = nullptr;
+		}
 		return 0;
 	}
 

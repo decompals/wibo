@@ -10,6 +10,7 @@ typedef int (*_PIFV)();
 namespace msvcrt {
 	int _commode;
 	int _fmode;
+	wchar_t** __winitenv;
 
 	// Stub because we're only ever a console application
 	void WIN_ENTRY __set_app_type(int at) {
@@ -23,7 +24,7 @@ namespace msvcrt {
 		return &_commode;
 	}
 
-	void WIN_FUNC _initterm(const _PVFV *ppfn, const _PVFV* end) {
+	void WIN_ENTRY _initterm(const _PVFV *ppfn, const _PVFV* end) {
 		for (; ppfn < end; ppfn++) {
 			_PVFV func = *ppfn;
 			if (func) {
@@ -32,7 +33,7 @@ namespace msvcrt {
 		}
 	}
 
-	int WIN_FUNC _initterm_e(const _PIFV *ppfn, const _PIFV *end) {
+	int WIN_ENTRY _initterm_e(const _PIFV *ppfn, const _PIFV *end) {
 		for (; ppfn < end; ppfn++) {
 			_PIFV func = *ppfn;
 			if (func) {
@@ -49,7 +50,7 @@ namespace msvcrt {
 		return 0;
 	}
 
-	_PIFV WIN_FUNC _onexit(_PIFV func) {
+	_PIFV WIN_ENTRY _onexit(_PIFV func) {
 		DEBUG_LOG("STUB: _onexit(%p)\n", func);
 		return func;
 	}
@@ -58,7 +59,7 @@ namespace msvcrt {
 	// https://github.com/reactos/reactos/blob/fade0c3b8977d43f3a9e0b8887d18afcabd8e145/sdk/lib/crt/misc/getargs.c#L328
 	// https://learn.microsoft.com/en-us/cpp/c-runtime-library/getmainargs-wgetmainargs?view=msvc-170
 
-	int WIN_FUNC __wgetmainargs(int* wargc, wchar_t*** wargv, wchar_t*** wenv, int doWildcard, int* startInfo){
+	int WIN_ENTRY __wgetmainargs(int* wargc, wchar_t*** wargv, wchar_t*** wenv, int doWildcard, int* startInfo){
 		// get the regular, non-wide versions of argc/argv/env
 		// argc: the number of args in argv. always >= 1
 		// argv: array of null-terminated strings for command-line args.
@@ -164,6 +165,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "__set_app_type") == 0) return (void *) msvcrt::__set_app_type;
 	if (strcmp(name, "_fmode") == 0) return (void *)&msvcrt::_fmode;
     if (strcmp(name, "_commode") == 0) return (void *)&msvcrt::_commode;
+	if (strcmp(name, "__winitenv") == 0) return (void *)&msvcrt::__winitenv;
 	if (strcmp(name, "__p__fmode") == 0) return (void *) msvcrt::__p__fmode;
 	if (strcmp(name, "__p__commode") == 0) return (void *) msvcrt::__p__commode;
 	if (strcmp(name, "_initterm") == 0) return (void *)msvcrt::_initterm;

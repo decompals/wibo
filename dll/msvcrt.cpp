@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <cwchar>
 #include <stdlib.h>
+#include <string>
 
 typedef void (*_PVFV)();
 typedef int (*_PIFV)();
@@ -81,7 +82,7 @@ namespace msvcrt {
 
 		if(wargc) *wargc = argc;
 
-		std::setlocale(LC_ALL, "");
+		std::setlocale(LC_CTYPE, "");
 
 		if(wargv){
 			*wargv = new wchar_t*[argc + 1]; // allocate array of our future wstrings
@@ -100,6 +101,21 @@ namespace msvcrt {
 				}
 			}
 			(*wargv)[argc] = nullptr;
+
+			// sanity check
+			for (int i = 0; i < argc; i++) {
+				wchar_t* warg = (*wargv)[i];
+				size_t len = std::wcstombs(nullptr, warg, 0);
+				if (len != (size_t)-1) {
+					char* converted = new char[len + 1];
+					std::wcstombs(converted, warg, len + 1);
+					DEBUG_LOG("Input argv[%d]: %s\n", i, argv[i]);
+					DEBUG_LOG("Output wargv[%d]: %s\n", i, converted);
+					delete[] converted;
+				} else {
+					DEBUG_LOG("Bad wide arg conversion for %d!\n", i);
+				}
+			}
 		}
 
 		if(wenv){
@@ -122,6 +138,21 @@ namespace msvcrt {
 				}
 			}
 			(*wenv)[count] = nullptr;
+
+			// sanity check
+			for (int i = 0; i < count; i++) {
+				wchar_t* warg = (*wenv)[i];
+				size_t len = std::wcstombs(nullptr, warg, 0);
+				if (len != (size_t)-1) {
+					char* converted = new char[len + 1];
+					std::wcstombs(converted, warg, len + 1);
+					DEBUG_LOG("Input env[%d]: %s\n", i, env[i]);
+					DEBUG_LOG("Output wenv[%d]: %s\n", i, converted);
+					delete[] converted;
+				} else {
+					DEBUG_LOG("Bad wide arg conversion for %d!\n", i);
+				}
+			}
 		}
 		return 0;
 	}

@@ -1533,11 +1533,37 @@ namespace kernel32 {
 
 	DWORD WIN_FUNC GetModuleFileNameW(HMODULE hModule, LPWSTR lpFilename, DWORD nSize) {
 		DEBUG_LOG("GetModuleFileNameW (hModule=%p, nSize=%i)\n", hModule, nSize);
+		if (lpFilename == nullptr) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
 
-		*lpFilename = 0; // just NUL terminate
+		std::string path;
+		if (wibo::isMainModule(hModule)) {
+			const auto exePath = files::pathFromWindows(wibo::argv[0]);
+			const auto absPath = std::filesystem::absolute(exePath);
+			path = files::pathToWindows(absPath);
+		} else {
+			path = static_cast<wibo::ModuleInfo *>(hModule)->name;
+		}
+		const size_t len = path.size();
+		if (nSize == 0) {
+			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			return 0;
+		}
 
-		wibo::lastError = 0;
-		return 0;
+		const size_t copyLen = std::min(len, nSize - 1);
+		memcpy(lpFilename, stringToWideString(path.c_str()).data(), copyLen);
+		if (copyLen < nSize) {
+			lpFilename[copyLen] = 0;
+		}
+		if (copyLen < len) {
+			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			return nSize;
+		}
+
+		wibo::lastError = ERROR_SUCCESS;
+		return copyLen;
 	}
 
 	void* WIN_FUNC FindResourceA(void* hModule, const char* lpName, const char* lpType) {

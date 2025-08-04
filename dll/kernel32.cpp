@@ -2174,6 +2174,11 @@ namespace kernel32 {
 		return 1; // EXCEPTION_EXECUTE_HANDLER
 	}
 
+	unsigned int WIN_FUNC SetErrorMode(unsigned int mode){
+		DEBUG_LOG("SetErrorMode: %d\n", mode);
+		return 0;
+	}
+
 	struct SINGLE_LIST_ENTRY
 	{
 		SINGLE_LIST_ENTRY *Next;
@@ -2481,6 +2486,7 @@ static void *resolveByName(const char *name) {
 	// errhandlingapi.h
 	if (strcmp(name, "SetUnhandledExceptionFilter") == 0) return (void *) kernel32::SetUnhandledExceptionFilter;
 	if (strcmp(name, "UnhandledExceptionFilter") == 0) return (void *) kernel32::UnhandledExceptionFilter;
+	if (strcmp(name, "SetErrorMode") == 0) return (void*)kernel32::SetErrorMode;
 
 	// interlockedapi.h
 	if (strcmp(name, "InitializeSListHead") == 0) return (void *) kernel32::InitializeSListHead;

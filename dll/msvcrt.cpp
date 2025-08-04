@@ -154,8 +154,46 @@ namespace msvcrt {
 					DEBUG_LOG("Bad wide arg conversion for %d!\n", i);
 				}
 			}
+
+			__winitenv = *wenv;
 		}
 		return 0;
+	}
+
+	char WIN_ENTRY *setlocale(int category, const char *locale){
+		DEBUG_LOG("STUB: setlocale(%d, %s)\n", category, locale);
+		return (char*)"C";
+	}
+
+	int WIN_ENTRY _wdupenv_s(wchar_t **buffer, size_t *numberOfElements, const wchar_t *varname){
+		// just gonna stub all this out for now
+		// if it turns out we need this, troubleshoot wscspy
+
+		// if(!buffer || !varname) return -1;
+		// if(numberOfElements) *numberOfElements = 0;
+
+		// size_t varnamelen = wcslen(varname);
+
+		// for(wchar_t** env = __winitenv; env && *env; ++env){
+		// 	wchar_t* cur = *env;
+		// 	if(wcsncmp(cur, varname, varnamelen) == 0 && cur[varnamelen] == L'='){
+		// 		wchar_t* value = cur + varnamelen + 1;
+		// 		size_t value_len = wcslen(value);
+
+		// 		*buffer = (wchar_t*)malloc((value_len + 1) * sizeof(wchar_t));
+		// 		if(!*buffer) return -1;
+
+		// 		wscspy(*buffer, value); // y u no work
+		// 		if(numberOfElements) *numberOfElements = value_len + 1;
+		// 		return 0;
+		// 	}
+		// }
+
+		return 0;
+	}
+
+	void WIN_ENTRY free(void* ptr){
+		std::free(ptr);
 	}
 
 }
@@ -173,6 +211,9 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "_controlfp_s") == 0) return (void *)msvcrt::_controlfp_s;
 	if (strcmp(name, "_onexit") == 0) return (void*)msvcrt::_onexit;
 	if (strcmp(name, "__wgetmainargs") == 0) return (void*)msvcrt::__wgetmainargs;
+	if (strcmp(name, "setlocale") == 0) return (void*)msvcrt::setlocale;
+	if (strcmp(name, "_wdupenv_s") == 0) return (void*)msvcrt::_wdupenv_s;
+	if (strcmp(name, "free") == 0) return (void*)msvcrt::free;
 	return nullptr;
 }
 

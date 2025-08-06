@@ -1589,7 +1589,10 @@ namespace kernel32 {
 	}
 
 	void* WIN_FUNC FindResourceW(void* hModule, const wchar_t* lpName, const wchar_t* lpType) {
-		DEBUG_LOG("FindResourceW\n");
+		// why do these segfault lmao
+		// std::string name = wideStringToString((const unsigned short *)lpName, wcslen(lpName));
+		// std::string type = wideStringToString((const unsigned short *)lpType, wcslen(lpType));
+		DEBUG_LOG("FindResourceW %p\n", hModule);
 		return (void*)0x100002;
 	}
 

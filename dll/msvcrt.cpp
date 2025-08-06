@@ -292,6 +292,20 @@ namespace msvcrt {
 		return dup;
 	}
 
+	void* WIN_ENTRY memset(void *s, int c, size_t n){
+		return std::memset(s, c, n);
+	}
+
+	int WIN_ENTRY wcsncpy_s(wchar_t *strDest, size_t numberOfElements, const wchar_t *strSource, size_t count){
+		DEBUG_LOG("STUB: wcsncpy_s\n");
+		return 0;
+	}
+
+	int WIN_ENTRY wcsncat_s(wchar_t *strDest, size_t numberOfElements, const wchar_t *strSource, size_t count){
+		DEBUG_LOG("STUB: wscncat_s\n");
+		return 0;
+	}
+
 }
 
 
@@ -314,6 +328,9 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "_wsplitpath_s") == 0) return (void*)msvcrt::_wsplitpath_s;
 	if (strcmp(name, "wcscat_s") == 0) return (void*)msvcrt::wcscat_s;
 	if (strcmp(name, "_wcsdup") == 0) return (void*)msvcrt::_wcsdup;
+	if (strcmp(name, "memset") == 0) return (void*)msvcrt::memset;
+	if (strcmp(name, "wcsncpy_s") == 0) return (void*)msvcrt::wcsncpy_s;
+	if (strcmp(name, "wcsncat_s") == 0) return (void*)msvcrt::wcsncat_s;
 	return nullptr;
 }
 

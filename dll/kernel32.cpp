@@ -898,6 +898,23 @@ namespace kernel32 {
 		}
 	}
 
+	unsigned int WIN_FUNC GetFileAttributesW(const wchar_t* lpFileName) {
+		DEBUG_LOG("GetFileAttributesW\n");
+		size_t len = std::wcstombs(nullptr, lpFileName, 0);
+		if(len != (size_t)-1){
+			char* converted = new char[len + 1];
+			std::wcstombs(converted, lpFileName, len + 1);
+			unsigned int ret = GetFileAttributesA(converted);
+			delete [] converted;
+			return ret;
+		}
+		else {
+			DEBUG_LOG("Could not convert filename for GetFileAttributesW!\n");
+			wibo::lastError = 2;
+			return 0xFFFFFFFF;
+		}
+	}
+
 	unsigned int WIN_FUNC WriteFile(void *hFile, const void *lpBuffer, unsigned int nNumberOfBytesToWrite, unsigned int *lpNumberOfBytesWritten, void *lpOverlapped) {
 		DEBUG_LOG("WriteFile(%p, %d)\n", hFile, nNumberOfBytesToWrite);
 		assert(!lpOverlapped);
@@ -2431,6 +2448,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "FindNextFileA") == 0) return (void *) kernel32::FindNextFileA;
 	if (strcmp(name, "FindClose") == 0) return (void *) kernel32::FindClose;
 	if (strcmp(name, "GetFileAttributesA") == 0) return (void *) kernel32::GetFileAttributesA;
+	if (strcmp(name, "GetFileAttributesW") == 0) return (void *) kernel32::GetFileAttributesW;
 	if (strcmp(name, "WriteFile") == 0) return (void *) kernel32::WriteFile;
 	if (strcmp(name, "ReadFile") == 0) return (void *) kernel32::ReadFile;
 	if (strcmp(name, "CreateFileA") == 0) return (void *) kernel32::CreateFileA;

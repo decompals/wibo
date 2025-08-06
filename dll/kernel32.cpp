@@ -915,6 +915,11 @@ namespace kernel32 {
 		}
 	}
 
+	unsigned short WIN_FUNC GetUserDefaultUILanguage(){
+		DEBUG_LOG("STUB GetUserDefaultUILanguage\n");
+		return 0;
+	}
+
 	unsigned int WIN_FUNC WriteFile(void *hFile, const void *lpBuffer, unsigned int nNumberOfBytesToWrite, unsigned int *lpNumberOfBytesWritten, void *lpOverlapped) {
 		DEBUG_LOG("WriteFile(%p, %d)\n", hFile, nNumberOfBytesToWrite);
 		assert(!lpOverlapped);
@@ -1367,6 +1372,11 @@ namespace kernel32 {
 		return 1;
 	}
 
+	unsigned int WIN_FUNC GetConsoleOutputCP(){
+		DEBUG_LOG("GetConsoleOutputCP\n");
+		return 65001; // UTF-8
+	}
+
 	unsigned int WIN_FUNC SetConsoleCtrlHandler(void *HandlerRoutine, unsigned int Add) {
 		DEBUG_LOG("STUB SetConsoleCtrlHandler\n");
 		// This is a function that gets called when doing ^C
@@ -1585,6 +1595,11 @@ namespace kernel32 {
 
 	void* WIN_FUNC FindResourceA(void* hModule, const char* lpName, const char* lpType) {
 		DEBUG_LOG("FindResourceA %p %s %s\n", hModule, lpName, lpType);
+		return (void*)0x100002;
+	}
+
+	void* WIN_FUNC FindResourceW(void* hModule, const wchar_t* lpName, const wchar_t* lpType) {
+		DEBUG_LOG("FindResourceW\n");
 		return (void*)0x100002;
 	}
 
@@ -2374,6 +2389,7 @@ static void *resolveByName(const char *name) {
 
 	// winnls.h
 	if (strcmp(name, "GetSystemDefaultLangID") == 0) return (void *) kernel32::GetSystemDefaultLangID;
+	if (strcmp(name, "GetUserDefaultUILanguage") == 0) return (void *) kernel32::GetUserDefaultUILanguage;
 	if (strcmp(name, "GetACP") == 0) return (void *) kernel32::GetACP;
 	if (strcmp(name, "GetCPInfo") == 0) return (void *) kernel32::GetCPInfo;
 	if (strcmp(name, "CompareStringA") == 0) return (void *) kernel32::CompareStringA;
@@ -2411,6 +2427,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "GetCurrentDirectoryA") == 0) return (void *) kernel32::GetCurrentDirectoryA;
 	if (strcmp(name, "GetCurrentDirectoryW") == 0) return (void *) kernel32::GetCurrentDirectoryW;
 	if (strcmp(name, "FindResourceA") == 0) return (void *) kernel32::FindResourceA;
+	if (strcmp(name, "FindResourceW") == 0) return (void *) kernel32::FindResourceW;
 	if (strcmp(name, "SetHandleCount") == 0) return (void *) kernel32::SetHandleCount;
 	if (strcmp(name, "FormatMessageA") == 0) return (void *) kernel32::FormatMessageA;
 	if (strcmp(name, "GetComputerNameA") == 0) return (void *) kernel32::GetComputerNameA;
@@ -2438,6 +2455,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "SetConsoleCtrlHandler") == 0) return (void *) kernel32::SetConsoleCtrlHandler;
 	if (strcmp(name, "GetConsoleScreenBufferInfo") == 0) return (void *) kernel32::GetConsoleScreenBufferInfo;
 	if (strcmp(name, "WriteConsoleW") == 0) return (void *) kernel32::WriteConsoleW;
+	if (strcmp(name, "GetConsoleOutputCP") == 0) return (void *) kernel32::GetConsoleOutputCP;
 
 	// fileapi.h
 	if (strcmp(name, "GetFullPathNameA") == 0) return (void *) kernel32::GetFullPathNameA;

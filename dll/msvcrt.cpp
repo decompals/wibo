@@ -306,6 +306,20 @@ namespace msvcrt {
 		return 0;
 	}
 
+	int WIN_ENTRY _itow_s(int value, wchar_t *buffer, size_t size, int radix){
+		DEBUG_LOG("STUB: _itow_s\n");
+		return 0;
+	}
+
+	int WIN_ENTRY _wtoi(const wchar_t* str) {
+		return (int)wcstol(str, nullptr, 10);
+	}
+
+	int WIN_ENTRY wcscpy_s(wchar_t *dest, size_t dest_size, const wchar_t *src){
+		DEBUG_LOG("STUB: wcscpy_s\n");
+		return 0;
+	}
+
 }
 
 
@@ -331,6 +345,9 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "memset") == 0) return (void*)msvcrt::memset;
 	if (strcmp(name, "wcsncpy_s") == 0) return (void*)msvcrt::wcsncpy_s;
 	if (strcmp(name, "wcsncat_s") == 0) return (void*)msvcrt::wcsncat_s;
+	if (strcmp(name, "_itow_s") == 0) return (void*)msvcrt::_itow_s;
+	if (strcmp(name, "_wtoi") == 0) return (void*)msvcrt::_wtoi;
+	if (strcmp(name, "wcscpy_s") == 0) return (void*)msvcrt::wcscpy_s;
 	return nullptr;
 }
 

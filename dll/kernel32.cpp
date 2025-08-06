@@ -899,20 +899,10 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC GetFileAttributesW(const wchar_t* lpFileName) {
-		DEBUG_LOG("GetFileAttributesW\n");
-		size_t len = std::wcstombs(nullptr, lpFileName, 0);
-		if(len != (size_t)-1){
-			char* converted = new char[len + 1];
-			std::wcstombs(converted, lpFileName, len + 1);
-			unsigned int ret = GetFileAttributesA(converted);
-			delete [] converted;
-			return ret;
-		}
-		else {
-			DEBUG_LOG("Could not convert filename for GetFileAttributesW!\n");
-			wibo::lastError = 2;
-			return 0xFFFFFFFF;
-		}
+		DEBUG_LOG("GetFileAttributesW(");
+		std::string str = wideStringToString((const unsigned short*)lpFileName, wcslen(lpFileName));
+		DEBUG_LOG("%s)\n", str.c_str());
+		return GetFileAttributesA(str.c_str());
 	}
 
 	unsigned short WIN_FUNC GetUserDefaultUILanguage(){

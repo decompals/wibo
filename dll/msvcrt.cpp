@@ -337,6 +337,10 @@ namespace msvcrt {
 		_Exit(status);
 	}
 
+	int WIN_ENTRY wcsncmp(const wchar_t *string1, const wchar_t *string2, size_t count){
+		return std::wcsncmp(string1, string2, count);
+	}
+
 }
 
 
@@ -369,6 +373,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "_get_osfhandle") == 0) return (void*)msvcrt::_get_osfhandle;
 	if (strcmp(name, "_write") == 0) return (void*)msvcrt::_write;
 	if (strcmp(name, "exit") == 0) return (void*)msvcrt::exit;
+	if (strcmp(name, "wcsncmp") == 0) return (void*)msvcrt::wcsncmp;
 	return nullptr;
 }
 

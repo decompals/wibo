@@ -1588,17 +1588,71 @@ namespace kernel32 {
 		return (void*)0x100002;
 	}
 
+	// https://github.com/reactos/reactos/blob/master/dll/win32/kernelbase/wine/loader.c#L1090
+	// https://github.com/wine-mirror/wine/blob/master/dlls/kernelbase/loader.c#L1097
 	void* WIN_FUNC FindResourceW(void* hModule, const wchar_t* lpName, const wchar_t* lpType) {
-		// why do these segfault lmao
-		// std::string name = wideStringToString((const unsigned short *)lpName, wcslen(lpName));
-		// std::string type = wideStringToString((const unsigned short *)lpType, wcslen(lpType));
 		DEBUG_LOG("FindResourceW %p\n", hModule);
-		return (void*)0x100002;
+		char* name = nullptr;
+		char* type = nullptr;
+
+		if(!hModule) hModule = GetModuleHandleW(0);
+
+		if((uintptr_t)lpName >> 16 == 0){
+			asprintf(&name, "%u",(unsigned int)(uintptr_t)lpName);
+		}
+		else {
+			std::string str = wideStringToString((const unsigned short*)lpName);
+			name = (char*)str.c_str();
+		}
+
+		if((uintptr_t)lpType >> 16 == 0){
+			asprintf(&type, "%u",(unsigned int)(uintptr_t)lpType);
+		}
+		else {
+			std::string str = wideStringToString((const unsigned short*)lpType);
+			type = (char*)str.c_str();
+		}
+
+		if(name && type){
+			char path[512];
+			snprintf(path, sizeof(path), "resources/%s/%s.res", type, name);
+			DEBUG_LOG("Created path %s\n", path);
+			return fopen(path, "rb");
+		}
+		else {
+			free(name);
+			free(type);
+			DEBUG_LOG("Could not create path, falling back to 0x100002\n");
+			return (void*)0x100002;
+		}
+
 	}
 
 	void* WIN_FUNC LoadResource(void* hModule, void* res) {
 		DEBUG_LOG("LoadResource %p %p\n", hModule, res);
-		return (void*)0x100003;
+
+		if(!hModule || !res) return nullptr;
+		FILE* hRes = (FILE*)res;
+
+		long pos = ftell(hRes);
+		DEBUG_LOG("Pos: %d\n", pos);
+		fseek(hRes, 0, SEEK_END);
+		long size = ftell(hRes);
+		fseek(hRes, pos, SEEK_SET);
+		DEBUG_LOG("Size: %d\n", size);
+
+		if(size <= 0) return nullptr;
+
+		void* buffer = malloc(size);
+		if(!buffer) return nullptr;
+
+		if(fread(buffer, 1, size, hRes) != (size_t)size){
+			free(buffer);
+			return nullptr;
+		}
+		return buffer;
+
+		// return (void*)0x100003;
 	}
 
 	void* WIN_FUNC LockResource(void* res) {

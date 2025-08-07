@@ -1592,40 +1592,29 @@ namespace kernel32 {
 	// https://github.com/wine-mirror/wine/blob/master/dlls/kernelbase/loader.c#L1097
 	void* WIN_FUNC FindResourceW(void* hModule, const wchar_t* lpName, const wchar_t* lpType) {
 		DEBUG_LOG("FindResourceW %p\n", hModule);
-		char* name = nullptr;
-		char* type = nullptr;
+		std::string name, type;
 
 		if(!hModule) hModule = GetModuleHandleW(0);
 
 		if((uintptr_t)lpName >> 16 == 0){
-			asprintf(&name, "%u",(unsigned int)(uintptr_t)lpName);
+			name = std::to_string((unsigned int)(uintptr_t)lpName);
 		}
 		else {
-			std::string str = wideStringToString((const unsigned short*)lpName);
-			name = (char*)str.c_str();
+			name = wideStringToString((const unsigned short*)lpName);
 		}
 
 		if((uintptr_t)lpType >> 16 == 0){
-			asprintf(&type, "%u",(unsigned int)(uintptr_t)lpType);
+			type = std::to_string((unsigned int)(uintptr_t)lpType);
 		}
 		else {
-			std::string str = wideStringToString((const unsigned short*)lpType);
-			type = (char*)str.c_str();
+			type = wideStringToString((const unsigned short*)lpType);
 		}
 
-		if(name && type){
-			char path[512];
-			snprintf(path, sizeof(path), "resources/%s/%s.res", type, name);
-			DEBUG_LOG("Created path %s\n", path);
-			return fopen(path, "rb");
-		}
-		else {
-			free(name);
-			free(type);
-			DEBUG_LOG("Could not create path, falling back to 0x100002\n");
-			return (void*)0x100002;
-		}
-
+		char path[512];
+		snprintf(path, sizeof(path), "resources/%s/%s.res", type.c_str(), name.c_str());
+		DEBUG_LOG("Created path %s\n", path);
+		return fopen(path, "rb");
+		// 	return (void*)0x100002;
 	}
 
 	void* WIN_FUNC LoadResource(void* hModule, void* res) {

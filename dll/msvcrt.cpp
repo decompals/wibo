@@ -1,6 +1,7 @@
 #include "common.h"
 #include <cstdlib>
 #include <cwchar>
+#include <cwctype>
 #include <stdlib.h>
 #include <string>
 
@@ -347,6 +348,22 @@ namespace msvcrt {
 		return vswprintf(buffer, size, format, args);
 	}
 
+	const wchar_t* WIN_ENTRY wcsstr( const wchar_t *dest, const wchar_t *src ){
+		return std::wcsstr(dest, src);
+	}
+
+	int WIN_ENTRY iswspace(wint_t w){
+		return std::iswspace(w);
+	}
+
+	const wchar_t* WIN_ENTRY wcsrchr(const wchar_t *str, wchar_t c){
+		return std::wcsrchr(str, c);
+	}
+
+	unsigned long WIN_ENTRY wcstoul(const wchar_t *strSource, wchar_t **endptr, int base){
+		return std::wcstoul(strSource, endptr, base);
+	}
+
 }
 
 
@@ -381,6 +398,10 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "exit") == 0) return (void*)msvcrt::exit;
 	if (strcmp(name, "wcsncmp") == 0) return (void*)msvcrt::wcsncmp;
 	if (strcmp(name, "_vswprintf_c_l") == 0) return (void*)msvcrt::_vswprintf_c_l;
+	if (strcmp(name, "wcsstr") == 0) return (void*)msvcrt::wcsstr;
+	if (strcmp(name, "iswspace") == 0) return (void*)msvcrt::iswspace;
+	if (strcmp(name, "wcsrchr") == 0) return (void*)msvcrt::wcsrchr;
+	if (strcmp(name, "wcstoul") == 0) return (void*)msvcrt::wcstoul;
 	return nullptr;
 }
 

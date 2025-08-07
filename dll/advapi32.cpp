@@ -6,6 +6,11 @@ namespace advapi32 {
 		return 1; // screw them for now
 	}
 
+	bool WIN_FUNC CryptReleaseContext(void* hProv, unsigned int dwFlags) {
+		DEBUG_LOG("STUB: CryptReleaseContext %p %u\n", hProv, dwFlags);
+		return true;
+	}
+
 	bool WIN_FUNC CryptAcquireContextW(void** phProv, const wchar_t* pszContainer, const wchar_t* pszProvider, unsigned int dwProvType, unsigned int dwFlags){
 		DEBUG_LOG("STUB: CryptAcquireContextW(%p)\n", phProv);
 
@@ -22,6 +27,7 @@ namespace advapi32 {
 
 static void *resolveByName(const char *name) {
 	if (strcmp(name, "RegOpenKeyExA") == 0) return (void *) advapi32::RegOpenKeyExA;
+	if (strcmp(name, "CryptReleaseContext") == 0) return (void*) advapi32::CryptReleaseContext;
 	if (strcmp(name, "CryptAcquireContextW") == 0) return (void*) advapi32::CryptAcquireContextW;
 	return nullptr;
 }

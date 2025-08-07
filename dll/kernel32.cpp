@@ -468,7 +468,7 @@ namespace kernel32 {
 	}
 
 	LPWSTR WIN_FUNC GetCommandLineW() {
-		DEBUG_LOG("GetCommandLineW -> ");
+		DEBUG_LOG("GetCommandLineW -> \n");
 		return wibo::commandLineW.data();
 	}
 
@@ -1724,23 +1724,54 @@ namespace kernel32 {
 	}
 
 	void *WIN_FUNC VirtualAlloc(void *lpAddress, unsigned int dwSize, unsigned int flAllocationType, unsigned int flProtect) {
-		DEBUG_LOG("VirtualAlloc %p %u %u %u\n",lpAddress, dwSize, flAllocationType, flProtect);
-		if (flAllocationType & 0x2000 || lpAddress == NULL) { // MEM_RESERVE
-			// do this for now...
-			assert(lpAddress == NULL);
-			void *mem = 0;
-			posix_memalign(&mem, 0x1000, dwSize);
-			memset(mem, 0, dwSize);
+		DEBUG_LOG("VirtualAlloc %p %u %u %u\n", lpAddress, dwSize, flAllocationType, flProtect);
 
-			// Windows only fences off the lower 2GB of the 32-bit address space for the private use of processes.
-			assert(mem < (void*)0x80000000);
-
-			DEBUG_LOG("-> %p\n", mem);
-			return mem;
+		int prot = PROT_READ | PROT_WRITE;
+		if (flProtect == 0x04 /* PAGE_READWRITE */) {
+			prot = PROT_READ | PROT_WRITE;
+		} else if (flProtect == 0x02 /* PAGE_READONLY */) {
+			prot = PROT_READ;
+		} else if (flProtect == 0x40 /* PAGE_EXECUTE_READWRITE */) {
+			prot = PROT_READ | PROT_WRITE | PROT_EXEC;
 		} else {
-			assert(lpAddress != NULL);
-			return lpAddress;
+			DEBUG_LOG("Unhandled flProtect: %u, defaulting to RW\n", flProtect);
 		}
+
+		int flags = MAP_PRIVATE | MAP_ANONYMOUS; // MAP_ANONYMOUS ensures the memory is zeroed out
+		if (lpAddress != NULL) {
+			flags |= MAP_FIXED;
+		}
+
+		void* result = mmap(lpAddress, dwSize, prot, flags, -1, 0);
+		// Windows only fences off the lower 2GB of the 32-bit address space for the private use of processes.
+		assert(result < (void*)0x80000000);
+		if (result == MAP_FAILED) {
+			DEBUG_LOG("mmap failed\n");
+			return NULL;
+		}
+		else {
+			DEBUG_LOG("-> %p\n", result);
+			return result;
+		}
+
+
+		// DEBUG_LOG("VirtualAlloc %p %u %u %u\n",lpAddress, dwSize, flAllocationType, flProtect);
+		// if (flAllocationType & 0x2000 || lpAddress == NULL) { // MEM_RESERVE
+		// 	// do this for now...
+		// 	assert(lpAddress == NULL);
+		// 	void *mem = 0;
+		// 	posix_memalign(&mem, 0x1000, dwSize);
+		// 	memset(mem, 0, dwSize);
+
+		// 	// Windows only fences off the lower 2GB of the 32-bit address space for the private use of processes.
+		// 	assert(mem < (void*)0x80000000);
+
+		// 	DEBUG_LOG("-> %p\n", mem);
+		// 	return mem;
+		// } else {
+		// 	assert(lpAddress != NULL);
+		// 	return lpAddress;
+		// }
 	}
 
 	unsigned int WIN_FUNC VirtualFree(void *lpAddress, unsigned int dwSize, int dwFreeType) {

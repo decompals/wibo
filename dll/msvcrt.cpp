@@ -324,6 +324,19 @@ namespace msvcrt {
 		return 0;
 	}
 
+	int* WIN_ENTRY _get_osfhandle(int fd){
+		DEBUG_LOG("STUB: _get_osfhandle %d\n", fd);
+		return (int*)fd;
+	}
+
+	int WIN_ENTRY _write(int fd, const void* buffer, unsigned int count) {
+		return (int)write(fd, buffer, count);
+	}
+
+	void WIN_ENTRY exit(int status){
+		_Exit(status);
+	}
+
 }
 
 
@@ -353,6 +366,9 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "_itow_s") == 0) return (void*)msvcrt::_itow_s;
 	if (strcmp(name, "_wtoi") == 0) return (void*)msvcrt::_wtoi;
 	if (strcmp(name, "wcscpy_s") == 0) return (void*)msvcrt::wcscpy_s;
+	if (strcmp(name, "_get_osfhandle") == 0) return (void*)msvcrt::_get_osfhandle;
+	if (strcmp(name, "_write") == 0) return (void*)msvcrt::_write;
+	if (strcmp(name, "exit") == 0) return (void*)msvcrt::exit;
 	return nullptr;
 }
 

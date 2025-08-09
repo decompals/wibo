@@ -13,7 +13,7 @@ typedef int (*_PIFV)();
 namespace msvcrt {
 	int _commode;
 	int _fmode;
-	wchar_t** __winitenv;
+	uint16_t** __winitenv;
 
 	// Stub because we're only ever a console application
 	void WIN_ENTRY __set_app_type(int at) {
@@ -62,7 +62,8 @@ namespace msvcrt {
 	// https://github.com/reactos/reactos/blob/fade0c3b8977d43f3a9e0b8887d18afcabd8e145/sdk/lib/crt/misc/getargs.c#L328
 	// https://learn.microsoft.com/en-us/cpp/c-runtime-library/getmainargs-wgetmainargs?view=msvc-170
 
-	int WIN_ENTRY __wgetmainargs(int* wargc, wchar_t*** wargv, wchar_t*** wenv, int doWildcard, int* startInfo){
+	int WIN_ENTRY __wgetmainargs(int* wargc, uint16_t*** wargv, uint16_t*** wenv, int doWildcard, int* startInfo){
+		DEBUG_LOG("__wgetmainargs\n");
 		// get the regular, non-wide versions of argc/argv/env
 		// argc: the number of args in argv. always >= 1
 		// argv: array of null-terminated strings for command-line args.
@@ -89,74 +90,27 @@ namespace msvcrt {
 		std::setlocale(LC_CTYPE, "");
 
 		if(wargv){
-			*wargv = new wchar_t*[argc + 1]; // allocate array of our future wstrings
+			*wargv = new uint16_t*[argc + 1]; // allocate array of our future wstrings
 			for(int i = 0; i < argc; i++){
 				const char* cur_arg = argv[i];
-				size_t wSize = std::mbstowcs(nullptr, cur_arg, 0);
-				if(wSize != (size_t)-1){
-					wSize++; // for null terminator
-					wchar_t* wStr = new wchar_t[wSize];
-					std::mbstowcs(wStr, cur_arg, wSize);
-					(*wargv)[i] = wStr;
-				}
-				else {
-					DEBUG_LOG("Bad argv[%d]: %s\n", i, cur_arg);
-					return -1;
-				}
+				std::vector<uint16_t> wStr = stringToWideString(cur_arg);
+				(*wargv)[i] = wStr.data();
 			}
 			(*wargv)[argc] = nullptr;
-
-			// sanity check
-			// for (int i = 0; i < argc; i++) {
-			// 	wchar_t* warg = (*wargv)[i];
-			// 	size_t len = std::wcstombs(nullptr, warg, 0);
-			// 	if (len != (size_t)-1) {
-			// 		char* converted = new char[len + 1];
-			// 		std::wcstombs(converted, warg, len + 1);
-			// 		DEBUG_LOG("Input argv[%d]: %s\n", i, argv[i]);
-			// 		DEBUG_LOG("Output wargv[%d]: %s\n", i, converted);
-			// 		delete[] converted;
-			// 	} else {
-			// 		DEBUG_LOG("Bad wide arg conversion for %d!\n", i);
-			// 	}
-			// }
 		}
 
 		if(wenv){
 			int count = 0;
 			for(; env[count] != nullptr; count++);
 			DEBUG_LOG("Found env count %d\n", count);
-			*wenv = new wchar_t*[count + 1]; // allocate array of our future wstrings
+			*wenv = new uint16_t*[count + 1]; // allocate array of our future wstrings
 			for(int i = 0; i < count; i++){
 				const char* cur_env = env[i];
-				size_t wSize = std::mbstowcs(nullptr, cur_env, 0);
-				if(wSize != (size_t)-1){
-					wSize++; // for null terminator
-					wchar_t* wStr = new wchar_t[wSize];
-					std::mbstowcs(wStr, cur_env, wSize);
-					(*wenv)[i] = wStr;
-				}
-				else {
-					DEBUG_LOG("Bad env[%d]: %s\n", i, cur_env);
-					return -1;
-				}
+				DEBUG_LOG("Adding env %s\n", cur_env);
+				std::vector<uint16_t> wStr = stringToWideString(cur_env);
+				(*wenv)[i] = wStr.data();
 			}
 			(*wenv)[count] = nullptr;
-
-			// sanity check
-			// for (int i = 0; i < count; i++) {
-			// 	wchar_t* warg = (*wenv)[i];
-			// 	size_t len = std::wcstombs(nullptr, warg, 0);
-			// 	if (len != (size_t)-1) {
-			// 		char* converted = new char[len + 1];
-			// 		std::wcstombs(converted, warg, len + 1);
-			// 		DEBUG_LOG("Input env[%d]: %s\n", i, env[i]);
-			// 		DEBUG_LOG("Output wenv[%d]: %s\n", i, converted);
-			// 		delete[] converted;
-			// 	} else {
-			// 		DEBUG_LOG("Bad wide arg conversion for %d!\n", i);
-			// 	}
-			// }
 
 			__winitenv = *wenv;
 		}
@@ -167,29 +121,27 @@ namespace msvcrt {
 		return std::setlocale(category, locale);
 	}
 
-	int WIN_ENTRY _wdupenv_s(wchar_t **buffer, size_t *numberOfElements, const wchar_t *varname){
-		std::string var_str = wideStringToString((const unsigned short*)varname, wcslen(varname));
-		DEBUG_LOG("_wdupenv_s: %s\n", var_str.c_str());
+	int WIN_ENTRY _wdupenv_s(uint16_t **buffer, size_t *numberOfElements, const uint16_t *varname){
+		std::string var_str = wideStringToString(varname);
+		DEBUG_LOG("_wdupenv_s: var name %s\n", var_str.c_str());
 		if(!buffer || !varname) return 22;
 		*buffer = nullptr;
 		if(numberOfElements) *numberOfElements = 0;
 
-		size_t varnamelen = wcslen(varname);
+		size_t varnamelen = wstrlen(varname);
 
-		for(wchar_t** env = __winitenv; env && *env; ++env){
-			wchar_t* cur = *env;
-			if(wcsncmp(cur, varname, varnamelen) == 0 && cur[varnamelen] == L'='){
-				wchar_t* value = cur + varnamelen + 1;
-				size_t value_len = wcslen(value);
+		for(uint16_t** env = __winitenv; env && *env; ++env){
+			uint16_t* cur = *env;
+			std::string cur_str = wideStringToString(cur);
+			if(wstrncmp(cur, varname, varnamelen) == 0 && cur[varnamelen] == L'='){
+				uint16_t* value = cur + varnamelen + 1;
+				size_t value_len = wstrlen(value);
 
-				wchar_t* copy = (wchar_t*)malloc((value_len + 1) * sizeof(wchar_t));
+				uint16_t* copy = (uint16_t*)malloc((value_len + 1) * sizeof(uint16_t));
 				if(!copy) return 12;
 
-				std::wmemcpy(copy, value, value_len + 1);
+				wstrncpy(copy, value, value_len + 1);
 				*buffer = copy;
-
-				std::string value_str = wideStringToString((const unsigned short*)copy, wcslen(copy));
-				DEBUG_LOG("Value: %s\n", value_str.c_str());
 
 				if(numberOfElements) *numberOfElements = value_len + 1;
 				return 0;
@@ -207,30 +159,21 @@ namespace msvcrt {
 		std::free(ptr);
 	}
 
-	int WIN_ENTRY _get_wpgmptr(wchar_t** pValue){
+	int WIN_ENTRY _get_wpgmptr(uint16_t** pValue){
 		DEBUG_LOG("STUB: _get_wpgmptr(%p)\n", pValue);
 		return 0;
 	}
 
-	int WIN_ENTRY _wsplitpath_s(const wchar_t * path, wchar_t * drive, size_t driveNumberOfElements, wchar_t *dir, size_t dirNumberOfElements,
-		wchar_t * fname, size_t nameNumberOfElements, wchar_t * ext, size_t extNumberOfElements){
+	int WIN_ENTRY _wsplitpath_s(const uint16_t * path, uint16_t * drive, size_t driveNumberOfElements, uint16_t *dir, size_t dirNumberOfElements,
+		uint16_t * fname, size_t nameNumberOfElements, uint16_t * ext, size_t extNumberOfElements){
 
 		if(!path){
 			DEBUG_LOG("no path\n");
 			return -1;
 		}
-
-		{
-			size_t wlen = std::wcstombs(nullptr, path, 0);
-			if(wlen != (size_t)-1){
-				char* converted = new char[wlen + 1];
-				std::wcstombs(converted, path, wlen + 1);
-				DEBUG_LOG("Path: %s\n", converted);
-				delete [] converted;
-			}
-			else {
-				DEBUG_LOG("Bad wide arg conversion for path!\n");
-			}
+		else {
+			std::string path_str = wideStringToString(path);
+			DEBUG_LOG("path: %s\n", path_str.c_str());
 		}
 
 		if(drive && driveNumberOfElements) drive[0] = L'\0';
@@ -238,29 +181,29 @@ namespace msvcrt {
 		if(fname && nameNumberOfElements) fname[0] = L'\0';
 		if(ext && extNumberOfElements) ext[0] = L'\0';
 
-		const wchar_t *slash = wcsrchr(path, L'/');
-		const wchar_t *dot = wcsrchr(path, L'.');
-		const wchar_t *filename_start = slash ? slash + 1 : path;
+		const uint16_t *slash = wstrrchr(path, L'/');
+		const uint16_t *dot = wstrrchr(path, L'.');
+		const uint16_t *filename_start = slash ? slash + 1 : path;
 		if (dot && dot < filename_start) dot = nullptr;
 
 		if (dir && dirNumberOfElements && slash) {
 			size_t dir_len = slash - path + 1;
 			if (dir_len >= dirNumberOfElements) return -1;
-			wcsncpy(dir, path, dir_len);
+			wstrncpy(dir, path, dir_len);
 			dir[dir_len] = L'\0';
 		}
 
 		if (fname && nameNumberOfElements) {
-			size_t fname_len = dot ? (size_t)(dot - filename_start) : wcslen(filename_start);
+			size_t fname_len = dot ? (size_t)(dot - filename_start) : wstrlen(filename_start);
 			if (fname_len >= nameNumberOfElements) return -1;
-			wcsncpy(fname, filename_start, fname_len);
+			wstrncpy(fname, filename_start, fname_len);
 			fname[fname_len] = L'\0';
 		}
 
 		if (ext && extNumberOfElements && dot) {
-			size_t ext_len = wcslen(dot);
+			size_t ext_len = wstrlen(dot);
 			if (ext_len >= extNumberOfElements) return -1;
-			wcsncpy(ext, dot, ext_len);
+			wstrncpy(ext, dot, ext_len);
 			ext[ext_len] = L'\0';
 		}
 
@@ -274,41 +217,41 @@ namespace msvcrt {
 		return 0;
 	}
 
-	int WIN_ENTRY wcscat_s(wchar_t *strDestination, size_t numberOfElements, const wchar_t *strSource){
-		std::string dst_str = wideStringToString((const unsigned short*)strDestination, wcslen(strDestination));
-		std::string src_str = wideStringToString((const unsigned short*)strSource, wcslen(strSource));
+	int WIN_ENTRY wcscat_s(uint16_t *strDestination, size_t numberOfElements, const uint16_t *strSource){
+		std::string dst_str = wideStringToString(strDestination);
+		std::string src_str = wideStringToString(strSource);
 		DEBUG_LOG("wcscat_s %s %d %s", dst_str.c_str(), numberOfElements, src_str.c_str());
 		if(!strDestination || !strSource || numberOfElements == 0) return 22;
 
-		size_t dest_len = wcslen(strDestination);
-		size_t src_len = wcslen(strSource);
+		size_t dest_len = wstrlen(strDestination);
+		size_t src_len = wstrlen(strSource);
 
 		if(dest_len + src_len + 1 > numberOfElements){
 			if(strDestination && numberOfElements > 0) strDestination[0] = L'\0';
 			return 34;
 		}
 
-		std::wcscat(strDestination, strSource);
-		dst_str = wideStringToString((const unsigned short*)strDestination, wcslen(strDestination));
+		wstrcat(strDestination, strSource);
+		dst_str = wideStringToString(strDestination);
 		DEBUG_LOG(" --> %s\n", dst_str.c_str());
 
 		return 0;
 	}
 
-	wchar_t* WIN_ENTRY _wcsdup(const wchar_t *strSource){
-		std::string src_str = wideStringToString((const unsigned short*)strSource, wcslen(strSource));
+	uint16_t* WIN_ENTRY _wcsdup(const uint16_t *strSource){
+		std::string src_str = wideStringToString(strSource);
 		DEBUG_LOG("_wcsdup: %s", src_str.c_str());
 		if(!strSource) return nullptr;
-		size_t strLen = wcslen(strSource);
+		size_t strLen = wstrlen(strSource);
 
-		wchar_t* dup = (wchar_t*)malloc((strLen + 1) * sizeof(wchar_t));
+		uint16_t* dup = (uint16_t*)malloc((strLen + 1) * sizeof(uint16_t));
 		if(!dup) return nullptr;
 
-		for(int i = 0; i <= strLen; i++){
+		for(size_t i = 0; i <= strLen; i++){
 			dup[i] = strSource[i];
 		}
 
-		std::string dst_str = wideStringToString((const unsigned short*)dup, wcslen(dup));
+		std::string dst_str = wideStringToString(dup);
 		DEBUG_LOG(" --> %s\n", dst_str.c_str());
 		return dup;
 	}
@@ -317,8 +260,8 @@ namespace msvcrt {
 		return std::memset(s, c, n);
 	}
 
-	int WIN_ENTRY wcsncpy_s(wchar_t *strDest, size_t numberOfElements, const wchar_t *strSource, size_t count){
-		std::string src_str = wideStringToString((const unsigned short*)strSource, wcslen(strSource));
+	int WIN_ENTRY wcsncpy_s(uint16_t *strDest, size_t numberOfElements, const uint16_t *strSource, size_t count){
+		std::string src_str = wideStringToString(strSource);
 		DEBUG_LOG("wcsncpy_s dest size %d, src str %s, src size %d", numberOfElements, src_str.c_str(), count);
 
 		if(!strDest || !strSource || numberOfElements == 0){
@@ -326,23 +269,23 @@ namespace msvcrt {
 			return 1;
 		}
 
-		if(count == (size_t)-1) count = std::wcslen(strSource);
+		if(count == (size_t)-1) count = wstrlen(strSource);
 
 		if(count >= numberOfElements){
 			strDest[0] = L'\0';
 			return 1;
 		}
 
-		std::wcsncpy(strDest, strSource, count);
+		wstrncpy(strDest, strSource, count);
 		strDest[count] = L'\0';
-		std::string dst_str = wideStringToString((const unsigned short*)strDest, wcslen(strDest));
+		std::string dst_str = wideStringToString(strDest);
 		DEBUG_LOG(" --> %s\n", dst_str.c_str());
 		return 0;
 	}
 
-	int WIN_ENTRY wcsncat_s(wchar_t *strDest, size_t numberOfElements, const wchar_t *strSource, size_t count){
-		std::string dst_str = wideStringToString((const unsigned short*)strDest, wcslen(strDest));
-		std::string src_str = wideStringToString((const unsigned short*)strSource, wcslen(strSource));
+	int WIN_ENTRY wcsncat_s(uint16_t *strDest, size_t numberOfElements, const uint16_t *strSource, size_t count){
+		std::string dst_str = wideStringToString(strDest);
+		std::string src_str = wideStringToString(strSource);
 		DEBUG_LOG("wscncat_s dest str %s, dest size %d, src str %s, src size %d", dst_str.c_str(), numberOfElements, src_str.c_str(), count);
 		
 		if(!strDest || !strSource || numberOfElements == 0){
@@ -350,31 +293,31 @@ namespace msvcrt {
 			return 1;
 		}
 
-		size_t dest_len = std::wcslen(strDest);
-		size_t src_len = (count == (size_t)-1) ? std::wcslen(strSource) : wcsnlen(strSource, count);
+		size_t dest_len = wstrlen(strDest);
+		size_t src_len = (count == (size_t)-1) ? wstrlen(strSource) : wstrnlen(strSource, count);
 
 		if(dest_len + src_len + 1 > numberOfElements){
 			strDest[0] = L'\0';
 			return 1;
 		}
 
-		std::wcsncat(strDest, strSource, src_len);
-		dst_str = wideStringToString((const unsigned short*)strDest, wcslen(strDest));
+		wstrncat(strDest, strSource, src_len);
+		dst_str = wideStringToString(strDest);
 		DEBUG_LOG(" --> %s\n", dst_str.c_str());
 		return 0;
 	}
 
-	int WIN_ENTRY _itow_s(int value, wchar_t *buffer, size_t size, int radix){
+	int WIN_ENTRY _itow_s(int value, uint16_t *buffer, size_t size, int radix){
 		DEBUG_LOG("STUB: _itow_s\n");
 		return 0;
 	}
 
-	int WIN_ENTRY _wtoi(const wchar_t* str) {
+	int WIN_ENTRY _wtoi(const uint16_t* str) {
 		DEBUG_LOG("_wtoi\n");
-		return (int)wcstol(str, nullptr, 10);
+		return wstrtol(str, nullptr, 10);
 	}
 
-	int WIN_ENTRY wcscpy_s(wchar_t *dest, size_t dest_size, const wchar_t *src){
+	int WIN_ENTRY wcscpy_s(uint16_t *dest, size_t dest_size, const uint16_t *src){
 		DEBUG_LOG("STUB: wcscpy_s\n");
 		return 0;
 	}
@@ -392,30 +335,32 @@ namespace msvcrt {
 		_Exit(status);
 	}
 
-	int WIN_ENTRY wcsncmp(const wchar_t *string1, const wchar_t *string2, size_t count){
-		return std::wcsncmp(string1, string2, count);
+	int WIN_ENTRY wcsncmp(const uint16_t *string1, const uint16_t *string2, size_t count){
+		return wstrncmp(string1, string2, count);
 	}
 
-	int WIN_ENTRY _vswprintf_c_l(wchar_t* buffer, size_t size, const wchar_t* format, va_list args) {
+	int WIN_ENTRY _vswprintf_c_l(uint16_t* buffer, size_t size, const uint16_t* format, va_list args) {
 		if (!buffer || !format || size == 0)
 			return -1;
-		return vswprintf(buffer, size, format, args);
+		DEBUG_LOG("STUB: _vswprintf_c_l\n");
+		return 0;
+		// return vswprintf(buffer, size, format, args); this doesn't work because on this architecture, wchar_t is size 4, instead of size 2
 	}
 
-	const wchar_t* WIN_ENTRY wcsstr( const wchar_t *dest, const wchar_t *src ){
-		return std::wcsstr(dest, src);
+	const uint16_t* WIN_ENTRY wcsstr( const uint16_t *dest, const uint16_t *src ){
+		return wstrstr(dest, src);
 	}
 
 	int WIN_ENTRY iswspace(wint_t w){
 		return std::iswspace(w);
 	}
 
-	const wchar_t* WIN_ENTRY wcsrchr(const wchar_t *str, wchar_t c){
-		return std::wcsrchr(str, c);
+	const uint16_t* WIN_ENTRY wcsrchr(const uint16_t *str, uint16_t c){
+		return wstrrchr(str, c);
 	}
 
-	unsigned long WIN_ENTRY wcstoul(const wchar_t *strSource, wchar_t **endptr, int base){
-		return std::wcstoul(strSource, endptr, base);
+	unsigned long WIN_ENTRY wcstoul(const uint16_t *strSource, uint16_t **endptr, int base){
+		return wstrtoul(strSource, endptr, base);
 	}
 
 }

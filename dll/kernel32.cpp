@@ -4,6 +4,7 @@
 #include "handles.h"
 #include <algorithm>
 #include <climits>
+#include <cstdint>
 #include <cstdlib>
 #include <ctype.h>
 #include <filesystem>
@@ -780,6 +781,27 @@ namespace kernel32 {
 		strcpy(data->cAlternateFileName, "8P3FMTFN.BAD");
 	}
 
+	void setFindFileDataFromPathW(WIN32_FIND_DATA<uint16_t>* data, const std::filesystem::path &path){
+		auto status = std::filesystem::status(path);
+		uint64_t fileSize = 0;
+		data->dwFileAttributes = 0;
+		if (std::filesystem::is_directory(status)) {
+			data->dwFileAttributes |= 0x10;
+		}
+		if (std::filesystem::is_regular_file(status)) {
+			data->dwFileAttributes |= 0x80;
+			fileSize = std::filesystem::file_size(path);
+		}
+		data->nFileSizeHigh = (uint32_t)(fileSize >> 32);
+		data->nFileSizeLow = (uint32_t)fileSize;
+		auto fileName = path.filename().string();
+		assert(fileName.size() < 260);
+		auto wideFileName = stringToWideString(fileName.c_str());
+		wstrcpy(data->cFileName, wideFileName.data());
+		auto wideBad = stringToWideString("8P3FMTFN.BAD");
+		wstrcpy(data->cAlternateFileName, wideBad.data());
+	}
+
 	void *WIN_FUNC FindFirstFileA(const char *lpFileName, WIN32_FIND_DATA<char> *lpFindFileData) {
 		// This should handle wildcards too, but whatever.
 		auto path = files::pathFromWindows(lpFileName);
@@ -819,6 +841,49 @@ namespace kernel32 {
 		}
 
 		setFindFileDataFromPath(lpFindFileData, *handle->it++);
+		return handle;
+	}
+
+	void *WIN_FUNC FindFirstFileW(const uint16_t *lpFileName, WIN32_FIND_DATA<uint16_t> *lpFindFileData) {
+		std::string filename = wideStringToString(lpFileName);
+		// This should handle wildcards too, but whatever.
+		auto path = files::pathFromWindows(filename.c_str());
+		DEBUG_LOG("FindFirstFileW %s (%s)\n", filename.c_str(), path.c_str());
+
+		lpFindFileData->ftCreationTime = defaultFiletime;
+		lpFindFileData->ftLastAccessTime = defaultFiletime;
+		lpFindFileData->ftLastWriteTime = defaultFiletime;
+
+		auto status = std::filesystem::status(path);
+		if (status.type() == std::filesystem::file_type::regular) {
+			setFindFileDataFromPathW(lpFindFileData, path);
+			return (void *) 1;
+		}
+
+		// If the parent path is empty then we assume the parent path is the current directory.
+		auto parent_path = path.parent_path();
+		if (parent_path == "") {
+			parent_path = ".";
+		}
+
+		if (!std::filesystem::exists(parent_path)) {
+			wibo::lastError = ERROR_PATH_NOT_FOUND;
+			return INVALID_HANDLE_VALUE;
+		}
+
+		auto *handle = new FindFirstFileHandle();
+
+		std::filesystem::directory_iterator it(parent_path);
+		handle->it = it;
+		handle->pattern = path.filename().string();
+
+		if (!findNextFile(handle)) {
+			wibo::lastError = ERROR_FILE_NOT_FOUND;
+			delete handle;
+			return INVALID_HANDLE_VALUE;
+		}
+
+		setFindFileDataFromPathW(lpFindFileData, *handle->it++);
 		return handle;
 	}
 
@@ -2529,6 +2594,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "GetFullPathNameW") == 0) return (void *) kernel32::GetFullPathNameW;
 	if (strcmp(name, "GetShortPathNameA") == 0) return (void *) kernel32::GetShortPathNameA;
 	if (strcmp(name, "FindFirstFileA") == 0) return (void *) kernel32::FindFirstFileA;
+	if (strcmp(name, "FindFirstFileW") == 0) return (void *) kernel32::FindFirstFileW;
 	if (strcmp(name, "FindFirstFileExA") == 0) return (void *) kernel32::FindFirstFileExA;
 	if (strcmp(name, "FindNextFileA") == 0) return (void *) kernel32::FindNextFileA;
 	if (strcmp(name, "FindClose") == 0) return (void *) kernel32::FindClose;

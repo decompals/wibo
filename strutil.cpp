@@ -77,6 +77,12 @@ uint16_t* wstrncat(uint16_t* dest, const uint16_t* src, size_t count){
     return dest;
 }
 
+uint16_t* wstrcpy(uint16_t* dest, const uint16_t* src){
+	uint16_t* d = dest;
+    while ((*d++ = *src++) != 0);
+    return dest;
+}
+
 size_t wstrncpy(uint16_t *dst, const uint16_t *src, size_t n) {
 	size_t i = 0;
 	while (i < n && src[i] != 0) {

@@ -1,9 +1,11 @@
 #include "common.h"
+#include <clocale>
 #include <cstdlib>
 #include <cwchar>
 #include <cwctype>
 #include <stdlib.h>
 #include <string>
+#include "strutil.h"
 
 typedef void (*_PVFV)();
 typedef int (*_PIFV)();
@@ -161,13 +163,15 @@ namespace msvcrt {
 		return 0;
 	}
 
-	char WIN_ENTRY *setlocale(int category, const char *locale){
-		DEBUG_LOG("STUB: setlocale(%d, %s)\n", category, locale);
-		return (char*)"C";
+	char* WIN_ENTRY setlocale(int category, const char *locale){
+		return std::setlocale(category, locale);
 	}
 
 	int WIN_ENTRY _wdupenv_s(wchar_t **buffer, size_t *numberOfElements, const wchar_t *varname){
-		if(!buffer || !varname) return -1;
+		std::string var_str = wideStringToString((const unsigned short*)varname, wcslen(varname));
+		DEBUG_LOG("_wdupenv_s: %s\n", var_str.c_str());
+		if(!buffer || !varname) return 22;
+		*buffer = nullptr;
 		if(numberOfElements) *numberOfElements = 0;
 
 		size_t varnamelen = wcslen(varname);
@@ -178,14 +182,15 @@ namespace msvcrt {
 				wchar_t* value = cur + varnamelen + 1;
 				size_t value_len = wcslen(value);
 
-				*buffer = (wchar_t*)malloc((value_len + 1) * sizeof(wchar_t));
-				if(!*buffer) return -1;
+				wchar_t* copy = (wchar_t*)malloc((value_len + 1) * sizeof(wchar_t));
+				if(!copy) return 12;
 
-				for(int i = 0; i <= value_len; i++){
-					(*buffer)[i] = value[i];
-				}
+				std::wmemcpy(copy, value, value_len + 1);
+				*buffer = copy;
 
-				// wscspy(*buffer, value); // y u no work
+				std::string value_str = wideStringToString((const unsigned short*)copy, wcslen(copy));
+				DEBUG_LOG("Value: %s\n", value_str.c_str());
+
 				if(numberOfElements) *numberOfElements = value_len + 1;
 				return 0;
 			}
@@ -270,30 +275,41 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY wcscat_s(wchar_t *strDestination, size_t numberOfElements, const wchar_t *strSource){
-		if(!strDestination || !strSource || numberOfElements == 0) return -1;
+		std::string dst_str = wideStringToString((const unsigned short*)strDestination, wcslen(strDestination));
+		std::string src_str = wideStringToString((const unsigned short*)strSource, wcslen(strSource));
+		DEBUG_LOG("wcscat_s %s %d %s", dst_str.c_str(), numberOfElements, src_str.c_str());
+		if(!strDestination || !strSource || numberOfElements == 0) return 22;
 
 		size_t dest_len = wcslen(strDestination);
 		size_t src_len = wcslen(strSource);
 
-		if(dest_len + src_len >= numberOfElements) return -1;
-
-		for(int i = 0; i <= src_len; i++){
-			strDestination[dest_len + i] = strSource[i];
+		if(dest_len + src_len + 1 > numberOfElements){
+			if(strDestination && numberOfElements > 0) strDestination[0] = L'\0';
+			return 34;
 		}
+
+		std::wcscat(strDestination, strSource);
+		dst_str = wideStringToString((const unsigned short*)strDestination, wcslen(strDestination));
+		DEBUG_LOG(" --> %s\n", dst_str.c_str());
 
 		return 0;
 	}
 
 	wchar_t* WIN_ENTRY _wcsdup(const wchar_t *strSource){
+		std::string src_str = wideStringToString((const unsigned short*)strSource, wcslen(strSource));
+		DEBUG_LOG("_wcsdup: %s", src_str.c_str());
 		if(!strSource) return nullptr;
 		size_t strLen = wcslen(strSource);
 
 		wchar_t* dup = (wchar_t*)malloc((strLen + 1) * sizeof(wchar_t));
+		if(!dup) return nullptr;
 
 		for(int i = 0; i <= strLen; i++){
 			dup[i] = strSource[i];
 		}
 
+		std::string dst_str = wideStringToString((const unsigned short*)dup, wcslen(dup));
+		DEBUG_LOG(" --> %s\n", dst_str.c_str());
 		return dup;
 	}
 
@@ -302,12 +318,49 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY wcsncpy_s(wchar_t *strDest, size_t numberOfElements, const wchar_t *strSource, size_t count){
-		DEBUG_LOG("STUB: wcsncpy_s\n");
+		std::string src_str = wideStringToString((const unsigned short*)strSource, wcslen(strSource));
+		DEBUG_LOG("wcsncpy_s dest size %d, src str %s, src size %d", numberOfElements, src_str.c_str(), count);
+
+		if(!strDest || !strSource || numberOfElements == 0){
+			if(strDest && numberOfElements > 0) strDest[0] = L'\0';
+			return 1;
+		}
+
+		if(count == (size_t)-1) count = std::wcslen(strSource);
+
+		if(count >= numberOfElements){
+			strDest[0] = L'\0';
+			return 1;
+		}
+
+		std::wcsncpy(strDest, strSource, count);
+		strDest[count] = L'\0';
+		std::string dst_str = wideStringToString((const unsigned short*)strDest, wcslen(strDest));
+		DEBUG_LOG(" --> %s\n", dst_str.c_str());
 		return 0;
 	}
 
 	int WIN_ENTRY wcsncat_s(wchar_t *strDest, size_t numberOfElements, const wchar_t *strSource, size_t count){
-		DEBUG_LOG("STUB: wscncat_s\n");
+		std::string dst_str = wideStringToString((const unsigned short*)strDest, wcslen(strDest));
+		std::string src_str = wideStringToString((const unsigned short*)strSource, wcslen(strSource));
+		DEBUG_LOG("wscncat_s dest str %s, dest size %d, src str %s, src size %d", dst_str.c_str(), numberOfElements, src_str.c_str(), count);
+		
+		if(!strDest || !strSource || numberOfElements == 0){
+			if(strDest && numberOfElements > 0) strDest[0] = L'\0';
+			return 1;
+		}
+
+		size_t dest_len = std::wcslen(strDest);
+		size_t src_len = (count == (size_t)-1) ? std::wcslen(strSource) : wcsnlen(strSource, count);
+
+		if(dest_len + src_len + 1 > numberOfElements){
+			strDest[0] = L'\0';
+			return 1;
+		}
+
+		std::wcsncat(strDest, strSource, src_len);
+		dst_str = wideStringToString((const unsigned short*)strDest, wcslen(strDest));
+		DEBUG_LOG(" --> %s\n", dst_str.c_str());
 		return 0;
 	}
 
@@ -317,6 +370,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _wtoi(const wchar_t* str) {
+		DEBUG_LOG("_wtoi\n");
 		return (int)wcstol(str, nullptr, 10);
 	}
 

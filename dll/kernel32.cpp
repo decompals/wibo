@@ -898,9 +898,9 @@ namespace kernel32 {
 		}
 	}
 
-	unsigned int WIN_FUNC GetFileAttributesW(const wchar_t* lpFileName) {
+	unsigned int WIN_FUNC GetFileAttributesW(const uint16_t* lpFileName) {
 		DEBUG_LOG("GetFileAttributesW(");
-		std::string str = wideStringToString((const unsigned short*)lpFileName, wcslen(lpFileName));
+		std::string str = wideStringToString(lpFileName);
 		DEBUG_LOG("%s)\n", str.c_str());
 		return GetFileAttributesA(str.c_str());
 	}
@@ -1590,7 +1590,7 @@ namespace kernel32 {
 
 	// https://github.com/reactos/reactos/blob/master/dll/win32/kernelbase/wine/loader.c#L1090
 	// https://github.com/wine-mirror/wine/blob/master/dlls/kernelbase/loader.c#L1097
-	void* WIN_FUNC FindResourceW(void* hModule, const wchar_t* lpName, const wchar_t* lpType) {
+	void* WIN_FUNC FindResourceW(void* hModule, const uint16_t* lpName, const uint16_t* lpType) {
 		DEBUG_LOG("FindResourceW %p\n", hModule);
 		std::string name, type;
 
@@ -1600,14 +1600,14 @@ namespace kernel32 {
 			name = std::to_string((unsigned int)(uintptr_t)lpName);
 		}
 		else {
-			name = wideStringToString((const unsigned short*)lpName);
+			name = wideStringToString(lpName);
 		}
 
 		if((uintptr_t)lpType >> 16 == 0){
 			type = std::to_string((unsigned int)(uintptr_t)lpType);
 		}
 		else {
-			type = wideStringToString((const unsigned short*)lpType);
+			type = wideStringToString(lpType);
 		}
 
 		char path[512];

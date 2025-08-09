@@ -308,7 +308,13 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _itow_s(int value, uint16_t *buffer, size_t size, int radix){
-		DEBUG_LOG("STUB: _itow_s\n");
+		DEBUG_LOG("_itow_s value %d, size %d, radix %d\n", value, size, radix);
+		if (!buffer || size == 0) return -1;
+    	if (radix != 10) return -1;  // only base 10 supported for now
+
+		std::string str = std::to_string(value);
+		std::vector<uint16_t> wstr = stringToWideString(str.c_str());
+		buffer = wstr.data();
 		return 0;
 	}
 

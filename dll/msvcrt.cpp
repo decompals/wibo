@@ -324,7 +324,21 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY wcscpy_s(uint16_t *dest, size_t dest_size, const uint16_t *src){
-		DEBUG_LOG("STUB: wcscpy_s\n");
+		std::string src_str = wideStringToString(src);
+		DEBUG_LOG("wcscpy_s %s\n", src_str.c_str());
+		if (!dest || !src || dest_size == 0) {
+			return -1;
+		}
+
+		size_t src_len = 0;
+		while (src[src_len] != 0) src_len++;
+
+		if (src_len + 1 > dest_size) {
+			dest[0] = 0;
+			return -1; 
+		}
+
+		wstrcpy(dest, src);
 		return 0;
 	}
 

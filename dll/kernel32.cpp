@@ -1635,7 +1635,7 @@ namespace kernel32 {
 		}
 
 		const size_t copyLen = std::min(len, nSize - 1);
-		memcpy(lpFilename, stringToWideString(path.c_str()).data(), copyLen);
+		memcpy(lpFilename, stringToWideString(path.c_str()).data(), copyLen * 2);
 		if (copyLen < nSize) {
 			lpFilename[copyLen] = 0;
 		}

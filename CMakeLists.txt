@@ -5,14 +5,28 @@ if(NOT CMAKE_BUILD_TYPE)
         "Build type options: Debug Release RelWithDebInfo MinSizeRel" FORCE)
 endif()
 
+set(CMAKE_C_FLAGS_INIT "-m32")
+set(CMAKE_CXX_FLAGS_INIT "-m32")
+set(CMAKE_EXE_LINKER_FLAGS_INIT "-m32")
+set(CMAKE_SHARED_LINKER_FLAGS_INIT "-m32")
+
 project(wibo LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -fno-pie -no-pie -D_LARGEFILE64_SOURCE")
+
 find_package(Filesystem REQUIRED)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32 -Wall -fno-pie -no-pie -D_LARGEFILE64_SOURCE")
+include(FetchContent)
+FetchContent_Declare(
+    mimalloc
+    GIT_REPOSITORY https://github.com/microsoft/mimalloc.git
+    GIT_TAG        v3.1.5
+)
+FetchContent_MakeAvailable(mimalloc)
+find_package(mimalloc REQUIRED)
 
 include_directories(.)
 add_executable(wibo
@@ -35,5 +49,5 @@ add_executable(wibo
     processes.cpp
     strutil.cpp
 )
-target_link_libraries(wibo PRIVATE std::filesystem)
+target_link_libraries(wibo PRIVATE std::filesystem mimalloc-static)
 install(TARGETS wibo DESTINATION bin)

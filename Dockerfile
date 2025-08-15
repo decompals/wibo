@@ -2,7 +2,7 @@
 FROM --platform=linux/i386 alpine:latest AS build
 
 # Install dependencies
-RUN apk add --no-cache cmake ninja g++ linux-headers binutils
+RUN apk add --no-cache cmake ninja g++ linux-headers binutils git
 
 # Copy source files
 COPY . /wibo

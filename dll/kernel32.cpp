@@ -4,6 +4,7 @@
 #include "handles.h"
 #include <algorithm>
 #include <climits>
+#include <cstdint>
 #include <cstdlib>
 #include <ctype.h>
 #include <filesystem>
@@ -476,7 +477,7 @@ namespace kernel32 {
 	}
 
 	LPWSTR WIN_FUNC GetCommandLineW() {
-		DEBUG_LOG("GetCommandLineW -> ");
+		DEBUG_LOG("GetCommandLineW -> \n");
 		return wibo::commandLineW.data();
 	}
 
@@ -788,6 +789,27 @@ namespace kernel32 {
 		strcpy(data->cAlternateFileName, "8P3FMTFN.BAD");
 	}
 
+	void setFindFileDataFromPathW(WIN32_FIND_DATA<uint16_t>* data, const std::filesystem::path &path){
+		auto status = std::filesystem::status(path);
+		uint64_t fileSize = 0;
+		data->dwFileAttributes = 0;
+		if (std::filesystem::is_directory(status)) {
+			data->dwFileAttributes |= 0x10;
+		}
+		if (std::filesystem::is_regular_file(status)) {
+			data->dwFileAttributes |= 0x80;
+			fileSize = std::filesystem::file_size(path);
+		}
+		data->nFileSizeHigh = (uint32_t)(fileSize >> 32);
+		data->nFileSizeLow = (uint32_t)fileSize;
+		auto fileName = path.filename().string();
+		assert(fileName.size() < 260);
+		auto wideFileName = stringToWideString(fileName.c_str());
+		wstrcpy(data->cFileName, wideFileName.data());
+		auto wideBad = stringToWideString("8P3FMTFN.BAD");
+		wstrcpy(data->cAlternateFileName, wideBad.data());
+	}
+
 	void *WIN_FUNC FindFirstFileA(const char *lpFileName, WIN32_FIND_DATA<char> *lpFindFileData) {
 		// This should handle wildcards too, but whatever.
 		auto path = files::pathFromWindows(lpFileName);
@@ -827,6 +849,49 @@ namespace kernel32 {
 		}
 
 		setFindFileDataFromPath(lpFindFileData, *handle->it++);
+		return handle;
+	}
+
+	void *WIN_FUNC FindFirstFileW(const uint16_t *lpFileName, WIN32_FIND_DATA<uint16_t> *lpFindFileData) {
+		std::string filename = wideStringToString(lpFileName);
+		// This should handle wildcards too, but whatever.
+		auto path = files::pathFromWindows(filename.c_str());
+		DEBUG_LOG("FindFirstFileW %s (%s)\n", filename.c_str(), path.c_str());
+
+		lpFindFileData->ftCreationTime = defaultFiletime;
+		lpFindFileData->ftLastAccessTime = defaultFiletime;
+		lpFindFileData->ftLastWriteTime = defaultFiletime;
+
+		auto status = std::filesystem::status(path);
+		if (status.type() == std::filesystem::file_type::regular) {
+			setFindFileDataFromPathW(lpFindFileData, path);
+			return (void *) 1;
+		}
+
+		// If the parent path is empty then we assume the parent path is the current directory.
+		auto parent_path = path.parent_path();
+		if (parent_path == "") {
+			parent_path = ".";
+		}
+
+		if (!std::filesystem::exists(parent_path)) {
+			wibo::lastError = ERROR_PATH_NOT_FOUND;
+			return INVALID_HANDLE_VALUE;
+		}
+
+		auto *handle = new FindFirstFileHandle();
+
+		std::filesystem::directory_iterator it(parent_path);
+		handle->it = it;
+		handle->pattern = path.filename().string();
+
+		if (!findNextFile(handle)) {
+			wibo::lastError = ERROR_FILE_NOT_FOUND;
+			delete handle;
+			return INVALID_HANDLE_VALUE;
+		}
+
+		setFindFileDataFromPathW(lpFindFileData, *handle->it++);
 		return handle;
 	}
 
@@ -904,6 +969,18 @@ namespace kernel32 {
 				wibo::lastError = 2; // ERROR_FILE_NOT_FOUND
 				return 0xFFFFFFFF; // INVALID_FILE_ATTRIBUTES
 		}
+	}
+
+	unsigned int WIN_FUNC GetFileAttributesW(const uint16_t* lpFileName) {
+		DEBUG_LOG("GetFileAttributesW(");
+		std::string str = wideStringToString(lpFileName);
+		DEBUG_LOG("%s)\n", str.c_str());
+		return GetFileAttributesA(str.c_str());
+	}
+
+	unsigned short WIN_FUNC GetUserDefaultUILanguage(){
+		DEBUG_LOG("STUB GetUserDefaultUILanguage\n");
+		return 0;
 	}
 
 	unsigned int WIN_FUNC WriteFile(void *hFile, const void *lpBuffer, unsigned int nNumberOfBytesToWrite, unsigned int *lpNumberOfBytesWritten, void *lpOverlapped) {
@@ -1358,6 +1435,11 @@ namespace kernel32 {
 		return 1;
 	}
 
+	unsigned int WIN_FUNC GetConsoleOutputCP(){
+		DEBUG_LOG("GetConsoleOutputCP\n");
+		return 65001; // UTF-8
+	}
+
 	unsigned int WIN_FUNC SetConsoleCtrlHandler(void *HandlerRoutine, unsigned int Add) {
 		DEBUG_LOG("STUB SetConsoleCtrlHandler\n");
 		// This is a function that gets called when doing ^C
@@ -1541,11 +1623,37 @@ namespace kernel32 {
 
 	DWORD WIN_FUNC GetModuleFileNameW(HMODULE hModule, LPWSTR lpFilename, DWORD nSize) {
 		DEBUG_LOG("GetModuleFileNameW (hModule=%p, nSize=%i)\n", hModule, nSize);
+		if (lpFilename == nullptr) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
 
-		*lpFilename = 0; // just NUL terminate
+		std::string path;
+		if (wibo::isMainModule(hModule)) {
+			const auto exePath = files::pathFromWindows(wibo::argv[0]);
+			const auto absPath = std::filesystem::absolute(exePath);
+			path = files::pathToWindows(absPath);
+		} else {
+			path = static_cast<wibo::ModuleInfo *>(hModule)->name;
+		}
+		const size_t len = path.size();
+		if (nSize == 0) {
+			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			return 0;
+		}
 
-		wibo::lastError = 0;
-		return 0;
+		const size_t copyLen = std::min(len, nSize - 1);
+		memcpy(lpFilename, stringToWideString(path.c_str()).data(), copyLen * 2);
+		if (copyLen < nSize) {
+			lpFilename[copyLen] = 0;
+		}
+		if (copyLen < len) {
+			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			return nSize;
+		}
+
+		wibo::lastError = ERROR_SUCCESS;
+		return copyLen;
 	}
 
 	void* WIN_FUNC FindResourceA(void* hModule, const char* lpName, const char* lpType) {
@@ -1553,9 +1661,60 @@ namespace kernel32 {
 		return (void*)0x100002;
 	}
 
+	// https://github.com/reactos/reactos/blob/master/dll/win32/kernelbase/wine/loader.c#L1090
+	// https://github.com/wine-mirror/wine/blob/master/dlls/kernelbase/loader.c#L1097
+	void* WIN_FUNC FindResourceW(void* hModule, const uint16_t* lpName, const uint16_t* lpType) {
+		DEBUG_LOG("FindResourceW %p\n", hModule);
+		std::string name, type;
+
+		if(!hModule) hModule = GetModuleHandleW(0);
+
+		if((uintptr_t)lpName >> 16 == 0){
+			name = std::to_string((unsigned int)(uintptr_t)lpName);
+		}
+		else {
+			name = wideStringToString(lpName);
+		}
+
+		if((uintptr_t)lpType >> 16 == 0){
+			type = std::to_string((unsigned int)(uintptr_t)lpType);
+		}
+		else {
+			type = wideStringToString(lpType);
+		}
+
+		char path[512];
+		snprintf(path, sizeof(path), "resources/%s/%s.res", type.c_str(), name.c_str());
+		DEBUG_LOG("Created path %s\n", path);
+		return fopen(path, "rb");
+		// 	return (void*)0x100002;
+	}
+
 	void* WIN_FUNC LoadResource(void* hModule, void* res) {
 		DEBUG_LOG("LoadResource %p %p\n", hModule, res);
-		return (void*)0x100003;
+
+		if(!hModule || !res) return nullptr;
+		FILE* hRes = (FILE*)res;
+
+		long pos = ftell(hRes);
+		DEBUG_LOG("Pos: %d\n", pos);
+		fseek(hRes, 0, SEEK_END);
+		long size = ftell(hRes);
+		fseek(hRes, pos, SEEK_SET);
+		DEBUG_LOG("Size: %d\n", size);
+
+		if(size <= 0) return nullptr;
+
+		void* buffer = malloc(size);
+		if(!buffer) return nullptr;
+
+		if(fread(buffer, 1, size, hRes) != (size_t)size){
+			free(buffer);
+			return nullptr;
+		}
+		return buffer;
+
+		// return (void*)0x100003;
 	}
 
 	void* WIN_FUNC LockResource(void* res) {
@@ -1638,23 +1797,54 @@ namespace kernel32 {
 	}
 
 	void *WIN_FUNC VirtualAlloc(void *lpAddress, unsigned int dwSize, unsigned int flAllocationType, unsigned int flProtect) {
-		DEBUG_LOG("VirtualAlloc %p %u %u %u\n",lpAddress, dwSize, flAllocationType, flProtect);
-		if (flAllocationType & 0x2000 || lpAddress == NULL) { // MEM_RESERVE
-			// do this for now...
-			assert(lpAddress == NULL);
-			void *mem = 0;
-			posix_memalign(&mem, 0x1000, dwSize);
-			memset(mem, 0, dwSize);
+		DEBUG_LOG("VirtualAlloc %p %u %u %u\n", lpAddress, dwSize, flAllocationType, flProtect);
 
-			// Windows only fences off the lower 2GB of the 32-bit address space for the private use of processes.
-			assert(mem < (void*)0x80000000);
-
-			DEBUG_LOG("-> %p\n", mem);
-			return mem;
+		int prot = PROT_READ | PROT_WRITE;
+		if (flProtect == 0x04 /* PAGE_READWRITE */) {
+			prot = PROT_READ | PROT_WRITE;
+		} else if (flProtect == 0x02 /* PAGE_READONLY */) {
+			prot = PROT_READ;
+		} else if (flProtect == 0x40 /* PAGE_EXECUTE_READWRITE */) {
+			prot = PROT_READ | PROT_WRITE | PROT_EXEC;
 		} else {
-			assert(lpAddress != NULL);
-			return lpAddress;
+			DEBUG_LOG("Unhandled flProtect: %u, defaulting to RW\n", flProtect);
 		}
+
+		int flags = MAP_PRIVATE | MAP_ANONYMOUS; // MAP_ANONYMOUS ensures the memory is zeroed out
+		if (lpAddress != NULL) {
+			flags |= MAP_FIXED;
+		}
+
+		void* result = mmap(lpAddress, dwSize, prot, flags, -1, 0);
+		// Windows only fences off the lower 2GB of the 32-bit address space for the private use of processes.
+		assert(result < (void*)0x80000000);
+		if (result == MAP_FAILED) {
+			DEBUG_LOG("mmap failed\n");
+			return NULL;
+		}
+		else {
+			DEBUG_LOG("-> %p\n", result);
+			return result;
+		}
+
+
+		// DEBUG_LOG("VirtualAlloc %p %u %u %u\n",lpAddress, dwSize, flAllocationType, flProtect);
+		// if (flAllocationType & 0x2000 || lpAddress == NULL) { // MEM_RESERVE
+		// 	// do this for now...
+		// 	assert(lpAddress == NULL);
+		// 	void *mem = 0;
+		// 	posix_memalign(&mem, 0x1000, dwSize);
+		// 	memset(mem, 0, dwSize);
+
+		// 	// Windows only fences off the lower 2GB of the 32-bit address space for the private use of processes.
+		// 	assert(mem < (void*)0x80000000);
+
+		// 	DEBUG_LOG("-> %p\n", mem);
+		// 	return mem;
+		// } else {
+		// 	assert(lpAddress != NULL);
+		// 	return lpAddress;
+		// }
 	}
 
 	unsigned int WIN_FUNC VirtualFree(void *lpAddress, unsigned int dwSize, int dwFreeType) {
@@ -2182,6 +2372,11 @@ namespace kernel32 {
 		return 1; // EXCEPTION_EXECUTE_HANDLER
 	}
 
+	unsigned int WIN_FUNC SetErrorMode(unsigned int mode){
+		DEBUG_LOG("SetErrorMode: %d\n", mode);
+		return 0;
+	}
+
 	struct SINGLE_LIST_ENTRY
 	{
 		SINGLE_LIST_ENTRY *Next;
@@ -2334,6 +2529,7 @@ static void *resolveByName(const char *name) {
 
 	// winnls.h
 	if (strcmp(name, "GetSystemDefaultLangID") == 0) return (void *) kernel32::GetSystemDefaultLangID;
+	if (strcmp(name, "GetUserDefaultUILanguage") == 0) return (void *) kernel32::GetUserDefaultUILanguage;
 	if (strcmp(name, "GetACP") == 0) return (void *) kernel32::GetACP;
 	if (strcmp(name, "GetCPInfo") == 0) return (void *) kernel32::GetCPInfo;
 	if (strcmp(name, "CompareStringA") == 0) return (void *) kernel32::CompareStringA;
@@ -2372,6 +2568,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "GetCurrentDirectoryA") == 0) return (void *) kernel32::GetCurrentDirectoryA;
 	if (strcmp(name, "GetCurrentDirectoryW") == 0) return (void *) kernel32::GetCurrentDirectoryW;
 	if (strcmp(name, "FindResourceA") == 0) return (void *) kernel32::FindResourceA;
+	if (strcmp(name, "FindResourceW") == 0) return (void *) kernel32::FindResourceW;
 	if (strcmp(name, "SetHandleCount") == 0) return (void *) kernel32::SetHandleCount;
 	if (strcmp(name, "FormatMessageA") == 0) return (void *) kernel32::FormatMessageA;
 	if (strcmp(name, "GetComputerNameA") == 0) return (void *) kernel32::GetComputerNameA;
@@ -2399,16 +2596,19 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "SetConsoleCtrlHandler") == 0) return (void *) kernel32::SetConsoleCtrlHandler;
 	if (strcmp(name, "GetConsoleScreenBufferInfo") == 0) return (void *) kernel32::GetConsoleScreenBufferInfo;
 	if (strcmp(name, "WriteConsoleW") == 0) return (void *) kernel32::WriteConsoleW;
+	if (strcmp(name, "GetConsoleOutputCP") == 0) return (void *) kernel32::GetConsoleOutputCP;
 
 	// fileapi.h
 	if (strcmp(name, "GetFullPathNameA") == 0) return (void *) kernel32::GetFullPathNameA;
 	if (strcmp(name, "GetFullPathNameW") == 0) return (void *) kernel32::GetFullPathNameW;
 	if (strcmp(name, "GetShortPathNameA") == 0) return (void *) kernel32::GetShortPathNameA;
 	if (strcmp(name, "FindFirstFileA") == 0) return (void *) kernel32::FindFirstFileA;
+	if (strcmp(name, "FindFirstFileW") == 0) return (void *) kernel32::FindFirstFileW;
 	if (strcmp(name, "FindFirstFileExA") == 0) return (void *) kernel32::FindFirstFileExA;
 	if (strcmp(name, "FindNextFileA") == 0) return (void *) kernel32::FindNextFileA;
 	if (strcmp(name, "FindClose") == 0) return (void *) kernel32::FindClose;
 	if (strcmp(name, "GetFileAttributesA") == 0) return (void *) kernel32::GetFileAttributesA;
+	if (strcmp(name, "GetFileAttributesW") == 0) return (void *) kernel32::GetFileAttributesW;
 	if (strcmp(name, "WriteFile") == 0) return (void *) kernel32::WriteFile;
 	if (strcmp(name, "ReadFile") == 0) return (void *) kernel32::ReadFile;
 	if (strcmp(name, "CreateFileA") == 0) return (void *) kernel32::CreateFileA;
@@ -2490,6 +2690,7 @@ static void *resolveByName(const char *name) {
 	// errhandlingapi.h
 	if (strcmp(name, "SetUnhandledExceptionFilter") == 0) return (void *) kernel32::SetUnhandledExceptionFilter;
 	if (strcmp(name, "UnhandledExceptionFilter") == 0) return (void *) kernel32::UnhandledExceptionFilter;
+	if (strcmp(name, "SetErrorMode") == 0) return (void*)kernel32::SetErrorMode;
 
 	// interlockedapi.h
 	if (strcmp(name, "InitializeSListHead") == 0) return (void *) kernel32::InitializeSListHead;

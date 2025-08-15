@@ -26,7 +26,6 @@ FetchContent_Declare(
     GIT_TAG        v3.1.5
 )
 FetchContent_MakeAvailable(mimalloc)
-find_package(mimalloc REQUIRED)
 
 include_directories(.)
 add_executable(wibo

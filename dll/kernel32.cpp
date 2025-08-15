@@ -10,7 +10,7 @@
 #include <fnmatch.h>
 #include <string>
 #include "strutil.h"
-#include <malloc.h>
+#include <mimalloc.h>
 #include <random>
 #include <stdarg.h>
 #include <system_error>
@@ -46,9 +46,9 @@ namespace kernel32 {
 	static void *doAlloc(unsigned int dwBytes, bool zero) {
 		if (dwBytes == 0)
 			dwBytes = 1;
-		void *ret = malloc(dwBytes);
+		void *ret = mi_malloc_aligned(dwBytes, 8);
 		if (ret && zero) {
-			memset(ret, 0, malloc_usable_size(ret));
+			memset(ret, 0, mi_usable_size(ret));
 		}
 		return ret;
 	}
@@ -56,9 +56,9 @@ namespace kernel32 {
 	static void *doRealloc(void *mem, unsigned int dwBytes, bool zero) {
 		if (dwBytes == 0)
 			dwBytes = 1;
-		size_t oldSize = malloc_usable_size(mem);
-		void *ret = realloc(mem, dwBytes);
-		size_t newSize = malloc_usable_size(ret);
+		size_t oldSize = mi_usable_size(mem);
+		void *ret = mi_realloc_aligned(mem, dwBytes, 8);
+		size_t newSize = mi_usable_size(ret);
 		if (ret && zero && newSize > oldSize) {
 			memset((char*)ret + oldSize, 0, newSize - oldSize);
 		}
@@ -353,7 +353,15 @@ namespace kernel32 {
 
 	int WIN_FUNC InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBOOL fPending, LPVOID* lpContext) {
 		DEBUG_LOG("STUB: InitOnceBeginInitialize\n");
+		if (fPending != nullptr) {
+			*fPending = TRUE;
+		}
 		return 1;
+	}
+
+	BOOL WIN_FUNC InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpContext) {
+		DEBUG_LOG("STUB: InitOnceComplete\n");
+		return TRUE;
 	}
 
 	void WIN_FUNC AcquireSRWLockShared(void *SRWLock) { DEBUG_LOG("STUB: AcquireSRWLockShared(%p)\n", SRWLock); }
@@ -485,7 +493,7 @@ namespace kernel32 {
 		bufSize++;
 
 		// Step 2, actually build that buffer
-		char *buffer = (char *) malloc(bufSize);
+		char *buffer = (char *) mi_malloc(bufSize);
 		char *ptr = buffer;
 		work = environ;
 
@@ -515,7 +523,7 @@ namespace kernel32 {
 		bufSizeW++;
 
 		// Step 2, actually build that buffer
-		uint16_t *buffer = (uint16_t *) malloc(bufSizeW * 2);
+		uint16_t *buffer = (uint16_t *) mi_malloc(bufSizeW * 2);
 		uint16_t *ptr = buffer;
 		work = environ;
 
@@ -1896,7 +1904,7 @@ namespace kernel32 {
 
 	unsigned int WIN_FUNC HeapSize(void *hHeap, unsigned int dwFlags, void *lpMem) {
 		DEBUG_LOG("HeapSize(heap=%p, flags=%x, mem=%p)\n", hHeap, dwFlags, lpMem);
-		return malloc_usable_size(lpMem);
+		return mi_usable_size(lpMem);
 	}
 
 	void *WIN_FUNC GetProcessHeap() {
@@ -2348,6 +2356,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "EnterCriticalSection") == 0) return (void *) kernel32::EnterCriticalSection;
 	if (strcmp(name, "LeaveCriticalSection") == 0) return (void *) kernel32::LeaveCriticalSection;
 	if (strcmp(name, "InitOnceBeginInitialize") == 0) return (void *) kernel32::InitOnceBeginInitialize;
+	if (strcmp(name, "InitOnceComplete") == 0) return (void *) kernel32::InitOnceComplete;
 	if (strcmp(name, "AcquireSRWLockShared") == 0) return (void *) kernel32::AcquireSRWLockShared;
 	if (strcmp(name, "ReleaseSRWLockShared") == 0) return (void *) kernel32::ReleaseSRWLockShared;
 	if (strcmp(name, "AcquireSRWLockExclusive") == 0) return (void *) kernel32::AcquireSRWLockExclusive;

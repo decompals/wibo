@@ -2,6 +2,7 @@
 #include "files.h"
 #include "handles.h"
 #include <algorithm>
+#include <cstring>
 #include <map>
 
 namespace files {
@@ -82,6 +83,41 @@ namespace files {
 			printf("Invalid file handle %p\n", handle);
 			assert(0);
 		}
+	}
+
+	/**
+	 * Finds name in $PATH using standard unix rules for exec(3), but also allow
+	 * files in the current working directory, regardless of it's presence in
+	 * $PATH. The named file does not need to be executable.
+     *
+     * @param progname the name of the program
+     * @return the path of the program in the current environment or working directory
+     */
+	std::string which(const std::string &progname) {
+		// if there is are multiple path components, treat this as the path and ignore $PATH
+		if (progname.find('/') == std::string::npos) {
+			const char* p = getenv("PATH");
+
+			size_t pathsize = strlen(p) + 1;
+			char* path = (char*) malloc(pathsize);
+			std::shared_ptr<void> defer(nullptr, [path](...){ free(path); });
+			strncpy(path, p, pathsize);
+
+			while ((p = strsep(&path, ":")) != nullptr) {
+				if (*p == '\0') {
+					p = ".";
+				}
+				std::string candidate = std::string(p) + "/" + progname;
+				if (std::filesystem::exists(candidate)) {
+					return std::filesystem::canonical(candidate);
+				}
+			}
+		}
+
+		// the original resolution behavior did not use the canonical
+		// path. in most cases this shouldn't matter, but just in
+		// case it does, we retain same in the default case.
+		return std::filesystem::absolute(progname);
 	}
 
 	void *allocFpHandle(FILE *fp) {

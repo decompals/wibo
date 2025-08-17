@@ -6,7 +6,7 @@
 #include "strutil.h"
 #include <sys/mman.h>
 #include <sys/syscall.h>
-#include <stdarg.h>
+#include <cstdarg>
 #include <vector>
 #include <charconv>
 #include <fcntl.h>
@@ -323,10 +323,45 @@ static void blockUpper2GB() {
 	}
 }
 
+#define DOS_TO_UNIX_SHORT_OPT "-du"
+#define DOS_TO_UNIX_LONG_OPT "--unix-path"
+#define UNIX_TO_DOS_SHORT_OPT "-ud"
+#define UNIX_TO_DOS_LONG_OPT "--dos-path"
+
+[[noreturn]]
+void usage() {
+	printf("Usage: ./wibo program.exe ...\n"
+	        "\n"
+	        "Options:\n"
+	       "  -h, --help                     this help\n"
+	       "  " UNIX_TO_DOS_SHORT_OPT ", " UNIX_TO_DOS_LONG_OPT " <unix-path>    convert a unix path to a DOS path\n"
+	       "  " DOS_TO_UNIX_SHORT_OPT ", " DOS_TO_UNIX_LONG_OPT " <dos-path>    convert a DOS path to a unix path\n");
+	exit(1);
+}
+
+[[noreturn]]
+void handleUnixToDOS(const char* unixPath) {
+	if (!unixPath) {
+		perror("Error: path missing\n");
+		usage();
+	}
+	printf("%s\n", files::pathToWindows(std::filesystem::absolute(unixPath)).c_str());
+	exit(0);
+}
+
+[[noreturn]]
+void handleDOSToUnix(const char* dosPath) {
+	if (!dosPath) {
+		perror("Error: path missing\n");
+		usage();
+	}
+	printf("%s\n", files::pathFromWindows(dosPath).c_str());
+	exit(0);
+}
+
 int main(int argc, char **argv) {
 	if (argc <= 1) {
-		printf("Usage: ./wibo program.exe ...\n");
-		return 1;
+		usage();
 	}
 
 	if (getenv("WIBO_DEBUG")) {
@@ -367,7 +402,15 @@ int main(int argc, char **argv) {
 	for (int i = 1; i < argc; i++) {
 		std::string arg;
 		if (i == 1) {
-			arg = files::pathToWindows(std::filesystem::absolute(argv[1]));
+			arg = std::string(argv[1]);
+			if (arg == std::string("-h") || arg == std::string("--help")) {
+				usage();
+			} else if (arg == std::string(UNIX_TO_DOS_SHORT_OPT) || arg == std::string(UNIX_TO_DOS_LONG_OPT)) {
+				handleUnixToDOS(argv[2]);
+			} else if (arg == std::string(DOS_TO_UNIX_SHORT_OPT) || arg == std::string(DOS_TO_UNIX_LONG_OPT)) {
+				handleDOSToUnix(argv[2]);
+			}
+			arg = files::pathToWindows(files::which(argv[1]));
 		} else {
 			cmdLine += ' ';
 			arg = argv[i];
@@ -413,8 +456,8 @@ int main(int argc, char **argv) {
 	wibo::Executable exec;
 	wibo::mainModule = &exec;
 
-	char* pe_path = argv[1];
-	FILE *f = fopen(pe_path, "rb");
+	const std::string pe_path = files::which(argv[1]);
+	FILE *f = fopen(pe_path.c_str(), "rb");
 	if (!f) {
 		std::string mesg = std::string("Failed to open file ") + pe_path;
 		perror(mesg.c_str());

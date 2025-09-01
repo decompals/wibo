@@ -4,8 +4,10 @@
 #include <cstdlib>
 #include <cwchar>
 #include <cwctype>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string>
+#include <unistd.h>
 #include "strutil.h"
 
 typedef void (*_PVFV)();
@@ -273,7 +275,7 @@ namespace msvcrt {
 
 	uint16_t* WIN_ENTRY _wcsdup(const uint16_t *strSource){
 		std::string src_str = wideStringToString(strSource);
-		DEBUG_LOG("_wcsdup: %s", src_str.c_str());
+		// DEBUG_LOG("_wcsdup: %s", src_str.c_str());
 		if(!strSource) return nullptr;
 		size_t strLen = wstrlen(strSource);
 
@@ -285,8 +287,14 @@ namespace msvcrt {
 		}
 
 		std::string dst_str = wideStringToString(dup);
-		DEBUG_LOG(" --> %s\n", dst_str.c_str());
+		// DEBUG_LOG(" --> %s\n", dst_str.c_str());
 		return dup;
+	}
+
+	int WIN_ENTRY _waccess_s(const uint16_t* path, int mode){
+		std::string str = wideStringToString(path);
+		DEBUG_LOG("_waccess_s %s\n", str.c_str());
+		return access(str.c_str(), mode);
 	}
 
 	void* WIN_ENTRY memset(void *s, int c, size_t n){
@@ -424,6 +432,43 @@ namespace msvcrt {
 		return wstrtoul(strSource, endptr, base);
 	}
 
+	int WIN_ENTRY _dup2(int fd1, int fd2){
+		return dup2(fd1, fd2);
+	}
+
+	FILE* WIN_ENTRY _wfsopen(const uint16_t* filename, const uint16_t* mode, int shflag){
+		if (!filename || !mode) return nullptr;
+		std::string fname_str = wideStringToString(filename);
+		std::string mode_str = wideStringToString(mode);
+		DEBUG_LOG("_wfsopen file %s, mode %s\n", fname_str.c_str(), mode_str.c_str());
+
+		return fopen(fname_str.c_str(), mode_str.c_str());
+	}
+
+	int WIN_ENTRY fputws(const uint16_t* str, FILE* stream){
+		if(!str || !stream) return EOF;
+		
+		std::string fname_str = wideStringToString(str);
+		DEBUG_LOG("fputws %s\n", fname_str.c_str());
+
+		if(fputs(fname_str.c_str(), stream) < 0) return EOF;
+		else return 0;
+	}
+
+	int WIN_ENTRY fclose(FILE* stream){
+		return ::fclose(stream);
+	}
+
+	int WIN_ENTRY _flushall(){
+		DEBUG_LOG("flushall\n");
+		int count = 0;
+
+		if (fflush(stdin) == 0) count++;
+		if (fflush(stdout) == 0) count++;
+		if (fflush(stderr) == 0) count++;
+
+		return count;
+	}
 }
 
 
@@ -466,6 +511,12 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "wcschr") == 0) return (void*)msvcrt::wcschr;
 	if (strcmp(name, "getenv") == 0) return (void*)msvcrt::getenv;
 	if (strcmp(name, "_wgetenv_s") == 0) return (void*)msvcrt::_wgetenv_s;
+	if (strcmp(name, "_waccess_s") == 0) return (void*)msvcrt::_waccess_s;
+	if (strcmp(name, "_dup2") == 0) return (void*)msvcrt::_dup2;
+	if (strcmp(name, "_wfsopen") == 0) return (void*)msvcrt::_wfsopen;
+	if (strcmp(name, "fputws") == 0) return (void*)msvcrt::fputws;
+	if (strcmp(name, "fclose") == 0) return (void*)msvcrt::fclose;
+	if (strcmp(name, "_flushall") == 0) return (void*)msvcrt::_flushall;
 	return nullptr;
 }
 

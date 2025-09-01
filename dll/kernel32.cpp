@@ -17,6 +17,7 @@
 #include <system_error>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/wait.h>
 #include <spawn.h>
 #include <vector>
@@ -1709,6 +1710,30 @@ namespace kernel32 {
 		// return (void*)0x100003;
 	}
 
+	BOOL WIN_FUNC GetDiskFreeSpaceExW(const uint16_t* lpDirectoryName,
+		uint64_t* lpFreeBytesAvailableToCaller, uint64_t* lpTotalNumberOfBytes, uint64_t* lpTotalNumberOfFreeBytes){
+		if(!lpDirectoryName) return false;
+
+		std::string directoryName = wideStringToString(lpDirectoryName);
+		DEBUG_LOG("GetDiskFreeSpaceExW %s\n", directoryName.c_str());
+
+		struct statvfs buf;
+		if(statvfs(directoryName.c_str(), &buf) != 0){
+			return false;
+		}
+
+		if (lpFreeBytesAvailableToCaller)
+		    *lpFreeBytesAvailableToCaller = (uint64_t)buf.f_bavail * buf.f_bsize;
+		if (lpTotalNumberOfBytes)
+		    *lpTotalNumberOfBytes = (uint64_t)buf.f_blocks * buf.f_bsize;
+		if (lpTotalNumberOfFreeBytes)
+		    *lpTotalNumberOfFreeBytes = (uint64_t)buf.f_bfree * buf.f_bsize;
+
+		DEBUG_LOG("\t-> available bytes %llu, total bytes %llu, total free bytes %llu\n",
+			*lpFreeBytesAvailableToCaller, *lpTotalNumberOfBytes, *lpTotalNumberOfFreeBytes);
+		return true;
+	}
+
 	void* WIN_FUNC LockResource(void* res) {
 		DEBUG_LOG("LockResource %p\n", res);
 		return (void*)0x100004;
@@ -2622,6 +2647,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "GetFileInformationByHandle") == 0) return (void *) kernel32::GetFileInformationByHandle;
 	if (strcmp(name, "GetTempFileNameA") == 0) return (void *) kernel32::GetTempFileNameA;
 	if (strcmp(name, "GetTempPathA") == 0) return (void *) kernel32::GetTempPathA;
+	if (strcmp(name, "GetDiskFreeSpaceExW") == 0) return (void*) kernel32::GetDiskFreeSpaceExW;
 
 	// sysinfoapi.h
 	if (strcmp(name, "GetSystemTime") == 0) return (void *) kernel32::GetSystemTime;

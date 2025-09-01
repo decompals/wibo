@@ -1,4 +1,5 @@
 #include "common.h"
+#include <sys/random.h>
 
 namespace advapi32 {
 	unsigned int WIN_FUNC RegOpenKeyExA(void *hKey, const char *lpSubKey, unsigned int ulOptions, void *samDesired, void **phkResult) {
@@ -23,12 +24,25 @@ namespace advapi32 {
 
 		return false;
 	}
+
+	bool WIN_FUNC CryptGenRandom(void* hProv, unsigned int dwLen, char* pbBuffer){
+		DEBUG_LOG("STUB: CryptGenRandom(%p)\n", hProv);
+		if (!pbBuffer || dwLen == 0) return false;
+
+		ssize_t ret = getrandom(pbBuffer, dwLen, 0);
+		if (ret < 0 || (size_t)ret != dwLen) {
+			return false;
+		}
+
+		return true;
+	}
 }
 
 static void *resolveByName(const char *name) {
 	if (strcmp(name, "RegOpenKeyExA") == 0) return (void *) advapi32::RegOpenKeyExA;
 	if (strcmp(name, "CryptReleaseContext") == 0) return (void*) advapi32::CryptReleaseContext;
 	if (strcmp(name, "CryptAcquireContextW") == 0) return (void*) advapi32::CryptAcquireContextW;
+	if (strcmp(name, "CryptGenRandom") == 0) return (void*) advapi32::CryptGenRandom;
 	return nullptr;
 }
 

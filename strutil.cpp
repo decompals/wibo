@@ -50,6 +50,19 @@ const uint16_t* wstrstr(const uint16_t *dest, const uint16_t *src){
     return nullptr;
 }
 
+uint16_t* wstrchr(const uint16_t* str, uint16_t c) {
+    for (; *str != 0; str++) {
+        if (*str == c) {
+            return (uint16_t*)str;
+        }
+    }
+    // If searching for '\0', return pointer to terminator
+    if (c == 0) {
+        return (uint16_t*)str;
+    }
+    return nullptr;
+}
+
 uint16_t* wstrrchr(const uint16_t* str, uint16_t c){
 	const uint16_t* last = nullptr;
     for (; *str != 0; str++) {

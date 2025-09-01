@@ -1,5 +1,6 @@
 #include "common.h"
 #include <clocale>
+#include <cstdint>
 #include <cstdlib>
 #include <cwchar>
 #include <cwctype>
@@ -117,6 +118,10 @@ namespace msvcrt {
 		return 0;
 	}
 
+	char* WIN_ENTRY getenv(const char *varname){
+		return std::getenv(varname);
+	}
+
 	char* WIN_ENTRY setlocale(int category, const char *locale){
 		return std::setlocale(category, locale);
 	}
@@ -148,6 +153,34 @@ namespace msvcrt {
 			}
 		}
 
+		return 0;
+	}
+
+	int WIN_ENTRY _wgetenv_s(size_t* pReturnValue, uint16_t* buffer, size_t numberOfElements, const uint16_t* varname){
+		std::string var_str = wideStringToString(varname);
+		DEBUG_LOG("_wgetenv_s: var name %s\n", var_str.c_str());
+		if(!buffer || !varname) return 22;
+
+		size_t varnamelen = wstrlen(varname);
+
+		for(uint16_t** env = __winitenv; env && *env; ++env){
+			uint16_t* cur = *env;
+			std::string cur_str = wideStringToString(cur);
+			if(wstrncmp(cur, varname, varnamelen) == 0 && cur[varnamelen] == L'='){
+				uint16_t* value = cur + varnamelen + 1;
+				size_t value_len = wstrlen(value);
+
+				size_t copy_len = (value_len < numberOfElements - 1) ? value_len : numberOfElements - 1;
+				wstrncpy(buffer, value, copy_len);
+				buffer[copy_len] = 0;
+
+				if(pReturnValue) *pReturnValue = value_len + 1;
+				return 0;
+			}
+		}
+
+		buffer[0] = 0;
+		if(pReturnValue) *pReturnValue = 0;
 		return 0;
 	}
 
@@ -371,8 +404,16 @@ namespace msvcrt {
 		return wstrstr(dest, src);
 	}
 
-	int WIN_ENTRY iswspace(wint_t w){
+	int WIN_ENTRY iswspace(uint32_t w){
 		return std::iswspace(w);
+	}
+
+	int WIN_ENTRY iswdigit(uint32_t w){
+		return std::iswdigit(w);
+	}
+
+	const uint16_t* WIN_ENTRY wcschr(const uint16_t* str, uint16_t c){
+		return wstrchr(str, c);
 	}
 
 	const uint16_t* WIN_ENTRY wcsrchr(const uint16_t *str, uint16_t c){
@@ -421,6 +462,10 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "iswspace") == 0) return (void*)msvcrt::iswspace;
 	if (strcmp(name, "wcsrchr") == 0) return (void*)msvcrt::wcsrchr;
 	if (strcmp(name, "wcstoul") == 0) return (void*)msvcrt::wcstoul;
+	if (strcmp(name, "iswdigit") == 0) return (void*)msvcrt::iswdigit;
+	if (strcmp(name, "wcschr") == 0) return (void*)msvcrt::wcschr;
+	if (strcmp(name, "getenv") == 0) return (void*)msvcrt::getenv;
+	if (strcmp(name, "_wgetenv_s") == 0) return (void*)msvcrt::_wgetenv_s;
 	return nullptr;
 }
 

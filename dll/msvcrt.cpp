@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cwchar>
 #include <cwctype>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
@@ -469,6 +470,23 @@ namespace msvcrt {
 
 		return count;
 	}
+
+	int* WIN_ENTRY _errno() {
+		return &errno;
+	}
+
+	intptr_t WIN_ENTRY _wspawnvp(int mode, const uint16_t* cmdname, const uint16_t* const * argv){
+		std::string str_cmd = wideStringToString(cmdname);
+		DEBUG_LOG("STUB: _wspawnvp %s\n", str_cmd.c_str());
+		return -1;
+	}
+
+	int WIN_ENTRY _wunlink(const uint16_t *filename){
+		std::string str = wideStringToString(filename);
+		DEBUG_LOG("_wunlink %s\n", str.c_str());
+		return unlink(str.c_str());
+	}
+
 }
 
 
@@ -517,6 +535,9 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "fputws") == 0) return (void*)msvcrt::fputws;
 	if (strcmp(name, "fclose") == 0) return (void*)msvcrt::fclose;
 	if (strcmp(name, "_flushall") == 0) return (void*)msvcrt::_flushall;
+	if (strcmp(name, "_errno") == 0) return (void*)msvcrt::_errno;
+	if (strcmp(name, "_wspawnvp") == 0) return (void*)msvcrt::_wspawnvp;
+	if (strcmp(name, "_wunlink") == 0) return (void*)msvcrt::_wunlink;
 	return nullptr;
 }
 

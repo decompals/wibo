@@ -97,8 +97,16 @@ namespace msvcrt {
 			*wargv = new uint16_t*[argc + 1]; // allocate array of our future wstrings
 			for(int i = 0; i < argc; i++){
 				const char* cur_arg = argv[i];
+
 				std::vector<uint16_t> wStr = stringToWideString(cur_arg);
-				(*wargv)[i] = wStr.data();
+				
+			    // allocate a copy on the heap,
+				// since wStr will go out of scope
+			    uint16_t* theActualStr = new uint16_t[wStr.size() + 1];
+			    std::copy(wStr.begin(), wStr.end(), theActualStr);
+			    theActualStr[wStr.size()] = 0;
+
+				(*wargv)[i] = theActualStr;
 			}
 			(*wargv)[argc] = nullptr;
 		}
@@ -108,12 +116,21 @@ namespace msvcrt {
 			for(; env[count] != nullptr; count++);
 			DEBUG_LOG("Found env count %d\n", count);
 			*wenv = new uint16_t*[count + 1]; // allocate array of our future wstrings
-			for(int i = 0; i < count; i++){
-				const char* cur_env = env[i];
-				DEBUG_LOG("Adding env %s\n", cur_env);
-				std::vector<uint16_t> wStr = stringToWideString(cur_env);
-				(*wenv)[i] = wStr.data();
+			for (int i = 0; i < count; i++) {
+			    const char* cur_env = env[i];
+			    DEBUG_LOG("Adding env %s\n", cur_env);
+
+			    std::vector<uint16_t> wStr = stringToWideString(cur_env);
+
+			    // allocate a copy on the heap,
+				// since wStr will go out of scope
+			    uint16_t* theActualStr = new uint16_t[wStr.size() + 1];
+			    std::copy(wStr.begin(), wStr.end(), theActualStr);
+			    theActualStr[wStr.size()] = 0;
+
+			    (*wenv)[i] = theActualStr;
 			}
+
 			(*wenv)[count] = nullptr;
 
 			__winitenv = *wenv;
@@ -355,12 +372,19 @@ namespace msvcrt {
 
 	int WIN_ENTRY _itow_s(int value, uint16_t *buffer, size_t size, int radix){
 		DEBUG_LOG("_itow_s value %d, size %d, radix %d\n", value, size, radix);
-		if (!buffer || size == 0) return -1;
+		if (!buffer || size == 0) return 22;
 		assert(radix == 10); // only base 10 supported for now
 
 		std::string str = std::to_string(value);
-		std::vector<uint16_t> wstr = stringToWideString(str.c_str());
-		wstrcpy(buffer, wstr.data());
+		std::vector<uint16_t> wStr = stringToWideString(str.c_str());
+
+		if(wStr.size() + 1 > size){
+			buffer[0] = 0;
+			return 34;
+		}
+
+		std::copy(wStr.begin(), wStr.end(), buffer);
+		buffer[wStr.size()] = 0;
 		return 0;
 	}
 

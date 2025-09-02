@@ -5,8 +5,11 @@
 #include <string>
 #include <locale>
 #include <codecvt>
+#include <sstream>
 
 size_t wstrlen(const uint16_t *str) {
+	if(!str) return 0;
+	
 	size_t len = 0;
 	while (str[len] != 0)
 		++len;
@@ -126,12 +129,22 @@ std::string wideStringToString(const uint16_t *src, int len = -1) {
 
 	// the old implementation
 	std::string res(len, '\0');
+	std::string debug_wstr;
+		std::stringstream ss;
+		bool is_wide = false;
 	for (int i = 0; i < len; i++) {
+		ss << "0x" << std::hex << src[i] << " ";
+		// debug_wstr += std::format("0x%X ", src[i]);
 		if(src[i] > 255){
-			// DEBUG_LOG("Encountered wide char with value 0x%X!\n", src[i]);
-			// assert(src[i] <= 255);
+		// 	DEBUG_LOG("Encountered wide char with value 0x%X!\n", src[i]);
+		// 	assert(src[i] <= 255);
+			is_wide = true;
 		}
 		res[i] = src[i] & 0xFF;
+	}
+	if(is_wide){
+		debug_wstr += ss.str();
+		DEBUG_LOG("wideString (%d): %s\n", wstrlen(src), debug_wstr.c_str());
 	}
 	return res;
 }

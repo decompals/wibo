@@ -138,10 +138,13 @@ namespace msvcrt {
 
 		size_t varnamelen = wstrlen(varname);
 
+		DEBUG_LOG("\tSearching env vars...\n");
 		for(uint16_t** env = __winitenv; env && *env; ++env){
 			uint16_t* cur = *env;
 			std::string cur_str = wideStringToString(cur);
+			DEBUG_LOG("\tCur env var: %s\n", cur_str.c_str());
 			if(wstrncmp(cur, varname, varnamelen) == 0 && cur[varnamelen] == L'='){
+				DEBUG_LOG("Found the env var %s!\n", var_str.c_str());
 				uint16_t* value = cur + varnamelen + 1;
 				size_t value_len = wstrlen(value);
 
@@ -156,6 +159,7 @@ namespace msvcrt {
 			}
 		}
 
+		DEBUG_LOG("Could not find env var %s\n", var_str.c_str());
 		return 0;
 	}
 

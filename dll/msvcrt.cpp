@@ -369,15 +369,12 @@ namespace msvcrt {
 		std::string src_str = wideStringToString(src);
 		DEBUG_LOG("wcscpy_s %s\n", src_str.c_str());
 		if (!dest || !src || dest_size == 0) {
-			return -1;
+			return 22;
 		}
 
-		size_t src_len = 0;
-		while (src[src_len] != 0) src_len++;
-
-		if (src_len + 1 > dest_size) {
+		if (wstrlen(src) + 1 > dest_size) {
 			dest[0] = 0;
-			return -1; 
+			return 34; 
 		}
 
 		wstrcpy(dest, src);

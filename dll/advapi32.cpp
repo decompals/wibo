@@ -25,7 +25,7 @@ namespace advapi32 {
 		return false;
 	}
 
-	bool WIN_FUNC CryptGenRandom(void* hProv, unsigned int dwLen, char* pbBuffer){
+	bool WIN_FUNC CryptGenRandom(void* hProv, unsigned int dwLen, unsigned char* pbBuffer){
 		DEBUG_LOG("STUB: CryptGenRandom(%p)\n", hProv);
 		if (!pbBuffer || dwLen == 0) return false;
 

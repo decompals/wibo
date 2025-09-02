@@ -116,24 +116,24 @@ std::string wideStringToString(const uint16_t *src, int len = -1) {
 		len = src ? wstrlen(src) : 0;
 	}
 
-	std::u16string u16str;
-	for(const uint16_t* p = src; *p != 0; p++){
-		u16str.push_back(*p);
-	}
+	// std::u16string u16str;
+	// for(const uint16_t* p = src; *p != 0; p++){
+	// 	u16str.push_back(*p);
+	// }
 
-	std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> convert;
-	return convert.to_bytes(reinterpret_cast<const char16_t*>(u16str.data()));
+	// std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> convert;
+	// return convert.to_bytes(reinterpret_cast<const char16_t*>(u16str.data()));
 
 	// the old implementation
-	// std::string res(len, '\0');
-	// for (int i = 0; i < len; i++) {
-	// 	if(src[i] > 255){
-	// 		DEBUG_LOG("Encountered wide char with value 0x%X!\n", src[i]);
-	// 		assert(src[i] <= 255);
-	// 	}
-	// 	res[i] = src[i] & 0xFF;
-	// }
-	// return res;
+	std::string res(len, '\0');
+	for (int i = 0; i < len; i++) {
+		if(src[i] > 255){
+			// DEBUG_LOG("Encountered wide char with value 0x%X!\n", src[i]);
+			// assert(src[i] <= 255);
+		}
+		res[i] = src[i] & 0xFF;
+	}
+	return res;
 }
 
 std::vector<uint16_t> stringToWideString(const char *src) {

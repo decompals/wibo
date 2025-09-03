@@ -19,6 +19,7 @@ namespace msvcrt {
 	int _commode;
 	int _fmode;
 	uint16_t** __winitenv;
+	uint16_t* _wpgmptr;
 
 	// Stub because we're only ever a console application
 	void WIN_ENTRY __set_app_type(int at) {
@@ -59,7 +60,9 @@ namespace msvcrt {
 	}
 
 	_PIFV WIN_ENTRY _onexit(_PIFV func) {
-		DEBUG_LOG("STUB: _onexit(%p)\n", func);
+		DEBUG_LOG("_onexit(%p)\n", func);
+		if(!func) return nullptr;
+    	if (atexit((void(*)(void))func) != 0) return nullptr;
 		return func;
 	}
 	
@@ -85,10 +88,10 @@ namespace msvcrt {
 		char** argv = *regular_argv;
 		char** env = regular_env;
 
-		DEBUG_LOG("Wildcard: %d\n", doWildcard);
-		if(startInfo){
-			DEBUG_LOG("Start info: %d\n", *startInfo);
-		}
+		// DEBUG_LOG("Wildcard: %d\n", doWildcard);
+		// if(startInfo){
+		// 	DEBUG_LOG("Start info: %d\n", *startInfo);
+		// }
 
 		if(wargc) *wargc = argc;
 
@@ -113,11 +116,11 @@ namespace msvcrt {
 		if(wenv){
 			int count = 0;
 			for(; env[count] != nullptr; count++);
-			DEBUG_LOG("Found env count %d\n", count);
+			// DEBUG_LOG("Found env count %d\n", count);
 			*wenv = new uint16_t*[count + 1]; // allocate array of our future wstrings
 			for (int i = 0; i < count; i++) {
 			    const char* cur_env = env[i];
-			    DEBUG_LOG("Adding env %s\n", cur_env);
+			    // DEBUG_LOG("Adding env %s\n", cur_env);
 
 			    std::vector<uint16_t> wStr = stringToWideString(cur_env);
 
@@ -215,16 +218,31 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _get_wpgmptr(uint16_t** pValue){
-		DEBUG_LOG("STUB: _get_wpgmptr(%p)\n", pValue);
+		DEBUG_LOG("_get_wpgmptr(%p)\n", pValue);
+		if(!pValue) return 22;
+
+		char exe_path[PATH_MAX];
+		ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+		if(len == -1){
+			return 2;
+		}
+		exe_path[len] = 0;
+
+		std::vector<uint16_t> wStr = stringToWideString(exe_path);
+		_wpgmptr = new uint16_t[wStr.size() + 1];
+		std::copy(wStr.begin(), wStr.end(), _wpgmptr);
+		_wpgmptr[wStr.size()] = 0;
+
+		*pValue = _wpgmptr;
 		return 0;
 	}
 
 	int WIN_ENTRY _wsplitpath_s(const uint16_t * path, uint16_t * drive, size_t driveNumberOfElements, uint16_t *dir, size_t dirNumberOfElements,
 		uint16_t * fname, size_t nameNumberOfElements, uint16_t * ext, size_t extNumberOfElements){
-
+		DEBUG_LOG("_wsplitpath_s - ");
 		if(!path){
 			DEBUG_LOG("no path\n");
-			return -1;
+			return 22;
 		}
 		else {
 			std::string path_str = wideStringToString(path);
@@ -243,27 +261,27 @@ namespace msvcrt {
 
 		if (dir && dirNumberOfElements && slash) {
 			size_t dir_len = slash - path + 1;
-			if (dir_len >= dirNumberOfElements) return -1;
+			if (dir_len >= dirNumberOfElements) return 34;
 			wstrncpy(dir, path, dir_len);
 			dir[dir_len] = L'\0';
 		}
 
 		if (fname && nameNumberOfElements) {
 			size_t fname_len = dot ? (size_t)(dot - filename_start) : wstrlen(filename_start);
-			if (fname_len >= nameNumberOfElements) return -1;
+			if (fname_len >= nameNumberOfElements) return 34;
 			wstrncpy(fname, filename_start, fname_len);
 			fname[fname_len] = L'\0';
 		}
 
 		if (ext && extNumberOfElements && dot) {
 			size_t ext_len = wstrlen(dot);
-			if (ext_len >= extNumberOfElements) return -1;
+			if (ext_len >= extNumberOfElements) return 34;
 			wstrncpy(ext, dot, ext_len);
 			ext[ext_len] = L'\0';
 		}
 
 		if (drive && driveNumberOfElements && path[1] == L':' && path[2] == L'/') {
-			if (driveNumberOfElements < 3) return -1;
+			if (driveNumberOfElements < 3) return 34;
 			drive[0] = path[0];
 			drive[1] = L':';
 			drive[2] = L'\0';
@@ -521,6 +539,11 @@ namespace msvcrt {
 
 		if(realpathResult){
 			finalPath = resolved;
+		}
+		else if (!relPathStr.empty() && relPathStr[0] == '\\') {
+			// this is an absolute path - normalize it before assigning finalPath
+    		for (char& c : relPathStr) if (c == '\\') c = '/';
+			finalPath = relPathStr;
 		}
 		else {
 			DEBUG_LOG("\tcould not find realpath, trying cwd...\n");

@@ -1,5 +1,6 @@
 #include "common.h"
 #include <clocale>
+#include <cstdarg>
 #include <cstdint>
 #include <cstdlib>
 #include <cwchar>
@@ -442,11 +443,35 @@ namespace msvcrt {
 		return wstrncmp(string1, string2, count);
 	}
 
-	int WIN_ENTRY _vswprintf_c_l(uint16_t* buffer, size_t size, const uint16_t* format, va_list args) {
+	int WIN_ENTRY _vswprintf_c_l(uint16_t* buffer, size_t size, const uint16_t* format, ...) {
+		DEBUG_LOG("_vswprintf_c_l\n");
 		if (!buffer || !format || size == 0)
 			return -1;
-		DEBUG_LOG("STUB: _vswprintf_c_l\n");
-		return 0;
+
+		std::string narrow_fmt = wideStringToString(format);
+		DEBUG_LOG("\tFmt: %s\n", narrow_fmt.c_str());
+		
+		va_list args;
+		va_start(args, format);
+		int required = vsnprintf(nullptr, 0, narrow_fmt.c_str(), args);
+		va_end(args);
+		if (required < 0) {
+			buffer[0] = 0;
+			return -1;
+		}
+
+		char buffer_narrow[required + 1];
+		va_start(args, format);
+		vsnprintf(buffer_narrow, required + 1, narrow_fmt.c_str(), args);
+		va_end(args);
+		DEBUG_LOG("\tBuffer: %s\n", buffer_narrow);
+
+		std::vector<uint16_t> wide = stringToWideString(buffer_narrow);
+		size_t copy_len = std::min(wide.size(), size - 1);
+		std::memcpy(buffer, wide.data(), copy_len * sizeof(uint16_t));
+		buffer[copy_len] = 0;
+
+    	return copy_len;
 		// return vswprintf(buffer, size, format, args); this doesn't work because on this architecture, wchar_t is size 4, instead of size 2
 	}
 

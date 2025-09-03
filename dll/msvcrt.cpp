@@ -102,11 +102,9 @@ namespace msvcrt {
 				
 			    // allocate a copy on the heap,
 				// since wStr will go out of scope
-			    uint16_t* theActualStr = new uint16_t[wStr.size() + 1];
-			    std::copy(wStr.begin(), wStr.end(), theActualStr);
-			    theActualStr[wStr.size()] = 0;
-
-				(*wargv)[i] = theActualStr;
+				(*wargv)[i] = new uint16_t[wStr.size() + 1];
+			    std::copy(wStr.begin(), wStr.end(), (*wargv)[i]);
+			    (*wargv)[i][wStr.size()] = 0;
 			}
 			(*wargv)[argc] = nullptr;
 		}
@@ -124,11 +122,9 @@ namespace msvcrt {
 
 			    // allocate a copy on the heap,
 				// since wStr will go out of scope
-			    uint16_t* theActualStr = new uint16_t[wStr.size() + 1];
-			    std::copy(wStr.begin(), wStr.end(), theActualStr);
-			    theActualStr[wStr.size()] = 0;
-
-			    (*wenv)[i] = theActualStr;
+				(*wenv)[i] = new uint16_t[wStr.size() + 1];
+			    std::copy(wStr.begin(), wStr.end(), (*wenv)[i]);
+			    (*wenv)[i][wStr.size()] = 0;
 			}
 
 			(*wenv)[count] = nullptr;
@@ -155,11 +151,11 @@ namespace msvcrt {
 
 		size_t varnamelen = wstrlen(varname);
 
-		DEBUG_LOG("\tSearching env vars...\n");
+		// DEBUG_LOG("\tSearching env vars...\n");
 		for(uint16_t** env = __winitenv; env && *env; ++env){
 			uint16_t* cur = *env;
 			std::string cur_str = wideStringToString(cur);
-			DEBUG_LOG("\tCur env var: %s\n", cur_str.c_str());
+			// DEBUG_LOG("\tCur env var: %s\n", cur_str.c_str());
 			if(wstrncmp(cur, varname, varnamelen) == 0 && cur[varnamelen] == L'='){
 				DEBUG_LOG("Found the env var %s!\n", var_str.c_str());
 				uint16_t* value = cur + varnamelen + 1;
@@ -190,6 +186,7 @@ namespace msvcrt {
 		for(uint16_t** env = __winitenv; env && *env; ++env){
 			uint16_t* cur = *env;
 			std::string cur_str = wideStringToString(cur);
+			DEBUG_LOG("\tCur env var: %s\n", cur_str.c_str());
 			if(wstrncmp(cur, varname, varnamelen) == 0 && cur[varnamelen] == L'='){
 				uint16_t* value = cur + varnamelen + 1;
 				size_t value_len = wstrlen(value);
@@ -296,7 +293,7 @@ namespace msvcrt {
 	}
 
 	uint16_t* WIN_ENTRY _wcsdup(const uint16_t *strSource){
-		std::string src_str = wideStringToString(strSource);
+		// std::string src_str = wideStringToString(strSource);
 		// DEBUG_LOG("_wcsdup: %s", src_str.c_str());
 		if(!strSource) return nullptr;
 		size_t strLen = wstrlen(strSource);
@@ -308,7 +305,7 @@ namespace msvcrt {
 			dup[i] = strSource[i];
 		}
 
-		std::string dst_str = wideStringToString(dup);
+		// std::string dst_str = wideStringToString(dup);
 		// DEBUG_LOG(" --> %s\n", dst_str.c_str());
 		return dup;
 	}
@@ -325,7 +322,7 @@ namespace msvcrt {
 
 	int WIN_ENTRY wcsncpy_s(uint16_t *strDest, size_t numberOfElements, const uint16_t *strSource, size_t count){
 		std::string src_str = wideStringToString(strSource);
-		DEBUG_LOG("wcsncpy_s dest size %d, src str %s, src size %d", numberOfElements, src_str.c_str(), count);
+		DEBUG_LOG("wcsncpy_s dest size %d, src str %s, src size %d\n", numberOfElements, src_str.c_str(), count);
 
 		if(!strDest || !strSource || numberOfElements == 0){
 			if(strDest && numberOfElements > 0) strDest[0] = L'\0';
@@ -341,8 +338,8 @@ namespace msvcrt {
 
 		wstrncpy(strDest, strSource, count);
 		strDest[count] = L'\0';
-		std::string dst_str = wideStringToString(strDest);
-		DEBUG_LOG(" --> %s\n", dst_str.c_str());
+		// std::string dst_str = wideStringToString(strDest);
+		// DEBUG_LOG(" --> %s\n", dst_str.c_str());
 		return 0;
 	}
 

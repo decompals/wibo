@@ -5,6 +5,7 @@
 #include <cwchar>
 #include <cwctype>
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
@@ -185,8 +186,8 @@ namespace msvcrt {
 
 		for(uint16_t** env = __winitenv; env && *env; ++env){
 			uint16_t* cur = *env;
-			std::string cur_str = wideStringToString(cur);
-			DEBUG_LOG("\tCur env var: %s\n", cur_str.c_str());
+			// std::string cur_str = wideStringToString(cur);
+			// DEBUG_LOG("\tCur env var: %s\n", cur_str.c_str());
 			if(wstrncmp(cur, varname, varnamelen) == 0 && cur[varnamelen] == L'='){
 				uint16_t* value = cur + varnamelen + 1;
 				size_t value_len = wstrlen(value);
@@ -509,6 +510,51 @@ namespace msvcrt {
 		return unlink(str.c_str());
 	}
 
+	uint16_t* WIN_ENTRY _wfullpath(uint16_t* absPath, const uint16_t* relPath, size_t maxLength){
+		std::string relPathStr = wideStringToString(relPath);
+		DEBUG_LOG("_wfullpath, relpath %s\n", relPathStr.c_str());
+		if(!relPath) return nullptr;
+
+		char resolved[PATH_MAX];
+		char* realpathResult = realpath(relPathStr.c_str(), resolved);
+		std::string finalPath;
+
+		if(realpathResult){
+			finalPath = resolved;
+		}
+		else {
+			DEBUG_LOG("\tcould not find realpath, trying cwd...\n");
+			char cwd[PATH_MAX];
+			if(!getcwd(cwd, sizeof(cwd))){
+				return nullptr;
+			}
+			finalPath = std::string(cwd) + "/" + relPathStr;
+		}
+
+		std::vector<uint16_t> wResolved = stringToWideString(finalPath.c_str());
+	    // If caller provided a buffer, check size
+	    if (absPath) {
+	        if (wResolved.size() + 1 > maxLength) {
+	            return nullptr; // too small
+	        }
+	        std::copy(wResolved.begin(), wResolved.end(), absPath);
+	        absPath[wResolved.size()] = 0;
+
+			std::string absPathStr = wideStringToString(absPath);
+			DEBUG_LOG("\t-> abspath %s\n", absPathStr.c_str());
+	        return absPath;
+	    } else {
+	        // Windows behavior: if absPath == NULL, allocate new
+	        uint16_t* newBuf = new uint16_t[wResolved.size() + 1];
+	        std::copy(wResolved.begin(), wResolved.end(), newBuf);
+	        newBuf[wResolved.size()] = 0;
+
+			std::string absPathStr = wideStringToString(newBuf);
+			DEBUG_LOG("\t-> abspath %s\n", absPathStr.c_str());
+	        return newBuf;
+	    }
+
+	}
 }
 
 
@@ -560,6 +606,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "_errno") == 0) return (void*)msvcrt::_errno;
 	if (strcmp(name, "_wspawnvp") == 0) return (void*)msvcrt::_wspawnvp;
 	if (strcmp(name, "_wunlink") == 0) return (void*)msvcrt::_wunlink;
+	if (strcmp(name, "_wfullpath") == 0) return (void*)msvcrt::_wfullpath;
 	return nullptr;
 }
 

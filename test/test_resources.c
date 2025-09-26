@@ -2,86 +2,75 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "test_assert.h"
+
 int main(void) {
     char buffer[128];
     int copied = LoadStringA(GetModuleHandleA(NULL), 100, buffer, sizeof(buffer));
-    if (copied <= 0) {
-        printf("LoadString failed: %lu\n", GetLastError());
-        return 1;
-    }
-    printf("STRING[100]=%s\n", buffer);
+    TEST_CHECK_MSG(copied > 0, "LoadStringA failed: %lu", (unsigned long)GetLastError());
+    TEST_CHECK_EQ((int)strlen("Resource string 100"), copied);
+    TEST_CHECK_STR_EQ("Resource string 100", buffer);
 
     HRSRC versionInfo = FindResourceA(NULL, MAKEINTRESOURCEA(1), MAKEINTRESOURCEA(RT_VERSION));
-    if (!versionInfo) {
-        printf("FindResource version failed: %lu\n", GetLastError());
-        return 1;
-    }
+    TEST_CHECK_MSG(versionInfo != NULL, "FindResourceA version failed: %lu", (unsigned long)GetLastError());
+
     DWORD versionSize = SizeofResource(NULL, versionInfo);
-    if (!versionSize) {
-        printf("SizeofResource failed: %lu\n", GetLastError());
-        return 1;
-    }
-    printf("VERSION size=%lu\n", (unsigned long)versionSize);
+    TEST_CHECK_MSG(versionSize != 0, "SizeofResource failed: %lu", (unsigned long)GetLastError());
+    TEST_CHECK_EQ(364, (int)versionSize);
 
     char modulePath[MAX_PATH];
     DWORD moduleLen = GetModuleFileNameA(NULL, modulePath, sizeof(modulePath));
-    if (moduleLen == 0 || moduleLen >= sizeof(modulePath)) {
-        printf("GetModuleFileNameA failed: %lu\n", GetLastError());
-        return 1;
-    }
+    TEST_CHECK_MSG(moduleLen > 0 && moduleLen < sizeof(modulePath),
+                  "GetModuleFileNameA failed: %lu", (unsigned long)GetLastError());
 
     DWORD handle = 0;
     DWORD infoSize = GetFileVersionInfoSizeA(modulePath, &handle);
-    if (!infoSize) {
-        printf("GetFileVersionInfoSizeA failed: %lu\n", GetLastError());
-        return 1;
-    }
+    TEST_CHECK_MSG(infoSize != 0, "GetFileVersionInfoSizeA failed: %lu", (unsigned long)GetLastError());
 
     char *infoBuffer = (char *)malloc(infoSize);
-    if (!infoBuffer) {
-        printf("malloc failed\n");
-        return 1;
-    }
+    TEST_CHECK_MSG(infoBuffer != NULL, "malloc(%lu) failed", (unsigned long)infoSize);
 
-    if (!GetFileVersionInfoA(modulePath, 0, infoSize, infoBuffer)) {
-        printf("GetFileVersionInfoA failed: %lu\n", GetLastError());
-        free(infoBuffer);
-        return 1;
-    }
+    TEST_CHECK_MSG(GetFileVersionInfoA(modulePath, 0, infoSize, infoBuffer) != 0,
+                  "GetFileVersionInfoA failed: %lu", (unsigned long)GetLastError());
 
     VS_FIXEDFILEINFO *fixedInfo = NULL;
     unsigned int fixedSize = 0;
-    if (!VerQueryValueA(infoBuffer, "\\", (void **)&fixedInfo, &fixedSize)) {
-        printf("VerQueryValueA root failed\n");
-        free(infoBuffer);
-        return 1;
-    }
-    printf("FILEVERSION=%u.%u.%u.%u\n",
-           fixedInfo->dwFileVersionMS >> 16,
-           fixedInfo->dwFileVersionMS & 0xFFFF,
-           fixedInfo->dwFileVersionLS >> 16,
-           fixedInfo->dwFileVersionLS & 0xFFFF);
+    TEST_CHECK_MSG(VerQueryValueA(infoBuffer, "\\", (void **)&fixedInfo, &fixedSize) != 0 &&
+                      fixedInfo != NULL,
+                  "VerQueryValueA root failed");
+    TEST_CHECK_MSG(fixedSize >= sizeof(*fixedInfo),
+                  "Unexpected VS_FIXEDFILEINFO size: %u", fixedSize);
+    TEST_CHECK_EQ(1, (int)(fixedInfo->dwFileVersionMS >> 16));
+    TEST_CHECK_EQ(2, (int)(fixedInfo->dwFileVersionMS & 0xFFFF));
+    TEST_CHECK_EQ(3, (int)(fixedInfo->dwFileVersionLS >> 16));
+    TEST_CHECK_EQ(4, (int)(fixedInfo->dwFileVersionLS & 0xFFFF));
 
     struct { WORD wLanguage; WORD wCodePage; } *translations = NULL;
     unsigned int transSize = 0;
-    if (VerQueryValueA(infoBuffer, "\\VarFileInfo\\Translation", (void **)&translations, &transSize) &&
-        translations && transSize >= sizeof(*translations)) {
-        printf("Translation=%04X %04X\n", translations[0].wLanguage, translations[0].wCodePage);
-        char subBlock[64];
-        snprintf(subBlock, sizeof(subBlock), "\\StringFileInfo\\%04X%04X\\ProductVersion",
-                 translations[0].wLanguage, translations[0].wCodePage);
-        char *productVersion = NULL;
-        unsigned int pvSize = 0;
-        printf("Querying %s\n", subBlock);
-        if (VerQueryValueA(infoBuffer, subBlock, (void **)&productVersion, &pvSize) && productVersion) {
-            printf("PRODUCTVERSION=%s\n", productVersion);
-        } else {
-            printf("ProductVersion lookup failed\n");
-        }
-    } else {
-        printf("ProductVersion lookup failed\n");
-    }
+    TEST_CHECK_MSG(VerQueryValueA(infoBuffer, "\\VarFileInfo\\Translation",
+                                 (void **)&translations, &transSize) != 0 &&
+                      translations != NULL,
+                  "Translation lookup failed");
+    TEST_CHECK_MSG(transSize >= sizeof(*translations),
+                  "Translation block too small: %u", transSize);
+    TEST_CHECK_EQ(0x0409, translations[0].wLanguage);
+    TEST_CHECK_EQ(0x04B0, translations[0].wCodePage);
+
+    char subBlock[64];
+    int subLen = snprintf(subBlock, sizeof(subBlock),
+                          "\\StringFileInfo\\%04X%04X\\ProductVersion",
+                          translations[0].wLanguage, translations[0].wCodePage);
+    TEST_CHECK_MSG(subLen > 0 && (size_t)subLen < sizeof(subBlock),
+                  "Failed to build ProductVersion path");
+
+    char *productVersion = NULL;
+    unsigned int pvSize = 0;
+    TEST_CHECK_MSG(VerQueryValueA(infoBuffer, subBlock, (void **)&productVersion, &pvSize) != 0 &&
+                      productVersion != NULL,
+                  "ProductVersion lookup failed");
+    TEST_CHECK_STR_EQ("1.2.3-test", productVersion);
 
     free(infoBuffer);
-    return 0;
+    puts("resource metadata validated");
+    return EXIT_SUCCESS;
 }

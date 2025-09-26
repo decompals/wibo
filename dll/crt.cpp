@@ -117,6 +117,8 @@ int *WIN_ENTRY __p___argc() { return &wibo::argc; }
 
 size_t WIN_ENTRY strlen(const char *str) { return ::strlen(str); }
 
+int WIN_ENTRY strcmp(const char *lhs, const char *rhs) { return ::strcmp(lhs, rhs); }
+
 int WIN_ENTRY strncmp(const char *lhs, const char *rhs, size_t count) { return ::strncmp(lhs, rhs, count); }
 
 void *WIN_ENTRY malloc(size_t size) { return ::malloc(size); }
@@ -247,6 +249,8 @@ static void *resolveByName(const char *name) {
 		return (void *)crt::__p___argc;
 	if (strcmp(name, "strlen") == 0)
 		return (void *)crt::strlen;
+	if (strcmp(name, "strcmp") == 0)
+		return (void *)crt::strcmp;
 	if (strcmp(name, "strncmp") == 0)
 		return (void *)crt::strncmp;
 	if (strcmp(name, "malloc") == 0)

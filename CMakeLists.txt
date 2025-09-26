@@ -39,3 +39,94 @@ add_executable(wibo
 )
 target_link_libraries(wibo PRIVATE std::filesystem)
 install(TARGETS wibo DESTINATION bin)
+
+include(CTest)
+
+if(BUILD_TESTING)
+    find_program(WIBO_MINGW_CC i686-w64-mingw32-gcc)
+    find_program(WIBO_MINGW_WINDRES i686-w64-mingw32-windres)
+
+    set(WIBO_HAVE_MINGW_TOOLCHAIN FALSE)
+    if(WIBO_MINGW_CC AND WIBO_MINGW_WINDRES)
+        set(WIBO_HAVE_MINGW_TOOLCHAIN TRUE)
+    endif()
+
+    option(WIBO_ENABLE_FIXTURE_TESTS "Build and run Windows fixture binaries through wibo" ${WIBO_HAVE_MINGW_TOOLCHAIN})
+
+    if(WIBO_ENABLE_FIXTURE_TESTS)
+        if(NOT WIBO_HAVE_MINGW_TOOLCHAIN)
+            message(WARNING "MinGW toolchain not found; skipping fixture tests")
+        else()
+            set(WIBO_TEST_BIN_DIR ${CMAKE_CURRENT_BINARY_DIR}/test)
+            file(MAKE_DIRECTORY ${WIBO_TEST_BIN_DIR})
+
+            add_custom_command(
+                OUTPUT ${WIBO_TEST_BIN_DIR}/external_exports.dll
+                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2 -shared
+                        -o external_exports.dll
+                        ${CMAKE_CURRENT_SOURCE_DIR}/test/external_exports.c
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/test/external_exports.c)
+
+            add_custom_command(
+                OUTPUT ${WIBO_TEST_BIN_DIR}/test_external_dll.exe
+                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
+                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
+                        -o test_external_dll.exe
+                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_external_dll.c
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_external_dll.c
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
+
+            add_custom_command(
+                OUTPUT ${WIBO_TEST_BIN_DIR}/test_resources_res.o
+                COMMAND ${WIBO_MINGW_WINDRES}
+                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_resources.rc
+                        -O coff -o test_resources_res.o
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/test/test_resources.rc)
+
+            add_custom_command(
+                OUTPUT ${WIBO_TEST_BIN_DIR}/test_resources.exe
+                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
+                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
+                        -o test_resources.exe
+                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_resources.c
+                        test_resources_res.o -lversion
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_resources.c
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h
+                    ${WIBO_TEST_BIN_DIR}/test_resources_res.o)
+
+            add_custom_target(wibo_test_fixtures
+                DEPENDS
+                    ${WIBO_TEST_BIN_DIR}/external_exports.dll
+                    ${WIBO_TEST_BIN_DIR}/test_external_dll.exe
+                    ${WIBO_TEST_BIN_DIR}/test_resources.exe)
+
+            if(CMAKE_CONFIGURATION_TYPES)
+                set(_wibo_fixture_build_command
+                    ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --config $<CONFIG> --target wibo_test_fixtures)
+            else()
+                set(_wibo_fixture_build_command
+                    ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target wibo_test_fixtures)
+            endif()
+
+            add_test(NAME wibo.build_fixtures COMMAND ${_wibo_fixture_build_command})
+
+            add_test(NAME wibo.test_external_dll
+                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_external_dll.exe)
+            set_tests_properties(wibo.test_external_dll PROPERTIES
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS wibo.build_fixtures)
+
+            add_test(NAME wibo.test_resources
+                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_resources.exe)
+            set_tests_properties(wibo.test_resources PROPERTIES
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS wibo.build_fixtures)
+        endif()
+    endif()
+endif()

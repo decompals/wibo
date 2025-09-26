@@ -20,7 +20,15 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y file unzip wget
+          sudo apt-get install -y \
+            file \
+            unzip \
+            wget \
+            cmake \
+            ninja-build \
+            g++-multilib \
+            gcc-mingw-w64-i686 \
+            binutils-mingw-w64-i686
 
       - name: Build debug
         run: docker build --build-arg build_type=Debug --target export --output build_debug .
@@ -39,6 +47,12 @@ jobs:
           file test_debug.o
           build/wibo Wii/1.7/mwcceppc.exe -nodefaults -c test/test.c -Itest -o test.o
           file test.o
+
+      - name: Fixture tests
+        run: |
+          cmake -S . -B build_ctest -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DWIBO_ENABLE_FIXTURE_TESTS=ON
+          cmake --build build_ctest
+          ctest --test-dir build_ctest --output-on-failure
 
       - name: Upload release
         uses: actions/upload-artifact@v4

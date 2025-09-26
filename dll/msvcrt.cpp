@@ -11,18 +11,26 @@
 #include <cstring>
 #include <cwchar>
 #include <cwctype>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <strings.h>
 #include <type_traits>
 #include <unistd.h>
 #include <vector>
+#include <spawn.h>
+#include <sys/wait.h>
+#include "files.h"
+#include "processes.h"
 #include "strutil.h"
 
 typedef void (*_PVFV)();
 typedef int (*_PIFV)();
 using _onexit_t = _PIFV;
+
+extern "C" char **environ;
 
 namespace msvcrt {
 	int _commode;
@@ -66,6 +74,60 @@ namespace msvcrt {
 			return tables.back();
 		}
 
+		std::string normalizeEnvStringForWindows(const char *src) {
+			if (!src) {
+				return std::string();
+			}
+			std::string entry(src);
+			auto pos = entry.find('=');
+			if (pos == std::string::npos) {
+				return entry;
+			}
+			std::string name = entry.substr(0, pos);
+			std::string value = entry.substr(pos + 1);
+			if (strcasecmp(name.c_str(), "PATH") == 0) {
+				std::string converted = files::hostPathListToWindows(value);
+				std::string result = converted.empty() ? value : converted;
+				std::string exeDir;
+				if (wibo::argv && wibo::argv[0]) {
+					std::filesystem::path exePath = std::filesystem::absolute(std::filesystem::path(wibo::argv[0])).parent_path();
+					if (!exePath.empty()) {
+						exeDir = files::pathToWindows(exePath);
+					}
+				}
+				if (!exeDir.empty()) {
+					std::string loweredResult = result;
+					std::string loweredExe = exeDir;
+					std::transform(loweredResult.begin(), loweredResult.end(), loweredResult.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+					std::transform(loweredExe.begin(), loweredExe.end(), loweredExe.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+					bool present = false;
+					size_t start = 0;
+					while (start <= loweredResult.size()) {
+						size_t end = loweredResult.find(';', start);
+						if (end == std::string::npos) {
+							end = loweredResult.size();
+						}
+						if (loweredResult.substr(start, end - start) == loweredExe) {
+							present = true;
+							break;
+						}
+						if (end == loweredResult.size()) {
+							break;
+						}
+						start = end + 1;
+					}
+					if (!present) {
+						if (!result.empty() && result.back() != ';') {
+							result.push_back(';');
+						}
+						result += exeDir;
+					}
+				}
+				entry = name + "=" + result;
+			}
+			return entry;
+		}
+
 		template <typename CharT>
 		struct StringListStorage {
 			std::vector<std::unique_ptr<CharT[]>> strings;
@@ -103,23 +165,19 @@ namespace msvcrt {
 		};
 
 		std::vector<char> copyNarrowString(const char *src) {
-			if (!src) {
-				src = "";
-			}
-			size_t len = std::strlen(src);
+			std::string normalized = normalizeEnvStringForWindows(src);
+			size_t len = normalized.size();
 			std::vector<char> result(len + 1);
 			if (len > 0) {
-				std::memcpy(result.data(), src, len);
+				std::memcpy(result.data(), normalized.data(), len);
 			}
 			result[len] = '\0';
 			return result;
 		}
 
 		std::vector<uint16_t> copyWideString(const char *src) {
-			if (!src) {
-				src = "";
-			}
-			return stringToWideString(src);
+			std::string normalized = normalizeEnvStringForWindows(src);
+			return stringToWideString(normalized.c_str());
 		}
 
 		template <typename CharT, typename Converter>
@@ -427,6 +485,90 @@ namespace msvcrt {
 		std::free(ptr);
 	}
 
+	void* WIN_ENTRY memcpy(void *dest, const void *src, size_t count) {
+		return std::memcpy(dest, src, count);
+	}
+
+	void* WIN_ENTRY memmove(void *dest, const void *src, size_t count) {
+		return std::memmove(dest, src, count);
+	}
+
+	int WIN_ENTRY fflush(FILE *stream) {
+		return std::fflush(stream);
+	}
+
+	FILE *WIN_ENTRY fopen(const char *filename, const char *mode) {
+		return std::fopen(filename, mode);
+	}
+
+	int WIN_ENTRY _dup2(int fd1, int fd2) {
+		return dup2(fd1, fd2);
+	}
+
+	int WIN_ENTRY _isatty(int fd) {
+		return isatty(fd);
+	}
+
+	int WIN_ENTRY fseek(FILE *stream, long offset, int origin) {
+		return std::fseek(stream, offset, origin);
+	}
+
+	long WIN_ENTRY ftell(FILE *stream) {
+		return std::ftell(stream);
+	}
+
+	int WIN_ENTRY feof(FILE *stream) {
+		return std::feof(stream);
+	}
+
+	int WIN_ENTRY fputws(const uint16_t *str, FILE *stream) {
+		std::wstring temp;
+		if (str) {
+			for (const uint16_t *cursor = str; *cursor; ++cursor) {
+				temp.push_back(static_cast<wchar_t>(*cursor));
+			}
+		}
+		return std::fputws(temp.c_str(), stream);
+	}
+
+	uint16_t* WIN_ENTRY fgetws(uint16_t *buffer, int size, FILE *stream) {
+		if (!buffer || size <= 0) {
+			return nullptr;
+		}
+		std::vector<wchar_t> temp(static_cast<size_t>(size));
+		wchar_t *res = std::fgetws(temp.data(), size, stream);
+		if (!res) {
+			return nullptr;
+		}
+		for (int i = 0; i < size; ++i) {
+			buffer[i] = static_cast<uint16_t>(temp[i]);
+			if (temp[i] == L'\0') {
+				break;
+			}
+		}
+		return buffer;
+	}
+
+	wint_t WIN_ENTRY fgetwc(FILE *stream) {
+		return std::fgetwc(stream);
+	}
+
+	int WIN_ENTRY _wfopen_s(FILE **stream, const uint16_t *filename, const uint16_t *mode) {
+		if (!stream || !filename || !mode) {
+			errno = EINVAL;
+			return EINVAL;
+		}
+		std::string narrowName = wideStringToString(filename);
+		std::string narrowMode = wideStringToString(mode);
+		FILE *handle = std::fopen(narrowName.c_str(), narrowMode.c_str());
+		if (!handle) {
+			*stream = nullptr;
+			return errno ? errno : EINVAL;
+		}
+		*stream = handle;
+		return 0;
+	}
+
 	static uint16_t toLower(uint16_t ch) {
 		if (ch >= 'A' && ch <= 'Z') {
 			return static_cast<uint16_t>(ch + ('a' - 'A'));
@@ -461,6 +603,234 @@ namespace msvcrt {
 		uint16_t a = toLower(*lhs);
 		uint16_t b = toLower(*rhs);
 		return static_cast<int>(a) - static_cast<int>(b);
+	}
+
+	int WIN_ENTRY _wmakepath_s(uint16_t *path, size_t sizeInWords, const uint16_t *drive, const uint16_t *dir,
+				 const uint16_t *fname, const uint16_t *ext) {
+		if (!path || sizeInWords == 0) {
+			return EINVAL;
+		}
+
+		path[0] = 0;
+		std::u16string result;
+
+		auto append = [&](const uint16_t *src) {
+			if (!src || !*src) {
+				return;
+			}
+			for (const uint16_t *cursor = src; *cursor; ++cursor) {
+				result.push_back(static_cast<char16_t>(*cursor));
+			}
+		};
+
+		if (drive && *drive) {
+			result.push_back(static_cast<char16_t>(drive[0]));
+			if (drive[1] == u':') {
+				result.push_back(u':');
+				append(drive + 2);
+			} else {
+				result.push_back(u':');
+				append(drive + 1);
+			}
+		}
+
+		auto appendDir = [&](const uint16_t *directory) {
+			if (!directory || !*directory) {
+				return;
+			}
+			append(directory);
+			if (result.empty()) {
+				return;
+			}
+			char16_t last = result.back();
+			if (last != u'/' && last != u'\\') {
+				result.push_back(u'\\');
+			}
+		};
+
+		appendDir(dir);
+		append(fname);
+
+		if (ext && *ext) {
+			if (*ext != u'.') {
+				result.push_back(u'.');
+				append(ext);
+			} else {
+				append(ext);
+			}
+		}
+
+		size_t required = result.size() + 1;
+		if (required > sizeInWords) {
+			path[0] = 0;
+			return ERANGE;
+		}
+
+		for (size_t i = 0; i < result.size(); ++i) {
+			path[i] = static_cast<uint16_t>(result[i]);
+		}
+		path[result.size()] = 0;
+		return 0;
+	}
+
+	int WIN_ENTRY _wputenv_s(const uint16_t *varname, const uint16_t *value) {
+		if (!varname || !value) {
+			errno = EINVAL;
+			return EINVAL;
+		}
+
+		if (!*varname) {
+			errno = EINVAL;
+			return EINVAL;
+		}
+
+		for (const uint16_t *cursor = varname; *cursor; ++cursor) {
+			if (*cursor == static_cast<uint16_t>('=')) {
+				errno = EINVAL;
+				return EINVAL;
+			}
+		}
+
+		std::string name = wideStringToString(varname);
+		if (name.empty()) {
+			errno = EINVAL;
+			return EINVAL;
+		}
+
+		int resultCode = 0;
+		if (!*value) {
+			if (unsetenv(name.c_str()) != 0) {
+				resultCode = errno != 0 ? errno : EINVAL;
+			}
+		} else {
+			std::string narrowValue = wideStringToString(value);
+			if (setenv(name.c_str(), narrowValue.c_str(), 1) != 0) {
+				resultCode = errno != 0 ? errno : EINVAL;
+			}
+		}
+
+		if (resultCode != 0) {
+			errno = resultCode;
+			return resultCode;
+		}
+
+		getMainArgsCommon<char>(nullptr, nullptr, nullptr, copyNarrowString);
+		getMainArgsCommon<uint16_t>(nullptr, nullptr, nullptr, copyWideString);
+		return 0;
+	}
+
+	unsigned long WIN_ENTRY wcsspn(const uint16_t *str1, const uint16_t *str2) {
+		if (!str1 || !str2) {
+			return 0;
+		}
+		unsigned long count = 0;
+		for (const uint16_t *p = str1; *p; ++p) {
+			bool match = false;
+			for (const uint16_t *q = str2; *q; ++q) {
+				if (*p == *q) {
+					match = true;
+					break;
+				}
+			}
+			if (!match) {
+				break;
+			}
+			++count;
+		}
+		return count;
+	}
+
+	long WIN_ENTRY _wtol(const uint16_t *str) {
+		return wstrtol(str, nullptr, 10);
+	}
+
+	int WIN_ENTRY _wcsupr_s(uint16_t *str, size_t size) {
+		if (!str || size == 0) {
+			return EINVAL;
+		}
+		size_t len = wstrnlen(str, size);
+		if (len >= size) {
+			return ERANGE;
+		}
+		for (size_t i = 0; i < len; ++i) {
+			wchar_t ch = static_cast<wchar_t>(str[i]);
+			str[i] = static_cast<uint16_t>(std::towupper(ch));
+		}
+		return 0;
+	}
+
+	int WIN_ENTRY _wcslwr_s(uint16_t *str, size_t size) {
+		if (!str || size == 0) {
+			return EINVAL;
+		}
+		size_t len = wstrnlen(str, size);
+		if (len >= size) {
+			return ERANGE;
+		}
+		for (size_t i = 0; i < len; ++i) {
+			wchar_t ch = static_cast<wchar_t>(str[i]);
+			str[i] = static_cast<uint16_t>(std::towlower(ch));
+		}
+		return 0;
+	}
+
+	wint_t WIN_ENTRY towlower(wint_t ch) {
+		return static_cast<wint_t>(std::towlower(static_cast<wchar_t>(ch)));
+	}
+
+	int WIN_ENTRY _ftime64_s(void *timeb) {
+		DEBUG_LOG("STUB: _ftime64_s(%p)\n", timeb);
+		return 0;
+	}
+
+	int WIN_ENTRY _crt_debugger_hook(int value) {
+		DEBUG_LOG("_crt_debugger_hook(%d)\n", value);
+		(void)value;
+		return 0;
+	}
+
+	int WIN_ENTRY _configthreadlocale(int mode) {
+		static int currentMode = 0;
+		int previous = currentMode;
+		if (mode == -1) {
+			return previous;
+		}
+		if (mode == 0 || mode == 1 || mode == 2) {
+			currentMode = mode;
+			return previous;
+		}
+		errno = EINVAL;
+		return -1;
+	}
+
+	static void abort_and_log(const char *reason) {
+		DEBUG_LOG("Runtime abort: %s\n", reason ? reason : "");
+		std::abort();
+	}
+
+	int WIN_ENTRY _amsg_exit(int reason) {
+		DEBUG_LOG("_amsg_exit(%d)\n", reason);
+		abort_and_log("_amsg_exit");
+		return reason;
+	}
+
+	void WIN_ENTRY _invoke_watson(const uint16_t *, const uint16_t *, const uint16_t *, unsigned int, uintptr_t) {
+		DEBUG_LOG("_invoke_watson\n");
+		abort_and_log("_invoke_watson");
+	}
+
+	void WIN_ENTRY terminateShim() {
+		abort_and_log("terminate");
+	}
+
+	int WIN_ENTRY _except_handler4_common(void *, void *, void *, void *) {
+		DEBUG_LOG("_except_handler4_common\n");
+		return 0;
+	}
+
+	long WIN_ENTRY _XcptFilter(unsigned long code, void *) {
+		DEBUG_LOG("_XcptFilter(%lu)\n", code);
+		return 0;
 	}
 
 	int WIN_ENTRY _get_wpgmptr(uint16_t** pValue){
@@ -576,9 +946,17 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _waccess_s(const uint16_t* path, int mode){
-		std::string str = wideStringToString(path);
-		DEBUG_LOG("_waccess_s %s\n", str.c_str());
-		return access(str.c_str(), mode);
+		std::string original = wideStringToString(path);
+		DEBUG_LOG("_waccess_s %s\n", original.c_str());
+		std::filesystem::path host = files::pathFromWindows(original.c_str());
+		std::string candidate;
+		if (!host.empty()) {
+			candidate = host.string();
+		} else {
+			candidate = original;
+			std::replace(candidate.begin(), candidate.end(), '\\', '/');
+		}
+		return access(candidate.c_str(), mode);
 	}
 
 	void* WIN_ENTRY memset(void *s, int c, size_t n){
@@ -744,27 +1122,14 @@ namespace msvcrt {
 		return wstrtoul(strSource, endptr, base);
 	}
 
-	int WIN_ENTRY _dup2(int fd1, int fd2){
-		return dup2(fd1, fd2);
-	}
-
 	FILE* WIN_ENTRY _wfsopen(const uint16_t* filename, const uint16_t* mode, int shflag){
 		if (!filename || !mode) return nullptr;
 		std::string fname_str = wideStringToString(filename);
 		std::string mode_str = wideStringToString(mode);
 		DEBUG_LOG("_wfsopen file %s, mode %s\n", fname_str.c_str(), mode_str.c_str());
 
+		(void)shflag;
 		return fopen(fname_str.c_str(), mode_str.c_str());
-	}
-
-	int WIN_ENTRY fputws(const uint16_t* str, FILE* stream){
-		if(!str || !stream) return EOF;
-		
-		std::string fname_str = wideStringToString(str);
-		DEBUG_LOG("fputws %s\n", fname_str.c_str());
-
-		if(fputs(fname_str.c_str(), stream) < 0) return EOF;
-		else return 0;
 	}
 
 	int WIN_ENTRY puts(const char *str) {
@@ -787,9 +1152,9 @@ namespace msvcrt {
 		DEBUG_LOG("flushall\n");
 		int count = 0;
 
-		if (fflush(stdin) == 0) count++;
-		if (fflush(stdout) == 0) count++;
-		if (fflush(stderr) == 0) count++;
+		if (msvcrt::fflush(stdin) == 0) count++;
+		if (msvcrt::fflush(stdout) == 0) count++;
+		if (msvcrt::fflush(stderr) == 0) count++;
 
 		return count;
 	}
@@ -798,10 +1163,62 @@ namespace msvcrt {
 		return &errno;
 	}
 
-	intptr_t WIN_ENTRY _wspawnvp(int mode, const uint16_t* cmdname, const uint16_t* const * argv){
-		std::string str_cmd = wideStringToString(cmdname);
-		DEBUG_LOG("STUB: _wspawnvp %s\n", str_cmd.c_str());
-		return -1;
+	intptr_t WIN_ENTRY _wspawnvp(int mode, const uint16_t* cmdname, const uint16_t* const * argv) {
+		if (!cmdname || !argv) {
+			errno = EINVAL;
+			return -1;
+		}
+
+		std::string command = wideStringToString(cmdname);
+		DEBUG_LOG("_wspawnvp(mode=%d, cmd=%s)\n", mode, command.c_str());
+
+		std::vector<std::string> argStorage;
+		for (const uint16_t *const *cursor = argv; *cursor; ++cursor) {
+			argStorage.emplace_back(wideStringToString(*cursor));
+		}
+		if (argStorage.empty()) {
+			argStorage.emplace_back(command);
+		}
+
+		auto resolved = processes::resolveExecutable(command, true);
+		if (!resolved) {
+			errno = ENOENT;
+			DEBUG_LOG("\tfailed to resolve executable for %s\n", command.c_str());
+			return -1;
+		}
+
+		pid_t pid = -1;
+		int spawnResult = processes::spawnViaWibo(*resolved, argStorage, &pid);
+		if (spawnResult != 0) {
+			errno = spawnResult;
+			DEBUG_LOG("\tspawnViaWibo failed: %d\n", spawnResult);
+			return -1;
+		}
+
+		constexpr int P_WAIT = 0;
+		constexpr int P_DETACH = 2;
+
+		if (mode == P_WAIT) {
+			int status = 0;
+			if (waitpid(pid, &status, 0) == -1) {
+				DEBUG_LOG("\twaitpid failed: %d\n", errno);
+				return -1;
+			}
+			if (WIFEXITED(status)) {
+				return static_cast<intptr_t>(WEXITSTATUS(status));
+			}
+			if (WIFSIGNALED(status)) {
+				errno = EINTR;
+			}
+			return -1;
+		}
+
+		if (mode == P_DETACH) {
+			return 0;
+		}
+
+		// _P_NOWAIT and unknown flags: return process id
+		return static_cast<intptr_t>(pid);
 	}
 
 	int WIN_ENTRY _wunlink(const uint16_t *filename){
@@ -889,11 +1306,39 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "__dllonexit") == 0) return (void*)msvcrt::__dllonexit;
 	if (strcmp(name, "free") == 0) return (void*)msvcrt::free;
 	if (strcmp(name, "_wcsicmp") == 0) return (void*)msvcrt::_wcsicmp;
+	if (strcmp(name, "_wmakepath_s") == 0) return (void*)msvcrt::_wmakepath_s;
+	if (strcmp(name, "_wputenv_s") == 0) return (void*)msvcrt::_wputenv_s;
 	if (strcmp(name, "_get_wpgmptr") == 0) return (void*)msvcrt::_get_wpgmptr;
 	if (strcmp(name, "_wsplitpath_s") == 0) return (void*)msvcrt::_wsplitpath_s;
 	if (strcmp(name, "wcscat_s") == 0) return (void*)msvcrt::wcscat_s;
 	if (strcmp(name, "_wcsdup") == 0) return (void*)msvcrt::_wcsdup;
 	if (strcmp(name, "memset") == 0) return (void*)msvcrt::memset;
+	if (strcmp(name, "memcpy") == 0) return (void*)msvcrt::memcpy;
+	if (strcmp(name, "memmove") == 0) return (void*)msvcrt::memmove;
+	if (strcmp(name, "fflush") == 0) return (void*)msvcrt::fflush;
+	if (strcmp(name, "fopen") == 0) return (void*)msvcrt::fopen;
+	if (strcmp(name, "fseek") == 0) return (void*)msvcrt::fseek;
+	if (strcmp(name, "ftell") == 0) return (void*)msvcrt::ftell;
+	if (strcmp(name, "feof") == 0) return (void*)msvcrt::feof;
+	if (strcmp(name, "fgetws") == 0) return (void*)msvcrt::fgetws;
+	if (strcmp(name, "fgetwc") == 0) return (void*)msvcrt::fgetwc;
+	if (strcmp(name, "fputws") == 0) return (void*)msvcrt::fputws;
+	if (strcmp(name, "_wfopen_s") == 0) return (void*)msvcrt::_wfopen_s;
+	if (strcmp(name, "wcsspn") == 0) return (void*)msvcrt::wcsspn;
+	if (strcmp(name, "_wtol") == 0) return (void*)msvcrt::_wtol;
+	if (strcmp(name, "_wcsupr_s") == 0) return (void*)msvcrt::_wcsupr_s;
+	if (strcmp(name, "_wcslwr_s") == 0) return (void*)msvcrt::_wcslwr_s;
+	if (strcmp(name, "_dup2") == 0) return (void*)msvcrt::_dup2;
+	if (strcmp(name, "_isatty") == 0) return (void*)msvcrt::_isatty;
+	if (strcmp(name, "towlower") == 0) return (void*)msvcrt::towlower;
+	if (strcmp(name, "_ftime64_s") == 0) return (void*)msvcrt::_ftime64_s;
+	if (strcmp(name, "_crt_debugger_hook") == 0) return (void*)msvcrt::_crt_debugger_hook;
+	if (strcmp(name, "_configthreadlocale") == 0) return (void*)msvcrt::_configthreadlocale;
+	if (strcmp(name, "_amsg_exit") == 0) return (void*)msvcrt::_amsg_exit;
+	if (strcmp(name, "_invoke_watson") == 0) return (void*)msvcrt::_invoke_watson;
+	if (strcmp(name, "_except_handler4_common") == 0) return (void*)msvcrt::_except_handler4_common;
+	if (strcmp(name, "_XcptFilter") == 0) return (void*)msvcrt::_XcptFilter;
+	if (strcmp(name, "?terminate@@YAXXZ") == 0) return (void*)msvcrt::terminateShim;
 	if (strcmp(name, "wcsncpy_s") == 0) return (void*)msvcrt::wcsncpy_s;
 	if (strcmp(name, "wcsncat_s") == 0) return (void*)msvcrt::wcsncat_s;
 	if (strcmp(name, "_itow_s") == 0) return (void*)msvcrt::_itow_s;

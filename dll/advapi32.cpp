@@ -7,34 +7,34 @@ namespace advapi32 {
 		return 1; // screw them for now
 	}
 
-	bool WIN_FUNC CryptReleaseContext(void* hProv, unsigned int dwFlags) {
+	BOOL WIN_FUNC CryptReleaseContext(void* hProv, unsigned int dwFlags) {
 		DEBUG_LOG("STUB: CryptReleaseContext %p %u\n", hProv, dwFlags);
-		return true;
+		return TRUE;
 	}
 
-	bool WIN_FUNC CryptAcquireContextW(void** phProv, const wchar_t* pszContainer, const wchar_t* pszProvider, unsigned int dwProvType, unsigned int dwFlags){
+	BOOL WIN_FUNC CryptAcquireContextW(void** phProv, const wchar_t* pszContainer, const wchar_t* pszProvider, unsigned int dwProvType, unsigned int dwFlags){
 		DEBUG_LOG("STUB: CryptAcquireContextW(%p)\n", phProv);
 
 		// to quote the guy above me: screw them for now
 		static int lmao = 42;
 		if (phProv) {
 			*phProv = &lmao;
-			return true;
+			return TRUE;
 		}
 
-		return false;
+		return FALSE;
 	}
 
-	bool WIN_FUNC CryptGenRandom(void* hProv, unsigned int dwLen, unsigned char* pbBuffer){
+	BOOL WIN_FUNC CryptGenRandom(void* hProv, unsigned int dwLen, unsigned char* pbBuffer){
 		DEBUG_LOG("STUB: CryptGenRandom(%p)\n", hProv);
-		if (!pbBuffer || dwLen == 0) return false;
+		if (!pbBuffer || dwLen == 0) return FALSE;
 
 		ssize_t ret = getrandom(pbBuffer, dwLen, 0);
 		if (ret < 0 || (size_t)ret != dwLen) {
-			return false;
+			return FALSE;
 		}
 
-		return true;
+		return TRUE;
 	}
 }
 

@@ -110,6 +110,8 @@ struct ModuleRegistry {
 	std::optional<std::filesystem::path> dllDirectory;
 	bool initialized = false;
 	std::unordered_map<void *, wibo::ModuleInfo *> onExitTables;
+	std::unordered_map<const wibo::Module *, std::vector<std::string>> builtinAliasLists;
+	std::unordered_map<std::string, wibo::ModuleInfo *> builtinAliasMap;
 };
 
 ModuleRegistry &registry() {
@@ -180,32 +182,6 @@ std::string normalizedBaseKey(const ParsedModuleName &parsed) {
 	return normalizeAlias(base);
 }
 
-std::optional<std::filesystem::path> findCaseInsensitiveFile(const std::filesystem::path &directory,
-															 const std::string &filename) {
-	std::error_code ec;
-	if (directory.empty()) {
-		return std::nullopt;
-	}
-	if (!std::filesystem::exists(directory, ec) || !std::filesystem::is_directory(directory, ec)) {
-		return std::nullopt;
-	}
-	const std::string lower = toLowerCopy(filename);
-	for (const auto &entry : std::filesystem::directory_iterator(directory, ec)) {
-		if (ec) {
-			break;
-		}
-		const std::string candidate = toLowerCopy(entry.path().filename().string());
-		if (candidate == lower) {
-			return std::filesystem::canonical(entry.path(), ec);
-		}
-	}
-	auto direct = directory / filename;
-	if (std::filesystem::exists(direct, ec)) {
-		return std::filesystem::canonical(direct, ec);
-	}
-	return std::nullopt;
-}
-
 std::optional<std::filesystem::path> combineAndFind(const std::filesystem::path &directory,
 													const std::string &filename) {
 	if (filename.empty()) {
@@ -214,16 +190,7 @@ std::optional<std::filesystem::path> combineAndFind(const std::filesystem::path 
 	if (directory.empty()) {
 		return std::nullopt;
 	}
-	return findCaseInsensitiveFile(directory, filename);
-}
-
-std::filesystem::path canonicalPath(const std::filesystem::path &path) {
-	std::error_code ec;
-	auto canonical = std::filesystem::weakly_canonical(path, ec);
-	if (!ec) {
-		return canonical;
-	}
-	return std::filesystem::absolute(path);
+	return files::findCaseInsensitiveFile(directory, filename);
 }
 
 std::vector<std::filesystem::path> collectSearchDirectories(bool alteredSearchPath) {
@@ -305,11 +272,11 @@ std::optional<std::filesystem::path> resolveModuleOnDisk(const std::string &requ
 		for (const auto &candidate : names) {
 			auto combined = parsed.directory + "\\" + candidate;
 			auto posixPath = files::pathFromWindows(combined.c_str());
-			if (!posixPath.empty()) {
-				auto resolved = findCaseInsensitiveFile(std::filesystem::path(posixPath).parent_path(),
+				if (!posixPath.empty()) {
+					auto resolved = files::findCaseInsensitiveFile(std::filesystem::path(posixPath).parent_path(),
 														std::filesystem::path(posixPath).filename().string());
 				if (resolved) {
-					return canonicalPath(*resolved);
+					return files::canonicalPath(*resolved);
 				}
 			}
 		}
@@ -321,7 +288,7 @@ std::optional<std::filesystem::path> resolveModuleOnDisk(const std::string &requ
 		for (const auto &candidate : names) {
 			auto resolved = combineAndFind(dir, candidate);
 			if (resolved) {
-				return canonicalPath(*resolved);
+				return files::canonicalPath(*resolved);
 			}
 		}
 	}
@@ -330,7 +297,7 @@ std::optional<std::filesystem::path> resolveModuleOnDisk(const std::string &requ
 }
 
 std::string storageKeyForPath(const std::filesystem::path &path) {
-	return normalizeAlias(files::pathToWindows(canonicalPath(path)));
+	return normalizeAlias(files::pathToWindows(files::canonicalPath(path)));
 }
 
 std::string storageKeyForBuiltin(const std::string &normalizedName) { return normalizedName; }
@@ -349,7 +316,13 @@ void registerAlias(const std::string &alias, wibo::ModuleInfo *info) {
 		return;
 	}
 	auto &reg = registry();
-	if (reg.modulesByAlias.find(alias) == reg.modulesByAlias.end()) {
+	auto it = reg.modulesByAlias.find(alias);
+	if (it == reg.modulesByAlias.end()) {
+		reg.modulesByAlias[alias] = info;
+		return;
+	}
+	// Prefer externally loaded modules over built-ins when both are present.
+	if (it->second && it->second->module != nullptr && info->module == nullptr) {
 		reg.modulesByAlias[alias] = info;
 	}
 }
@@ -369,10 +342,20 @@ void registerBuiltinModule(const wibo::Module *module) {
 	auto &reg = registry();
 	reg.modulesByKey[storageKey] = std::move(entry);
 
+	reg.builtinAliasLists[module] = {};
+	auto &aliasList = reg.builtinAliasLists[module];
 	for (size_t i = 0; module->names[i]; ++i) {
-		registerAlias(normalizeAlias(module->names[i]), raw);
+		std::string alias = normalizeAlias(module->names[i]);
+		aliasList.push_back(alias);
+		registerAlias(alias, raw);
+		reg.builtinAliasMap[alias] = raw;
 		ParsedModuleName parsed = parseModuleName(module->names[i]);
-		registerAlias(normalizedBaseKey(parsed), raw);
+		std::string baseAlias = normalizedBaseKey(parsed);
+		if (baseAlias != alias) {
+			aliasList.push_back(baseAlias);
+			registerAlias(baseAlias, raw);
+			reg.builtinAliasMap[baseAlias] = raw;
+		}
 	}
 }
 
@@ -543,7 +526,7 @@ void shutdownModuleRegistry() {
 ModuleInfo *moduleInfoFromHandle(HMODULE module) { return static_cast<ModuleInfo *>(module); }
 
 void setDllDirectoryOverride(const std::filesystem::path &path) {
-	auto canonical = canonicalPath(path);
+	auto canonical = files::canonicalPath(path);
 	std::lock_guard<std::recursive_mutex> lock(registry().mutex);
 	registry().dllDirectory = canonical;
 }
@@ -645,76 +628,119 @@ HMODULE loadModule(const char *dllName) {
 	ensureInitialized();
 
 	ParsedModuleName parsed = parseModuleName(requested);
+
+	auto &reg = registry();
+	DWORD diskError = ERROR_SUCCESS;
+
+	auto tryLoadExternal = [&](const std::filesystem::path &path) -> ModuleInfo * {
+		std::string key = storageKeyForPath(path);
+		auto existingIt = reg.modulesByKey.find(key);
+		if (existingIt != reg.modulesByKey.end()) {
+			ModuleInfo *info = existingIt->second.get();
+			if (info->refCount != UINT_MAX) {
+				info->refCount++;
+			}
+			registerExternalModuleAliases(requested, files::canonicalPath(path), info);
+			return info;
+		}
+
+		FILE *file = fopen(path.c_str(), "rb");
+		if (!file) {
+			perror("loadModule");
+			diskError = ERROR_MOD_NOT_FOUND;
+			return nullptr;
+		}
+
+		auto executable = std::make_unique<Executable>();
+		if (!executable->loadPE(file, true)) {
+			DEBUG_LOG("  loadPE failed for %s\n", path.c_str());
+			fclose(file);
+			diskError = ERROR_BAD_EXE_FORMAT;
+			return nullptr;
+		}
+		fclose(file);
+
+		ModulePtr info = std::make_unique<ModuleInfo>();
+		info->module = nullptr;
+		info->originalName = requested;
+		info->normalizedName = normalizedBaseKey(parsed);
+		info->resolvedPath = files::canonicalPath(path);
+		info->executable = std::move(executable);
+		info->entryPoint = info->executable->entryPoint;
+		info->imageBase = info->executable->imageBuffer;
+		info->imageSize = info->executable->imageSize;
+		info->refCount = 1;
+		info->dataFile = false;
+		info->dontResolveReferences = false;
+
+		ModuleInfo *raw = info.get();
+		reg.modulesByKey[key] = std::move(info);
+		registerExternalModuleAliases(requested, raw->resolvedPath, raw);
+		ensureExportsInitialized(*raw);
+		callDllMain(*raw, DLL_PROCESS_ATTACH);
+		return raw;
+	};
+
+	auto resolveAndLoadExternal = [&]() -> ModuleInfo * {
+		auto resolvedPath = resolveModuleOnDisk(requested, false);
+		if (!resolvedPath) {
+			DEBUG_LOG("  module not found on disk\n");
+			return nullptr;
+		}
+		return tryLoadExternal(*resolvedPath);
+	};
+
 	std::string alias = normalizedBaseKey(parsed);
 	ModuleInfo *existing = findByAlias(alias);
 	if (!existing) {
 		existing = findByAlias(normalizeAlias(requested));
 	}
 	if (existing) {
-		DEBUG_LOG("  found existing module alias %s\n", alias.c_str());
-		if (existing->refCount != UINT_MAX) {
-			existing->refCount++;
+		DEBUG_LOG("  found existing module alias %s (builtin=%d)\n", alias.c_str(), existing->module != nullptr);
+		if (existing->module == nullptr) {
+			if (existing->refCount != UINT_MAX) {
+				existing->refCount++;
+			}
+			DEBUG_LOG("  returning existing external module %s\n", existing->originalName.c_str());
+			lastError = ERROR_SUCCESS;
+			return existing;
+		}
+		if (ModuleInfo *external = resolveAndLoadExternal()) {
+			DEBUG_LOG("  replaced builtin module %s with external copy\n", requested.c_str());
+			lastError = ERROR_SUCCESS;
+			return external;
 		}
 		lastError = ERROR_SUCCESS;
+		DEBUG_LOG("  returning builtin module %s\n", existing->originalName.c_str());
 		return existing;
 	}
 
-	auto resolvedPath = resolveModuleOnDisk(requested, false);
-	if (!resolvedPath) {
-		DEBUG_LOG("  module not found on disk\n");
-		lastError = ERROR_MOD_NOT_FOUND;
-		return nullptr;
-	}
-
-	std::string key = storageKeyForPath(*resolvedPath);
-	auto &reg = registry();
-	auto it = reg.modulesByKey.find(key);
-	if (it != reg.modulesByKey.end()) {
-		ModuleInfo *info = it->second.get();
-		info->refCount++;
-		registerExternalModuleAliases(requested, *resolvedPath, info);
+	if (ModuleInfo *external = resolveAndLoadExternal()) {
+		DEBUG_LOG("  loaded external module %s\n", requested.c_str());
 		lastError = ERROR_SUCCESS;
-		return info;
+		return external;
 	}
 
-	FILE *file = fopen(resolvedPath->c_str(), "rb");
-	if (!file) {
-		perror("loadModule");
-		lastError = ERROR_MOD_NOT_FOUND;
-		return nullptr;
+	auto fallbackAlias = normalizedBaseKey(parsed);
+	ModuleInfo *builtin = nullptr;
+	auto builtinIt = reg.builtinAliasMap.find(fallbackAlias);
+	if (builtinIt != reg.builtinAliasMap.end()) {
+		builtin = builtinIt->second;
+	}
+	if (!builtin) {
+		builtinIt = reg.builtinAliasMap.find(normalizeAlias(requested));
+		if (builtinIt != reg.builtinAliasMap.end()) {
+			builtin = builtinIt->second;
+		}
+	}
+	if (builtin && builtin->module != nullptr) {
+		DEBUG_LOG("  falling back to builtin module %s\n", builtin->originalName.c_str());
+		lastError = (diskError != ERROR_SUCCESS) ? diskError : ERROR_SUCCESS;
+		return builtin;
 	}
 
-	auto executable = std::make_unique<Executable>();
-	if (!executable->loadPE(file, true)) {
-		DEBUG_LOG("  loadPE failed for %s\n", resolvedPath->c_str());
-		fclose(file);
-		lastError = ERROR_BAD_EXE_FORMAT;
-		return nullptr;
-	}
-	fclose(file);
-
-	ModulePtr info = std::make_unique<ModuleInfo>();
-	info->module = nullptr;
-	info->originalName = requested;
-	info->normalizedName = alias;
-	info->resolvedPath = *resolvedPath;
-	info->executable = std::move(executable);
-	info->entryPoint = info->executable->entryPoint;
-	info->imageBase = info->executable->imageBuffer;
-	info->imageSize = info->executable->imageSize;
-	info->refCount = 1;
-	info->dataFile = false;
-	info->dontResolveReferences = false;
-
-	ModuleInfo *raw = info.get();
-	reg.modulesByKey[key] = std::move(info);
-	registerExternalModuleAliases(requested, *resolvedPath, raw);
-	ensureExportsInitialized(*raw);
-
-	callDllMain(*raw, DLL_PROCESS_ATTACH);
-	lastError = ERROR_SUCCESS;
-
-	return raw;
+	lastError = (diskError != ERROR_SUCCESS) ? diskError : ERROR_MOD_NOT_FOUND;
+	return nullptr;
 }
 
 void freeModule(HMODULE module) {

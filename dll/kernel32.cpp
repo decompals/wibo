@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fnmatch.h>
 #include <string>
+#include <strings.h>
 #include "strutil.h"
 #include <malloc.h>
 #include <random>
@@ -305,90 +306,73 @@ namespace kernel32 {
 	};
 
 
- 	BOOL WIN_FUNC CreateProcessA(
+	BOOL WIN_FUNC CreateProcessA(
 		LPCSTR lpApplicationName,
 		LPSTR lpCommandLine,
- 		void *lpProcessAttributes,
- 		void *lpThreadAttributes,
+		void *lpProcessAttributes,
+		void *lpThreadAttributes,
 		BOOL bInheritHandles,
 		DWORD dwCreationFlags,
 		LPVOID lpEnvironment,
 		LPCSTR lpCurrentDirectory,
- 		void *lpStartupInfo,
+		void *lpStartupInfo,
 		PROCESS_INFORMATION *lpProcessInformation
- 	) {
+	) {
 		DEBUG_LOG("CreateProcessA %s \"%s\" %p %p %d 0x%x %p %s %p %p\n",
- 			lpApplicationName,
- 			lpCommandLine,
- 			lpProcessAttributes,
+			lpApplicationName ? lpApplicationName : "<null>",
+			lpCommandLine ? lpCommandLine : "<null>",
+			lpProcessAttributes,
 			lpThreadAttributes,
 			bInheritHandles,
 			dwCreationFlags,
 			lpEnvironment,
 			lpCurrentDirectory ? lpCurrentDirectory : "<none>",
- 			lpStartupInfo,
- 			lpProcessInformation
- 		);
+			lpStartupInfo,
+			lpProcessInformation
+		);
 
-		// Argument parsing
-		// First: how many arguments do we have?
-		size_t argc = 2;
-
-		for (size_t i = 1; i < strlen(lpCommandLine); i++) {
-			if (isspace(lpCommandLine[i]) && !isspace(lpCommandLine[i - 1]))
-				argc++;
-		}
-
-		char **argv = (char **) calloc(argc + 1, sizeof(char*));
-		argv[0] = wibo::executableName;
-		std::string pathStr = files::pathFromWindows(lpApplicationName).string();
-		argv[1] = (char *) pathStr.c_str();
-
-		char* arg = strtok(lpCommandLine, " ");
-		size_t current_arg_index = 2;
-
-		while (arg != NULL) {
-			// We're deliberately discarding the first token here
-			// to prevent from doubling up on the target executable name
-			// (it appears as lpApplicationName, and as the first token in lpCommandLine)
-			arg = strtok(NULL, " ");
-
-			if (arg) {
-				// Trim all quotation marks from the start and the end of the string
-				while(*arg == '\"') {
-					arg++;
-				}
-
-				char* end = arg + strlen(arg) - 1;
-				while(end > arg && *end == '\"') {
-					*end = '\0';
-					end--;
-				}
+		std::string application = lpApplicationName ? lpApplicationName : "";
+		std::vector<std::string> arguments = processes::splitCommandLine(lpCommandLine);
+		if (application.empty()) {
+			if (arguments.empty()) {
+				wibo::lastError = ERROR_FILE_NOT_FOUND;
+				return 0;
 			}
-			
-			argv[current_arg_index++] = arg;
+			application = arguments.front();
+		}
+		if (arguments.empty()) {
+			arguments.push_back(application);
 		}
 
-		argv[argc] = NULL; // Last element in argv should be a null pointer
-
-		// YET TODO: take into account process / thread attributes, environment variables
-		// working directory, etc.
-		setenv("WIBO_DEBUG_INDENT", std::to_string(wibo::debugIndent + 1).c_str(), true);
-
-		pid_t pid;
-		if (posix_spawn(&pid, wibo::executableName, NULL, NULL, argv, environ)) {
+		auto resolved = processes::resolveExecutable(application, true);
+		if (!resolved) {
+			wibo::lastError = ERROR_FILE_NOT_FOUND;
 			return 0;
-		};
+		}
 
-		*lpProcessInformation = {
-			.hProcess = processes::allocProcessHandle(pid),
-			.hThread = nullptr,
-			.dwProcessId = (DWORD) pid,
-			.dwThreadId = 42
-		};
+		pid_t pid = -1;
+		int spawnResult = processes::spawnViaWibo(*resolved, arguments, &pid);
+		if (spawnResult != 0) {
+			wibo::lastError = (spawnResult == ENOENT) ? ERROR_FILE_NOT_FOUND : ERROR_ACCESS_DENIED;
+			return 0;
+		}
 
+		if (lpProcessInformation) {
+			lpProcessInformation->hProcess = processes::allocProcessHandle(pid);
+			lpProcessInformation->hThread = nullptr;
+			lpProcessInformation->dwProcessId = static_cast<DWORD>(pid);
+			lpProcessInformation->dwThreadId = 0;
+		}
+		wibo::lastError = ERROR_SUCCESS;
+		(void)lpProcessAttributes;
+		(void)lpThreadAttributes;
+		(void)bInheritHandles;
+		(void)dwCreationFlags;
+		(void)lpEnvironment;
+		(void)lpCurrentDirectory;
+		(void)lpStartupInfo;
 		return 1;
- 	}
+	}
 
 	unsigned int WIN_FUNC WaitForSingleObject(void *hHandle, unsigned int dwMilliseconds) {
 		DEBUG_LOG("WaitForSingleObject (%u)\n", dwMilliseconds);
@@ -1918,6 +1902,15 @@ namespace kernel32 {
 		return wibo::loadModule(lpLibFileName);
 	}
 
+	HMODULE WIN_FUNC LoadLibraryW(LPCWSTR lpLibFileName) {
+		DEBUG_LOG("LoadLibraryW\n");
+		if (!lpLibFileName) {
+			return nullptr;
+		}
+		auto filename = wideStringToString(lpLibFileName);
+		return LoadLibraryA(filename.c_str());
+	}
+
 	HMODULE WIN_FUNC LoadLibraryExW(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwFlags) {
 		assert(!hFile);
 		DEBUG_LOG("LoadLibraryExW(%x) -> ", dwFlags);
@@ -2554,35 +2547,74 @@ namespace kernel32 {
 		return 0; // fail
 	}
 
+
+	static std::string convertEnvValueForWindows(const std::string &name, const char *rawValue) {
+		if (!rawValue) {
+			return std::string();
+		}
+		if (strcasecmp(name.c_str(), "PATH") != 0) {
+			return rawValue;
+		}
+		std::string converted = files::hostPathListToWindows(rawValue);
+		return converted.empty() ? std::string(rawValue) : converted;
+	}
+
+	static std::string convertEnvValueToHost(const std::string &name, const char *rawValue) {
+		if (!rawValue) {
+			return std::string();
+		}
+		if (strcasecmp(name.c_str(), "PATH") != 0) {
+			return rawValue;
+		}
+		std::string converted = files::windowsPathListToHost(rawValue);
+		return converted.empty() ? std::string(rawValue) : converted;
+	}
+
 	DWORD WIN_FUNC GetEnvironmentVariableA(LPCSTR lpName, LPSTR lpBuffer, DWORD nSize) {
 		DEBUG_LOG("GetEnvironmentVariableA: %s\n", lpName);
-		const char *value = getenv(lpName);
-		if (!value) {
+		if (!lpName) {
 			return 0;
 		}
-		unsigned int len = strlen(value);
+		const char *rawValue = getenv(lpName);
+		if (!rawValue) {
+			return 0;
+		}
+		std::string converted = convertEnvValueForWindows(lpName, rawValue);
+		const std::string &finalValue = converted.empty() ? std::string(rawValue) : converted;
+		unsigned int len = finalValue.size();
 		if (nSize == 0) {
 			return len + 1;
 		}
-		if (nSize < len) {
+		if (nSize <= len) {
 			return len;
 		}
-		memcpy(lpBuffer, value, len + 1);
+		memcpy(lpBuffer, finalValue.c_str(), len + 1);
 		return len;
 	}
 
 	unsigned int WIN_FUNC SetEnvironmentVariableA(const char *lpName, const char *lpValue) {
-		DEBUG_LOG("SetEnvironmentVariableA: %s=%s\n", lpName, lpValue);
-		return setenv(lpName, lpValue, 1 /* OVERWRITE */);
+		DEBUG_LOG("SetEnvironmentVariableA: %s=%s\n", lpName, lpValue ? lpValue : "<null>");
+		if (!lpName) {
+			return 0;
+		}
+		if (!lpValue) {
+			return unsetenv(lpName);
+		}
+		std::string hostValue = convertEnvValueToHost(lpName, lpValue);
+		const char *valuePtr = hostValue.empty() ? lpValue : hostValue.c_str();
+		return setenv(lpName, valuePtr, 1 /* OVERWRITE */);
 	}
 
 	DWORD WIN_FUNC GetEnvironmentVariableW(LPCWSTR lpName, LPWSTR lpBuffer, DWORD nSize) {
-		DEBUG_LOG("GetEnvironmentVariableW: %s\n", wideStringToString(lpName).c_str());
-		const char *value = getenv(wideStringToString(lpName).c_str());
-		if (!value) {
+		std::string name = wideStringToString(lpName);
+		DEBUG_LOG("GetEnvironmentVariableW: %s\n", name.c_str());
+		const char *rawValue = getenv(name.c_str());
+		if (!rawValue) {
 			return 0;
 		}
-		auto wideValue = stringToWideString(value);
+		std::string converted = convertEnvValueForWindows(name, rawValue);
+		const std::string &finalValue = converted.empty() ? std::string(rawValue) : converted;
+		auto wideValue = stringToWideString(finalValue.c_str());
 		const auto len = wideValue.size();
 		if (nSize < len) {
 			return len;
@@ -2908,6 +2940,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "LockResource") == 0) return (void *) kernel32::LockResource;
 	if (strcmp(name, "SizeofResource") == 0) return (void *) kernel32::SizeofResource;
 	if (strcmp(name, "LoadLibraryA") == 0) return (void *) kernel32::LoadLibraryA;
+	if (strcmp(name, "LoadLibraryW") == 0) return (void *) kernel32::LoadLibraryW;
 	if (strcmp(name, "LoadLibraryExW") == 0) return (void *) kernel32::LoadLibraryExW;
 	if (strcmp(name, "DisableThreadLibraryCalls") == 0) return (void *) kernel32::DisableThreadLibraryCalls;
 	if (strcmp(name, "FreeLibrary") == 0) return (void *) kernel32::FreeLibrary;

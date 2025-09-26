@@ -2,9 +2,57 @@
 #include "files.h"
 #include "handles.h"
 #include <algorithm>
+#include <cctype>
 #include <map>
+#include <optional>
+#include <strings.h>
+#include <string>
 
 namespace files {
+
+	static std::vector<std::string> splitList(const std::string &value, char delimiter) {
+		std::vector<std::string> entries;
+		size_t start = 0;
+		while (start <= value.size()) {
+			size_t end = value.find(delimiter, start);
+			if (end == std::string::npos) {
+				end = value.size();
+			}
+			entries.emplace_back(value.substr(start, end - start));
+			if (end == value.size()) {
+				break;
+			}
+			start = end + 1;
+		}
+		return entries;
+	}
+
+	static std::string toWindowsPathEntry(const std::string &entry) {
+		if (entry.empty()) {
+			return std::string();
+		}
+		bool looksWindows = entry.find('\\') != std::string::npos ||
+					(entry.size() >= 2 && entry[1] == ':' && entry[0] != '/');
+		if (looksWindows) {
+			std::string normalized = entry;
+			std::replace(normalized.begin(), normalized.end(), '/', '\\');
+			return normalized;
+		}
+		return pathToWindows(std::filesystem::path(entry));
+	}
+
+	static std::string toHostPathEntry(const std::string &entry) {
+		if (entry.empty()) {
+			return std::string();
+		}
+		auto converted = pathFromWindows(entry.c_str());
+		if (!converted.empty()) {
+			return converted.string();
+		}
+		std::string normalized = entry;
+		std::replace(normalized.begin(), normalized.end(), '\\', '/');
+		return normalized;
+	}
 
 	static void *stdinHandle;
 	static void *stdoutHandle;
@@ -122,5 +170,77 @@ namespace files {
 		stdinHandle = allocFpHandle(stdin);
 		stdoutHandle = allocFpHandle(stdout);
 		stderrHandle = allocFpHandle(stderr);
+	}
+
+	std::optional<std::filesystem::path> findCaseInsensitiveFile(const std::filesystem::path &directory,
+														 const std::string &filename) {
+		std::error_code ec;
+		if (directory.empty()) {
+			return std::nullopt;
+		}
+		if (!std::filesystem::exists(directory, ec) || !std::filesystem::is_directory(directory, ec)) {
+			return std::nullopt;
+		}
+		std::string needle = filename;
+		std::transform(needle.begin(), needle.end(), needle.begin(), [](unsigned char ch) { return std::tolower(ch); });
+		for (const auto &entry : std::filesystem::directory_iterator(directory, ec)) {
+			if (ec) {
+				break;
+			}
+			std::string candidate = entry.path().filename().string();
+			std::transform(candidate.begin(), candidate.end(), candidate.begin(), [](unsigned char ch) { return std::tolower(ch); });
+			if (candidate == needle) {
+				return canonicalPath(entry.path());
+			}
+		}
+		auto direct = directory / filename;
+		if (std::filesystem::exists(direct, ec)) {
+			return canonicalPath(direct);
+		}
+		return std::nullopt;
+	}
+
+	std::filesystem::path canonicalPath(const std::filesystem::path &path) {
+		std::error_code ec;
+		auto canonical = std::filesystem::weakly_canonical(path, ec);
+		if (!ec) {
+			return canonical;
+		}
+		return std::filesystem::absolute(path);
+	}
+
+	std::string hostPathListToWindows(const std::string &value) {
+		if (value.empty()) {
+			return value;
+		}
+		char delimiter = value.find(';') != std::string::npos ? ';' : ':';
+		auto entries = splitList(value, delimiter);
+		std::string result;
+		for (size_t i = 0; i < entries.size(); ++i) {
+			if (i != 0) {
+				result.push_back(';');
+			}
+			if (!entries[i].empty()) {
+				result += toWindowsPathEntry(entries[i]);
+			}
+		}
+		return result;
+	}
+
+	std::string windowsPathListToHost(const std::string &value) {
+		if (value.empty()) {
+			return value;
+		}
+		auto entries = splitList(value, ';');
+		std::string result;
+		for (size_t i = 0; i < entries.size(); ++i) {
+			if (i != 0) {
+				result.push_back(':');
+			}
+			if (!entries[i].empty()) {
+				result += toHostPathEntry(entries[i]);
+			}
+		}
+		return result;
 	}
 }

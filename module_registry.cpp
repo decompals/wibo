@@ -385,16 +385,30 @@ void callDllMain(wibo::ModuleInfo &info, DWORD reason) {
 	if (!dllMain) {
 		return;
 	}
-	if (reason == 1) {
+
+	auto invokeWithGuestTIB = [&](DWORD callReason) -> BOOL {
+		if (!wibo::tibSelector) {
+			return dllMain(reinterpret_cast<HMODULE>(info.imageBase), callReason, nullptr);
+		}
+
+		uint16_t previousSegment = 0;
+		asm volatile("mov %%fs, %0" : "=r"(previousSegment));
+		asm volatile("movw %0, %%fs" : : "r"(wibo::tibSelector) : "memory");
+		BOOL result = dllMain(reinterpret_cast<HMODULE>(info.imageBase), callReason, nullptr);
+		asm volatile("movw %0, %%fs" : : "r"(previousSegment) : "memory");
+		return result;
+	};
+
+	if (reason == DLL_PROCESS_ATTACH) {
 		if (info.processAttachCalled) {
 			return;
 		}
 		info.processAttachCalled = true;
-		BOOL result = dllMain(reinterpret_cast<HMODULE>(info.imageBase), reason, nullptr);
+		BOOL result = invokeWithGuestTIB(reason);
 		info.processAttachSucceeded = result != 0;
-	} else if (reason == 0) {
+	} else if (reason == DLL_PROCESS_DETACH) {
 		if (info.processAttachCalled && info.processAttachSucceeded) {
-			dllMain(reinterpret_cast<HMODULE>(info.imageBase), reason, nullptr);
+			invokeWithGuestTIB(reason);
 		}
 	}
 }

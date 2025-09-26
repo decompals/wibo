@@ -20,6 +20,7 @@ std::vector<uint16_t> wibo::commandLineW;
 wibo::Executable *wibo::mainModule = 0;
 bool wibo::debugEnabled = false;
 unsigned int wibo::debugIndent = 0;
+uint16_t wibo::tibSelector = 0;
 
 void wibo::debug_log(const char *fmt, ...) {
 	va_list args;
@@ -223,6 +224,8 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
+	wibo::tibSelector = static_cast<uint16_t>((tibDesc.entry_number << 3) | 7);
+
 	// Build a command line
 	std::string cmdLine;
 	for (int i = 1; i < argc; i++) {
@@ -287,12 +290,11 @@ int main(int argc, char **argv) {
 	exec.loadPE(f, true);
 	fclose(f);
 
-	uint16_t tibSegment = (tibDesc.entry_number << 3) | 7;
 	// Invoke the damn thing
 	asm(
 		"movw %0, %%fs; call *%1"
 		:
-		: "r"(tibSegment), "r"(exec.entryPoint)
+		: "r"(wibo::tibSelector), "r"(exec.entryPoint)
 	);
 	DEBUG_LOG("We came back\n");
 	wibo::shutdownModuleRegistry();

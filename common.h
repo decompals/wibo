@@ -96,6 +96,7 @@ namespace wibo {
 	extern std::vector<uint16_t> commandLineW;
 	extern bool debugEnabled;
 	extern unsigned int debugIndent;
+	extern uint16_t tibSelector;
 
 	void debug_log(const char *fmt, ...);
 

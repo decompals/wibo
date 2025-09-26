@@ -292,7 +292,7 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 		++dir;
 	}
 
-	entryPoint = fromRVA<void>(header32.addressOfEntryPoint);
+	entryPoint = header32.addressOfEntryPoint ? fromRVA<void>(header32.addressOfEntryPoint) : nullptr;
 
 	return true;
 }

@@ -1,5 +1,6 @@
 #include "common.h"
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <climits>
 #include <clocale>
@@ -11,6 +12,7 @@
 #include <cwchar>
 #include <cwctype>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -20,6 +22,7 @@
 
 typedef void (*_PVFV)();
 typedef int (*_PIFV)();
+using _onexit_t = _PIFV;
 
 namespace msvcrt {
 	int _commode;
@@ -29,6 +32,40 @@ namespace msvcrt {
 	uint16_t* _wpgmptr;
 
 	namespace {
+		struct DllOnExitTable {
+			_PVFV **pbegin;
+			_PVFV **pend;
+			std::vector<_PVFV> callbacks;
+			bool registered;
+		};
+
+		constexpr size_t LOCK_TABLE_SIZE = 64;
+		std::array<std::recursive_mutex, LOCK_TABLE_SIZE> &lockTable() {
+			static std::array<std::recursive_mutex, LOCK_TABLE_SIZE> table;
+			return table;
+		}
+
+		std::vector<DllOnExitTable> &dllOnExitTables() {
+			static std::vector<DllOnExitTable> tables;
+			return tables;
+		}
+
+		std::mutex &dllOnExitMutex() {
+			static std::mutex mutex;
+			return mutex;
+		}
+
+		DllOnExitTable &ensureDllOnExitTable(_PVFV **pbegin, _PVFV **pend) {
+			auto &tables = dllOnExitTables();
+			for (auto &table : tables) {
+				if (table.pbegin == pbegin && table.pend == pend) {
+					return table;
+				}
+			}
+			tables.push_back(DllOnExitTable{pbegin, pend, {}, false});
+			return tables.back();
+		}
+
 		template <typename CharT>
 		struct StringListStorage {
 			std::vector<std::unique_ptr<CharT[]>> strings;
@@ -336,8 +373,94 @@ namespace msvcrt {
 		return std::malloc(size);
 	}
 
+	void* WIN_ENTRY _malloc_crt(size_t size) {
+		return std::malloc(size);
+	}
+
+	void WIN_ENTRY _lock(int locknum) {
+		if (locknum < 0 || static_cast<size_t>(locknum) >= LOCK_TABLE_SIZE) {
+			DEBUG_LOG("_lock: unsupported lock %d\n", locknum);
+			return;
+		}
+		lockTable()[static_cast<size_t>(locknum)].lock();
+	}
+
+	void WIN_ENTRY _unlock(int locknum) {
+		if (locknum < 0 || static_cast<size_t>(locknum) >= LOCK_TABLE_SIZE) {
+			DEBUG_LOG("_unlock: unsupported lock %d\n", locknum);
+			return;
+		}
+		lockTable()[static_cast<size_t>(locknum)].unlock();
+	}
+
+	_onexit_t WIN_ENTRY __dllonexit(_onexit_t func, _PVFV **pbegin, _PVFV **pend) {
+		if (!pbegin || !pend) {
+			return nullptr;
+		}
+
+		std::lock_guard<std::mutex> guard(dllOnExitMutex());
+		auto &table = ensureDllOnExitTable(pbegin, pend);
+		if (!table.registered) {
+			wibo::registerOnExitTable(reinterpret_cast<void *>(pbegin));
+			table.registered = true;
+		}
+
+		if (func) {
+			auto callback = reinterpret_cast<_PVFV>(func);
+			table.callbacks.push_back(callback);
+			wibo::addOnExitFunction(reinterpret_cast<void *>(pbegin), reinterpret_cast<void (*)()>(callback));
+		}
+
+		if (table.callbacks.empty()) {
+			*pbegin = nullptr;
+			*pend = nullptr;
+		} else {
+			_PVFV *dataPtr = table.callbacks.data();
+			*pbegin = dataPtr;
+			*pend = dataPtr + table.callbacks.size();
+		}
+
+		return reinterpret_cast<_onexit_t>(func);
+	}
+
 	void WIN_ENTRY free(void* ptr){
 		std::free(ptr);
+	}
+
+	static uint16_t toLower(uint16_t ch) {
+		if (ch >= 'A' && ch <= 'Z') {
+			return static_cast<uint16_t>(ch + ('a' - 'A'));
+		}
+		wchar_t wide = static_cast<wchar_t>(ch);
+		wchar_t lowered = std::towlower(wide);
+		if (lowered < 0 || lowered > 0xFFFF) {
+			return ch;
+		}
+		return static_cast<uint16_t>(lowered);
+	}
+
+	int WIN_ENTRY _wcsicmp(const uint16_t *lhs, const uint16_t *rhs) {
+		if (lhs == rhs) {
+			return 0;
+		}
+		if (!lhs) {
+			return -1;
+		}
+		if (!rhs) {
+			return 1;
+		}
+
+		while (*lhs && *rhs) {
+			uint16_t a = toLower(*lhs++);
+			uint16_t b = toLower(*rhs++);
+			if (a != b) {
+				return static_cast<int>(a) - static_cast<int>(b);
+			}
+		}
+
+		uint16_t a = toLower(*lhs);
+		uint16_t b = toLower(*rhs);
+		return static_cast<int>(a) - static_cast<int>(b);
 	}
 
 	int WIN_ENTRY _get_wpgmptr(uint16_t** pValue){
@@ -760,8 +883,12 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "strcmp") == 0) return (void *)msvcrt::strcmp;
 	if (strcmp(name, "strncmp") == 0) return (void *)msvcrt::strncmp;
 	if (strcmp(name, "malloc") == 0) return (void*)msvcrt::malloc;
-	if (strcmp(name, "_malloc_crt") == 0) return (void*)msvcrt::malloc;
+	if (strcmp(name, "_malloc_crt") == 0) return (void*)msvcrt::_malloc_crt;
+	if (strcmp(name, "_lock") == 0) return (void*)msvcrt::_lock;
+	if (strcmp(name, "_unlock") == 0) return (void*)msvcrt::_unlock;
+	if (strcmp(name, "__dllonexit") == 0) return (void*)msvcrt::__dllonexit;
 	if (strcmp(name, "free") == 0) return (void*)msvcrt::free;
+	if (strcmp(name, "_wcsicmp") == 0) return (void*)msvcrt::_wcsicmp;
 	if (strcmp(name, "_get_wpgmptr") == 0) return (void*)msvcrt::_get_wpgmptr;
 	if (strcmp(name, "_wsplitpath_s") == 0) return (void*)msvcrt::_wsplitpath_s;
 	if (strcmp(name, "wcscat_s") == 0) return (void*)msvcrt::wcscat_s;

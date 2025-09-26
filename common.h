@@ -26,6 +26,7 @@ typedef void *HMODULE;
 typedef void *PVOID;
 typedef void *LPVOID;
 typedef void *FARPROC;
+typedef uint16_t WORD;
 typedef uint32_t DWORD;
 typedef DWORD *PDWORD;
 typedef DWORD *LPDWORD;

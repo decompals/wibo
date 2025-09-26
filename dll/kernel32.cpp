@@ -7,6 +7,7 @@
 #include <climits>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <ctype.h>
 #include <filesystem>
 #include <fnmatch.h>
@@ -21,8 +22,45 @@
 #include <sys/statvfs.h>
 #include <sys/wait.h>
 #include <spawn.h>
+#include <unistd.h>
 #include <vector>
 #include <fcntl.h>
+
+namespace {
+	using DWORD_PTR = uintptr_t;
+
+	constexpr WORD PROCESSOR_ARCHITECTURE_INTEL = 0;
+	constexpr WORD PROCESSOR_ARCHITECTURE_ARM = 5;
+	constexpr WORD PROCESSOR_ARCHITECTURE_IA64 = 6;
+	constexpr WORD PROCESSOR_ARCHITECTURE_AMD64 = 9;
+	constexpr WORD PROCESSOR_ARCHITECTURE_ARM64 = 12;
+	constexpr WORD PROCESSOR_ARCHITECTURE_UNKNOWN = 0xFFFF;
+
+	constexpr DWORD PROCESSOR_INTEL_386 = 386;
+	constexpr DWORD PROCESSOR_INTEL_486 = 486;
+	constexpr DWORD PROCESSOR_INTEL_PENTIUM = 586;
+	constexpr DWORD PROCESSOR_INTEL_IA64 = 2200;
+	constexpr DWORD PROCESSOR_AMD_X8664 = 8664;
+
+	struct SYSTEM_INFO {
+		union {
+			DWORD dwOemId;
+			struct {
+				WORD wProcessorArchitecture;
+				WORD wReserved;
+			};
+		};
+		DWORD dwPageSize;
+		LPVOID lpMinimumApplicationAddress;
+		LPVOID lpMaximumApplicationAddress;
+		DWORD_PTR dwActiveProcessorMask;
+		DWORD dwNumberOfProcessors;
+		DWORD dwProcessorType;
+		DWORD dwAllocationGranularity;
+		WORD wProcessorLevel;
+		WORD wProcessorRevision;
+	};
+}
 
 typedef union _RTL_RUN_ONCE {
 	PVOID Ptr;
@@ -175,6 +213,88 @@ namespace kernel32 {
 		processes::Process* process = processes::processFromHandle(hProcess, false);
 		*lpExitCode = process->exitCode;
 		return 1; // success in retrieval
+	}
+
+	BOOL WIN_FUNC DisableThreadLibraryCalls(HMODULE hLibModule) {
+		DEBUG_LOG("DisableThreadLibraryCalls(%p)\n", hLibModule);
+		(void)hLibModule;
+		return TRUE;
+	}
+
+	void WIN_FUNC GetSystemInfo(SYSTEM_INFO *lpSystemInfo) {
+		DEBUG_LOG("GetSystemInfo\n");
+		if (!lpSystemInfo) {
+			return;
+		}
+
+		std::memset(lpSystemInfo, 0, sizeof(*lpSystemInfo));
+
+		WORD architecture = PROCESSOR_ARCHITECTURE_UNKNOWN;
+		DWORD processorType = 0;
+		WORD processorLevel = 0;
+
+#if defined(__x86_64__) || defined(_M_X64)
+		architecture = PROCESSOR_ARCHITECTURE_AMD64;
+		processorType = PROCESSOR_AMD_X8664;
+		processorLevel = 6;
+#elif defined(__i386__) || defined(_M_IX86)
+		architecture = PROCESSOR_ARCHITECTURE_INTEL;
+		processorType = PROCESSOR_INTEL_PENTIUM;
+		processorLevel = 6;
+#elif defined(__aarch64__)
+		architecture = PROCESSOR_ARCHITECTURE_ARM64;
+		processorType = 0;
+		processorLevel = 8;
+#elif defined(__arm__)
+		architecture = PROCESSOR_ARCHITECTURE_ARM;
+		processorType = 0;
+		processorLevel = 7;
+#else
+		architecture = PROCESSOR_ARCHITECTURE_UNKNOWN;
+		processorType = 0;
+		processorLevel = 0;
+#endif
+
+		lpSystemInfo->wProcessorArchitecture = architecture;
+		lpSystemInfo->wReserved = 0;
+		lpSystemInfo->dwOemId = lpSystemInfo->wProcessorArchitecture;
+		lpSystemInfo->dwProcessorType = processorType;
+		lpSystemInfo->wProcessorLevel = processorLevel;
+		lpSystemInfo->wProcessorRevision = 0;
+
+		long pageSize = sysconf(_SC_PAGESIZE);
+		if (pageSize <= 0) {
+			pageSize = 4096;
+		}
+		lpSystemInfo->dwPageSize = static_cast<DWORD>(pageSize);
+
+		lpSystemInfo->lpMinimumApplicationAddress = reinterpret_cast<LPVOID>(0x00010000);
+		if (sizeof(void *) == 4) {
+			lpSystemInfo->lpMaximumApplicationAddress = reinterpret_cast<LPVOID>(0x7FFEFFFF);
+		} else {
+			lpSystemInfo->lpMaximumApplicationAddress = reinterpret_cast<LPVOID>(0x00007FFFFFFEFFFFull);
+		}
+
+		unsigned int cpuCount = 1;
+		long reported = sysconf(_SC_NPROCESSORS_ONLN);
+		if (reported > 0) {
+			cpuCount = static_cast<unsigned int>(reported);
+		}
+		lpSystemInfo->dwNumberOfProcessors = cpuCount;
+
+		unsigned int maskWidth = static_cast<unsigned int>(sizeof(DWORD_PTR) * 8);
+		DWORD_PTR mask;
+		if (cpuCount >= maskWidth) {
+			mask = static_cast<DWORD_PTR>(~static_cast<DWORD_PTR>(0));
+		} else {
+			mask = (static_cast<DWORD_PTR>(1) << cpuCount) - 1;
+		}
+		if (mask == 0) {
+			mask = 1;
+		}
+		lpSystemInfo->dwActiveProcessorMask = mask;
+
+		lpSystemInfo->dwAllocationGranularity = 0x10000;
 	}
 
 	struct PROCESS_INFORMATION {
@@ -2764,6 +2884,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "GetDiskFreeSpaceExW") == 0) return (void*) kernel32::GetDiskFreeSpaceExW;
 
 	// sysinfoapi.h
+	if (strcmp(name, "GetSystemInfo") == 0) return (void *) kernel32::GetSystemInfo;
 	if (strcmp(name, "GetSystemTime") == 0) return (void *) kernel32::GetSystemTime;
 	if (strcmp(name, "GetLocalTime") == 0) return (void *) kernel32::GetLocalTime;
 	if (strcmp(name, "GetSystemTimeAsFileTime") == 0) return (void *) kernel32::GetSystemTimeAsFileTime;
@@ -2788,6 +2909,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "SizeofResource") == 0) return (void *) kernel32::SizeofResource;
 	if (strcmp(name, "LoadLibraryA") == 0) return (void *) kernel32::LoadLibraryA;
 	if (strcmp(name, "LoadLibraryExW") == 0) return (void *) kernel32::LoadLibraryExW;
+	if (strcmp(name, "DisableThreadLibraryCalls") == 0) return (void *) kernel32::DisableThreadLibraryCalls;
 	if (strcmp(name, "FreeLibrary") == 0) return (void *) kernel32::FreeLibrary;
 	if (strcmp(name, "GetProcAddress") == 0) return (void *) kernel32::GetProcAddress;
 

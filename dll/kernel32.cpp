@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctype.h>
+#include <cwctype>
 #include <filesystem>
 #include <fnmatch.h>
 #include <string>
@@ -19,6 +20,7 @@
 #include <stdarg.h>
 #include <system_error>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/wait.h>
@@ -26,8 +28,56 @@
 #include <unistd.h>
 #include <vector>
 #include <fcntl.h>
+#include <time.h>
+#include <pthread.h>
+#include <mutex>
+#include <unordered_map>
+
+namespace advapi32 {
+	void releaseToken(void *tokenPtr);
+}
 
 namespace {
+	struct MappingObject;
+	struct ViewInfo {
+		void *mapBase = nullptr;
+		size_t mapLength = 0;
+		MappingObject *owner = nullptr;
+	};
+
+	struct MappingObject {
+		int fd = -1;
+		size_t maxSize = 0;
+		unsigned int protect = 0;
+		bool anonymous = false;
+		bool closed = false;
+		size_t refCount = 0;
+	};
+
+	void closeMappingIfPossible(MappingObject *mapping);
+	void tryReleaseMapping(MappingObject *mapping);
+	std::unordered_map<void *, ViewInfo> g_viewInfo;
+
+	void closeMappingIfPossible(MappingObject *mapping) {
+		if (!mapping) {
+			return;
+		}
+		if (mapping->fd != -1) {
+			close(mapping->fd);
+			mapping->fd = -1;
+		}
+		delete mapping;
+	}
+
+	void tryReleaseMapping(MappingObject *mapping) {
+		if (!mapping) {
+			return;
+		}
+		if (mapping->closed && mapping->refCount == 0) {
+			closeMappingIfPossible(mapping);
+		}
+	}
+
 	using DWORD_PTR = uintptr_t;
 
 	constexpr WORD PROCESSOR_ARCHITECTURE_INTEL = 0;
@@ -107,6 +157,44 @@ namespace kernel32 {
 		return ret;
 	}
 
+	struct MutexObject {
+		pthread_mutex_t mutex;
+		bool ownerValid = false;
+		pthread_t owner = 0;
+		unsigned int recursionCount = 0;
+		std::u16string name;
+		int refCount = 1;
+	};
+
+	static std::mutex mutexRegistryLock;
+	static std::unordered_map<std::u16string, MutexObject *> namedMutexes;
+
+	static std::u16string makeMutexName(LPCWSTR name) {
+		if (!name) {
+			return std::u16string();
+		}
+		size_t len = wstrlen(reinterpret_cast<const uint16_t *>(name));
+		return std::u16string(reinterpret_cast<const char16_t *>(name), len);
+	}
+
+	static void releaseMutexObject(MutexObject *obj) {
+		if (!obj) {
+			return;
+		}
+		std::lock_guard<std::mutex> lock(mutexRegistryLock);
+		obj->refCount--;
+		if (obj->refCount == 0) {
+			if (!obj->name.empty()) {
+				auto it = namedMutexes.find(obj->name);
+				if (it != namedMutexes.end() && it->second == obj) {
+					namedMutexes.erase(it);
+				}
+			}
+			pthread_mutex_destroy(&obj->mutex);
+			delete obj;
+		}
+	}
+
 	static int doCompareString(const std::string &a, const std::string &b, unsigned int dwCmpFlags) {
 		for (size_t i = 0; ; i++) {
 			if (i == a.size()) {
@@ -171,6 +259,28 @@ namespace kernel32 {
 	void WIN_FUNC SetLastError(unsigned int dwErrCode) {
 		DEBUG_LOG("SetLastError(%u)\n", dwErrCode);
 		wibo::lastError = dwErrCode;
+	}
+
+	BOOL WIN_FUNC Wow64DisableWow64FsRedirection(void **OldValue) {
+		DEBUG_LOG("Wow64DisableWow64FsRedirection\n");
+		if (OldValue) {
+			*OldValue = nullptr;
+		}
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+
+	BOOL WIN_FUNC Wow64RevertWow64FsRedirection(void *OldValue) {
+		DEBUG_LOG("Wow64RevertWow64FsRedirection\n");
+		(void) OldValue;
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+
+	void WIN_FUNC RaiseException(DWORD dwExceptionCode, DWORD dwExceptionFlags, DWORD nNumberOfArguments, const ULONG_PTR *lpArguments) {
+		DEBUG_LOG("RaiseException(code=0x%x, flags=0x%x, args=%u)\n", dwExceptionCode, dwExceptionFlags, nNumberOfArguments);
+		(void)lpArguments;
+		exit(static_cast<int>(dwExceptionCode));
 	}
 
 	PVOID WIN_FUNC AddVectoredExceptionHandler(ULONG first, PVECTORED_EXCEPTION_HANDLER handler) {
@@ -374,30 +484,107 @@ namespace kernel32 {
 		return 1;
 	}
 
+	BOOL WIN_FUNC CreateProcessW(
+		LPCWSTR lpApplicationName,
+		LPWSTR lpCommandLine,
+		void *lpProcessAttributes,
+		void *lpThreadAttributes,
+		BOOL bInheritHandles,
+		DWORD dwCreationFlags,
+		LPVOID lpEnvironment,
+		LPCWSTR lpCurrentDirectory,
+		void *lpStartupInfo,
+		PROCESS_INFORMATION *lpProcessInformation
+	) {
+		std::string applicationUtf8;
+		if (lpApplicationName) {
+			applicationUtf8 = wideStringToString(lpApplicationName);
+		}
+		std::string commandUtf8;
+		if (lpCommandLine) {
+			commandUtf8 = wideStringToString(lpCommandLine);
+		}
+		std::string directoryUtf8;
+		if (lpCurrentDirectory) {
+			directoryUtf8 = wideStringToString(lpCurrentDirectory);
+		}
+		DEBUG_LOG("CreateProcessW %s \"%s\" %p %p %d 0x%x %p %s %p %p\n",
+			applicationUtf8.empty() ? "<null>" : applicationUtf8.c_str(),
+			commandUtf8.empty() ? "<null>" : commandUtf8.c_str(),
+			lpProcessAttributes,
+			lpThreadAttributes,
+			bInheritHandles,
+			dwCreationFlags,
+			lpEnvironment,
+			directoryUtf8.empty() ? "<none>" : directoryUtf8.c_str(),
+			lpStartupInfo,
+			lpProcessInformation
+		);
+		std::vector<char> commandBuffer;
+		if (!commandUtf8.empty()) {
+			commandBuffer.assign(commandUtf8.begin(), commandUtf8.end());
+			commandBuffer.push_back('\0');
+		}
+		LPSTR commandPtr = commandBuffer.empty() ? nullptr : commandBuffer.data();
+		LPCSTR applicationPtr = applicationUtf8.empty() ? nullptr : applicationUtf8.c_str();
+		LPCSTR directoryPtr = directoryUtf8.empty() ? nullptr : directoryUtf8.c_str();
+		return CreateProcessA(
+			applicationPtr,
+			commandPtr,
+			lpProcessAttributes,
+			lpThreadAttributes,
+			bInheritHandles,
+			dwCreationFlags,
+			lpEnvironment,
+			directoryPtr,
+			lpStartupInfo,
+			lpProcessInformation
+		);
+	}
+
 	unsigned int WIN_FUNC WaitForSingleObject(void *hHandle, unsigned int dwMilliseconds) {
 		DEBUG_LOG("WaitForSingleObject (%u)\n", dwMilliseconds);
-
-		// TODO - wait on other objects?
-
-		// TODO: wait for less than forever
-		assert(dwMilliseconds == 0xffffffff);
-
-		processes::Process* process = processes::processFromHandle(hHandle, false);
-
-		int status;
-		waitpid(process->pid, &status, 0);
-
-		if (WIFEXITED(status)) {
-			process->exitCode = WEXITSTATUS(status);
-		} else {
-			// If we're here, *something* has caused our child process to exit abnormally
-			// Specific exit codes don't really map onto any of these situations - we just know it's bad.
-			// Specify a non-zero exit code to alert our parent process something's gone wrong.
-			DEBUG_LOG("WaitForSingleObject: Child process exited abnormally - returning exit code 1.");
-			process->exitCode = 1;
+		handles::Data data = handles::dataFromHandle(hHandle, false);
+		switch (data.type) {
+		case handles::TYPE_PROCESS: {
+			// TODO: wait for less than forever
+			assert(dwMilliseconds == 0xffffffff);
+			processes::Process *process = reinterpret_cast<processes::Process *>(data.ptr);
+			int status;
+			waitpid(process->pid, &status, 0);
+			if (WIFEXITED(status)) {
+				process->exitCode = WEXITSTATUS(status);
+			} else {
+				DEBUG_LOG("WaitForSingleObject: Child process exited abnormally - returning exit code 1.\n");
+				process->exitCode = 1;
+			}
+			wibo::lastError = ERROR_SUCCESS;
+			return 0;
 		}
-
-		return 0;
+		case handles::TYPE_MUTEX: {
+			MutexObject *obj = reinterpret_cast<MutexObject *>(data.ptr);
+			if (dwMilliseconds != 0xffffffff) {
+				DEBUG_LOG("WaitForSingleObject: timeout for mutex not supported\n");
+				wibo::lastError = ERROR_NOT_SUPPORTED;
+				return 0xFFFFFFFF;
+			}
+			pthread_mutex_lock(&obj->mutex);
+			pthread_t self = pthread_self();
+			if (obj->ownerValid && pthread_equal(obj->owner, self)) {
+				obj->recursionCount++;
+			} else {
+				obj->owner = self;
+				obj->ownerValid = true;
+				obj->recursionCount = 1;
+			}
+			wibo::lastError = ERROR_SUCCESS;
+			return 0;
+		}
+		default:
+			DEBUG_LOG("WaitForSingleObject: unsupported handle type %d\n", data.type);
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return 0xFFFFFFFF;
+		}
 	}
 
 	int WIN_FUNC GetSystemDefaultLangID() {
@@ -680,12 +867,18 @@ namespace kernel32 {
 			if (!(fp == stdin || fp == stdout || fp == stderr)) {
 				fclose(fp);
 			}
-		} else if (data.type == handles::TYPE_MAPPED) {
-			if (data.ptr != (void *) 0x1) {
-				munmap(data.ptr, data.size);
-			}
-		} else if (data.type == handles::TYPE_PROCESS) {
+	} else if (data.type == handles::TYPE_MAPPED) {
+		auto *mapping = reinterpret_cast<MappingObject *>(data.ptr);
+		if (mapping) {
+			mapping->closed = true;
+			tryReleaseMapping(mapping);
+		}
+	} else if (data.type == handles::TYPE_PROCESS) {
 			delete (processes::Process*) data.ptr;
+		} else if (data.type == handles::TYPE_TOKEN) {
+			advapi32::releaseToken(data.ptr);
+		} else if (data.type == handles::TYPE_MUTEX) {
+			releaseMutexObject(reinterpret_cast<MutexObject *>(data.ptr));
 		}
 		return TRUE;
 	}
@@ -717,21 +910,37 @@ namespace kernel32 {
 	}
 
 	DWORD WIN_FUNC GetFullPathNameW(LPCWSTR lpFileName, DWORD nBufferLength, LPWSTR lpBuffer, LPWSTR *lpFilePart) {
-		const auto fileName = wideStringToString(lpFileName);
-		DEBUG_LOG("GetFullPathNameW(%s) ", fileName.c_str());
+		std::string narrowName = wideStringToString(lpFileName);
+		DEBUG_LOG("GetFullPathNameW(%s) ", narrowName.c_str());
 
-		const auto lpFileNameA = wideStringToString(lpFileName);
-		std::filesystem::path absPath = std::filesystem::absolute(files::pathFromWindows(lpFileNameA.c_str()));
+		std::filesystem::path absPath = std::filesystem::absolute(files::pathFromWindows(narrowName.c_str()));
 		std::string absStr = files::pathToWindows(absPath);
-		const auto absStrW = stringToWideString(absStr.c_str());
+		auto absStrW = stringToWideString(absStr.c_str());
 		DEBUG_LOG("-> %s\n", absStr.c_str());
 
-		const auto len = wstrlen(absStrW.data());
-		if (nBufferLength < len + 1) {
+		size_t len = wstrlen(absStrW.data());
+		if (nBufferLength == 0 || nBufferLength <= len) {
+			if (lpFilePart) {
+				*lpFilePart = nullptr;
+			}
 			return len + 1;
 		}
+
 		wstrncpy(lpBuffer, absStrW.data(), len + 1);
-		assert(!lpFilePart);
+		if (lpFilePart) {
+			*lpFilePart = nullptr;
+			std::error_code ec;
+			bool pathIsDir = std::filesystem::is_directory(absPath, ec) && !ec;
+			if (!pathIsDir) {
+				uint16_t *lastSlash = wstrrchr(lpBuffer, '\\');
+				if (lastSlash && *(lastSlash + 1) != 0) {
+					*lpFilePart = lastSlash + 1;
+				} else if (!lastSlash && len > 0) {
+					*lpFilePart = lpBuffer;
+				}
+			}
+		}
+		wibo::lastError = ERROR_SUCCESS;
 		return len;
 	}
 
@@ -757,6 +966,21 @@ namespace kernel32 {
 			strcpy(lpszShortPath, absStr.c_str());
 			return absStr.length();
 		}
+	}
+
+	DWORD WIN_FUNC GetShortPathNameW(LPCWSTR lpszLongPath, LPWSTR lpszShortPath, DWORD cchBuffer) {
+		std::string longPath = wideStringToString(lpszLongPath);
+		DEBUG_LOG("GetShortPathNameW(%s)\n", longPath.c_str());
+		std::filesystem::path absPath = std::filesystem::absolute(files::pathFromWindows(longPath.c_str()));
+		std::string absStr = files::pathToWindows(absPath);
+		auto absStrW = stringToWideString(absStr.c_str());
+		size_t len = wstrlen(absStrW.data());
+		if (cchBuffer == 0 || cchBuffer <= len) {
+			return len + 1;
+		}
+		wstrncpy(lpszShortPath, absStrW.data(), len + 1);
+		wibo::lastError = ERROR_SUCCESS;
+		return len;
 	}
 
 	using random_shorts_engine = std::independent_bits_engine<std::default_random_engine, sizeof(unsigned short) * 8, unsigned short>;
@@ -825,6 +1049,29 @@ namespace kernel32 {
 		(unsigned int)UNIX_TIME_ZERO,
 		(unsigned int)(UNIX_TIME_ZERO >> 32)
 	};
+
+	static FILETIME fileTimeFromDuration(uint64_t ticks100ns) {
+		FILETIME result;
+		result.dwLowDateTime = (unsigned int)(ticks100ns & 0xFFFFFFFF);
+		result.dwHighDateTime = (unsigned int)(ticks100ns >> 32);
+		return result;
+	}
+
+	static FILETIME fileTimeFromTimeval(const struct timeval &value) {
+		uint64_t total = 0;
+		if (value.tv_sec > 0 || value.tv_usec > 0) {
+			total = (uint64_t)value.tv_sec * 10000000ULL + (uint64_t)value.tv_usec * 10ULL;
+		}
+		return fileTimeFromDuration(total);
+	}
+
+	static FILETIME fileTimeFromTimespec(const struct timespec &value) {
+		uint64_t total = 0;
+		if (value.tv_sec > 0 || value.tv_nsec > 0) {
+			total = (uint64_t)value.tv_sec * 10000000ULL + (uint64_t)value.tv_nsec / 100ULL;
+		}
+		return fileTimeFromDuration(total);
+	}
 
 	template<typename CharType>
 	struct WIN32_FIND_DATA {
@@ -1227,38 +1474,80 @@ namespace kernel32 {
 			unsigned int dwMaximumSizeHigh,
 			unsigned int dwMaximumSizeLow,
 			const char *lpName) {
-		DEBUG_LOG("CreateFileMappingA(%p, %p, %u, %u, %u, %s)\n", hFile, lpFileMappingAttributes, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow, lpName);
+		DEBUG_LOG("CreateFileMappingA(%p, %p, %u, %u, %u, %s)\n", hFile, lpFileMappingAttributes, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow, lpName ? lpName : "(null)");
+		(void) lpFileMappingAttributes;
+		(void) lpName;
 
-		int64_t size = (int64_t) dwMaximumSizeHigh << 32 | dwMaximumSizeLow;
+		auto mapping = new MappingObject();
+		mapping->protect = flProtect;
 
-		void *mmapped;
-
-		if (hFile == (void*) -1) { // INVALID_HANDLE_VALUE
-			if (size == 0) {
-				mmapped = (void *) 0x1;
-			} else {
-				mmapped = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-			}
-		} else {
-			int fd = fileno(files::fpFromHandle(hFile));
-
-			if (size == 0) {
-				size = getFileSize(hFile);
-				if (size == -1) {
-					return (void*) -1;
-				}
-			}
-
-			if (size == 0) {
-				mmapped = (void *) 0x1;
-			} else {
-				mmapped = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
-			}
+		uint64_t size = ((uint64_t) dwMaximumSizeHigh << 32) | dwMaximumSizeLow;
+		if (flProtect != 0x02 /* PAGE_READONLY */ && flProtect != 0x04 /* PAGE_READWRITE */ && flProtect != 0x08 /* PAGE_WRITECOPY */) {
+			DEBUG_LOG("CreateFileMappingA: unsupported protection 0x%x\n", flProtect);
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			closeMappingIfPossible(mapping);
+			return nullptr;
 		}
 
-		assert(mmapped != MAP_FAILED);
-		return handles::allocDataHandle({handles::TYPE_MAPPED, mmapped, (unsigned int) size});
+		if (hFile == (void *) -1) {
+			mapping->anonymous = true;
+			mapping->fd = -1;
+			if (size == 0) {
+				wibo::lastError = ERROR_INVALID_PARAMETER;
+				closeMappingIfPossible(mapping);
+				return nullptr;
+			}
+			mapping->maxSize = size;
+		} else {
+			FILE *fp = files::fpFromHandle(hFile);
+			if (!fp) {
+				wibo::lastError = ERROR_INVALID_HANDLE;
+				closeMappingIfPossible(mapping);
+				return nullptr;
+			}
+			int originalFd = fileno(fp);
+			if (originalFd == -1) {
+				setLastErrorFromErrno();
+				closeMappingIfPossible(mapping);
+				return nullptr;
+			}
+			int dupFd = fcntl(originalFd, F_DUPFD_CLOEXEC, 0);
+			if (dupFd == -1) {
+				setLastErrorFromErrno();
+				closeMappingIfPossible(mapping);
+				return nullptr;
+			}
+			mapping->fd = dupFd;
+			if (size == 0) {
+				int64_t fileSize = getFileSize(hFile);
+				if (fileSize < 0) {
+					closeMappingIfPossible(mapping);
+					return nullptr;
+				}
+				size = static_cast<uint64_t>(fileSize);
+			}
+			mapping->maxSize = size;
+		}
+
+		wibo::lastError = ERROR_SUCCESS;
+		return handles::allocDataHandle({handles::TYPE_MAPPED, mapping, static_cast<size_t>(mapping->maxSize)});
 	}
+
+	void *WIN_FUNC CreateFileMappingW(
+			void *hFile,
+			void *lpFileMappingAttributes,
+			unsigned int flProtect,
+			unsigned int dwMaximumSizeHigh,
+			unsigned int dwMaximumSizeLow,
+			const uint16_t *lpName) {
+		std::string name = wideStringToString(lpName);
+		return CreateFileMappingA(hFile, lpFileMappingAttributes, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow, lpName ? name.c_str() : nullptr);
+	}
+
+	constexpr unsigned int FILE_MAP_COPY = 0x00000001;
+	constexpr unsigned int FILE_MAP_WRITE = 0x00000002;
+	constexpr unsigned int FILE_MAP_READ = 0x00000004;
+	constexpr unsigned int FILE_MAP_EXECUTE = 0x00000020;
 
 	void *WIN_FUNC MapViewOfFile(
 			void *hFileMappingObject,
@@ -1266,23 +1555,138 @@ namespace kernel32 {
 			unsigned int dwFileOffsetHigh,
 			unsigned int dwFileOffsetLow,
 			unsigned int dwNumberOfBytesToMap) {
-		DEBUG_LOG("MapViewOfFile(%p, %u, %u, %u, %u)\n", hFileMappingObject, dwDesiredAccess, dwFileOffsetHigh, dwFileOffsetLow, dwNumberOfBytesToMap);
+		DEBUG_LOG("MapViewOfFile(%p, 0x%x, %u, %u, %u)\n", hFileMappingObject, dwDesiredAccess, dwFileOffsetHigh, dwFileOffsetLow, dwNumberOfBytesToMap);
 
 		handles::Data data = handles::dataFromHandle(hFileMappingObject, false);
-		assert(data.type == handles::TYPE_MAPPED);
-		return (void*)((unsigned int) data.ptr + dwFileOffsetLow);
+		if (data.type != handles::TYPE_MAPPED) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return nullptr;
+		}
+		auto *mapping = reinterpret_cast<MappingObject *>(data.ptr);
+		if (!mapping) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return nullptr;
+		}
+		if (mapping->closed) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return nullptr;
+		}
+
+		uint64_t offset = ((uint64_t) dwFileOffsetHigh << 32) | dwFileOffsetLow;
+		if (mapping->anonymous && offset != 0) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return nullptr;
+		}
+		size_t maxSize = mapping->maxSize;
+		uint64_t length = dwNumberOfBytesToMap;
+		if (length == 0) {
+			if (maxSize == 0) {
+				wibo::lastError = ERROR_INVALID_PARAMETER;
+				return nullptr;
+			}
+			if (offset > maxSize) {
+				wibo::lastError = ERROR_INVALID_PARAMETER;
+				return nullptr;
+			}
+			length = maxSize - offset;
+		}
+		if (length == 0) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return nullptr;
+		}
+		if (maxSize && offset + length > maxSize) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return nullptr;
+		}
+
+		int prot = PROT_READ;
+		bool wantWrite = (dwDesiredAccess & FILE_MAP_WRITE) != 0;
+		bool wantExecute = (dwDesiredAccess & FILE_MAP_EXECUTE) != 0;
+
+		if (mapping->protect == 0x04 /* PAGE_READWRITE */) {
+			if (wantWrite) {
+				prot |= PROT_WRITE;
+			}
+		} else { // read-only or write copy
+			if (wantWrite && !(dwDesiredAccess & FILE_MAP_COPY)) {
+				wibo::lastError = ERROR_ACCESS_DENIED;
+				return nullptr;
+			}
+		}
+		if (wantExecute) {
+			prot |= PROT_EXEC;
+		}
+
+		int flags = 0;
+		if (mapping->anonymous) {
+			flags |= MAP_ANONYMOUS;
+		}
+		flags |= (dwDesiredAccess & FILE_MAP_COPY) ? MAP_PRIVATE : MAP_SHARED;
+
+		size_t pageSize = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+		off_t alignedOffset = mapping->anonymous ? 0 : static_cast<off_t>(offset & ~static_cast<uint64_t>(pageSize - 1));
+		size_t offsetDelta = static_cast<size_t>(offset - alignedOffset);
+		size_t mapLength = static_cast<size_t>(length + offsetDelta);
+		if (mapLength < length) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return nullptr;
+		}
+
+		int mmapFd = mapping->anonymous ? -1 : mapping->fd;
+		void *mapBase = mmap(nullptr, mapLength, prot, flags, mmapFd, alignedOffset);
+		if (mapBase == MAP_FAILED) {
+			setLastErrorFromErrno();
+			return nullptr;
+		}
+		void *viewPtr = static_cast<uint8_t *>(mapBase) + offsetDelta;
+		g_viewInfo[viewPtr] = ViewInfo{mapBase, mapLength, mapping};
+		mapping->refCount++;
+		wibo::lastError = ERROR_SUCCESS;
+		return viewPtr;
 	}
 
 	int WIN_FUNC UnmapViewOfFile(void *lpBaseAddress) {
 		DEBUG_LOG("UnmapViewOfFile(%p)\n", lpBaseAddress);
+		auto it = g_viewInfo.find(lpBaseAddress);
+		if (it == g_viewInfo.end()) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		ViewInfo info = it->second;
+		g_viewInfo.erase(it);
+		if (info.mapBase && info.mapLength) {
+			munmap(info.mapBase, info.mapLength);
+		}
+		if (info.owner && info.owner->refCount > 0) {
+			info.owner->refCount--;
+			tryReleaseMapping(info.owner);
+		}
+		wibo::lastError = ERROR_SUCCESS;
 		return 1;
 	}
 
-	int WIN_FUNC DeleteFileA(const char* lpFileName) {
+	BOOL WIN_FUNC DeleteFileA(const char* lpFileName) {
+		if (!lpFileName) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
 		std::string path = files::pathFromWindows(lpFileName);
 		DEBUG_LOG("DeleteFileA %s (%s)\n", lpFileName, path.c_str());
-		unlink(path.c_str());
-		return 1;
+		if (unlink(path.c_str()) == 0) {
+			wibo::lastError = ERROR_SUCCESS;
+			return TRUE;
+		}
+		setLastErrorFromErrno();
+		return FALSE;
+	}
+
+	BOOL WIN_FUNC DeleteFileW(const uint16_t *lpFileName) {
+		if (!lpFileName) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+		std::string name = wideStringToString(lpFileName);
+		return DeleteFileA(name.c_str());
 	}
 
 	DWORD WIN_FUNC SetFilePointer(HANDLE hFile, LONG lDistanceToMove, PLONG lpDistanceToMoveHigh, DWORD dwMoveMethod) {
@@ -2159,6 +2563,132 @@ namespace kernel32 {
 		return S_OK;
 	}
 
+	HANDLE WIN_FUNC CreateMutexW(void *lpMutexAttributes, BOOL bInitialOwner, LPCWSTR lpName) {
+		std::string nameLog;
+		if (lpName) {
+			nameLog = wideStringToString(reinterpret_cast<const uint16_t *>(lpName));
+		} else {
+			nameLog = "<unnamed>";
+		}
+		DEBUG_LOG("CreateMutexW(name=%s, initialOwner=%d)\n", nameLog.c_str(), bInitialOwner);
+		(void)lpMutexAttributes;
+
+		std::u16string name = makeMutexName(lpName);
+		MutexObject *obj = nullptr;
+		bool alreadyExists = false;
+		{
+			std::lock_guard<std::mutex> lock(mutexRegistryLock);
+			if (!name.empty()) {
+				auto it = namedMutexes.find(name);
+				if (it != namedMutexes.end()) {
+					obj = it->second;
+					obj->refCount++;
+					alreadyExists = true;
+				}
+			}
+			if (!obj) {
+				obj = new MutexObject();
+				pthread_mutexattr_t attr;
+				pthread_mutexattr_init(&attr);
+				pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+				pthread_mutex_init(&obj->mutex, &attr);
+				pthread_mutexattr_destroy(&attr);
+				obj->ownerValid = false;
+				obj->recursionCount = 0;
+				obj->name = name;
+				obj->refCount = 1;
+				if (!name.empty()) {
+					namedMutexes[name] = obj;
+				}
+			}
+		}
+
+		if (!alreadyExists && bInitialOwner) {
+			pthread_mutex_lock(&obj->mutex);
+			obj->owner = pthread_self();
+			obj->ownerValid = true;
+			obj->recursionCount = 1;
+		}
+
+		HANDLE handle = handles::allocDataHandle({handles::TYPE_MUTEX, obj, 0});
+		wibo::lastError = alreadyExists ? ERROR_ALREADY_EXISTS : ERROR_SUCCESS;
+		return handle;
+	}
+
+	BOOL WIN_FUNC ReleaseMutex(HANDLE hMutex) {
+		DEBUG_LOG("ReleaseMutex(%p)\n", hMutex);
+		auto data = handles::dataFromHandle(hMutex, false);
+		if (data.type != handles::TYPE_MUTEX) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return FALSE;
+		}
+		auto *obj = reinterpret_cast<MutexObject *>(data.ptr);
+		pthread_t self = pthread_self();
+		if (!obj->ownerValid || !pthread_equal(obj->owner, self)) {
+			wibo::lastError = ERROR_NOT_OWNER;
+			return FALSE;
+		}
+		if (obj->recursionCount > 0) {
+			obj->recursionCount--;
+		}
+		if (obj->recursionCount == 0) {
+			obj->ownerValid = false;
+		}
+		pthread_mutex_unlock(&obj->mutex);
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+
+	BOOL WIN_FUNC GetThreadTimes(HANDLE hThread,
+				     FILETIME *lpCreationTime,
+				     FILETIME *lpExitTime,
+				     FILETIME *lpKernelTime,
+				     FILETIME *lpUserTime) {
+		DEBUG_LOG("GetThreadTimes(%p, %p, %p, %p, %p)\n",
+			hThread, lpCreationTime, lpExitTime, lpKernelTime, lpUserTime);
+
+		if (!lpKernelTime || !lpUserTime) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+
+		bool isPseudoCurrentThread = hThread == (HANDLE)0x100007 || hThread == (HANDLE)0xFFFFFFFE || hThread == (HANDLE)0 || hThread == (HANDLE)0xFFFFFFFF;
+		if (!isPseudoCurrentThread) {
+			DEBUG_LOG("GetThreadTimes: unsupported handle %p\n", hThread);
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return FALSE;
+		}
+
+		if (lpCreationTime) {
+			*lpCreationTime = defaultFiletime;
+		}
+		if (lpExitTime) {
+			lpExitTime->dwLowDateTime = 0;
+			lpExitTime->dwHighDateTime = 0;
+		}
+
+		struct rusage usage;
+		if (getrusage(RUSAGE_THREAD, &usage) == 0) {
+			*lpKernelTime = fileTimeFromTimeval(usage.ru_stime);
+			*lpUserTime = fileTimeFromTimeval(usage.ru_utime);
+			wibo::lastError = ERROR_SUCCESS;
+			return TRUE;
+		}
+
+		struct timespec cpuTime;
+		if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpuTime) == 0) {
+			*lpKernelTime = fileTimeFromDuration(0);
+			*lpUserTime = fileTimeFromTimespec(cpuTime);
+			wibo::lastError = ERROR_SUCCESS;
+			return TRUE;
+		}
+
+		setLastErrorFromErrno();
+		*lpKernelTime = fileTimeFromDuration(0);
+		*lpUserTime = fileTimeFromDuration(0);
+		return FALSE;
+	}
+
 	unsigned short WIN_FUNC GetFileType(void *hFile) {
 		DEBUG_LOG("GetFileType %p\n", hFile);
 		return 1; // FILE_TYPE_DISK
@@ -2529,13 +3059,61 @@ namespace kernel32 {
 		return FALSE; // We're not multibyte (yet?)
 	}
 
+	constexpr unsigned int LCMAP_LOWERCASE = 0x00000100;
+	constexpr unsigned int LCMAP_UPPERCASE = 0x00000200;
+	constexpr unsigned int LCMAP_SORTKEY = 0x00000400;
+	constexpr unsigned int LCMAP_BYTEREV = 0x00000800;
+	constexpr unsigned int LCMAP_LINGUISTIC_CASING = 0x01000000;
+
 	int WIN_FUNC LCMapStringW(int Locale, unsigned int dwMapFlags, const uint16_t* lpSrcStr, int cchSrc, uint16_t* lpDestStr, int cchDest) {
-		DEBUG_LOG("LCMapStringW: (locale=%i, flags=%u, src=%p, dest=%p)\n", Locale, dwMapFlags, cchSrc, cchDest);
-		if (cchSrc < 0) {
-			cchSrc = wstrlen(lpSrcStr) + 1;
+		DEBUG_LOG("LCMapStringW(locale=%i, flags=0x%x, src=%p, dest=%p, cchSrc=%d, cchDest=%d)\n", Locale, dwMapFlags, lpSrcStr, lpDestStr, cchSrc, cchDest);
+		(void) Locale;
+		if (!lpSrcStr || cchSrc == 0) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
 		}
-		// DEBUG_LOG("lpSrcStr: %s\n", lpSrcStr);
-		return 1; // success
+
+		bool nullTerminated = cchSrc < 0;
+		size_t srcLen = nullTerminated ? (wstrlen(lpSrcStr) + 1) : static_cast<size_t>(cchSrc);
+		if (srcLen == 0) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+
+		if (!lpDestStr || cchDest == 0) {
+			// Caller is asking for the required length.
+			wibo::lastError = ERROR_SUCCESS;
+			return static_cast<int>(srcLen);
+		}
+		if (cchDest < static_cast<int>(srcLen)) {
+			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			return 0;
+		}
+
+		unsigned int casingFlags = dwMapFlags & (LCMAP_UPPERCASE | LCMAP_LOWERCASE);
+		unsigned int ignoredFlags = dwMapFlags & (LCMAP_LINGUISTIC_CASING);
+		(void) ignoredFlags;
+		if (dwMapFlags & (LCMAP_SORTKEY | LCMAP_BYTEREV)) {
+			DEBUG_LOG("LCMapStringW: unsupported mapping flags 0x%x\n", dwMapFlags);
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+
+		std::vector<uint16_t> buffer(srcLen, 0);
+		for (size_t i = 0; i < srcLen; ++i) {
+			uint16_t ch = lpSrcStr[i];
+			if (casingFlags == LCMAP_UPPERCASE) {
+				buffer[i] = static_cast<uint16_t>(std::towupper(static_cast<wint_t>(ch)));
+			} else if (casingFlags == LCMAP_LOWERCASE) {
+				buffer[i] = static_cast<uint16_t>(std::towlower(static_cast<wint_t>(ch)));
+			} else {
+				buffer[i] = ch;
+			}
+		}
+
+		std::memcpy(lpDestStr, buffer.data(), srcLen * sizeof(uint16_t));
+		wibo::lastError = ERROR_SUCCESS;
+		return static_cast<int>(srcLen);
 	}
 
 	int WIN_FUNC LCMapStringA(int Locale, unsigned int dwMapFlags, const char* lpSrcStr, int cchSrc, char* lpDestStr, int cchDest) {
@@ -2592,17 +3170,31 @@ namespace kernel32 {
 		return len;
 	}
 
-	unsigned int WIN_FUNC SetEnvironmentVariableA(const char *lpName, const char *lpValue) {
-		DEBUG_LOG("SetEnvironmentVariableA: %s=%s\n", lpName, lpValue ? lpValue : "<null>");
-		if (!lpName) {
-			return 0;
+	BOOL WIN_FUNC SetEnvironmentVariableA(const char *lpName, const char *lpValue) {
+		DEBUG_LOG("SetEnvironmentVariableA: %s=%s\n", lpName ? lpName : "(null)", lpValue ? lpValue : "(null)");
+		if (!lpName || std::strchr(lpName, '=')) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
 		}
+		int rc = 0;
 		if (!lpValue) {
-			return unsetenv(lpName);
+			rc = unsetenv(lpName);
+			if (rc != 0) {
+				setLastErrorFromErrno();
+				return FALSE;
+			}
+			wibo::lastError = ERROR_SUCCESS;
+			return TRUE;
 		}
 		std::string hostValue = convertEnvValueToHost(lpName, lpValue);
 		const char *valuePtr = hostValue.empty() ? lpValue : hostValue.c_str();
-		return setenv(lpName, valuePtr, 1 /* OVERWRITE */);
+		rc = setenv(lpName, valuePtr, 1 /* overwrite */);
+		if (rc != 0) {
+			setLastErrorFromErrno();
+			return FALSE;
+		}
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
 	}
 
 	DWORD WIN_FUNC GetEnvironmentVariableW(LPCWSTR lpName, LPWSTR lpBuffer, DWORD nSize) {
@@ -2621,6 +3213,16 @@ namespace kernel32 {
 		}
 		wstrncpy(lpBuffer, wideValue.data(), len);
 		return len - 1;
+	}
+
+	BOOL WIN_FUNC SetEnvironmentVariableW(const uint16_t *lpName, const uint16_t *lpValue) {
+		if (!lpName) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+		std::string name = wideStringToString(lpName);
+		std::string value = lpValue ? wideStringToString(lpValue) : std::string();
+		return SetEnvironmentVariableA(name.c_str(), lpValue ? value.c_str() : nullptr);
 	}
 
 	unsigned int WIN_FUNC QueryPerformanceCounter(unsigned long int *lpPerformanceCount) {
@@ -2785,6 +3387,9 @@ static void *resolveByName(const char *name) {
 	// errhandlingapi.h
 	if (strcmp(name, "GetLastError") == 0) return (void *) kernel32::GetLastError;
 	if (strcmp(name, "SetLastError") == 0) return (void *) kernel32::SetLastError;
+	if (strcmp(name, "Wow64DisableWow64FsRedirection") == 0) return (void *) kernel32::Wow64DisableWow64FsRedirection;
+	if (strcmp(name, "Wow64RevertWow64FsRedirection") == 0) return (void *) kernel32::Wow64RevertWow64FsRedirection;
+	if (strcmp(name, "RaiseException") == 0) return (void *) kernel32::RaiseException;
 	if (strcmp(name, "AddVectoredExceptionHandler") == 0) return (void *) kernel32::AddVectoredExceptionHandler;
 
 	// processthreadsapi.h
@@ -2794,6 +3399,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "GetCurrentThreadId") == 0) return (void *) kernel32::GetCurrentThreadId;
 	if (strcmp(name, "ExitProcess") == 0) return (void *) kernel32::ExitProcess;
 	if (strcmp(name, "GetExitCodeProcess") == 0) return (void *) kernel32::GetExitCodeProcess;
+	if (strcmp(name, "CreateProcessW") == 0) return (void *) kernel32::CreateProcessW;
 	if (strcmp(name, "CreateProcessA") == 0) return (void *) kernel32::CreateProcessA;
 	if (strcmp(name, "TlsAlloc") == 0) return (void *) kernel32::TlsAlloc;
 	if (strcmp(name, "TlsFree") == 0) return (void *) kernel32::TlsFree;
@@ -2803,6 +3409,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "GetStartupInfoW") == 0) return (void *) kernel32::GetStartupInfoW;
 	if (strcmp(name, "SetThreadStackGuarantee") == 0) return (void *) kernel32::SetThreadStackGuarantee;
 	if (strcmp(name, "GetCurrentThread") == 0) return (void *) kernel32::GetCurrentThread;
+	if (strcmp(name, "GetThreadTimes") == 0) return (void *) kernel32::GetThreadTimes;
 	if (strcmp(name, "SetThreadDescription") == 0) return (void *) kernel32::SetThreadDescription;
 
 	// winnls.h
@@ -2836,6 +3443,8 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "ReleaseSRWLockExclusive") == 0) return (void *) kernel32::ReleaseSRWLockExclusive;
 	if (strcmp(name, "TryAcquireSRWLockExclusive") == 0) return (void *) kernel32::TryAcquireSRWLockExclusive;
 	if (strcmp(name, "WaitForSingleObject") == 0) return (void *) kernel32::WaitForSingleObject;
+	if (strcmp(name, "CreateMutexW") == 0) return (void *) kernel32::CreateMutexW;
+	if (strcmp(name, "ReleaseMutex") == 0) return (void *) kernel32::ReleaseMutex;
 
 	// winbase.h
 	if (strcmp(name, "GlobalAlloc") == 0) return (void *) kernel32::GlobalAlloc;
@@ -2867,6 +3476,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "FreeEnvironmentStringsW") == 0) return (void *) kernel32::FreeEnvironmentStringsW;
 	if (strcmp(name, "GetEnvironmentVariableA") == 0) return (void *) kernel32::GetEnvironmentVariableA;
 	if (strcmp(name, "SetEnvironmentVariableA") == 0) return (void *) kernel32::SetEnvironmentVariableA;
+	if (strcmp(name, "SetEnvironmentVariableW") == 0) return (void *) kernel32::SetEnvironmentVariableW;
 	if (strcmp(name, "GetEnvironmentVariableW") == 0) return (void *) kernel32::GetEnvironmentVariableW;
 
 	// console api
@@ -2884,6 +3494,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "GetFullPathNameA") == 0) return (void *) kernel32::GetFullPathNameA;
 	if (strcmp(name, "GetFullPathNameW") == 0) return (void *) kernel32::GetFullPathNameW;
 	if (strcmp(name, "GetShortPathNameA") == 0) return (void *) kernel32::GetShortPathNameA;
+	if (strcmp(name, "GetShortPathNameW") == 0) return (void *) kernel32::GetShortPathNameW;
 	if (strcmp(name, "FindFirstFileA") == 0) return (void *) kernel32::FindFirstFileA;
 	if (strcmp(name, "FindFirstFileW") == 0) return (void *) kernel32::FindFirstFileW;
 	if (strcmp(name, "FindFirstFileExA") == 0) return (void *) kernel32::FindFirstFileExA;
@@ -2896,9 +3507,11 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "CreateFileA") == 0) return (void *) kernel32::CreateFileA;
 	if (strcmp(name, "CreateFileW") == 0) return (void *) kernel32::CreateFileW;
 	if (strcmp(name, "CreateFileMappingA") == 0) return (void *) kernel32::CreateFileMappingA;
+	if (strcmp(name, "CreateFileMappingW") == 0) return (void *) kernel32::CreateFileMappingW;
 	if (strcmp(name, "MapViewOfFile") == 0) return (void *) kernel32::MapViewOfFile;
 	if (strcmp(name, "UnmapViewOfFile") == 0) return (void *) kernel32::UnmapViewOfFile;
 	if (strcmp(name, "DeleteFileA") == 0) return (void *) kernel32::DeleteFileA;
+	if (strcmp(name, "DeleteFileW") == 0) return (void *) kernel32::DeleteFileW;
 	if (strcmp(name, "SetFilePointer") == 0) return (void *) kernel32::SetFilePointer;
 	if (strcmp(name, "SetFilePointerEx") == 0) return (void *) kernel32::SetFilePointerEx;
 	if (strcmp(name, "SetEndOfFile") == 0) return (void *) kernel32::SetEndOfFile;

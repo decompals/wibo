@@ -4,10 +4,12 @@
 
 namespace handles {
 	enum Type {
-        TYPE_UNUSED,
+		TYPE_UNUSED,
 		TYPE_FILE,
 		TYPE_MAPPED,
-        TYPE_PROCESS
+		TYPE_PROCESS,
+		TYPE_TOKEN,
+		TYPE_MUTEX
 	};
 
     struct Data {

@@ -23,6 +23,7 @@ extern const wibo::Module lib_lmgr;
 extern const wibo::Module lib_mscoree;
 extern const wibo::Module lib_msvcrt;
 extern const wibo::Module lib_ntdll;
+extern const wibo::Module lib_rpcrt4;
 extern const wibo::Module lib_ole32;
 extern const wibo::Module lib_user32;
 extern const wibo::Module lib_vcruntime;
@@ -405,7 +406,7 @@ void ensureInitialized() {
 
 	const wibo::Module *builtins[] = {
 		&lib_advapi32, &lib_bcrypt, &lib_crt,	 &lib_kernel32,	 &lib_lmgr,	   &lib_mscoree, &lib_msvcrt,
-		&lib_ntdll,	   &lib_ole32,	&lib_user32, &lib_vcruntime, &lib_version, nullptr,
+		&lib_ntdll,	   &lib_ole32,	&lib_rpcrt4,	&lib_user32, &lib_vcruntime, &lib_version, nullptr,
 	};
 
 	for (const wibo::Module **module = builtins; *module; ++module) {

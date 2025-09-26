@@ -92,6 +92,17 @@ struct PEHintNameTableEntry {
 	char name[1]; // variable length
 };
 
+struct PEDelayImportDescriptor {
+	uint32_t attributes;
+	uint32_t name;
+	uint32_t moduleHandle;
+	uint32_t importAddressTable;
+	uint32_t importNameTable;
+	uint32_t boundImportAddressTable;
+	uint32_t unloadInformationTable;
+	uint32_t timeStamp;
+};
+
 struct PEBaseRelocationBlock {
 	uint32_t virtualAddress;
 	uint32_t sizeOfBlock;
@@ -279,17 +290,54 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 				// Import by ordinal
 				uint16_t ordinal = lookup & 0xFFFF;
 				DEBUG_LOG("  Ordinal: %d\n", ordinal);
-				*addressTable = reinterpret_cast<uintptr_t>(resolveFuncByOrdinal(module, ordinal));
+				void *func = resolveFuncByOrdinal(module, ordinal);
+				DEBUG_LOG("    -> %p\n", func);
+				*addressTable = reinterpret_cast<uintptr_t>(func);
 			} else {
 				// Import by name
 				PEHintNameTableEntry *hintName = fromRVA<PEHintNameTableEntry>(lookup);
-				DEBUG_LOG("  Name: %s\n", hintName->name);
-				*addressTable = reinterpret_cast<uintptr_t>(resolveFuncByName(module, hintName->name));
+				DEBUG_LOG("  Name: %s (IAT=%p)\n", hintName->name, addressTable);
+				void *func = resolveFuncByName(module, hintName->name);
+				DEBUG_LOG("    -> %p\n", func);
+				*addressTable = reinterpret_cast<uintptr_t>(func);
 			}
 			++lookupTable;
 			++addressTable;
 		}
 		++dir;
+	}
+
+	if (header32.delayImportDescriptor.virtualAddress) {
+		DEBUG_LOG("Processing delay import table at RVA %x\n", header32.delayImportDescriptor.virtualAddress);
+		PEDelayImportDescriptor *delay = fromRVA<PEDelayImportDescriptor>(header32.delayImportDescriptor.virtualAddress);
+		while (delay->name) {
+			char *dllName = fromRVA<char>(delay->name);
+			DEBUG_LOG("Delay DLL Name: %s\n", dllName);
+			uint32_t *lookupTable = fromRVA<uint32_t>(delay->importNameTable);
+			uint32_t *addressTable = fromRVA<uint32_t>(delay->importAddressTable);
+			HMODULE module = loadModule(dllName);
+			while (*lookupTable) {
+				uint32_t lookup = *lookupTable;
+				if (lookup & 0x80000000) {
+					uint16_t ordinal = lookup & 0xFFFF;
+				DEBUG_LOG("  Ordinal: %d (IAT=%p)\n", ordinal, addressTable);
+					*addressTable = reinterpret_cast<uintptr_t>(resolveFuncByOrdinal(module, ordinal));
+				} else {
+					PEHintNameTableEntry *hintName = fromRVA<PEHintNameTableEntry>(lookup);
+					DEBUG_LOG("  Name: %s\n", hintName->name);
+					*addressTable = reinterpret_cast<uintptr_t>(resolveFuncByName(module, hintName->name));
+				}
+				++lookupTable;
+				++addressTable;
+			}
+			if (delay->moduleHandle) {
+				HMODULE *moduleSlot = fromRVA<HMODULE>(delay->moduleHandle);
+				if (moduleSlot) {
+					*moduleSlot = module;
+				}
+			}
+			++delay;
+		}
 	}
 
 	entryPoint = header32.addressOfEntryPoint ? fromRVA<void>(header32.addressOfEntryPoint) : nullptr;

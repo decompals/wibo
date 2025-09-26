@@ -24,6 +24,7 @@ add_executable(wibo
     dll/mscoree.cpp
     dll/msvcrt.cpp
     dll/ntdll.cpp
+    dll/rpcrt4.cpp
     dll/ole32.cpp
     dll/user32.cpp
     dll/vcruntime.cpp

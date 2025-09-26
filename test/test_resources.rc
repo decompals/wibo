@@ -1,0 +1,31 @@
+#include <windows.h>
+
+#define IDS_SAMPLE 100
+
+STRINGTABLE
+BEGIN
+    IDS_SAMPLE "Resource string 100"
+END
+
+1 VERSIONINFO
+FILEVERSION 1,2,3,4
+PRODUCTVERSION 1,2,3,4
+FILEFLAGSMASK 0x3fL
+FILEFLAGS 0x0L
+FILEOS 0x40004L
+FILETYPE 0x1L
+FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "FileDescription", "Test Resource Binary\0"
+            VALUE "ProductVersion", "1.2.3-test\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END

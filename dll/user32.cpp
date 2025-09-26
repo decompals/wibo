@@ -1,104 +1,54 @@
 #include "common.h"
+#include "strutil.h"
 
 namespace user32 {
-	struct Resource {
-		uint32_t id;
-		uint32_t value;
-	};
-
-	struct ResourceTable {
-		char pad[12];
-		uint16_t nameEntryCount;
-		uint16_t idEntryCount;
-		Resource resources[];
-	};
-
-	static unsigned int searchResourceTableByID(const char *tableAddr, unsigned int id) {
-		ResourceTable* table = (ResourceTable*)tableAddr;
-		for (int i = 0; i < table->idEntryCount; i++) {
-			const Resource& r = table->resources[table->nameEntryCount + i];
-			if (r.id == id) {
-				return r.value;
-			}
-		}
-		return 0;
-	}
-
-	static unsigned int* getResourceByID(wibo::Executable *mod, unsigned int typeID, unsigned int nameID, unsigned int languageID) {
-		const char *rsrcBase = (const char *)mod->rsrcBase;
-
-		if (rsrcBase == 0) {
-			DEBUG_LOG("getResourceByID: no .rsrc section\n");
-			wibo::lastError = 1812; // ERROR_RESOURCE_DATA_NOT_FOUND
-			return 0;
-		}
-
-		unsigned int typeTable = searchResourceTableByID(rsrcBase, typeID) & 0x7FFFFFFFu;
-		if (typeTable == 0) {
-			DEBUG_LOG("getResourceByID: no type table with id = %s\n", typeID);
-			wibo::lastError = 1813; // ERROR_RESOURCE_TYPE_NOT_FOUND
-			return 0;
-		}
-
-		unsigned int nameTable = searchResourceTableByID(rsrcBase + typeTable, nameID) & 0x7FFFFFFFu;
-		if (nameTable == 0) {
-			DEBUG_LOG("getResourceByID: no name table with id = %s\n", nameID);
-			wibo::lastError = 1814; // ERROR_RESOURCE_NAME_NOT_FOUND
-			return 0;
-		}
-
-		unsigned int langEntry = searchResourceTableByID(rsrcBase + nameTable, languageID);
-		if (langEntry == 0) {
-			DEBUG_LOG("getResourceByID: no lang entry with id = %s\n", languageID);
-			wibo::lastError = 1814; // ERROR_RESOURCE_NAME_NOT_FOUND
-			return 0;
-		}
-
-		return (unsigned int*)(rsrcBase + langEntry);
-	}
-
-	static const char *getStringFromTable(wibo::Executable *mod, unsigned int uID) {
-		unsigned int tableID = (uID >> 4) + 1;
-		unsigned int entryID = uID & 15;
-		unsigned int* stringTable = getResourceByID(mod, 6, tableID, 1033);
-		if (stringTable == 0)
-			return 0;
-
-		// what's in here?
-		const char *str = mod->fromRVA<const char>(stringTable[0]);
-		unsigned int size = stringTable[1];
-		assert(entryID < size);
-
-		// skip over strings to get to the one we want
-		for (unsigned int i = 0; i < entryID; i++) {
-			int stringSize = *(uint16_t*)str;
-			str += 2;
-			str += stringSize * 2;
-		}
-
-		return str;
-	}
+	constexpr uint32_t RT_STRING_ID = 6;
 
 	int WIN_FUNC LoadStringA(void* hInstance, unsigned int uID, char* lpBuffer, int cchBufferMax) {
-		DEBUG_LOG("LoadStringA %p %d %d\n", hInstance, uID, cchBufferMax);
-		wibo::Executable *mod = wibo::executableFromModule(hInstance);
+		DEBUG_LOG("LoadStringA %p %u %d\n", hInstance, uID, cchBufferMax);
+		if (!lpBuffer || cchBufferMax <= 0) {
+			return 0;
+		}
+		wibo::Executable *mod = wibo::executableFromModule((HMODULE) hInstance);
 		if (!mod) {
 			return 0;
 		}
-		const char* s = getStringFromTable(mod, uID);
-		if (!s) {
+		wibo::ResourceIdentifier type = wibo::ResourceIdentifier::fromID(RT_STRING_ID);
+		wibo::ResourceIdentifier table = wibo::ResourceIdentifier::fromID((uID >> 4) + 1);
+		wibo::ResourceLocation loc;
+		if (!mod->findResource(type, table, std::nullopt, loc)) {
 			return 0;
 		}
-		int len = *(int16_t*)s;
-		s += 2;
-		assert(cchBufferMax != 0);
-		len = (len < cchBufferMax - 1 ? len : cchBufferMax - 1);
-		for (int i = 0; i < len; i++) {
-			lpBuffer[i] = s[i * 2];
+		const uint16_t *cursor = reinterpret_cast<const uint16_t *>(loc.data);
+		const uint16_t *end = cursor + (loc.size / sizeof(uint16_t));
+		unsigned int entryIndex = uID & 0x0Fu;
+		for (unsigned int i = 0; i < entryIndex; ++i) {
+			if (cursor >= end) {
+				return 0;
+			}
+			uint16_t length = *cursor++;
+			if (cursor + length > end) {
+				return 0;
+			}
+			cursor += length;
 		}
-		lpBuffer[len] = 0;
-		DEBUG_LOG("returning: %s\n", lpBuffer);
-		return len;
+		if (cursor >= end) {
+			return 0;
+		}
+		uint16_t length = *cursor++;
+		if (cursor + length > end) {
+			return 0;
+		}
+		int copyLength = length;
+		if (copyLength > cchBufferMax - 1) {
+			copyLength = cchBufferMax - 1;
+		}
+		for (int i = 0; i < copyLength; ++i) {
+			lpBuffer[i] = static_cast<char>(cursor[i] & 0xFF);
+		}
+		lpBuffer[copyLength] = 0;
+		DEBUG_LOG("LoadStringA -> %.*s\n", copyLength, lpBuffer);
+		return copyLength;
 	}
 
 	int WIN_FUNC MessageBoxA(void *hwnd, const char *lpText, const char *lpCaption, unsigned int uType) {

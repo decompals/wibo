@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
@@ -61,6 +62,9 @@ typedef unsigned char BYTE;
 #define ERROR_BUFFER_OVERFLOW 111
 #define ERROR_INSUFFICIENT_BUFFER 122
 #define ERROR_RESOURCE_DATA_NOT_FOUND 1812
+#define ERROR_RESOURCE_TYPE_NOT_FOUND 1813
+#define ERROR_RESOURCE_NAME_NOT_FOUND 1814
+#define ERROR_RESOURCE_LANG_NOT_FOUND 1815
 #define ERROR_MOD_NOT_FOUND 126
 #define ERROR_NEGATIVE_SEEK 131
 #define ERROR_BAD_EXE_FORMAT 193
@@ -118,6 +122,39 @@ namespace wibo {
 	void *resolveFuncByName(HMODULE module, const char *funcName);
 	void *resolveFuncByOrdinal(HMODULE module, uint16_t ordinal);
 
+	struct ResourceIdentifier {
+		ResourceIdentifier() : isString(false), id(0) {}
+		static ResourceIdentifier fromID(uint32_t value) {
+			ResourceIdentifier ident;
+			ident.isString = false;
+			ident.id = value;
+			return ident;
+		}
+		static ResourceIdentifier fromString(std::u16string value) {
+			ResourceIdentifier ident;
+			ident.isString = true;
+			ident.name = std::move(value);
+			return ident;
+		}
+		bool isString;
+		uint32_t id;
+		std::u16string name;
+	};
+
+	struct ResourceLocation {
+		const void *dataEntry = nullptr;
+		const void *data = nullptr;
+		uint32_t size = 0;
+		uint16_t language = 0;
+	};
+
+	struct ImageResourceDataEntry {
+		uint32_t offsetToData;
+		uint32_t size;
+		uint32_t codePage;
+		uint32_t reserved;
+	};
+
 	struct Executable {
 		Executable();
 		~Executable();
@@ -127,6 +164,7 @@ namespace wibo {
 		size_t imageSize;
 		void *entryPoint;
 		void *rsrcBase;
+		uint32_t rsrcSize;
 		uintptr_t preferredImageBase;
 		intptr_t relocationDelta;
 		uint32_t exportDirectoryRVA;
@@ -134,13 +172,18 @@ namespace wibo {
 		uint32_t relocationDirectoryRVA;
 		uint32_t relocationDirectorySize;
 
+		bool findResource(const ResourceIdentifier &type,
+					 const ResourceIdentifier &name,
+					 std::optional<uint16_t> language,
+					 ResourceLocation &out) const;
+
 		template <typename T>
-		T *fromRVA(uint32_t rva) {
+		T *fromRVA(uint32_t rva) const {
 			return (T *) (rva + (uint8_t *) imageBuffer);
 		}
 
 		template <typename T>
-		T *fromRVA(T *rva) {
+		T *fromRVA(T *rva) const {
 			return fromRVA<T>((uint32_t) rva);
 		}
 	};

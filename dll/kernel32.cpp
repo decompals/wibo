@@ -2,6 +2,7 @@
 #include "files.h"
 #include "processes.h"
 #include "handles.h"
+#include "resources.h"
 #include <algorithm>
 #include <climits>
 #include <cstdint>
@@ -1674,89 +1675,74 @@ namespace kernel32 {
 		return copyLen;
 	}
 
-	static std::string resource_identifier_to_string(const char *id) {
-		if (!id) {
-			return "";
-		}
-		if ((uintptr_t)id >> 16 == 0) {
-			return std::to_string(static_cast<unsigned int>((uintptr_t)id));
-		}
-		return id;
-	}
-
-	static std::string resource_identifier_to_string(const uint16_t *id) {
-		if (!id) {
-			return "";
-		}
-		if ((uintptr_t)id >> 16 == 0) {
-			return std::to_string(static_cast<unsigned int>((uintptr_t)id));
-		}
-		return wideStringToString(id);
-	}
-
-	static FILE *open_resource_stream(const std::string &type, const std::string &name) {
-		char path[512];
-		snprintf(path, sizeof(path), "resources/%s/%s.res", type.c_str(), name.c_str());
-		DEBUG_LOG("Created path %s\n", path);
-		return fopen(path, "rb");
-	}
-
-	void *WIN_FUNC FindResourceA(void *hModule, const char *lpName, const char *lpType) {
-		DEBUG_LOG("FindResourceA %p %s %s\n", hModule, lpName, lpType);
-
+	static wibo::Executable *module_executable_for_resource(void *hModule) {
 		if (!hModule) {
 			hModule = GetModuleHandleA(nullptr);
 		}
+		return wibo::executableFromModule((HMODULE) hModule);
+    }
 
-		const std::string name = resource_identifier_to_string(lpName);
-		const std::string type = resource_identifier_to_string(lpType);
-
-		FILE *res = open_resource_stream(type, name);
-		if (!res) {
+	static void *find_resource_internal(void *hModule,
+										 const wibo::ResourceIdentifier &type,
+										 const wibo::ResourceIdentifier &name,
+										 std::optional<uint16_t> language) {
+		auto *exe = module_executable_for_resource(hModule);
+		if (!exe) {
 			wibo::lastError = ERROR_RESOURCE_DATA_NOT_FOUND;
+			return nullptr;
 		}
-		return res;
+		wibo::ResourceLocation loc;
+		if (!exe->findResource(type, name, language, loc)) {
+			return nullptr;
+		}
+		return const_cast<void *>(loc.dataEntry);
 	}
 
-	// https://github.com/reactos/reactos/blob/master/dll/win32/kernelbase/wine/loader.c#L1090
-	// https://github.com/wine-mirror/wine/blob/master/dlls/kernelbase/loader.c#L1097
+	void *WIN_FUNC FindResourceA(void *hModule, const char *lpName, const char *lpType) {
+		DEBUG_LOG("FindResourceA %p %p %p\n", hModule, lpName, lpType);
+		auto type = wibo::resourceIdentifierFromAnsi(lpType);
+		auto name = wibo::resourceIdentifierFromAnsi(lpName);
+		return find_resource_internal(hModule, type, name, std::nullopt);
+	}
+
+	void *WIN_FUNC FindResourceExA(void *hModule, const char *lpType, const char *lpName, uint16_t wLanguage) {
+		DEBUG_LOG("FindResourceExA %p %p %p %u\n", hModule, lpName, lpType, wLanguage);
+		auto type = wibo::resourceIdentifierFromAnsi(lpType);
+		auto name = wibo::resourceIdentifierFromAnsi(lpName);
+		return find_resource_internal(hModule, type, name, wLanguage);
+	}
+
 	void *WIN_FUNC FindResourceW(void *hModule, const uint16_t *lpName, const uint16_t *lpType) {
 		DEBUG_LOG("FindResourceW %p\n", hModule);
+		auto type = wibo::resourceIdentifierFromWide(lpType);
+		auto name = wibo::resourceIdentifierFromWide(lpName);
+		return find_resource_internal(hModule, type, name, std::nullopt);
+	}
 
-		if (!hModule)
-			hModule = GetModuleHandleW(0);
-
-		const std::string name = resource_identifier_to_string(lpName);
-		const std::string type = resource_identifier_to_string(lpType);
-
-		return open_resource_stream(type, name);
+	void *WIN_FUNC FindResourceExW(void *hModule, const uint16_t *lpType, const uint16_t *lpName, uint16_t wLanguage) {
+		DEBUG_LOG("FindResourceExW %p %u\n", hModule, wLanguage);
+		auto type = wibo::resourceIdentifierFromWide(lpType);
+		auto name = wibo::resourceIdentifierFromWide(lpName);
+		return find_resource_internal(hModule, type, name, wLanguage);
 	}
 
 	void* WIN_FUNC LoadResource(void* hModule, void* res) {
 		DEBUG_LOG("LoadResource %p %p\n", hModule, res);
-
-		if(!hModule || !res) return nullptr;
-		FILE* hRes = (FILE*)res;
-
-		long pos = ftell(hRes);
-		DEBUG_LOG("Pos: %d\n", pos);
-		fseek(hRes, 0, SEEK_END);
-		long size = ftell(hRes);
-		fseek(hRes, pos, SEEK_SET);
-		DEBUG_LOG("Size: %d\n", size);
-
-		if(size <= 0) return nullptr;
-
-		void* buffer = malloc(size);
-		if(!buffer) return nullptr;
-
-		if(fread(buffer, 1, size, hRes) != (size_t)size){
-			free(buffer);
+		if (!res) {
+			wibo::lastError = ERROR_RESOURCE_DATA_NOT_FOUND;
 			return nullptr;
 		}
-		return buffer;
-
-		// return (void*)0x100003;
+		auto *exe = module_executable_for_resource(hModule);
+		if (!exe || !exe->rsrcBase) {
+			wibo::lastError = ERROR_RESOURCE_DATA_NOT_FOUND;
+			return nullptr;
+		}
+		const auto *entry = reinterpret_cast<const wibo::ImageResourceDataEntry *>(res);
+		if (!wibo::resourceEntryBelongsToExecutable(*exe, entry)) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return nullptr;
+		}
+		return const_cast<void *>(exe->fromRVA<const void>(entry->offsetToData));
 	}
 
 	BOOL WIN_FUNC GetDiskFreeSpaceExW(const uint16_t* lpDirectoryName,
@@ -1785,12 +1771,26 @@ namespace kernel32 {
 
 	void* WIN_FUNC LockResource(void* res) {
 		DEBUG_LOG("LockResource %p\n", res);
-		return (void*)0x100004;
+		return res;
 	}
 
 	unsigned int WIN_FUNC SizeofResource(void* hModule, void* res) {
 		DEBUG_LOG("SizeofResource %p %p\n", hModule, res);
-		return 0;
+		if (!res) {
+			wibo::lastError = ERROR_RESOURCE_DATA_NOT_FOUND;
+			return 0;
+		}
+		auto *exe = module_executable_for_resource(hModule);
+		if (!exe || !exe->rsrcBase) {
+			wibo::lastError = ERROR_RESOURCE_DATA_NOT_FOUND;
+			return 0;
+		}
+		const auto *entry = reinterpret_cast<const wibo::ImageResourceDataEntry *>(res);
+		if (!wibo::resourceEntryBelongsToExecutable(*exe, entry)) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		return entry->size;
 	}
 
 	HMODULE WIN_FUNC LoadLibraryA(LPCSTR lpLibFileName) {
@@ -2712,7 +2712,9 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "GetCurrentDirectoryA") == 0) return (void *) kernel32::GetCurrentDirectoryA;
 	if (strcmp(name, "GetCurrentDirectoryW") == 0) return (void *) kernel32::GetCurrentDirectoryW;
 	if (strcmp(name, "FindResourceA") == 0) return (void *) kernel32::FindResourceA;
+	if (strcmp(name, "FindResourceExA") == 0) return (void *) kernel32::FindResourceExA;
 	if (strcmp(name, "FindResourceW") == 0) return (void *) kernel32::FindResourceW;
+	if (strcmp(name, "FindResourceExW") == 0) return (void *) kernel32::FindResourceExW;
 	if (strcmp(name, "SetHandleCount") == 0) return (void *) kernel32::SetHandleCount;
 	if (strcmp(name, "FormatMessageA") == 0) return (void *) kernel32::FormatMessageA;
 	if (strcmp(name, "GetComputerNameA") == 0) return (void *) kernel32::GetComputerNameA;

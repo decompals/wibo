@@ -117,6 +117,7 @@ wibo::Executable::Executable() {
 	imageSize = 0;
 	entryPoint = nullptr;
 	rsrcBase = 0;
+	rsrcSize = 0;
 	preferredImageBase = 0;
 	relocationDelta = 0;
 	exportDirectoryRVA = 0;
@@ -211,6 +212,7 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 
 		if (strcmp(name, ".rsrc") == 0) {
 			rsrcBase = sectionBase;
+			rsrcSize = std::max(section.virtualSize, section.sizeOfRawData);
 		}
 	}
 

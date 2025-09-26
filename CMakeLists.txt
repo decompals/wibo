@@ -31,6 +31,7 @@ add_executable(wibo
     files.cpp
     handles.cpp
     loader.cpp
+    resources.cpp
     module_registry.cpp
     main.cpp
     processes.cpp

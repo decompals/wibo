@@ -326,6 +326,12 @@ namespace msvcrt {
 		return 0;
 	}
 
+	size_t WIN_ENTRY strlen(const char *str) { return ::strlen(str); }
+
+	int WIN_ENTRY strcmp(const char *lhs, const char *rhs) { return ::strcmp(lhs, rhs); }
+
+	int WIN_ENTRY strncmp(const char *lhs, const char *rhs, size_t count) { return ::strncmp(lhs, rhs, count); }
+
 	void* WIN_ENTRY malloc(size_t size){
 		return std::malloc(size);
 	}
@@ -750,6 +756,9 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "__wgetmainargs") == 0) return (void*)msvcrt::__wgetmainargs;
 	if (strcmp(name, "setlocale") == 0) return (void*)msvcrt::setlocale;
 	if (strcmp(name, "_wdupenv_s") == 0) return (void*)msvcrt::_wdupenv_s;
+	if (strcmp(name, "strlen") == 0) return (void *)msvcrt::strlen;
+	if (strcmp(name, "strcmp") == 0) return (void *)msvcrt::strcmp;
+	if (strcmp(name, "strncmp") == 0) return (void *)msvcrt::strncmp;
 	if (strcmp(name, "malloc") == 0) return (void*)msvcrt::malloc;
 	if (strcmp(name, "free") == 0) return (void*)msvcrt::free;
 	if (strcmp(name, "_get_wpgmptr") == 0) return (void*)msvcrt::_get_wpgmptr;

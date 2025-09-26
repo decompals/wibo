@@ -1711,7 +1711,11 @@ namespace kernel32 {
 		const std::string name = resource_identifier_to_string(lpName);
 		const std::string type = resource_identifier_to_string(lpType);
 
-		return open_resource_stream(type, name);
+		FILE *res = open_resource_stream(type, name);
+		if (!res) {
+			wibo::lastError = ERROR_RESOURCE_DATA_NOT_FOUND;
+		}
+		return res;
 	}
 
 	// https://github.com/reactos/reactos/blob/master/dll/win32/kernelbase/wine/loader.c#L1090

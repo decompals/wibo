@@ -1,16 +1,21 @@
 #include "common.h"
+#include <algorithm>
+#include <cerrno>
+#include <climits>
 #include <clocale>
 #include <cstdarg>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <cwchar>
 #include <cwctype>
-#include <errno.h>
-#include <limits.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <memory>
+#include <optional>
 #include <string>
+#include <type_traits>
 #include <unistd.h>
+#include <vector>
 #include "strutil.h"
 
 typedef void (*_PVFV)();
@@ -19,8 +24,151 @@ typedef int (*_PIFV)();
 namespace msvcrt {
 	int _commode;
 	int _fmode;
+	char** __initenv;
 	uint16_t** __winitenv;
 	uint16_t* _wpgmptr;
+
+	namespace {
+		template <typename CharT>
+		struct StringListStorage {
+			std::vector<std::unique_ptr<CharT[]>> strings;
+			std::unique_ptr<CharT*[]> pointers;
+
+			template <typename Converter>
+			CharT **assign(char **source, Converter convert) {
+				if (!source) {
+					strings.clear();
+					pointers.reset();
+					return nullptr;
+				}
+
+				size_t count = 0;
+				while (source[count]) {
+					++count;
+				}
+
+				strings.clear();
+				strings.reserve(count);
+				pointers = std::make_unique<CharT *[]>(count + 1);
+
+				for (size_t i = 0; i < count; ++i) {
+					auto data = convert(source[i]);
+					auto buffer = std::make_unique<CharT[]>(data.size());
+					std::copy(data.begin(), data.end(), buffer.get());
+					CharT *raw = buffer.get();
+					strings.emplace_back(std::move(buffer));
+					pointers[i] = raw;
+				}
+
+				pointers[count] = nullptr;
+				return pointers.get();
+			}
+		};
+
+		std::vector<char> copyNarrowString(const char *src) {
+			if (!src) {
+				src = "";
+			}
+			size_t len = std::strlen(src);
+			std::vector<char> result(len + 1);
+			if (len > 0) {
+				std::memcpy(result.data(), src, len);
+			}
+			result[len] = '\0';
+			return result;
+		}
+
+		std::vector<uint16_t> copyWideString(const char *src) {
+			if (!src) {
+				src = "";
+			}
+			return stringToWideString(src);
+		}
+
+		template <typename CharT, typename Converter>
+		// NOLINTNEXTLINE(readability-non-const-parameter)
+		int getMainArgsCommon(int *argcOut, CharT ***argvOut, CharT ***envOut, Converter convert) {
+			if (argcOut) {
+				*argcOut = wibo::argc;
+			}
+
+			static StringListStorage<CharT> argvStorage;
+			static StringListStorage<CharT> envStorage;
+
+			if (argvOut) {
+				*argvOut = argvStorage.assign(wibo::argv, convert);
+			}
+
+			CharT **envData = envStorage.assign(environ, convert);
+			if (envOut) {
+				*envOut = envData;
+			}
+
+			if constexpr (std::is_same_v<CharT, uint16_t>) {
+				__winitenv = envData;
+			} else if constexpr (std::is_same_v<CharT, char>) {
+				__initenv = envData;
+			}
+
+			return 0;
+		}
+
+		template <typename CharT>
+		size_t envStringLength(const CharT *str) {
+			if (!str) {
+				return 0;
+			}
+			if constexpr (std::is_same_v<CharT, char>) {
+				return std::strlen(str);
+			} else {
+				return wstrlen(str);
+			}
+		}
+
+		template <typename CharT>
+		int envStringCompare(const CharT *lhs, const CharT *rhs, size_t count) {
+			if constexpr (std::is_same_v<CharT, char>) {
+				return std::strncmp(lhs, rhs, count);
+			} else {
+				return wstrncmp(lhs, rhs, count);
+			}
+		}
+
+		template <typename CharT>
+		struct EnvLookupResult {
+			const CharT *value;
+			size_t length;
+		};
+
+		template <typename CharT>
+		std::optional<EnvLookupResult<CharT>> findEnvironmentValue(CharT **env, const CharT *varname) {
+			if (!env || !varname) {
+				return std::nullopt;
+			}
+
+			size_t nameLength = envStringLength(varname);
+			if (nameLength == 0) {
+				return std::nullopt;
+			}
+
+			for (CharT **cursor = env; *cursor; ++cursor) {
+				CharT *entry = *cursor;
+				if (envStringCompare(entry, varname, nameLength) == 0 && entry[nameLength] == static_cast<CharT>('=')) {
+					const CharT *value = entry + nameLength + 1;
+					return EnvLookupResult<CharT>{value, envStringLength(value)};
+				}
+			}
+
+			return std::nullopt;
+		}
+
+		uint16_t **ensureWideEnvironment() {
+			if (!__winitenv) {
+				getMainArgsCommon<uint16_t>(nullptr, nullptr, nullptr, copyWideString);
+			}
+			return __winitenv;
+		}
+	} // namespace
 
 	// Stub because we're only ever a console application
 	void WIN_ENTRY __set_app_type(int at) {
@@ -63,80 +211,30 @@ namespace msvcrt {
 	_PIFV WIN_ENTRY _onexit(_PIFV func) {
 		DEBUG_LOG("_onexit(%p)\n", func);
 		if(!func) return nullptr;
-    	if (atexit((void(*)(void))func) != 0) return nullptr;
+		if (atexit(reinterpret_cast<void (*)()>(func)) != 0) return nullptr;
 		return func;
 	}
-	
-	// wgetmainargs references:
-	// https://github.com/reactos/reactos/blob/fade0c3b8977d43f3a9e0b8887d18afcabd8e145/sdk/lib/crt/misc/getargs.c#L328
-	// https://learn.microsoft.com/en-us/cpp/c-runtime-library/getmainargs-wgetmainargs?view=msvc-170
 
-	int WIN_ENTRY __wgetmainargs(int* wargc, uint16_t*** wargv, uint16_t*** wenv, int doWildcard, int* startInfo){
-		DEBUG_LOG("__wgetmainargs\n");
-		// get the regular, non-wide versions of argc/argv/env
-		// argc: the number of args in argv. always >= 1
-		// argv: array of null-terminated strings for command-line args.
-		//		argv[0] = the command to invoke the program
-		//		argv[1] = the first command-line arg
-		//		argv[argc - 1] = the last command-line arg
-		//		argv[argc] = NULL
-		// env: array of strings for user's environment variables. always terminated by NULL entry.
-		int* regular_argc = &wibo::argc;
-		char*** regular_argv = &wibo::argv;
-		char** regular_env = environ;
-
-		int argc = *regular_argc;
-		char** argv = *regular_argv;
-		char** env = regular_env;
-
-		// DEBUG_LOG("Wildcard: %d\n", doWildcard);
-		// if(startInfo){
-		// 	DEBUG_LOG("Start info: %d\n", *startInfo);
-		// }
-
-		if(wargc) *wargc = argc;
+	// NOLINTNEXTLINE(readability-non-const-parameter)
+	int WIN_ENTRY __wgetmainargs(int *wargc, uint16_t ***wargv, uint16_t ***wenv, int doWildcard, int *startInfo) {
+		DEBUG_LOG("__wgetmainargs(doWildcard=%d)\n", doWildcard);
+		(void)startInfo;
+		if (doWildcard) {
+			DEBUG_LOG("\tWildcard expansion is not implemented\n");
+		}
 
 		std::setlocale(LC_CTYPE, "");
+		return getMainArgsCommon<uint16_t>(wargc, wargv, wenv, copyWideString);
+	}
 
-		if(wargv){
-			*wargv = new uint16_t*[argc + 1]; // allocate array of our future wstrings
-			for(int i = 0; i < argc; i++){
-				const char* cur_arg = argv[i];
-
-				std::vector<uint16_t> wStr = stringToWideString(cur_arg);
-				
-			    // allocate a copy on the heap,
-				// since wStr will go out of scope
-				(*wargv)[i] = new uint16_t[wStr.size() + 1];
-			    std::copy(wStr.begin(), wStr.end(), (*wargv)[i]);
-			    (*wargv)[i][wStr.size()] = 0;
-			}
-			(*wargv)[argc] = nullptr;
+	// NOLINTNEXTLINE(readability-non-const-parameter)
+	int WIN_ENTRY __getmainargs(int *argc, char ***argv, char ***env, int doWildcard, int *startInfo) {
+		DEBUG_LOG("__getmainargs(doWildcard=%d)\n", doWildcard);
+		(void)startInfo;
+		if (doWildcard) {
+			DEBUG_LOG("\tWildcard expansion is not implemented\n");
 		}
-
-		if(wenv){
-			int count = 0;
-			for(; env[count] != nullptr; count++);
-			// DEBUG_LOG("Found env count %d\n", count);
-			*wenv = new uint16_t*[count + 1]; // allocate array of our future wstrings
-			for (int i = 0; i < count; i++) {
-			    const char* cur_env = env[i];
-			    // DEBUG_LOG("Adding env %s\n", cur_env);
-
-			    std::vector<uint16_t> wStr = stringToWideString(cur_env);
-
-			    // allocate a copy on the heap,
-				// since wStr will go out of scope
-				(*wenv)[i] = new uint16_t[wStr.size() + 1];
-			    std::copy(wStr.begin(), wStr.end(), (*wenv)[i]);
-			    (*wenv)[i][wStr.size()] = 0;
-			}
-
-			(*wenv)[count] = nullptr;
-
-			__winitenv = *wenv;
-		}
-		return 0;
+		return getMainArgsCommon<char>(argc, argv, env, copyNarrowString);
 	}
 
 	char* WIN_ENTRY getenv(const char *varname){
@@ -148,65 +246,83 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _wdupenv_s(uint16_t **buffer, size_t *numberOfElements, const uint16_t *varname){
-		std::string var_str = wideStringToString(varname);
-		DEBUG_LOG("_wdupenv_s: var name %s\n", var_str.c_str());
-		if(!buffer || !varname) return 22;
-		*buffer = nullptr;
-		if(numberOfElements) *numberOfElements = 0;
-
-		size_t varnamelen = wstrlen(varname);
-
-		// DEBUG_LOG("\tSearching env vars...\n");
-		for(uint16_t** env = __winitenv; env && *env; ++env){
-			uint16_t* cur = *env;
-			std::string cur_str = wideStringToString(cur);
-			// DEBUG_LOG("\tCur env var: %s\n", cur_str.c_str());
-			if(wstrncmp(cur, varname, varnamelen) == 0 && cur[varnamelen] == L'='){
-				DEBUG_LOG("Found the env var %s!\n", var_str.c_str());
-				uint16_t* value = cur + varnamelen + 1;
-				size_t value_len = wstrlen(value);
-
-				uint16_t* copy = (uint16_t*)malloc((value_len + 1) * sizeof(uint16_t));
-				if(!copy) return 12;
-
-				wstrncpy(copy, value, value_len + 1);
-				*buffer = copy;
-
-				if(numberOfElements) *numberOfElements = value_len + 1;
-				return 0;
-			}
+		if (buffer) {
+			*buffer = nullptr;
+		}
+		if (numberOfElements) {
+			*numberOfElements = 0;
 		}
 
-		DEBUG_LOG("Could not find env var %s\n", var_str.c_str());
+		if (!buffer || !varname) {
+			DEBUG_LOG("_wdupenv_s: invalid parameter\n");
+			errno = EINVAL;
+			return EINVAL;
+		}
+
+		std::string var_str = wideStringToString(varname);
+		DEBUG_LOG("_wdupenv_s: var name %s\n", var_str.c_str());
+
+		auto env = ensureWideEnvironment();
+		auto match = findEnvironmentValue(env, varname);
+		if (!match) {
+			DEBUG_LOG("Could not find env var %s\n", var_str.c_str());
+			return 0;
+		}
+
+		size_t value_len = match->length;
+		auto *copy = static_cast<uint16_t *>(malloc((value_len + 1) * sizeof(uint16_t)));
+		if (!copy) {
+			DEBUG_LOG("_wdupenv_s: allocation failed\n");
+			errno = ENOMEM;
+			return ENOMEM;
+		}
+
+		wstrncpy(copy, match->value, value_len);
+		copy[value_len] = 0;
+		*buffer = copy;
+		if (numberOfElements) {
+			*numberOfElements = value_len + 1;
+		}
 		return 0;
 	}
 
 	int WIN_ENTRY _wgetenv_s(size_t* pReturnValue, uint16_t* buffer, size_t numberOfElements, const uint16_t* varname){
-		std::string var_str = wideStringToString(varname);
-		DEBUG_LOG("_wgetenv_s: var name %s\n", var_str.c_str());
-		if(!buffer || !varname) return 22;
-
-		size_t varnamelen = wstrlen(varname);
-
-		for(uint16_t** env = __winitenv; env && *env; ++env){
-			uint16_t* cur = *env;
-			// std::string cur_str = wideStringToString(cur);
-			// DEBUG_LOG("\tCur env var: %s\n", cur_str.c_str());
-			if(wstrncmp(cur, varname, varnamelen) == 0 && cur[varnamelen] == L'='){
-				uint16_t* value = cur + varnamelen + 1;
-				size_t value_len = wstrlen(value);
-
-				size_t copy_len = (value_len < numberOfElements - 1) ? value_len : numberOfElements - 1;
-				wstrncpy(buffer, value, copy_len);
-				buffer[copy_len] = 0;
-
-				if(pReturnValue) *pReturnValue = value_len + 1;
-				return 0;
-			}
+		if (pReturnValue) {
+			*pReturnValue = 0;
+		}
+		if (numberOfElements > 0 && buffer) {
+			buffer[0] = 0;
 		}
 
-		buffer[0] = 0;
-		if(pReturnValue) *pReturnValue = 0;
+		bool bufferRequired = numberOfElements != 0;
+		if (!pReturnValue || !varname || (bufferRequired && !buffer)) {
+			DEBUG_LOG("_wgetenv_s: invalid parameter\n");
+			errno = EINVAL;
+			return EINVAL;
+		}
+
+		std::string var_str = wideStringToString(varname);
+		DEBUG_LOG("_wgetenv_s: var name %s\n", var_str.c_str());
+
+		auto env = ensureWideEnvironment();
+		auto match = findEnvironmentValue(env, varname);
+		if (!match) {
+			return 0;
+		}
+
+		size_t required = match->length + 1;
+		*pReturnValue = required;
+		if (!bufferRequired || !buffer) {
+			return 0;
+		}
+
+		if (required > numberOfElements) {
+			errno = ERANGE;
+			return ERANGE;
+		}
+
+		wstrncpy(buffer, match->value, match->length);
+		buffer[match->length] = 0;
 		return 0;
 	}
 
@@ -318,7 +434,7 @@ namespace msvcrt {
 		if(!strSource) return nullptr;
 		size_t strLen = wstrlen(strSource);
 
-		uint16_t* dup = (uint16_t*)malloc((strLen + 1) * sizeof(uint16_t));
+		auto *dup = static_cast<uint16_t *>(malloc((strLen + 1) * sizeof(uint16_t)));
 		if(!dup) return nullptr;
 
 		for(size_t i = 0; i <= strLen; i++){
@@ -471,7 +587,7 @@ namespace msvcrt {
 		std::memcpy(buffer, wide.data(), copy_len * sizeof(uint16_t));
 		buffer[copy_len] = 0;
 
-    	return copy_len;
+		return static_cast<int>(copy_len);
 		// return vswprintf(buffer, size, format, args); this doesn't work because on this architecture, wchar_t is size 4, instead of size 2
 	}
 
@@ -605,7 +721,7 @@ namespace msvcrt {
 	        return absPath;
 	    } else {
 	        // Windows behavior: if absPath == NULL, allocate new
-	        uint16_t* newBuf = new uint16_t[wResolved.size() + 1];
+	        auto *newBuf = new uint16_t[wResolved.size() + 1];
 	        std::copy(wResolved.begin(), wResolved.end(), newBuf);
 	        newBuf[wResolved.size()] = 0;
 
@@ -622,6 +738,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "__set_app_type") == 0) return (void *) msvcrt::__set_app_type;
 	if (strcmp(name, "_fmode") == 0) return (void *)&msvcrt::_fmode;
     if (strcmp(name, "_commode") == 0) return (void *)&msvcrt::_commode;
+	if (strcmp(name, "__initenv") == 0) return (void *)&msvcrt::__initenv;
 	if (strcmp(name, "__winitenv") == 0) return (void *)&msvcrt::__winitenv;
 	if (strcmp(name, "__p__fmode") == 0) return (void *) msvcrt::__p__fmode;
 	if (strcmp(name, "__p__commode") == 0) return (void *) msvcrt::__p__commode;
@@ -629,6 +746,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "_initterm_e") == 0) return (void *)msvcrt::_initterm_e;
 	if (strcmp(name, "_controlfp_s") == 0) return (void *)msvcrt::_controlfp_s;
 	if (strcmp(name, "_onexit") == 0) return (void*)msvcrt::_onexit;
+	if (strcmp(name, "__getmainargs") == 0) return (void*)msvcrt::__getmainargs;
 	if (strcmp(name, "__wgetmainargs") == 0) return (void*)msvcrt::__wgetmainargs;
 	if (strcmp(name, "setlocale") == 0) return (void*)msvcrt::setlocale;
 	if (strcmp(name, "_wdupenv_s") == 0) return (void*)msvcrt::_wdupenv_s;

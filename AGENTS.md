@@ -7,16 +7,23 @@
 - Sample fixtures for exercising the loader live in `test/`; keep new repros small and self-contained.
 
 ## Build, Test, and Development Commands
-- `cmake -B build -DCMAKE_BUILD_TYPE=Debug` configures a 32-bit toolchain; ensure multilib packages are present.
+- `cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` configures a 32-bit toolchain; ensure multilib packages are present.
 - `cmake --build build --target wibo` compiles the shim; switch to `-DCMAKE_BUILD_TYPE=Release` for optimised binaries.
 - `./build/wibo /path/to/program.exe` runs a Windows binary through the shim; use `WIBO_DEBUG=1` for verbose logging.
 - `cmake -B build -DBUILD_TESTING=ON` + `ctest --test-dir build --output-on-failure` runs the self-checking WinAPI fixtures (requires `i686-w64-mingw32-gcc` and `i686-w64-mingw32-windres`).
 - `clang-format -i path/to/file.cpp` and `clang-tidy path/to/file.cpp -p build` keep contributions aligned with the repo's tooling.
+- DON'T use `clang-format` on existing files, only new or heavily modified ones; the repo hasn't been fully formatted yet.
 
 ## Coding Style & Naming Conventions
 - Formatting follows `.clang-format` (LLVM base, tabbed indentation width 4, 120 column limit); never hand-wrap differently.
 - Prefer PascalCase for emulated Win32 entry points, camelCase for internal helpers, and SCREAMING_SNAKE_CASE for constants or macros.
 - Document non-obvious control flow with short comments and keep platform-specific code paths behind descriptive helper functions.
+
+## Shim Implementation Guidelines
+- Target pre-XP behavior; our binaries are old and don't expect modern WinAPI behavior.
+- Use the `microsoft_docs` tools to fetch WinAPI signatures and documentation; always fetch the documentation when working on an API function.
+- Create minimal, self-contained repros in `test/` when implementing or debugging APIs; this aids both development and future testing.
+- Stub unimplemented APIs with `DEBUG_LOG` calls to track usage; prioritize based on the needs of real-world binaries.
 
 ## Testing Guidelines
 - Fixture binaries live in `test/` and are compiled automatically when `BUILD_TESTING` is enabled; keep new repros small and self-contained (`test_<feature>.c`).

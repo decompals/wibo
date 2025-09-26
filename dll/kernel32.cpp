@@ -1907,25 +1907,6 @@ namespace kernel32 {
 			DEBUG_LOG("-> %p\n", result);
 			return result;
 		}
-
-
-		// DEBUG_LOG("VirtualAlloc %p %u %u %u\n",lpAddress, dwSize, flAllocationType, flProtect);
-		// if (flAllocationType & 0x2000 || lpAddress == NULL) { // MEM_RESERVE
-		// 	// do this for now...
-		// 	assert(lpAddress == NULL);
-		// 	void *mem = 0;
-		// 	posix_memalign(&mem, 0x1000, dwSize);
-		// 	memset(mem, 0, dwSize);
-
-		// 	// Windows only fences off the lower 2GB of the 32-bit address space for the private use of processes.
-		// 	assert(mem < (void*)0x80000000);
-
-		// 	DEBUG_LOG("-> %p\n", mem);
-		// 	return mem;
-		// } else {
-		// 	assert(lpAddress != NULL);
-		// 	return lpAddress;
-		// }
 	}
 
 	unsigned int WIN_FUNC VirtualFree(void *lpAddress, unsigned int dwSize, int dwFreeType) {

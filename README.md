@@ -15,8 +15,6 @@ Rough to-do list:
 - Implement more APIs
 - Do something intelligent with Windows `HANDLE`s
 - Convert paths in environment variables (and the structure of `PATH` itself, maybe) to Windows format
-- Implement PE relocations rather than just failing unceremoniously
-- Land external DLL loading support (module registry + search order + export resolution)
 
 ---
 

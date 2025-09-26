@@ -14,6 +14,10 @@ typedef void (*_invalid_parameter_handler)(const wchar_t *, const wchar_t *, con
 
 extern char **environ;
 
+namespace msvcrt {
+	int WIN_ENTRY puts(const char *str);
+}
+
 typedef enum _crt_app_type {
 	_crt_unknown_app,
 	_crt_console_app,
@@ -193,6 +197,17 @@ int WIN_ENTRY __stdio_common_vfprintf(unsigned long long /*options*/, FILE *stre
 	return vfprintf(stream, format, args);
 }
 
+int WIN_ENTRY __stdio_common_vsprintf(unsigned long long /*options*/, char *buffer, size_t len, const char *format, void * /*locale*/, va_list args) {
+	if (!buffer || !format)
+		return -1;
+	int result = vsnprintf(buffer, len, format, args);
+	if (result < 0)
+		return -1;
+	if (len > 0 && static_cast<size_t>(result) >= len)
+		return -1;
+	return result;
+}
+
 } // namespace crt
 
 static void *resolveByName(const char *name) {
@@ -258,6 +273,10 @@ static void *resolveByName(const char *name) {
 		return (void *)crt::__acrt_iob_func;
 	if (strcmp(name, "__stdio_common_vfprintf") == 0)
 		return (void *)crt::__stdio_common_vfprintf;
+	if (strcmp(name, "__stdio_common_vsprintf") == 0)
+		return (void *)crt::__stdio_common_vsprintf;
+	if (strcmp(name, "puts") == 0)
+		return (void *)msvcrt::puts;
 	if (strcmp(name, "__setusermatherr") == 0)
 		return (void *)crt::__setusermatherr;
 	if (strcmp(name, "_initialize_onexit_table") == 0)

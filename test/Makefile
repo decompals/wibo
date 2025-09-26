@@ -24,7 +24,7 @@ $(RES_OBJ): $(RES_RC)
 	$(WINDRES) $< -O coff -o $@
 
 $(RES_EXE): $(RES_EXE_SRC) $(RES_OBJ)
-	$(CC) $(CFLAGS) -o $@ $^
+	$(CC) $(CFLAGS) -o $@ $^ -lversion
 
 clean:
 	rm -f $(DLL) $(EXE) $(RES_EXE) $(RES_OBJ)

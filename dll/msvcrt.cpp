@@ -522,6 +522,18 @@ namespace msvcrt {
 		else return 0;
 	}
 
+	int WIN_ENTRY puts(const char *str) {
+		if (!str) {
+			str = "(null)";
+		}
+		DEBUG_LOG("puts %s\n", str);
+		if (std::fputs(str, stdout) < 0)
+			return EOF;
+		if (std::fputc('\n', stdout) == EOF)
+			return EOF;
+		return 0;
+	}
+
 	int WIN_ENTRY fclose(FILE* stream){
 		return ::fclose(stream);
 	}
@@ -649,6 +661,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "_dup2") == 0) return (void*)msvcrt::_dup2;
 	if (strcmp(name, "_wfsopen") == 0) return (void*)msvcrt::_wfsopen;
 	if (strcmp(name, "fputws") == 0) return (void*)msvcrt::fputws;
+	if (strcmp(name, "puts") == 0) return (void*)msvcrt::puts;
 	if (strcmp(name, "fclose") == 0) return (void*)msvcrt::fclose;
 	if (strcmp(name, "_flushall") == 0) return (void*)msvcrt::_flushall;
 	if (strcmp(name, "_errno") == 0) return (void*)msvcrt::_errno;

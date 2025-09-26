@@ -1,5 +1,5 @@
-#include "common.h"
 #include "resources.h"
+#include "common.h"
 
 namespace {
 
@@ -56,8 +56,7 @@ bool resourceNameEquals(const uint8_t *base, uint32_t nameField, const std::u16s
 }
 
 const ImageResourceDirectoryEntry *findEntry(const uint8_t *base, const ImageResourceDirectory *dir,
-										 const wibo::ResourceIdentifier &ident,
-										 uint32_t rsrcSize) {
+											 const wibo::ResourceIdentifier &ident, uint32_t rsrcSize) {
 	const auto *entries = resourceEntries(dir);
 	if (ident.isString) {
 		for (uint16_t i = 0; i < dir->numberOfNamedEntries; ++i) {
@@ -75,7 +74,8 @@ const ImageResourceDirectoryEntry *findEntry(const uint8_t *base, const ImageRes
 	return nullptr;
 }
 
-const ImageResourceDirectory *entryAsDirectory(const uint8_t *base, const ImageResourceDirectoryEntry *entry, uint32_t rsrcSize) {
+const ImageResourceDirectory *entryAsDirectory(const uint8_t *base, const ImageResourceDirectoryEntry *entry,
+											   uint32_t rsrcSize) {
 	if (!(entry->offsetToData & RESOURCE_DATA_IS_DIRECTORY))
 		return nullptr;
 	uint32_t offset = entry->offsetToData & ~RESOURCE_DATA_IS_DIRECTORY;
@@ -84,7 +84,8 @@ const ImageResourceDirectory *entryAsDirectory(const uint8_t *base, const ImageR
 	return reinterpret_cast<const ImageResourceDirectory *>(base + offset);
 }
 
-const wibo::ImageResourceDataEntry *entryAsData(const uint8_t *base, const ImageResourceDirectoryEntry *entry, uint32_t rsrcSize) {
+const wibo::ImageResourceDataEntry *entryAsData(const uint8_t *base, const ImageResourceDirectoryEntry *entry,
+												uint32_t rsrcSize) {
 	if (entry->offsetToData & RESOURCE_DATA_IS_DIRECTORY)
 		return nullptr;
 	uint32_t offset = entry->offsetToData;
@@ -93,15 +94,11 @@ const wibo::ImageResourceDataEntry *entryAsData(const uint8_t *base, const Image
 	return reinterpret_cast<const wibo::ImageResourceDataEntry *>(base + offset);
 }
 
-uint16_t primaryLang(uint16_t lang) {
-	return lang & 0x3FFu;
-}
+uint16_t primaryLang(uint16_t lang) { return lang & 0x3FFu; }
 
-const ImageResourceDirectoryEntry *selectLanguageEntry(const ImageResourceDirectory *dir,
-									 const uint8_t *base,
-									 uint32_t rsrcSize,
-									 std::optional<uint16_t> desired,
-									 uint16_t &chosenLang) {
+const ImageResourceDirectoryEntry *selectLanguageEntry(const ImageResourceDirectory *dir, const uint8_t *base,
+													   uint32_t rsrcSize, std::optional<uint16_t> desired,
+													   uint16_t &chosenLang) {
 	const auto *entries = resourceEntries(dir);
 	uint16_t total = dir->numberOfNamedEntries + dir->numberOfIdEntries;
 	const ImageResourceDirectoryEntry *primaryMatch = nullptr;
@@ -143,10 +140,8 @@ const ImageResourceDirectoryEntry *selectLanguageEntry(const ImageResourceDirect
 
 namespace wibo {
 
-bool Executable::findResource(const ResourceIdentifier &type,
-				 const ResourceIdentifier &name,
-				 std::optional<uint16_t> language,
-				 ResourceLocation &out) const {
+bool Executable::findResource(const ResourceIdentifier &type, const ResourceIdentifier &name,
+							  std::optional<uint16_t> language, ResourceLocation &out) const {
 	const uint8_t *base = reinterpret_cast<const uint8_t *>(rsrcBase);
 	if (!base) {
 		wibo::lastError = ERROR_RESOURCE_DATA_NOT_FOUND;
@@ -201,9 +196,7 @@ bool resourceEntryBelongsToExecutable(const Executable &exe, const ImageResource
 	return ptr >= base && (ptr + sizeof(*entry)) <= (base + exe.rsrcSize);
 }
 
-static bool isIntegerIdentifier(const void *ptr) {
-	return ((uintptr_t)ptr >> 16) == 0;
-}
+static bool isIntegerIdentifier(const void *ptr) { return ((uintptr_t)ptr >> 16) == 0; }
 
 static std::u16string ansiToU16String(const char *str) {
 	std::u16string result;

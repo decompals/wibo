@@ -51,15 +51,16 @@ struct PEExportDirectory {
 #define FOR_256_2(a, b)                                                                                                \
 	FOR_256_3(a, b, 0, 0)                                                                                              \
 	FOR_256_3(a, b, 0, 1)                                                                                              \
-	FOR_256_3(a, b, 0, 2) FOR_256_3(a, b, 0, 3) FOR_256_3(a, b, 1, 0) FOR_256_3(a, b, 1, 1) FOR_256_3(a, b, 1, 2)      \
-		FOR_256_3(a, b, 1, 3) FOR_256_3(a, b, 2, 0) FOR_256_3(a, b, 2, 1) FOR_256_3(a, b, 2, 2) FOR_256_3(a, b, 2, 3)  \
-			FOR_256_3(a, b, 3, 0) FOR_256_3(a, b, 3, 1) FOR_256_3(a, b, 3, 2) FOR_256_3(a, b, 3, 3)
+	FOR_256_3(a, b, 0, 2)                                                                                              \
+	FOR_256_3(a, b, 0, 3) FOR_256_3(a, b, 1, 0) FOR_256_3(a, b, 1, 1) FOR_256_3(a, b, 1, 2) FOR_256_3(a, b, 1, 3)      \
+		FOR_256_3(a, b, 2, 0) FOR_256_3(a, b, 2, 1) FOR_256_3(a, b, 2, 2) FOR_256_3(a, b, 2, 3) FOR_256_3(a, b, 3, 0)  \
+			FOR_256_3(a, b, 3, 1) FOR_256_3(a, b, 3, 2) FOR_256_3(a, b, 3, 3)
 #define FOR_256                                                                                                        \
 	FOR_256_2(0, 0)                                                                                                    \
 	FOR_256_2(0, 1)                                                                                                    \
-	FOR_256_2(0, 2) FOR_256_2(0, 3) FOR_256_2(1, 0) FOR_256_2(1, 1) FOR_256_2(1, 2) FOR_256_2(1, 3) FOR_256_2(2, 0)    \
-		FOR_256_2(2, 1) FOR_256_2(2, 2) FOR_256_2(2, 3) FOR_256_2(3, 0) FOR_256_2(3, 1) FOR_256_2(3, 2)                \
-			FOR_256_2(3, 3)
+	FOR_256_2(0, 2)                                                                                                    \
+	FOR_256_2(0, 3) FOR_256_2(1, 0) FOR_256_2(1, 1) FOR_256_2(1, 2) FOR_256_2(1, 3) FOR_256_2(2, 0) FOR_256_2(2, 1)    \
+		FOR_256_2(2, 2) FOR_256_2(2, 3) FOR_256_2(3, 0) FOR_256_2(3, 1) FOR_256_2(3, 2) FOR_256_2(3, 3)
 
 static int stubIndex = 0;
 static char stubDlls[0x100][0x100];
@@ -416,7 +417,7 @@ void ensureInitialized() {
 }
 
 void registerExternalModuleAliases(const std::string &requestedName, const std::filesystem::path &resolvedPath,
-									   wibo::ModuleInfo *info) {
+								   wibo::ModuleInfo *info) {
 	ParsedModuleName parsed = parseModuleName(requestedName);
 	registerAlias(normalizedBaseKey(parsed), info);
 	registerAlias(normalizeAlias(requestedName), info);
@@ -428,24 +429,24 @@ wibo::ModuleInfo *moduleFromAddress(void *addr) {
 		return nullptr;
 	auto &reg = registry();
 	for (auto &pair : reg.modulesByKey) {
-	wibo::ModuleInfo *info = pair.second.get();
-	if (!info)
-		continue;
-	uint8_t *base = nullptr;
-	size_t size = 0;
-	if (info->imageBase && info->imageSize) {
-		base = static_cast<uint8_t *>(info->imageBase);
-		size = info->imageSize;
-	} else if (info->executable) {
-		base = static_cast<uint8_t *>(info->executable->imageBuffer);
-		size = info->executable->imageSize;
-	}
-	if (!base || size == 0)
-		continue;
-	uint8_t *ptr = static_cast<uint8_t *>(addr);
-	if (ptr >= base && ptr < base + size) {
-		return info;
-	}
+		wibo::ModuleInfo *info = pair.second.get();
+		if (!info)
+			continue;
+		uint8_t *base = nullptr;
+		size_t size = 0;
+		if (info->imageBase && info->imageSize) {
+			base = static_cast<uint8_t *>(info->imageBase);
+			size = info->imageSize;
+		} else if (info->executable) {
+			base = static_cast<uint8_t *>(info->executable->imageBuffer);
+			size = info->executable->imageSize;
+		}
+		if (!base || size == 0)
+			continue;
+		uint8_t *ptr = static_cast<uint8_t *>(addr);
+		if (ptr >= base && ptr < base + size) {
+			return info;
+		}
 	}
 	return nullptr;
 }
@@ -624,7 +625,7 @@ HMODULE loadModule(const char *dllName) {
 		return nullptr;
 	}
 	std::string requested(dllName);
-DEBUG_LOG("loadModule(%s)\n", requested.c_str());
+	DEBUG_LOG("loadModule(%s)\n", requested.c_str());
 
 	std::lock_guard<std::recursive_mutex> lock(registry().mutex);
 	ensureInitialized();

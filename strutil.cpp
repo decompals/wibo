@@ -148,11 +148,13 @@ std::string wideStringToString(const uint16_t *src, int len) {
 	std::string result(count, '\0');
 	for (size_t i = 0; i < count; ++i) {
 		uint16_t value = src[i];
+#ifndef NDEBUG
 		if (i > 0)
 			hexDump << ' ';
 		hexDump << "0x" << value;
 		if (value > 0xFF)
 			sawWide = true;
+#endif
 		result[i] = static_cast<char>(value & 0xFF);
 	}
 

@@ -1,4 +1,6 @@
-#include <stdlib.h>
+#pragma once
+
+#include <cstdlib>
 
 namespace handles {
 	enum Type {

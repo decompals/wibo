@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 
 namespace wibo {
 
@@ -11,4 +12,4 @@ bool resourceEntryBelongsToExecutable(const Executable &exe, const ImageResource
 ResourceIdentifier resourceIdentifierFromAnsi(const char *id);
 ResourceIdentifier resourceIdentifierFromWide(const uint16_t *id);
 
-}
+} // namespace wibo

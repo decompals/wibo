@@ -92,6 +92,14 @@ struct PEHintNameTableEntry {
 	char name[1]; // variable length
 };
 
+struct PEBaseRelocationBlock {
+	uint32_t virtualAddress;
+	uint32_t sizeOfBlock;
+};
+
+constexpr uint16_t IMAGE_REL_BASED_ABSOLUTE = 0;
+constexpr uint16_t IMAGE_REL_BASED_HIGHLOW = 3;
+
 uint16_t read16(FILE *file) {
 	uint16_t v = 0;
 	fread(&v, 2, 1, file);
@@ -109,6 +117,12 @@ wibo::Executable::Executable() {
 	imageSize = 0;
 	entryPoint = nullptr;
 	rsrcBase = 0;
+	preferredImageBase = 0;
+	relocationDelta = 0;
+	exportDirectoryRVA = 0;
+	exportDirectorySize = 0;
+	relocationDirectoryRVA = 0;
+	relocationDirectorySize = 0;
 }
 
 wibo::Executable::~Executable() {
@@ -150,20 +164,29 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 	long pageSize = sysconf(_SC_PAGE_SIZE);
 	DEBUG_LOG("Page size: %x\n", (unsigned int)pageSize);
 
+	preferredImageBase = header32.imageBase;
+	exportDirectoryRVA = header32.exportTable.virtualAddress;
+	exportDirectorySize = header32.exportTable.size;
+	relocationDirectoryRVA = header32.baseRelocationTable.virtualAddress;
+	relocationDirectorySize = header32.baseRelocationTable.size;
+
 	// Build buffer
 	imageSize = header32.sizeOfImage;
-	if (exec) {
-		imageBuffer = mmap((void *)header32.imageBase, header32.sizeOfImage, PROT_READ | PROT_WRITE | PROT_EXEC,
-						   MAP_ANONYMOUS | MAP_FIXED | MAP_PRIVATE, -1, 0);
-	} else {
-		imageBuffer = mmap(nullptr, header32.sizeOfImage, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+	int prot = PROT_READ | PROT_WRITE;
+	if (exec)
+		prot |= PROT_EXEC;
+	void *preferredBase = (void *)(uintptr_t)header32.imageBase;
+	imageBuffer = mmap(preferredBase, header32.sizeOfImage, prot, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+	if (imageBuffer == MAP_FAILED) {
+		imageBuffer = mmap(nullptr, header32.sizeOfImage, prot, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
 	}
-	memset(imageBuffer, 0, header32.sizeOfImage);
 	if (imageBuffer == MAP_FAILED) {
 		perror("Image mapping failed!");
-		imageBuffer = 0;
+		imageBuffer = nullptr;
 		return false;
 	}
+	relocationDelta = (intptr_t)((uintptr_t)imageBuffer - (uintptr_t)header32.imageBase);
+	memset(imageBuffer, 0, header32.sizeOfImage);
 
 	// Read the sections
 	fseek(file, offsetToPE + sizeof header + header.sizeOfOptionalHeader, SEEK_SET);
@@ -188,6 +211,48 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 
 		if (strcmp(name, ".rsrc") == 0) {
 			rsrcBase = sectionBase;
+		}
+	}
+
+	if (exec && relocationDelta != 0) {
+		if (relocationDirectoryRVA == 0 || relocationDirectorySize == 0) {
+			DEBUG_LOG("Relocation required but no relocation directory present\n");
+			munmap(imageBuffer, imageSize);
+			imageBuffer = nullptr;
+			return false;
+		}
+
+		uint8_t *relocCursor = fromRVA<uint8_t>(relocationDirectoryRVA);
+		uint8_t *relocEnd = relocCursor + relocationDirectorySize;
+		while (relocCursor < relocEnd) {
+			auto *block = reinterpret_cast<PEBaseRelocationBlock *>(relocCursor);
+			if (block->sizeOfBlock < sizeof(PEBaseRelocationBlock) || block->sizeOfBlock > static_cast<uint32_t>(relocEnd - relocCursor)) {
+				break;
+			}
+			if (block->sizeOfBlock == sizeof(PEBaseRelocationBlock)) {
+				break;
+			}
+			size_t entryCount = (block->sizeOfBlock - sizeof(PEBaseRelocationBlock)) / sizeof(uint16_t);
+			auto *entries = reinterpret_cast<uint16_t *>(relocCursor + sizeof(PEBaseRelocationBlock));
+			for (size_t i = 0; i < entryCount; ++i) {
+				uint16_t entry = entries[i];
+				uint16_t type = entry >> 12;
+				uint16_t offset = entry & 0x0FFF;
+				if (type == IMAGE_REL_BASED_ABSOLUTE)
+					continue;
+				uintptr_t target = reinterpret_cast<uintptr_t>(imageBuffer) + block->virtualAddress + offset;
+				switch (type) {
+				case IMAGE_REL_BASED_HIGHLOW: {
+					auto *addr = reinterpret_cast<uint32_t *>(target);
+					*addr += static_cast<uint32_t>(relocationDelta);
+					break;
+				}
+				default:
+					DEBUG_LOG("Unhandled relocation type %u at %08x\n", type, block->virtualAddress + offset);
+					break;
+				}
+			}
+			relocCursor += block->sizeOfBlock;
 		}
 	}
 
@@ -222,8 +287,6 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 			++lookupTable;
 			++addressTable;
 		}
-		freeModule(module);
-
 		++dir;
 	}
 

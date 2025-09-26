@@ -16,7 +16,7 @@ Rough to-do list:
 - Do something intelligent with Windows `HANDLE`s
 - Convert paths in environment variables (and the structure of `PATH` itself, maybe) to Windows format
 - Implement PE relocations rather than just failing unceremoniously
-- Make the PE loader work for DLLs as well in case we ever want to load some
+- Land external DLL loading support (module registry + search order + export resolution)
 
 ---
 

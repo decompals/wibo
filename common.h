@@ -3,11 +3,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <memory>
+#include <optional>
 #include <string>
+#include <unordered_map>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
-#include <memory>
 
 // On Windows, the incoming stack is aligned to a 4 byte boundary.
 // force_align_arg_pointer will realign the stack to match GCC's 16 byte alignment.
@@ -57,7 +60,9 @@ typedef unsigned char BYTE;
 #define ERROR_INVALID_PARAMETER 87
 #define ERROR_BUFFER_OVERFLOW 111
 #define ERROR_INSUFFICIENT_BUFFER 122
+#define ERROR_MOD_NOT_FOUND 126
 #define ERROR_NEGATIVE_SEEK 131
+#define ERROR_BAD_EXE_FORMAT 193
 #define ERROR_ALREADY_EXISTS 183
 
 #define INVALID_SET_FILE_POINTER ((DWORD)-1)
@@ -94,7 +99,18 @@ namespace wibo {
 		ResolveByName byName;
 		ResolveByOrdinal byOrdinal;
 	};
-	extern const Module *modules[];
+	struct ModuleInfo;
+	void initializeModuleRegistry();
+	void shutdownModuleRegistry();
+	ModuleInfo *moduleInfoFromHandle(HMODULE module);
+	void setDllDirectoryOverride(const std::filesystem::path &path);
+	void clearDllDirectoryOverride();
+	std::optional<std::filesystem::path> dllDirectoryOverride();
+	HMODULE findLoadedModule(const char *name);
+	void registerOnExitTable(void *table);
+	void addOnExitFunction(void *table, void (*func)());
+	void executeOnExitTable(void *table);
+	void runPendingOnExit(ModuleInfo &info);
 
 	HMODULE loadModule(const char *name);
 	void freeModule(HMODULE module);
@@ -110,6 +126,12 @@ namespace wibo {
 		size_t imageSize;
 		void *entryPoint;
 		void *rsrcBase;
+		uintptr_t preferredImageBase;
+		intptr_t relocationDelta;
+		uint32_t exportDirectoryRVA;
+		uint32_t exportDirectorySize;
+		uint32_t relocationDirectoryRVA;
+		uint32_t relocationDirectorySize;
 
 		template <typename T>
 		T *fromRVA(uint32_t rva) {
@@ -122,9 +144,24 @@ namespace wibo {
 		}
 	};
 	struct ModuleInfo {
-		std::string name;
-		const wibo::Module* module = nullptr;
+		std::string originalName;
+		std::string normalizedName;
+		std::filesystem::path resolvedPath;
+		const wibo::Module *module = nullptr;
 		std::unique_ptr<wibo::Executable> executable;
+		void *entryPoint = nullptr;
+		void *imageBase = nullptr;
+		size_t imageSize = 0;
+		unsigned int refCount = 0;
+		bool dataFile = false;
+		bool processAttachCalled = false;
+		bool processAttachSucceeded = false;
+		bool dontResolveReferences = false;
+		uint32_t exportOrdinalBase = 0;
+		std::vector<void *> exportsByOrdinal;
+		std::unordered_map<std::string, uint16_t> exportNameToOrdinal;
+		bool exportsInitialized = false;
+		std::vector<void *> onExitFunctions;
 	};
 
 	extern Executable *mainModule;

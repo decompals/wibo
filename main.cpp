@@ -1,15 +1,15 @@
 #include "common.h"
 #include "files.h"
-#include <asm/ldt.h>
-#include <filesystem>
-#include <memory>
 #include "strutil.h"
-#include <sys/mman.h>
-#include <sys/syscall.h>
-#include <stdarg.h>
-#include <vector>
+#include <asm/ldt.h>
 #include <charconv>
 #include <fcntl.h>
+#include <filesystem>
+#include <memory>
+#include <stdarg.h>
+#include <sys/mman.h>
+#include <sys/syscall.h>
+#include <vector>
 
 uint32_t wibo::lastError = 0;
 char** wibo::argv;
@@ -32,145 +32,6 @@ void wibo::debug_log(const char *fmt, ...) {
 	}
 
 	va_end(args);
-}
-
-#define FOR_256_3(a, b, c, d) FOR_ITER((a << 6 | b << 4 | c << 2 | d))
-#define FOR_256_2(a, b) \
-	FOR_256_3(a, b, 0, 0) FOR_256_3(a, b, 0, 1) FOR_256_3(a, b, 0, 2) FOR_256_3(a, b, 0, 3) \
-	FOR_256_3(a, b, 1, 0) FOR_256_3(a, b, 1, 1) FOR_256_3(a, b, 1, 2) FOR_256_3(a, b, 1, 3) \
-	FOR_256_3(a, b, 2, 0) FOR_256_3(a, b, 2, 1) FOR_256_3(a, b, 2, 2) FOR_256_3(a, b, 2, 3) \
-	FOR_256_3(a, b, 3, 0) FOR_256_3(a, b, 3, 1) FOR_256_3(a, b, 3, 2) FOR_256_3(a, b, 3, 3)
-#define FOR_256 \
-	FOR_256_2(0, 0) FOR_256_2(0, 1) FOR_256_2(0, 2) FOR_256_2(0, 3) \
-	FOR_256_2(1, 0) FOR_256_2(1, 1) FOR_256_2(1, 2) FOR_256_2(1, 3) \
-	FOR_256_2(2, 0) FOR_256_2(2, 1) FOR_256_2(2, 2) FOR_256_2(2, 3) \
-	FOR_256_2(3, 0) FOR_256_2(3, 1) FOR_256_2(3, 2) FOR_256_2(3, 3) \
-
-static int stubIndex = 0;
-static char stubDlls[0x100][0x100];
-static char stubFuncNames[0x100][0x100];
-
-static void stubBase(int index) {
-	printf("Unhandled function %s (%s)\n", stubFuncNames[index], stubDlls[index]);
-	exit(1);
-}
-
-void (*stubFuncs[0x100])(void) = {
-#define FOR_ITER(i) []() { stubBase(i); },
-FOR_256
-#undef FOR_ITER
-};
-
-#undef FOR_256_3
-#undef FOR_256_2
-#undef FOR_256
-
-static void *resolveMissingFuncName(const char *dllName, const char *funcName) {
-	DEBUG_LOG("Missing function: %s (%s)\n", dllName, funcName);
-	assert(stubIndex < 0x100);
-	assert(strlen(dllName) < 0x100);
-	assert(strlen(funcName) < 0x100);
-	strcpy(stubFuncNames[stubIndex], funcName);
-	strcpy(stubDlls[stubIndex], dllName);
-	return (void *)stubFuncs[stubIndex++];
-}
-
-static void *resolveMissingFuncOrdinal(const char *dllName, uint16_t ordinal) {
-	char buf[16];
-	sprintf(buf, "%d", ordinal);
-	return resolveMissingFuncName(dllName, buf);
-}
-
-extern const wibo::Module lib_advapi32;
-extern const wibo::Module lib_bcrypt;
-extern const wibo::Module lib_crt;
-extern const wibo::Module lib_kernel32;
-extern const wibo::Module lib_lmgr;
-extern const wibo::Module lib_mscoree;
-extern const wibo::Module lib_msvcrt;
-extern const wibo::Module lib_ntdll;
-extern const wibo::Module lib_ole32;
-extern const wibo::Module lib_user32;
-extern const wibo::Module lib_vcruntime;
-extern const wibo::Module lib_version;
-const wibo::Module * wibo::modules[] = {
-	&lib_advapi32,
-	&lib_bcrypt,
-	&lib_crt,
-	&lib_kernel32,
-	&lib_lmgr,
-	&lib_mscoree,
-	&lib_msvcrt,
-	&lib_ntdll,
-	&lib_ole32,
-	&lib_user32,
-	&lib_vcruntime,
-	&lib_version,
-	nullptr,
-};
-
-HMODULE wibo::loadModule(const char *dllName) {
-	auto *result = new ModuleInfo;
-	result->name = dllName;
-	for (int i = 0; modules[i]; i++) {
-		for (int j = 0; modules[i]->names[j]; j++) {
-			if (strcasecmp(dllName, modules[i]->names[j]) == 0) {
-				result->module = modules[i];
-				return result;
-			}
-		}
-	}
-	return result;
-}
-
-void wibo::freeModule(HMODULE module) { delete static_cast<ModuleInfo *>(module); }
-
-void *wibo::resolveFuncByName(HMODULE module, const char *funcName) {
-	auto *info = static_cast<ModuleInfo *>(module);
-	assert(info);
-	if (info->module && info->module->byName) {
-		void *func = info->module->byName(funcName);
-		if (func)
-			return func;
-	}
-	return resolveMissingFuncName(info->name.c_str(), funcName);
-}
-
-void *wibo::resolveFuncByOrdinal(HMODULE module, uint16_t ordinal) {
-	auto *info = static_cast<ModuleInfo *>(module);
-	assert(info);
-	if (info->module && info->module->byOrdinal) {
-		void *func = info->module->byOrdinal(ordinal);
-		if (func)
-			return func;
-	}
-	return resolveMissingFuncOrdinal(info->name.c_str(), ordinal);
-}
-
-wibo::Executable *wibo::executableFromModule(HMODULE module) {
-	if (wibo::isMainModule(module)) {
-		return wibo::mainModule;
-	}
-
-	auto info = static_cast<wibo::ModuleInfo *>(module);
-	if (!info->executable) {
-		DEBUG_LOG("wibo::executableFromModule: loading %s\n", info->name.c_str());
-		auto executable = std::make_unique<wibo::Executable>();
-		const auto path = files::pathFromWindows(info->name.c_str());
-		FILE *f = fopen(path.c_str(), "rb");
-		if (!f) {
-			perror("wibo::executableFromModule");
-			return nullptr;
-		}
-		bool result = executable->loadPE(f, false);
-		fclose(f);
-		if (!result) {
-			DEBUG_LOG("wibo::executableFromModule: failed to load %s\n", path.c_str());
-			return nullptr;
-		}
-		info->executable = std::move(executable);
-	}
-	return info->executable.get();
 }
 
 struct UNICODE_STRING {
@@ -410,6 +271,8 @@ int main(int argc, char **argv) {
 	wibo::argv = argv + 1;
 	wibo::argc = argc - 1;
 
+	wibo::initializeModuleRegistry();
+
 	wibo::Executable exec;
 	wibo::mainModule = &exec;
 
@@ -432,6 +295,7 @@ int main(int argc, char **argv) {
 		: "r"(tibSegment), "r"(exec.entryPoint)
 	);
 	DEBUG_LOG("We came back\n");
+	wibo::shutdownModuleRegistry();
 
 	return 1;
 }

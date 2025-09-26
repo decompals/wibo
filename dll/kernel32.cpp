@@ -1565,8 +1565,9 @@ namespace kernel32 {
 			return wibo::mainModule->imageBuffer;
 		}
 
-		// wibo::lastError = 0;
-		return wibo::loadModule(lpModuleName);
+		HMODULE module = wibo::findLoadedModule(lpModuleName);
+		wibo::lastError = module ? ERROR_SUCCESS : ERROR_MOD_NOT_FOUND;
+		return module;
 	}
 
 	HMODULE WIN_FUNC GetModuleHandleW(LPCWSTR lpModuleName) {
@@ -1592,7 +1593,16 @@ namespace kernel32 {
 			const auto absPath = std::filesystem::absolute(exePath);
 			path = files::pathToWindows(absPath);
 		} else {
-			path = static_cast<wibo::ModuleInfo *>(hModule)->name;
+			auto *info = wibo::moduleInfoFromHandle(hModule);
+			if (!info) {
+				wibo::lastError = ERROR_INVALID_PARAMETER;
+				return 0;
+			}
+			if (!info->resolvedPath.empty()) {
+				path = files::pathToWindows(info->resolvedPath);
+			} else {
+				path = info->originalName;
+			}
 		}
 		const size_t len = path.size();
 		if (nSize == 0) {
@@ -1627,17 +1637,32 @@ namespace kernel32 {
 			const auto absPath = std::filesystem::absolute(exePath);
 			path = files::pathToWindows(absPath);
 		} else {
-			path = static_cast<wibo::ModuleInfo *>(hModule)->name;
+			auto *info = wibo::moduleInfoFromHandle(hModule);
+			if (!info) {
+				wibo::lastError = ERROR_INVALID_PARAMETER;
+				return 0;
+			}
+			if (!info->resolvedPath.empty()) {
+				path = files::pathToWindows(info->resolvedPath);
+			} else {
+				path = info->originalName;
+			}
 		}
-		const size_t len = path.size();
 		if (nSize == 0) {
 			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
 			return 0;
 		}
 
-		const size_t copyLen = std::min(len, nSize - 1);
-		memcpy(lpFilename, stringToWideString(path.c_str()).data(), copyLen * 2);
-		if (copyLen < nSize) {
+		auto wide = stringToWideString(path.c_str());
+		if (wide.empty()) {
+			wide.push_back(0);
+		}
+		const size_t len = wide.size() - 1;
+		const size_t copyLen = std::min(len, static_cast<size_t>(nSize - 1));
+		for (size_t i = 0; i < copyLen; i++) {
+			lpFilename[i] = wide[i];
+		}
+		if (copyLen < static_cast<size_t>(nSize)) {
 			lpFilename[copyLen] = 0;
 		}
 		if (copyLen < len) {
@@ -1649,38 +1674,58 @@ namespace kernel32 {
 		return copyLen;
 	}
 
-	void* WIN_FUNC FindResourceA(void* hModule, const char* lpName, const char* lpType) {
-		DEBUG_LOG("FindResourceA %p %s %s\n", hModule, lpName, lpType);
-		return (void*)0x100002;
+	static std::string resource_identifier_to_string(const char *id) {
+		if (!id) {
+			return "";
+		}
+		if ((uintptr_t)id >> 16 == 0) {
+			return std::to_string(static_cast<unsigned int>((uintptr_t)id));
+		}
+		return id;
 	}
 
-	// https://github.com/reactos/reactos/blob/master/dll/win32/kernelbase/wine/loader.c#L1090
-	// https://github.com/wine-mirror/wine/blob/master/dlls/kernelbase/loader.c#L1097
-	void* WIN_FUNC FindResourceW(void* hModule, const uint16_t* lpName, const uint16_t* lpType) {
-		DEBUG_LOG("FindResourceW %p\n", hModule);
-		std::string name, type;
-
-		if(!hModule) hModule = GetModuleHandleW(0);
-
-		if((uintptr_t)lpName >> 16 == 0){
-			name = std::to_string((unsigned int)(uintptr_t)lpName);
+	static std::string resource_identifier_to_string(const uint16_t *id) {
+		if (!id) {
+			return "";
 		}
-		else {
-			name = wideStringToString(lpName);
+		if ((uintptr_t)id >> 16 == 0) {
+			return std::to_string(static_cast<unsigned int>((uintptr_t)id));
 		}
+		return wideStringToString(id);
+	}
 
-		if((uintptr_t)lpType >> 16 == 0){
-			type = std::to_string((unsigned int)(uintptr_t)lpType);
-		}
-		else {
-			type = wideStringToString(lpType);
-		}
-
+	static FILE *open_resource_stream(const std::string &type, const std::string &name) {
 		char path[512];
 		snprintf(path, sizeof(path), "resources/%s/%s.res", type.c_str(), name.c_str());
 		DEBUG_LOG("Created path %s\n", path);
 		return fopen(path, "rb");
-		// 	return (void*)0x100002;
+	}
+
+	void *WIN_FUNC FindResourceA(void *hModule, const char *lpName, const char *lpType) {
+		DEBUG_LOG("FindResourceA %p %s %s\n", hModule, lpName, lpType);
+
+		if (!hModule) {
+			hModule = GetModuleHandleA(nullptr);
+		}
+
+		const std::string name = resource_identifier_to_string(lpName);
+		const std::string type = resource_identifier_to_string(lpType);
+
+		return open_resource_stream(type, name);
+	}
+
+	// https://github.com/reactos/reactos/blob/master/dll/win32/kernelbase/wine/loader.c#L1090
+	// https://github.com/wine-mirror/wine/blob/master/dlls/kernelbase/loader.c#L1097
+	void *WIN_FUNC FindResourceW(void *hModule, const uint16_t *lpName, const uint16_t *lpType) {
+		DEBUG_LOG("FindResourceW %p\n", hModule);
+
+		if (!hModule)
+			hModule = GetModuleHandleW(0);
+
+		const std::string name = resource_identifier_to_string(lpName);
+		const std::string type = resource_identifier_to_string(lpType);
+
+		return open_resource_stream(type, name);
 	}
 
 	void* WIN_FUNC LoadResource(void* hModule, void* res) {
@@ -1813,19 +1858,34 @@ namespace kernel32 {
 		return (void *) 0x100006;
 	}
 
+	static int translateProtect(DWORD flProtect) {
+		switch (flProtect) {
+		case 0x01: /* PAGE_NOACCESS */
+			return PROT_NONE;
+		case 0x02: /* PAGE_READONLY */
+			return PROT_READ;
+		case 0x04: /* PAGE_READWRITE */
+			return PROT_READ | PROT_WRITE;
+		case 0x08: /* PAGE_WRITECOPY */
+			return PROT_READ | PROT_WRITE;
+		case 0x10: /* PAGE_EXECUTE */
+			return PROT_EXEC;
+		case 0x20: /* PAGE_EXECUTE_READ */
+			return PROT_READ | PROT_EXEC;
+		case 0x40: /* PAGE_EXECUTE_READWRITE */
+			return PROT_READ | PROT_WRITE | PROT_EXEC;
+		case 0x80: /* PAGE_EXECUTE_WRITECOPY */
+			return PROT_READ | PROT_WRITE | PROT_EXEC;
+		default:
+			DEBUG_LOG("Unhandled flProtect: %u, defaulting to RW\n", flProtect);
+			return PROT_READ | PROT_WRITE;
+		}
+	}
+
 	void *WIN_FUNC VirtualAlloc(void *lpAddress, unsigned int dwSize, unsigned int flAllocationType, unsigned int flProtect) {
 		DEBUG_LOG("VirtualAlloc %p %u %u %u\n", lpAddress, dwSize, flAllocationType, flProtect);
 
-		int prot = PROT_READ | PROT_WRITE;
-		if (flProtect == 0x04 /* PAGE_READWRITE */) {
-			prot = PROT_READ | PROT_WRITE;
-		} else if (flProtect == 0x02 /* PAGE_READONLY */) {
-			prot = PROT_READ;
-		} else if (flProtect == 0x40 /* PAGE_EXECUTE_READWRITE */) {
-			prot = PROT_READ | PROT_WRITE | PROT_EXEC;
-		} else {
-			DEBUG_LOG("Unhandled flProtect: %u, defaulting to RW\n", flProtect);
-		}
+		int prot = translateProtect(flProtect);
 
 		int flags = MAP_PRIVATE | MAP_ANONYMOUS; // MAP_ANONYMOUS ensures the memory is zeroed out
 		if (lpAddress != NULL) {
@@ -1867,6 +1927,51 @@ namespace kernel32 {
 	unsigned int WIN_FUNC VirtualFree(void *lpAddress, unsigned int dwSize, int dwFreeType) {
 		DEBUG_LOG("VirtualFree %p %u %i\n", lpAddress, dwSize, dwFreeType);
 		return 1;
+	}
+
+	BOOL WIN_FUNC VirtualProtect(LPVOID lpAddress, SIZE_T dwSize, DWORD flNewProtect, PDWORD lpflOldProtect) {
+		DEBUG_LOG("VirtualProtect %p %zu %u\n", lpAddress, dwSize, flNewProtect);
+		if (!lpAddress || dwSize == 0) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+		if (lpflOldProtect)
+			*lpflOldProtect = flNewProtect;
+		size_t pageSize = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+		uintptr_t base = reinterpret_cast<uintptr_t>(lpAddress) & ~(pageSize - 1);
+		size_t length = ((reinterpret_cast<uintptr_t>(lpAddress) + dwSize) - base + pageSize - 1) & ~(pageSize - 1);
+		int prot = translateProtect(flNewProtect);
+		if (mprotect(reinterpret_cast<void *>(base), length, prot) != 0) {
+			perror("VirtualProtect/mprotect");
+			return FALSE;
+		}
+		return TRUE;
+	}
+
+	typedef struct _MEMORY_BASIC_INFORMATION {
+		void *BaseAddress;
+		void *AllocationBase;
+		DWORD AllocationProtect;
+		size_t RegionSize;
+		DWORD State;
+		DWORD Protect;
+		DWORD Type;
+	} MEMORY_BASIC_INFORMATION, *PMEMORY_BASIC_INFORMATION;
+
+	SIZE_T WIN_FUNC VirtualQuery(const void *lpAddress, PMEMORY_BASIC_INFORMATION lpBuffer, SIZE_T dwLength) {
+		DEBUG_LOG("VirtualQuery %p %zu\n", lpAddress, dwLength);
+		if (!lpBuffer || dwLength < sizeof(MEMORY_BASIC_INFORMATION)) {
+			return 0;
+		}
+		memset(lpBuffer, 0, sizeof(MEMORY_BASIC_INFORMATION));
+		lpBuffer->BaseAddress = const_cast<LPVOID>(lpAddress);
+		lpBuffer->AllocationBase = lpBuffer->BaseAddress;
+		lpBuffer->AllocationProtect = 0x04; // PAGE_READWRITE
+		lpBuffer->RegionSize = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+		lpBuffer->State = 0x1000; // MEM_COMMIT
+		lpBuffer->Protect = 0x04; // PAGE_READWRITE
+		lpBuffer->Type = 0x20000; // MEM_PRIVATE
+		return sizeof(MEMORY_BASIC_INFORMATION);
 	}
 
 	unsigned int WIN_FUNC GetProcessWorkingSetSize(void *hProcess, unsigned int *lpMinimumWorkingSetSize, unsigned int *lpMaximumWorkingSetSize) {
@@ -1964,6 +2069,11 @@ namespace kernel32 {
 	unsigned int WIN_FUNC SetHandleCount(unsigned int uNumber) {
 		DEBUG_LOG("SetHandleCount %p\n", uNumber);
 		return uNumber + 10;
+	}
+
+	void WIN_FUNC Sleep(DWORD dwMilliseconds) {
+		DEBUG_LOG("Sleep(%u)\n", dwMilliseconds);
+		usleep(static_cast<useconds_t>(dwMilliseconds) * 1000);
 	}
 
 	unsigned int WIN_FUNC GetACP() {
@@ -2177,7 +2287,21 @@ namespace kernel32 {
 	}
 
 	BOOL WIN_FUNC SetDllDirectoryA(LPCSTR lpPathName) {
-		DEBUG_LOG("STUB: SetDllDirectoryA(%s)\n", lpPathName);
+		DEBUG_LOG("SetDllDirectoryA(%s)\n", lpPathName);
+		if (!lpPathName || lpPathName[0] == '\0') {
+			wibo::clearDllDirectoryOverride();
+			wibo::lastError = ERROR_SUCCESS;
+			return TRUE;
+		}
+
+		auto hostPath = files::pathFromWindows(lpPathName);
+		if (hostPath.empty() || !std::filesystem::exists(hostPath)) {
+			wibo::lastError = ERROR_PATH_NOT_FOUND;
+			return FALSE;
+		}
+
+		wibo::setDllDirectoryOverride(std::filesystem::absolute(hostPath));
+		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 
@@ -2591,6 +2715,9 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "EncodePointer") == 0) return (void *) kernel32::EncodePointer;
 	if (strcmp(name, "DecodePointer") == 0) return (void *) kernel32::DecodePointer;
 	if (strcmp(name, "SetDllDirectoryA") == 0) return (void *) kernel32::SetDllDirectoryA;
+	if (strcmp(name, "Sleep") == 0) return (void *) kernel32::Sleep;
+	if (strcmp(name, "VirtualProtect") == 0) return (void *) kernel32::VirtualProtect;
+	if (strcmp(name, "VirtualQuery") == 0) return (void *) kernel32::VirtualQuery;
 
 	// processenv.h
 	if (strcmp(name, "GetCommandLineA") == 0) return (void *) kernel32::GetCommandLineA;

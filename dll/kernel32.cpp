@@ -261,6 +261,14 @@ namespace kernel32 {
 		wibo::lastError = dwErrCode;
 	}
 
+	BOOL WIN_FUNC IsBadReadPtr(const void *lp, uintptr_t ucb) {
+		DEBUG_LOG("STUB: IsBadReadPtr(ptr=%p, size=%zu)\n", lp, static_cast<size_t>(ucb));
+		if (!lp) {
+			return TRUE;
+		}
+		return FALSE;
+	}
+
 	BOOL WIN_FUNC Wow64DisableWow64FsRedirection(void **OldValue) {
 		DEBUG_LOG("Wow64DisableWow64FsRedirection\n");
 		if (OldValue) {
@@ -3387,6 +3395,7 @@ static void *resolveByName(const char *name) {
 	// errhandlingapi.h
 	if (strcmp(name, "GetLastError") == 0) return (void *) kernel32::GetLastError;
 	if (strcmp(name, "SetLastError") == 0) return (void *) kernel32::SetLastError;
+	if (strcmp(name, "IsBadReadPtr") == 0) return (void *) kernel32::IsBadReadPtr;
 	if (strcmp(name, "Wow64DisableWow64FsRedirection") == 0) return (void *) kernel32::Wow64DisableWow64FsRedirection;
 	if (strcmp(name, "Wow64RevertWow64FsRedirection") == 0) return (void *) kernel32::Wow64RevertWow64FsRedirection;
 	if (strcmp(name, "RaiseException") == 0) return (void *) kernel32::RaiseException;

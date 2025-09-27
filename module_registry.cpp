@@ -3,6 +3,7 @@
 #include "strutil.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cerrno>
 #include <climits>
@@ -63,16 +64,35 @@ struct PEExportDirectory {
 	FOR_256_2(0, 3) FOR_256_2(1, 0) FOR_256_2(1, 1) FOR_256_2(1, 2) FOR_256_2(1, 3) FOR_256_2(2, 0) FOR_256_2(2, 1)    \
 		FOR_256_2(2, 2) FOR_256_2(2, 3) FOR_256_2(3, 0) FOR_256_2(3, 1) FOR_256_2(3, 2) FOR_256_2(3, 3)
 
+static constexpr size_t MAX_STUBS = 0x100;
 static int stubIndex = 0;
-static char stubDlls[0x100][0x100];
-static char stubFuncNames[0x100][0x100];
+static std::array<std::string, MAX_STUBS> stubDlls;
+static std::array<std::string, MAX_STUBS> stubFuncNames;
+static std::unordered_map<std::string, void *> stubCache;
+
+static std::string makeStubKey(const char *dllName, const char *funcName) {
+	std::string key;
+	if (dllName) {
+		key.assign(dllName);
+		std::transform(key.begin(), key.end(), key.begin(),
+				   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	}
+	key.push_back(':');
+	if (funcName) {
+		std::string func(funcName);
+		std::transform(func.begin(), func.end(), func.begin(),
+				   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+		key += func;
+	}
+	return key;
+}
 
 static void stubBase(int index) {
-	printf("Unhandled function %s (%s)\n", stubFuncNames[index], stubDlls[index]);
+	printf("Unhandled function %s (%s)\n", stubFuncNames[index].c_str(), stubDlls[index].c_str());
 	exit(1);
 }
 
-void (*stubFuncs[0x100])(void) = {
+void (*stubFuncs[MAX_STUBS])(void) = {
 #define FOR_ITER(i) []() { stubBase(i); },
 	FOR_256
 #undef FOR_ITER
@@ -84,12 +104,23 @@ void (*stubFuncs[0x100])(void) = {
 
 void *resolveMissingFuncName(const char *dllName, const char *funcName) {
 	DEBUG_LOG("Missing function: %s (%s)\n", dllName, funcName);
-	assert(stubIndex < 0x100);
-	assert(strlen(dllName) < 0x100);
-	assert(strlen(funcName) < 0x100);
-	strcpy(stubFuncNames[stubIndex], funcName);
-	strcpy(stubDlls[stubIndex], dllName);
-	return (void *)stubFuncs[stubIndex++];
+	std::string key = makeStubKey(dllName, funcName);
+	auto existing = stubCache.find(key);
+	if (existing != stubCache.end()) {
+		return existing->second;
+	}
+	if (stubIndex >= static_cast<int>(MAX_STUBS)) {
+		fprintf(stderr,
+				"Too many missing functions encountered (>%zu). Last failure: %s (%s)\n",
+				MAX_STUBS, funcName, dllName);
+		exit(1);
+	}
+	stubFuncNames[stubIndex] = funcName ? funcName : "";
+	stubDlls[stubIndex] = dllName ? dllName : "";
+	void *stub = (void *)stubFuncs[stubIndex];
+	stubCache.emplace(std::move(key), stub);
+	stubIndex++;
+	return stub;
 }
 
 void *resolveMissingFuncOrdinal(const char *dllName, uint16_t ordinal) {
@@ -113,6 +144,8 @@ struct ModuleRegistry {
 	std::unordered_map<void *, wibo::ModuleInfo *> onExitTables;
 	std::unordered_map<const wibo::Module *, std::vector<std::string>> builtinAliasLists;
 	std::unordered_map<std::string, wibo::ModuleInfo *> builtinAliasMap;
+	std::unordered_set<std::string> pinnedAliases;
+	std::unordered_set<wibo::ModuleInfo *> pinnedModules;
 };
 
 ModuleRegistry &registry() {
@@ -322,6 +355,9 @@ void registerAlias(const std::string &alias, wibo::ModuleInfo *info) {
 		reg.modulesByAlias[alias] = info;
 		return;
 	}
+	if (reg.pinnedAliases.count(alias)) {
+		return;
+	}
 	// Prefer externally loaded modules over built-ins when both are present.
 	if (it->second && it->second->module != nullptr && info->module == nullptr) {
 		reg.modulesByAlias[alias] = info;
@@ -345,15 +381,25 @@ void registerBuiltinModule(const wibo::Module *module) {
 
 	reg.builtinAliasLists[module] = {};
 	auto &aliasList = reg.builtinAliasLists[module];
+	const bool pinModule = (module == &lib_lmgr);
+	if (pinModule) {
+		reg.pinnedModules.insert(raw);
+	}
 	for (size_t i = 0; module->names[i]; ++i) {
 		std::string alias = normalizeAlias(module->names[i]);
 		aliasList.push_back(alias);
+		if (pinModule) {
+			reg.pinnedAliases.insert(alias);
+		}
 		registerAlias(alias, raw);
 		reg.builtinAliasMap[alias] = raw;
 		ParsedModuleName parsed = parseModuleName(module->names[i]);
 		std::string baseAlias = normalizedBaseKey(parsed);
 		if (baseAlias != alias) {
 			aliasList.push_back(baseAlias);
+			if (pinModule) {
+				reg.pinnedAliases.insert(baseAlias);
+			}
 			registerAlias(baseAlias, raw);
 			reg.builtinAliasMap[baseAlias] = raw;
 		}
@@ -706,10 +752,13 @@ HMODULE loadModule(const char *dllName) {
 			lastError = ERROR_SUCCESS;
 			return existing;
 		}
-		if (ModuleInfo *external = resolveAndLoadExternal()) {
-			DEBUG_LOG("  replaced builtin module %s with external copy\n", requested.c_str());
-			lastError = ERROR_SUCCESS;
-			return external;
+		bool pinned = reg.pinnedModules.count(existing) != 0;
+		if (!pinned) {
+			if (ModuleInfo *external = resolveAndLoadExternal()) {
+				DEBUG_LOG("  replaced builtin module %s with external copy\n", requested.c_str());
+				lastError = ERROR_SUCCESS;
+				return external;
+			}
 		}
 		lastError = ERROR_SUCCESS;
 		DEBUG_LOG("  returning builtin module %s\n", existing->originalName.c_str());
@@ -826,6 +875,21 @@ void *resolveFuncByOrdinal(HMODULE module, uint16_t ordinal) {
 		}
 	}
 	return resolveMissingFuncOrdinal(info->originalName.c_str(), ordinal);
+}
+
+void *resolveMissingImportByName(const char *dllName, const char *funcName) {
+	const char *safeDll = dllName ? dllName : "";
+	const char *safeFunc = funcName ? funcName : "";
+	std::lock_guard<std::recursive_mutex> lock(registry().mutex);
+	ensureInitialized();
+	return resolveMissingFuncName(safeDll, safeFunc);
+}
+
+void *resolveMissingImportByOrdinal(const char *dllName, uint16_t ordinal) {
+	const char *safeDll = dllName ? dllName : "";
+	std::lock_guard<std::recursive_mutex> lock(registry().mutex);
+	ensureInitialized();
+	return resolveMissingFuncOrdinal(safeDll, ordinal);
 }
 
 Executable *executableFromModule(HMODULE module) {

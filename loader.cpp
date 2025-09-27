@@ -290,14 +290,16 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 				// Import by ordinal
 				uint16_t ordinal = lookup & 0xFFFF;
 				DEBUG_LOG("  Ordinal: %d\n", ordinal);
-				void *func = resolveFuncByOrdinal(module, ordinal);
+				void *func = module ? resolveFuncByOrdinal(module, ordinal)
+									 : resolveMissingImportByOrdinal(dllName, ordinal);
 				DEBUG_LOG("    -> %p\n", func);
 				*addressTable = reinterpret_cast<uintptr_t>(func);
 			} else {
 				// Import by name
 				PEHintNameTableEntry *hintName = fromRVA<PEHintNameTableEntry>(lookup);
 				DEBUG_LOG("  Name: %s (IAT=%p)\n", hintName->name, addressTable);
-				void *func = resolveFuncByName(module, hintName->name);
+				void *func = module ? resolveFuncByName(module, hintName->name)
+									 : resolveMissingImportByName(dllName, hintName->name);
 				DEBUG_LOG("    -> %p\n", func);
 				*addressTable = reinterpret_cast<uintptr_t>(func);
 			}
@@ -321,11 +323,15 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 				if (lookup & 0x80000000) {
 					uint16_t ordinal = lookup & 0xFFFF;
 				DEBUG_LOG("  Ordinal: %d (IAT=%p)\n", ordinal, addressTable);
-					*addressTable = reinterpret_cast<uintptr_t>(resolveFuncByOrdinal(module, ordinal));
+					void *func = module ? resolveFuncByOrdinal(module, ordinal)
+									 : resolveMissingImportByOrdinal(dllName, ordinal);
+					*addressTable = reinterpret_cast<uintptr_t>(func);
 				} else {
 					PEHintNameTableEntry *hintName = fromRVA<PEHintNameTableEntry>(lookup);
 					DEBUG_LOG("  Name: %s\n", hintName->name);
-					*addressTable = reinterpret_cast<uintptr_t>(resolveFuncByName(module, hintName->name));
+					void *func = module ? resolveFuncByName(module, hintName->name)
+									 : resolveMissingImportByName(dllName, hintName->name);
+					*addressTable = reinterpret_cast<uintptr_t>(func);
 				}
 				++lookupTable;
 				++addressTable;

@@ -127,6 +127,8 @@ namespace wibo {
 	void freeModule(HMODULE module);
 	void *resolveFuncByName(HMODULE module, const char *funcName);
 	void *resolveFuncByOrdinal(HMODULE module, uint16_t ordinal);
+	void *resolveMissingImportByName(const char *dllName, const char *funcName);
+	void *resolveMissingImportByOrdinal(const char *dllName, uint16_t ordinal);
 
 	struct ResourceIdentifier {
 		ResourceIdentifier() : isString(false), id(0) {}

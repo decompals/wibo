@@ -163,10 +163,8 @@ namespace msvcrt {
 					}
 				}
 				if (!exeDir.empty()) {
-					std::string loweredResult = result;
-					std::string loweredExe = exeDir;
-					std::transform(loweredResult.begin(), loweredResult.end(), loweredResult.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-					std::transform(loweredExe.begin(), loweredExe.end(), loweredExe.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+					std::string loweredResult = stringToLower(result);
+					std::string loweredExe = stringToLower(exeDir);
 					bool present = false;
 					size_t start = 0;
 					while (start <= loweredResult.size()) {
@@ -648,18 +646,6 @@ char* WIN_ENTRY setlocale(int category, const char *locale){
 		return 0;
 	}
 
-	static uint16_t toLower(uint16_t ch) {
-		if (ch >= 'A' && ch <= 'Z') {
-			return static_cast<uint16_t>(ch + ('a' - 'A'));
-		}
-		wchar_t wide = static_cast<wchar_t>(ch);
-		wchar_t lowered = std::towlower(wide);
-		if (lowered < 0 || lowered > 0xFFFF) {
-			return ch;
-		}
-		return static_cast<uint16_t>(lowered);
-	}
-
 	int WIN_ENTRY _wcsicmp(const uint16_t *lhs, const uint16_t *rhs) {
 		if (lhs == rhs) {
 			return 0;
@@ -672,15 +658,15 @@ char* WIN_ENTRY setlocale(int category, const char *locale){
 		}
 
 		while (*lhs && *rhs) {
-			uint16_t a = toLower(*lhs++);
-			uint16_t b = toLower(*rhs++);
+			uint16_t a = wcharToLower(*lhs++);
+			uint16_t b = wcharToLower(*rhs++);
 			if (a != b) {
 				return static_cast<int>(a) - static_cast<int>(b);
 			}
 		}
 
-		uint16_t a = toLower(*lhs);
-		uint16_t b = toLower(*rhs);
+		uint16_t a = wcharToLower(*lhs);
+		uint16_t b = wcharToLower(*rhs);
 		return static_cast<int>(a) - static_cast<int>(b);
 	}
 

@@ -1,8 +1,8 @@
 #include "common.h"
 #include "files.h"
 #include "handles.h"
+#include "strutil.h"
 #include <algorithm>
-#include <cctype>
 #include <map>
 #include <optional>
 #include <strings.h>
@@ -182,13 +182,13 @@ namespace files {
 			return std::nullopt;
 		}
 		std::string needle = filename;
-		std::transform(needle.begin(), needle.end(), needle.begin(), [](unsigned char ch) { return std::tolower(ch); });
+		toLowerInPlace(needle);
 		for (const auto &entry : std::filesystem::directory_iterator(directory, ec)) {
 			if (ec) {
 				break;
 			}
 			std::string candidate = entry.path().filename().string();
-			std::transform(candidate.begin(), candidate.end(), candidate.begin(), [](unsigned char ch) { return std::tolower(ch); });
+			toLowerInPlace(candidate);
 			if (candidate == needle) {
 				return canonicalPath(entry.path());
 			}

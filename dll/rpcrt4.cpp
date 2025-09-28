@@ -128,14 +128,8 @@ BindingHandleData *getBinding(RPC_BINDING_HANDLE handle) {
 
 extern "C" {
 
-RPC_STATUS WIN_FUNC RpcStringBindingComposeW(
-	RPC_WSTR objUuid,
-	RPC_WSTR protSeq,
-	RPC_WSTR networkAddr,
-	RPC_WSTR endpoint,
-	RPC_WSTR options,
-	RPC_WSTR *stringBinding
-) {
+RPC_STATUS WIN_FUNC RpcStringBindingComposeW(RPC_WSTR objUuid, RPC_WSTR protSeq, RPC_WSTR networkAddr,
+											 RPC_WSTR endpoint, RPC_WSTR options, RPC_WSTR *stringBinding) {
 	BindingComponents components;
 	components.objectUuid = toU16(objUuid);
 	components.protocolSequence = toU16(protSeq);
@@ -187,15 +181,10 @@ RPC_STATUS WIN_FUNC RpcBindingFromStringBindingW(RPC_WSTR stringBinding, RPC_BIN
 	return RPC_S_OK;
 }
 
-RPC_STATUS WIN_FUNC RpcBindingSetAuthInfoExW(
-	RPC_BINDING_HANDLE binding,
-	RPC_WSTR serverPrincName,
-	unsigned long authnLevel,
-	unsigned long authnSvc,
-	RPC_AUTH_IDENTITY_HANDLE authIdentity,
-	unsigned long authzSvc,
-	RPC_SECURITY_QOS *securityQos
-) {
+RPC_STATUS WIN_FUNC RpcBindingSetAuthInfoExW(RPC_BINDING_HANDLE binding, RPC_WSTR serverPrincName,
+											 unsigned long authnLevel, unsigned long authnSvc,
+											 RPC_AUTH_IDENTITY_HANDLE authIdentity, unsigned long authzSvc,
+											 RPC_SECURITY_QOS *securityQos) {
 	BindingHandleData *data = getBinding(binding);
 	if (!data) {
 		return RPC_S_INVALID_BINDING;
@@ -260,9 +249,7 @@ NdrClientCall2(PMIDL_STUB_DESC stubDescriptor, PFORMAT_STRING format, ...) {
 	return result;
 }
 
-void WIN_FUNC NdrServerCall2(PRPC_MESSAGE message) {
-	DEBUG_LOG("STUB: NdrServerCall2 message=%p\n", message);
-}
+void WIN_FUNC NdrServerCall2(PRPC_MESSAGE message) { DEBUG_LOG("STUB: NdrServerCall2 message=%p\n", message); }
 
 } // extern "C"
 
@@ -270,19 +257,19 @@ namespace {
 
 void *resolveByName(const char *name) {
 	if (std::strcmp(name, "RpcStringBindingComposeW") == 0)
-		return (void *) RpcStringBindingComposeW;
+		return (void *)RpcStringBindingComposeW;
 	if (std::strcmp(name, "RpcBindingFromStringBindingW") == 0)
-		return (void *) RpcBindingFromStringBindingW;
+		return (void *)RpcBindingFromStringBindingW;
 	if (std::strcmp(name, "RpcStringFreeW") == 0)
-		return (void *) RpcStringFreeW;
+		return (void *)RpcStringFreeW;
 	if (std::strcmp(name, "RpcBindingFree") == 0)
-		return (void *) RpcBindingFree;
+		return (void *)RpcBindingFree;
 	if (std::strcmp(name, "RpcBindingSetAuthInfoExW") == 0)
-		return (void *) RpcBindingSetAuthInfoExW;
+		return (void *)RpcBindingSetAuthInfoExW;
 	if (std::strcmp(name, "NdrClientCall2") == 0)
-		return (void *) NdrClientCall2;
+		return (void *)NdrClientCall2;
 	if (std::strcmp(name, "NdrServerCall2") == 0)
-		return (void *) NdrServerCall2;
+		return (void *)NdrServerCall2;
 	return nullptr;
 }
 

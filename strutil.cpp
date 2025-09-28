@@ -1,9 +1,46 @@
 #include "strutil.h"
 #include "common.h"
+#include <algorithm>
+#include <cctype>
+#include <cwctype>
 #include <cstdint>
 #include <sstream>
 #include <string>
 #include <vector>
+
+void toLowerInPlace(std::string &str) {
+	std::transform(str.begin(), str.end(), str.begin(),
+			   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+}
+
+void toUpperInPlace(std::string &str) {
+	std::transform(str.begin(), str.end(), str.begin(),
+			   [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+}
+
+std::string stringToLower(std::string_view str) {
+	std::string result(str);
+	toLowerInPlace(result);
+	return result;
+}
+
+std::string stringToUpper(std::string_view str) {
+	std::string result(str);
+	toUpperInPlace(result);
+	return result;
+}
+
+uint16_t wcharToLower(uint16_t ch) {
+	if (ch >= 'A' && ch <= 'Z') {
+		return static_cast<uint16_t>(ch + ('a' - 'A'));
+	}
+	wchar_t wide = static_cast<wchar_t>(ch);
+	wchar_t lowered = std::towlower(wide);
+	if (lowered < 0 || lowered > 0xFFFF) {
+		return ch;
+	}
+	return static_cast<uint16_t>(lowered);
+}
 
 size_t wstrlen(const uint16_t *str) {
 	if (!str)

@@ -5,17 +5,18 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <vector>
 #include <unistd.h>
+#include <vector>
 
 typedef void (*_PVFV)();
 typedef int (*_PIFV)();
-typedef void (*_invalid_parameter_handler)(const wchar_t *, const wchar_t *, const wchar_t *, unsigned int, uintptr_t);
+typedef void (*_invalid_parameter_handler)(const uint16_t *, const uint16_t *, const uint16_t *, unsigned int,
+										   uintptr_t);
 
 extern char **environ;
 
 namespace msvcrt {
-	int WIN_ENTRY puts(const char *str);
+int WIN_ENTRY puts(const char *str);
 }
 
 typedef enum _crt_app_type {
@@ -195,11 +196,13 @@ void *WIN_ENTRY __acrt_iob_func(unsigned int index) {
 	return nullptr;
 }
 
-int WIN_ENTRY __stdio_common_vfprintf(unsigned long long /*options*/, FILE *stream, const char *format, void * /*locale*/, va_list args) {
+int WIN_ENTRY __stdio_common_vfprintf(unsigned long long /*options*/, FILE *stream, const char *format,
+									  void * /*locale*/, va_list args) {
 	return vfprintf(stream, format, args);
 }
 
-int WIN_ENTRY __stdio_common_vsprintf(unsigned long long /*options*/, char *buffer, size_t len, const char *format, void * /*locale*/, va_list args) {
+int WIN_ENTRY __stdio_common_vsprintf(unsigned long long /*options*/, char *buffer, size_t len, const char *format,
+									  void * /*locale*/, va_list args) {
 	if (!buffer || !format)
 		return -1;
 	int result = vsnprintf(buffer, len, format, args);

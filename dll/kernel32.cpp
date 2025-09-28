@@ -349,37 +349,11 @@ namespace kernel32 {
 
 		std::memset(lpSystemInfo, 0, sizeof(*lpSystemInfo));
 
-		WORD architecture = PROCESSOR_ARCHITECTURE_UNKNOWN;
-		DWORD processorType = 0;
-		WORD processorLevel = 0;
-
-#if defined(__x86_64__) || defined(_M_X64)
-		architecture = PROCESSOR_ARCHITECTURE_AMD64;
-		processorType = PROCESSOR_AMD_X8664;
-		processorLevel = 6;
-#elif defined(__i386__) || defined(_M_IX86)
-		architecture = PROCESSOR_ARCHITECTURE_INTEL;
-		processorType = PROCESSOR_INTEL_PENTIUM;
-		processorLevel = 6;
-#elif defined(__aarch64__)
-		architecture = PROCESSOR_ARCHITECTURE_ARM64;
-		processorType = 0;
-		processorLevel = 8;
-#elif defined(__arm__)
-		architecture = PROCESSOR_ARCHITECTURE_ARM;
-		processorType = 0;
-		processorLevel = 7;
-#else
-		architecture = PROCESSOR_ARCHITECTURE_UNKNOWN;
-		processorType = 0;
-		processorLevel = 0;
-#endif
-
-		lpSystemInfo->wProcessorArchitecture = architecture;
+		lpSystemInfo->wProcessorArchitecture = PROCESSOR_ARCHITECTURE_INTEL;
 		lpSystemInfo->wReserved = 0;
 		lpSystemInfo->dwOemId = lpSystemInfo->wProcessorArchitecture;
-		lpSystemInfo->dwProcessorType = processorType;
-		lpSystemInfo->wProcessorLevel = processorLevel;
+		lpSystemInfo->dwProcessorType = PROCESSOR_INTEL_PENTIUM;
+		lpSystemInfo->wProcessorLevel = 6; // Pentium
 		lpSystemInfo->wProcessorRevision = 0;
 
 		long pageSize = sysconf(_SC_PAGESIZE);

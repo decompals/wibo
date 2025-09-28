@@ -3,8 +3,6 @@
 #include "resources.h"
 #include "strutil.h"
 
-#include <algorithm>
-#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -15,7 +13,7 @@ namespace {
 
 constexpr uint32_t RT_VERSION = 16;
 
-static uint16_t read_u16(const uint8_t *ptr) {
+static uint16_t readU16(const uint8_t *ptr) {
 	return static_cast<uint16_t>(ptr[0] | (ptr[1] << 8));
 }
 
@@ -49,9 +47,9 @@ static bool parseVersionBlock(const uint8_t *block, size_t available, VersionBlo
 		return false;
 	}
 
-	uint16_t totalLength = read_u16(block);
-	uint16_t valueLength = read_u16(block + sizeof(uint16_t));
-	uint16_t type = read_u16(block + sizeof(uint16_t) * 2);
+	uint16_t totalLength = readU16(block);
+	uint16_t valueLength = readU16(block + sizeof(uint16_t));
+	uint16_t type = readU16(block + sizeof(uint16_t) * 2);
 	if (totalLength == 0 || totalLength > available) {
 		DEBUG_LOG("invalid totalLength=%u available=%zu\n", totalLength, available);
 		return false;
@@ -61,7 +59,7 @@ static bool parseVersionBlock(const uint8_t *block, size_t available, VersionBlo
 	const uint8_t *cursor = block + sizeof(uint16_t) * 3;
 	out.key.clear();
 	while (cursor + sizeof(uint16_t) <= end) {
-		uint16_t ch = read_u16(cursor);
+		uint16_t ch = readU16(cursor);
 		cursor += sizeof(uint16_t);
 		if (!ch)
 			break;
@@ -101,11 +99,6 @@ static bool parseVersionBlock(const uint8_t *block, size_t available, VersionBlo
 	return true;
 }
 
-static std::string toLowerCopy(std::string str) {
-	std::transform(str.begin(), str.end(), str.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-	return str;
-}
-
 static bool queryVersionBlock(const uint8_t *block, size_t available,
 						 const std::vector<std::string> &segments,
 						 size_t depth,
@@ -126,7 +119,7 @@ static bool queryVersionBlock(const uint8_t *block, size_t available,
 		return true;
 	}
 
-	const std::string targetLower = toLowerCopy(segments[depth]);
+	const std::string targetLower = stringToLower(segments[depth]);
 	const uint8_t *cursor = view.childrenPtr;
 	const uint8_t *end = view.childrenPtr + view.childrenBytes;
 
@@ -137,12 +130,12 @@ static bool queryVersionBlock(const uint8_t *block, size_t available,
 			break;
 		if (child.totalLength == 0)
 			break;
-		std::string childKeyLower = toLowerCopy(narrowKey(child.key));
+		std::string childKeyLower = stringToLower(narrowKey(child.key));
 		if (childKeyLower == targetLower) {
 			if (queryVersionBlock(childStart, child.totalLength, segments, depth + 1, outPtr, outLen, outType))
 				return true;
 		}
-		size_t offset = static_cast<size_t>(child.totalLength);
+		const auto offset = static_cast<size_t>(child.totalLength);
 		cursor = childStart + align4(offset);
 		if (cursor <= childStart || cursor > end)
 			break;
@@ -252,7 +245,7 @@ static unsigned int VerQueryValueImpl(const void *pBlock, const std::string &sub
 		return 0;
 
 	const uint8_t *base = static_cast<const uint8_t *>(pBlock);
-	uint16_t totalLength = read_u16(base);
+	uint16_t totalLength = readU16(base);
 	if (totalLength < 6)
 		return 0;
 

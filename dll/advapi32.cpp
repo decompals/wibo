@@ -1,7 +1,8 @@
 #include "common.h"
 #include "handles.h"
+#include "strutil.h"
+#include <algorithm>
 #include <sys/random.h>
-#include <cwchar>
 #include <vector>
 
 namespace {
@@ -294,7 +295,8 @@ namespace advapi32 {
 		return TRUE;
 	}
 
-	BOOL WIN_FUNC CryptAcquireContextW(void** phProv, const wchar_t* pszContainer, const wchar_t* pszProvider, unsigned int dwProvType, unsigned int dwFlags){
+	BOOL WIN_FUNC CryptAcquireContextW(void **phProv, const uint16_t *pszContainer, const uint16_t *pszProvider,
+					  unsigned int dwProvType, unsigned int dwFlags) {
 		DEBUG_LOG("STUB: CryptAcquireContextW(%p)\n", phProv);
 
 		// to quote the guy above me: screw them for now
@@ -494,7 +496,7 @@ namespace advapi32 {
 		if (TokenInformationClass == TokenUserClass) {
 			constexpr size_t sidSize = sizeof(Sid);
 			constexpr size_t tokenUserSize = sizeof(TokenUserData);
-			const unsigned int required = static_cast<unsigned int>(tokenUserSize + sidSize);
+			const auto required = static_cast<unsigned int>(tokenUserSize + sidSize);
 			*ReturnLength = required;
 			if (!TokenInformation || TokenInformationLength < required) {
 				wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
@@ -544,8 +546,11 @@ namespace advapi32 {
 		return FALSE;
 	}
 
-	BOOL WIN_FUNC LookupAccountSidW(const wchar_t *lpSystemName, const void *sidPointer, wchar_t *Name, unsigned long *cchName, wchar_t *ReferencedDomainName, unsigned long *cchReferencedDomainName, SID_NAME_USE *peUse) {
-		DEBUG_LOG("LookupAccountSidW(system=%ls, sid=%p)\n", lpSystemName ? lpSystemName : L"(null)", sidPointer);
+	BOOL WIN_FUNC LookupAccountSidW(const uint16_t *lpSystemName, const void *sidPointer, uint16_t *Name,
+				       unsigned long *cchName, uint16_t *ReferencedDomainName,
+				       unsigned long *cchReferencedDomainName, SID_NAME_USE *peUse) {
+		std::string systemName = lpSystemName ? wideStringToString(lpSystemName) : std::string("(null)");
+		DEBUG_LOG("LookupAccountSidW(system=%s, sid=%p)\n", systemName.c_str(), sidPointer);
 		(void) lpSystemName; // Only local lookup supported
 		if (!sidPointer || !cchName || !cchReferencedDomainName || !peUse) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -556,18 +561,18 @@ namespace advapi32 {
 			wibo::lastError = ERROR_NONE_MAPPED;
 			return FALSE;
 		}
-		const wchar_t *accountName = L"SYSTEM";
-		const wchar_t *domainName = L"NT AUTHORITY";
-		unsigned long requiredAccount = static_cast<unsigned long>(std::wcslen(accountName) + 1);
-		unsigned long requiredDomain = static_cast<unsigned long>(std::wcslen(domainName) + 1);
+		static constexpr uint16_t accountName[] = {u'S', u'Y', u'S', u'T', u'E', u'M', u'\0'};
+		static constexpr uint16_t domainName[] = {u'N', u'T', u' ', u'A', u'U', u'T', u'H', u'O', u'R', u'I', u'T', u'Y', u'\0'};
+		unsigned long requiredAccount = wstrlen(accountName) + 1;
+		unsigned long requiredDomain = wstrlen(domainName) + 1;
 		if (!Name || *cchName < requiredAccount || !ReferencedDomainName || *cchReferencedDomainName < requiredDomain) {
 			*cchName = requiredAccount;
 			*cchReferencedDomainName = requiredDomain;
 			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
 			return FALSE;
 		}
-		std::wmemcpy(Name, accountName, requiredAccount);
-		std::wmemcpy(ReferencedDomainName, domainName, requiredDomain);
+		std::copy_n(accountName, requiredAccount, Name);
+		std::copy_n(domainName, requiredDomain, ReferencedDomainName);
 		*peUse = SidTypeWellKnownGroup;
 		*cchName = requiredAccount - 1;
 		*cchReferencedDomainName = requiredDomain - 1;

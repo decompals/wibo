@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <cerrno>
 #include <climits>
 #include <cstdio>
@@ -50,45 +49,29 @@ struct PEExportDirectory {
 	uint32_t addressOfNameOrdinals;
 };
 
-#define FOR_256_3(a, b, c, d) FOR_ITER((a << 6 | b << 4 | c << 2 | d))
-#define FOR_256_2(a, b)                                                                                                \
-	FOR_256_3(a, b, 0, 0)                                                                                              \
-	FOR_256_3(a, b, 0, 1)                                                                                              \
-	FOR_256_3(a, b, 0, 2)                                                                                              \
-	FOR_256_3(a, b, 0, 3) FOR_256_3(a, b, 1, 0) FOR_256_3(a, b, 1, 1) FOR_256_3(a, b, 1, 2) FOR_256_3(a, b, 1, 3)      \
-		FOR_256_3(a, b, 2, 0) FOR_256_3(a, b, 2, 1) FOR_256_3(a, b, 2, 2) FOR_256_3(a, b, 2, 3) FOR_256_3(a, b, 3, 0)  \
-			FOR_256_3(a, b, 3, 1) FOR_256_3(a, b, 3, 2) FOR_256_3(a, b, 3, 3)
-#define FOR_256                                                                                                        \
-	FOR_256_2(0, 0)                                                                                                    \
-	FOR_256_2(0, 1)                                                                                                    \
-	FOR_256_2(0, 2)                                                                                                    \
-	FOR_256_2(0, 3) FOR_256_2(1, 0) FOR_256_2(1, 1) FOR_256_2(1, 2) FOR_256_2(1, 3) FOR_256_2(2, 0) FOR_256_2(2, 1)    \
-		FOR_256_2(2, 2) FOR_256_2(2, 3) FOR_256_2(3, 0) FOR_256_2(3, 1) FOR_256_2(3, 2) FOR_256_2(3, 3)
+using StubFuncType = void (*)();
+constexpr size_t MAX_STUBS = 0x100;
+size_t stubIndex = 0;
+std::array<std::string, MAX_STUBS> stubDlls;
+std::array<std::string, MAX_STUBS> stubFuncNames;
+std::unordered_map<std::string, StubFuncType> stubCache;
 
-static constexpr size_t MAX_STUBS = 0x100;
-static int stubIndex = 0;
-static std::array<std::string, MAX_STUBS> stubDlls;
-static std::array<std::string, MAX_STUBS> stubFuncNames;
-static std::unordered_map<std::string, void *> stubCache;
-
-static std::string makeStubKey(const char *dllName, const char *funcName) {
+std::string makeStubKey(const char *dllName, const char *funcName) {
 	std::string key;
 	if (dllName) {
 		key.assign(dllName);
-		std::transform(key.begin(), key.end(), key.begin(),
-				   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+		toLowerInPlace(key);
 	}
 	key.push_back(':');
 	if (funcName) {
 		std::string func(funcName);
-		std::transform(func.begin(), func.end(), func.begin(),
-				   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+		toLowerInPlace(func);
 		key += func;
 	}
 	return key;
 }
 
-static void stubBase(int index) {
+void stubBase(size_t index) {
 	const char *func = stubFuncNames[index].empty() ? "<unknown>" : stubFuncNames[index].c_str();
 	const char *dll = stubDlls[index].empty() ? "<unknown>" : stubDlls[index].c_str();
 	fprintf(stderr, "wibo: call reached missing import %s from %s\n", func, dll);
@@ -96,46 +79,41 @@ static void stubBase(int index) {
 	abort();
 }
 
-void (*stubFuncs[MAX_STUBS])(void) = {
-#define FOR_ITER(i) []() { stubBase(i); },
-	FOR_256
-#undef FOR_ITER
-};
+template <size_t Index> void stubThunk() { stubBase(Index); }
 
-#undef FOR_256_3
-#undef FOR_256_2
-#undef FOR_256
+template <size_t... Indices>
+constexpr std::array<void (*)(void), sizeof...(Indices)> makeStubTable(std::index_sequence<Indices...>) {
+	return {{stubThunk<Indices>...}};
+}
 
-void *resolveMissingFuncName(const char *dllName, const char *funcName) {
+constexpr auto stubFuncs = makeStubTable(std::make_index_sequence<MAX_STUBS>{});
+
+StubFuncType resolveMissingFuncName(const char *dllName, const char *funcName) {
 	DEBUG_LOG("Missing function: %s (%s)\n", dllName, funcName);
 	std::string key = makeStubKey(dllName, funcName);
 	auto existing = stubCache.find(key);
 	if (existing != stubCache.end()) {
 		return existing->second;
 	}
-	if (stubIndex >= static_cast<int>(MAX_STUBS)) {
-		fprintf(stderr,
-				"Too many missing functions encountered (>%zu). Last failure: %s (%s)\n",
-				MAX_STUBS, funcName, dllName);
-		exit(1);
+	if (stubIndex >= MAX_STUBS) {
+		fprintf(stderr, "wibo: too many missing functions encountered (>%zu). Last failure: %s (%s)\n", MAX_STUBS,
+				funcName, dllName);
+		fflush(stderr);
+		abort();
 	}
 	stubFuncNames[stubIndex] = funcName ? funcName : "";
 	stubDlls[stubIndex] = dllName ? dllName : "";
-	void *stub = (void *)stubFuncs[stubIndex];
+	StubFuncType stub = stubFuncs[stubIndex];
 	stubCache.emplace(std::move(key), stub);
 	stubIndex++;
 	return stub;
 }
 
-void *resolveMissingFuncOrdinal(const char *dllName, uint16_t ordinal) {
+StubFuncType resolveMissingFuncOrdinal(const char *dllName, uint16_t ordinal) {
 	char buf[16];
 	sprintf(buf, "%d", ordinal);
 	return resolveMissingFuncName(dllName, buf);
 }
-
-} // namespace
-
-namespace {
 
 using ModulePtr = std::unique_ptr<wibo::ModuleInfo>;
 
@@ -152,23 +130,45 @@ struct ModuleRegistry {
 	std::unordered_set<wibo::ModuleInfo *> pinnedModules;
 };
 
-ModuleRegistry &registry() {
-	static ModuleRegistry reg;
-	return reg;
-}
+struct LockedRegistry {
+	ModuleRegistry *reg;
+	std::unique_lock<std::recursive_mutex> lock;
 
-std::string toLowerCopy(const std::string &value) {
-	std::string out = value;
-	std::transform(out.begin(), out.end(), out.begin(),
-				   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-	return out;
+	LockedRegistry(ModuleRegistry &registryRef, std::unique_lock<std::recursive_mutex> &&guard)
+		: reg(&registryRef), lock(std::move(guard)) {}
+
+	LockedRegistry(const LockedRegistry &) = delete;
+	LockedRegistry &operator=(const LockedRegistry &) = delete;
+	LockedRegistry(LockedRegistry &&) = default;
+	LockedRegistry &operator=(LockedRegistry &&) = default;
+
+	[[nodiscard]] ModuleRegistry &get() const { return *reg; }
+	ModuleRegistry *operator->() const { return reg; }
+	ModuleRegistry &operator*() const { return *reg; }
+};
+
+void registerBuiltinModule(ModuleRegistry &reg, const wibo::Module *module);
+
+LockedRegistry registry() {
+	static ModuleRegistry reg;
+	std::unique_lock<std::recursive_mutex> guard(reg.mutex);
+	if (!reg.initialized) {
+		reg.initialized = true;
+		const wibo::Module *builtins[] = {
+			&lib_advapi32, &lib_bcrypt, &lib_crt,	 &lib_kernel32, &lib_lmgr,		&lib_mscoree, &lib_msvcrt,
+			&lib_ntdll,	   &lib_ole32,	&lib_rpcrt4, &lib_user32,	&lib_vcruntime, &lib_version, nullptr,
+		};
+		for (const wibo::Module **module = builtins; *module; ++module) {
+			registerBuiltinModule(reg, *module);
+		}
+	}
+	return {reg, std::move(guard)};
 }
 
 std::string normalizeAlias(const std::string &value) {
 	std::string out = value;
 	std::replace(out.begin(), out.end(), '/', '\\');
-	std::transform(out.begin(), out.end(), out.begin(),
-				   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	toLowerInPlace(out);
 	return out;
 }
 
@@ -211,7 +211,7 @@ std::vector<std::string> candidateModuleNames(const ParsedModuleName &parsed) {
 
 std::string normalizedBaseKey(const ParsedModuleName &parsed) {
 	if (parsed.base.empty()) {
-		return std::string();
+		return {};
 	}
 	std::string base = parsed.base;
 	if (!parsed.hasExtension && !parsed.endsWithDot) {
@@ -231,48 +231,36 @@ std::optional<std::filesystem::path> combineAndFind(const std::filesystem::path 
 	return files::findCaseInsensitiveFile(directory, filename);
 }
 
-std::vector<std::filesystem::path> collectSearchDirectories(bool alteredSearchPath) {
+std::vector<std::filesystem::path> collectSearchDirectories(ModuleRegistry &reg, bool alteredSearchPath) {
 	std::vector<std::filesystem::path> dirs;
 	std::unordered_set<std::string> seen;
-	auto addDirectory = [&](const std::filesystem::path &dir) {
-		if (dir.empty())
-			return;
-		std::error_code ec;
-		auto canonical = std::filesystem::weakly_canonical(dir, ec);
+		auto addDirectory = [&](const std::filesystem::path &dir) {
+			if (dir.empty())
+				return;
+			std::error_code ec;
+			auto canonical = std::filesystem::weakly_canonical(dir, ec);
 		if (ec) {
 			canonical = std::filesystem::absolute(dir, ec);
 		}
 		if (ec)
 			return;
-		if (!std::filesystem::exists(canonical, ec) || ec)
-			return;
-		std::string key = toLowerCopy(canonical.string());
-		if (seen.insert(key).second) {
-			dirs.push_back(canonical);
-		}
-	};
-
-	auto &reg = registry();
-
-	if (wibo::argv && wibo::argc > 0 && wibo::argv[0]) {
-		std::filesystem::path mainBinary = std::filesystem::absolute(wibo::argv[0]);
-		if (mainBinary.has_parent_path()) {
-			addDirectory(mainBinary.parent_path());
-		}
-	}
+			if (!std::filesystem::exists(canonical, ec) || ec)
+				return;
+			std::string key = stringToLower(canonical.string());
+			if (seen.insert(key).second) {
+				dirs.push_back(canonical);
+			}
+		};
 
 	if (reg.dllDirectory.has_value()) {
 		addDirectory(*reg.dllDirectory);
 	}
 
-	addDirectory(files::pathFromWindows("Z:/Windows/System32"));
-	addDirectory(files::pathFromWindows("Z:/Windows"));
-
 	if (!alteredSearchPath) {
 		addDirectory(std::filesystem::current_path());
 	}
 
-	if (const char *envPath = std::getenv("PATH")) {
+	if (const char *envPath = std::getenv("WIBO_PATH")) {
 		std::string pathList = envPath;
 		size_t start = 0;
 		while (start <= pathList.size()) {
@@ -302,7 +290,9 @@ std::vector<std::filesystem::path> collectSearchDirectories(bool alteredSearchPa
 
 	return dirs;
 }
-std::optional<std::filesystem::path> resolveModuleOnDisk(const std::string &requestedName, bool alteredSearchPath) {
+
+std::optional<std::filesystem::path> resolveModuleOnDisk(ModuleRegistry &reg, const std::string &requestedName,
+														 bool alteredSearchPath) {
 	ParsedModuleName parsed = parseModuleName(requestedName);
 	auto names = candidateModuleNames(parsed);
 
@@ -310,9 +300,9 @@ std::optional<std::filesystem::path> resolveModuleOnDisk(const std::string &requ
 		for (const auto &candidate : names) {
 			auto combined = parsed.directory + "\\" + candidate;
 			auto posixPath = files::pathFromWindows(combined.c_str());
-				if (!posixPath.empty()) {
-					auto resolved = files::findCaseInsensitiveFile(std::filesystem::path(posixPath).parent_path(),
-														std::filesystem::path(posixPath).filename().string());
+			if (!posixPath.empty()) {
+				auto resolved = files::findCaseInsensitiveFile(std::filesystem::path(posixPath).parent_path(),
+															   std::filesystem::path(posixPath).filename().string());
 				if (resolved) {
 					return files::canonicalPath(*resolved);
 				}
@@ -321,7 +311,7 @@ std::optional<std::filesystem::path> resolveModuleOnDisk(const std::string &requ
 		return std::nullopt;
 	}
 
-	auto dirs = collectSearchDirectories(alteredSearchPath);
+	auto dirs = collectSearchDirectories(reg, alteredSearchPath);
 	for (const auto &dir : dirs) {
 		for (const auto &candidate : names) {
 			auto resolved = combineAndFind(dir, candidate);
@@ -340,8 +330,7 @@ std::string storageKeyForPath(const std::filesystem::path &path) {
 
 std::string storageKeyForBuiltin(const std::string &normalizedName) { return normalizedName; }
 
-wibo::ModuleInfo *findByAlias(const std::string &alias) {
-	auto &reg = registry();
+wibo::ModuleInfo *findByAlias(ModuleRegistry &reg, const std::string &alias) {
 	auto it = reg.modulesByAlias.find(alias);
 	if (it != reg.modulesByAlias.end()) {
 		return it->second;
@@ -349,11 +338,10 @@ wibo::ModuleInfo *findByAlias(const std::string &alias) {
 	return nullptr;
 }
 
-void registerAlias(const std::string &alias, wibo::ModuleInfo *info) {
+void registerAlias(ModuleRegistry &reg, const std::string &alias, wibo::ModuleInfo *info) {
 	if (alias.empty() || !info) {
 		return;
 	}
-	auto &reg = registry();
 	auto it = reg.modulesByAlias.find(alias);
 	if (it == reg.modulesByAlias.end()) {
 		reg.modulesByAlias[alias] = info;
@@ -368,7 +356,7 @@ void registerAlias(const std::string &alias, wibo::ModuleInfo *info) {
 	}
 }
 
-void registerBuiltinModule(const wibo::Module *module) {
+void registerBuiltinModule(ModuleRegistry &reg, const wibo::Module *module) {
 	if (!module) {
 		return;
 	}
@@ -380,7 +368,6 @@ void registerBuiltinModule(const wibo::Module *module) {
 	entry->exportsInitialized = true;
 	auto storageKey = storageKeyForBuiltin(entry->normalizedName);
 	auto raw = entry.get();
-	auto &reg = registry();
 	reg.modulesByKey[storageKey] = std::move(entry);
 
 	reg.builtinAliasLists[module] = {};
@@ -395,7 +382,7 @@ void registerBuiltinModule(const wibo::Module *module) {
 		if (pinModule) {
 			reg.pinnedAliases.insert(alias);
 		}
-		registerAlias(alias, raw);
+		registerAlias(reg, alias, raw);
 		reg.builtinAliasMap[alias] = raw;
 		ParsedModuleName parsed = parseModuleName(module->names[i]);
 		std::string baseAlias = normalizedBaseKey(parsed);
@@ -404,7 +391,7 @@ void registerBuiltinModule(const wibo::Module *module) {
 			if (pinModule) {
 				reg.pinnedAliases.insert(baseAlias);
 			}
-			registerAlias(baseAlias, raw);
+			registerAlias(reg, baseAlias, raw);
 			reg.builtinAliasMap[baseAlias] = raw;
 		}
 	}
@@ -447,35 +434,17 @@ void callDllMain(wibo::ModuleInfo &info, DWORD reason) {
 	}
 }
 
-void ensureInitialized() {
-	auto &reg = registry();
-	if (reg.initialized) {
-		return;
-	}
-	reg.initialized = true;
-
-	const wibo::Module *builtins[] = {
-		&lib_advapi32, &lib_bcrypt, &lib_crt,	 &lib_kernel32,	 &lib_lmgr,	   &lib_mscoree, &lib_msvcrt,
-		&lib_ntdll,	   &lib_ole32,	&lib_rpcrt4,	&lib_user32, &lib_vcruntime, &lib_version, nullptr,
-	};
-
-	for (const wibo::Module **module = builtins; *module; ++module) {
-		registerBuiltinModule(*module);
-	}
-}
-
-void registerExternalModuleAliases(const std::string &requestedName, const std::filesystem::path &resolvedPath,
-								   wibo::ModuleInfo *info) {
+void registerExternalModuleAliases(ModuleRegistry &reg, const std::string &requestedName,
+								   const std::filesystem::path &resolvedPath, wibo::ModuleInfo *info) {
 	ParsedModuleName parsed = parseModuleName(requestedName);
-	registerAlias(normalizedBaseKey(parsed), info);
-	registerAlias(normalizeAlias(requestedName), info);
-	registerAlias(storageKeyForPath(resolvedPath), info);
+	registerAlias(reg, normalizedBaseKey(parsed), info);
+	registerAlias(reg, normalizeAlias(requestedName), info);
+	registerAlias(reg, storageKeyForPath(resolvedPath), info);
 }
 
-wibo::ModuleInfo *moduleFromAddress(void *addr) {
+wibo::ModuleInfo *moduleFromAddress(ModuleRegistry &reg, void *addr) {
 	if (!addr)
 		return nullptr;
-	auto &reg = registry();
 	for (auto &pair : reg.modulesByKey) {
 		wibo::ModuleInfo *info = pair.second.get();
 		if (!info)
@@ -491,7 +460,7 @@ wibo::ModuleInfo *moduleFromAddress(void *addr) {
 		}
 		if (!base || size == 0)
 			continue;
-		uint8_t *ptr = static_cast<uint8_t *>(addr);
+		auto *ptr = static_cast<uint8_t *>(addr);
 		if (ptr >= base && ptr < base + size) {
 			return info;
 		}
@@ -523,7 +492,8 @@ void ensureExportsInitialized(wibo::ModuleInfo &info) {
 			}
 			if (rva >= exe->exportDirectoryRVA && rva < exe->exportDirectoryRVA + exe->exportDirectorySize) {
 				const char *forward = exe->fromRVA<const char>(rva);
-				info.exportsByOrdinal[i] = resolveMissingFuncName(info.originalName.c_str(), forward);
+				info.exportsByOrdinal[i] =
+					reinterpret_cast<void *>(resolveMissingFuncName(info.originalName.c_str(), forward));
 			} else {
 				info.exportsByOrdinal[i] = exe->fromRVA<void>(rva);
 			}
@@ -536,7 +506,7 @@ void ensureExportsInitialized(wibo::ModuleInfo &info) {
 		auto *ordinals = exe->fromRVA<uint16_t>(dir->addressOfNameOrdinals);
 		for (uint32_t i = 0; i < nameCount; ++i) {
 			uint16_t index = ordinals[i];
-			uint16_t ordinal = static_cast<uint16_t>(dir->base + index);
+			auto ordinal = static_cast<uint16_t>(dir->base + index);
 			if (index < info.exportsByOrdinal.size()) {
 				const char *namePtr = exe->fromRVA<const char>(names[i]);
 				info.exportNameToOrdinal[std::string(namePtr)] = ordinal;
@@ -550,14 +520,11 @@ void ensureExportsInitialized(wibo::ModuleInfo &info) {
 
 namespace wibo {
 
-void initializeModuleRegistry() {
-	std::lock_guard<std::recursive_mutex> lock(registry().mutex);
-	ensureInitialized();
-}
+void initializeModuleRegistry() { registry(); }
 
 void shutdownModuleRegistry() {
-	std::lock_guard<std::recursive_mutex> lock(registry().mutex);
-	for (auto &pair : registry().modulesByKey) {
+	auto reg = registry();
+	for (auto &pair : reg->modulesByKey) {
 		ModuleInfo *info = pair.second.get();
 		if (!info || info->module) {
 			continue;
@@ -567,40 +534,38 @@ void shutdownModuleRegistry() {
 			callDllMain(*info, DLL_PROCESS_DETACH);
 		}
 	}
-	registry().modulesByKey.clear();
-	registry().modulesByAlias.clear();
-	registry().dllDirectory.reset();
-	registry().initialized = false;
-	registry().onExitTables.clear();
+	reg->modulesByKey.clear();
+	reg->modulesByAlias.clear();
+	reg->dllDirectory.reset();
+	reg->initialized = false;
+	reg->onExitTables.clear();
 }
 
 ModuleInfo *moduleInfoFromHandle(HMODULE module) { return static_cast<ModuleInfo *>(module); }
 
 void setDllDirectoryOverride(const std::filesystem::path &path) {
 	auto canonical = files::canonicalPath(path);
-	std::lock_guard<std::recursive_mutex> lock(registry().mutex);
-	registry().dllDirectory = canonical;
+	auto reg = registry();
+	reg->dllDirectory = canonical;
 }
 
 void clearDllDirectoryOverride() {
-	std::lock_guard<std::recursive_mutex> lock(registry().mutex);
-	registry().dllDirectory.reset();
+	auto reg = registry();
+	reg->dllDirectory.reset();
 }
 
 std::optional<std::filesystem::path> dllDirectoryOverride() {
-	std::lock_guard<std::recursive_mutex> lock(registry().mutex);
-	return registry().dllDirectory;
+	auto reg = registry();
+	return reg->dllDirectory;
 }
 
 void registerOnExitTable(void *table) {
 	if (!table)
 		return;
-	std::lock_guard<std::recursive_mutex> lock(registry().mutex);
-	ensureInitialized();
-	auto &reg = registry();
-	if (reg.onExitTables.find(table) == reg.onExitTables.end()) {
-		if (auto *info = moduleFromAddress(table)) {
-			reg.onExitTables[table] = info;
+	auto reg = registry();
+	if (reg->onExitTables.find(table) == reg->onExitTables.end()) {
+		if (auto *info = moduleFromAddress(*reg, table)) {
+			reg->onExitTables[table] = info;
 		}
 	}
 }
@@ -608,16 +573,15 @@ void registerOnExitTable(void *table) {
 void addOnExitFunction(void *table, void (*func)()) {
 	if (!func)
 		return;
-	std::lock_guard<std::recursive_mutex> lock(registry().mutex);
-	auto &reg = registry();
+	auto reg = registry();
 	ModuleInfo *info = nullptr;
-	auto it = reg.onExitTables.find(table);
-	if (it != reg.onExitTables.end()) {
+	auto it = reg->onExitTables.find(table);
+	if (it != reg->onExitTables.end()) {
 		info = it->second;
 	} else if (table) {
-		info = moduleFromAddress(table);
+		info = moduleFromAddress(*reg, table);
 		if (info)
-			reg.onExitTables[table] = info;
+			reg->onExitTables[table] = info;
 	}
 	if (info) {
 		info->onExitFunctions.push_back(reinterpret_cast<void *>(func));
@@ -635,16 +599,15 @@ void runPendingOnExit(ModuleInfo &info) {
 }
 
 void executeOnExitTable(void *table) {
-	std::lock_guard<std::recursive_mutex> lock(registry().mutex);
-	auto &reg = registry();
+	auto reg = registry();
 	ModuleInfo *info = nullptr;
 	if (table) {
-		auto it = reg.onExitTables.find(table);
-		if (it != reg.onExitTables.end()) {
+		auto it = reg->onExitTables.find(table);
+		if (it != reg->onExitTables.end()) {
 			info = it->second;
-			reg.onExitTables.erase(it);
+			reg->onExitTables.erase(it);
 		} else {
-			info = moduleFromAddress(table);
+			info = moduleFromAddress(*reg, table);
 		}
 	}
 	if (info) {
@@ -656,13 +619,12 @@ HMODULE findLoadedModule(const char *name) {
 	if (!name) {
 		return nullptr;
 	}
-	std::lock_guard<std::recursive_mutex> lock(registry().mutex);
-	ensureInitialized();
+	auto reg = registry();
 	ParsedModuleName parsed = parseModuleName(name);
 	std::string alias = normalizedBaseKey(parsed);
-	ModuleInfo *info = findByAlias(alias);
+	ModuleInfo *info = findByAlias(*reg, alias);
 	if (!info) {
-		info = findByAlias(normalizeAlias(name));
+		info = findByAlias(*reg, normalizeAlias(name));
 	}
 	return info;
 }
@@ -675,23 +637,21 @@ HMODULE loadModule(const char *dllName) {
 	std::string requested(dllName);
 	DEBUG_LOG("loadModule(%s)\n", requested.c_str());
 
-	std::lock_guard<std::recursive_mutex> lock(registry().mutex);
-	ensureInitialized();
+	auto reg = registry();
 
 	ParsedModuleName parsed = parseModuleName(requested);
 
-	auto &reg = registry();
 	DWORD diskError = ERROR_SUCCESS;
 
 	auto tryLoadExternal = [&](const std::filesystem::path &path) -> ModuleInfo * {
 		std::string key = storageKeyForPath(path);
-		auto existingIt = reg.modulesByKey.find(key);
-		if (existingIt != reg.modulesByKey.end()) {
+		auto existingIt = reg->modulesByKey.find(key);
+		if (existingIt != reg->modulesByKey.end()) {
 			ModuleInfo *info = existingIt->second.get();
 			if (info->refCount != UINT_MAX) {
 				info->refCount++;
 			}
-			registerExternalModuleAliases(requested, files::canonicalPath(path), info);
+			registerExternalModuleAliases(*reg, requested, files::canonicalPath(path), info);
 			return info;
 		}
 
@@ -725,15 +685,15 @@ HMODULE loadModule(const char *dllName) {
 		info->dontResolveReferences = false;
 
 		ModuleInfo *raw = info.get();
-		reg.modulesByKey[key] = std::move(info);
-		registerExternalModuleAliases(requested, raw->resolvedPath, raw);
+		reg->modulesByKey[key] = std::move(info);
+		registerExternalModuleAliases(*reg, requested, raw->resolvedPath, raw);
 		ensureExportsInitialized(*raw);
 		callDllMain(*raw, DLL_PROCESS_ATTACH);
 		return raw;
 	};
 
 	auto resolveAndLoadExternal = [&]() -> ModuleInfo * {
-		auto resolvedPath = resolveModuleOnDisk(requested, false);
+		auto resolvedPath = resolveModuleOnDisk(*reg, requested, false);
 		if (!resolvedPath) {
 			DEBUG_LOG("  module not found on disk\n");
 			return nullptr;
@@ -742,9 +702,9 @@ HMODULE loadModule(const char *dllName) {
 	};
 
 	std::string alias = normalizedBaseKey(parsed);
-	ModuleInfo *existing = findByAlias(alias);
+	ModuleInfo *existing = findByAlias(*reg, alias);
 	if (!existing) {
-		existing = findByAlias(normalizeAlias(requested));
+		existing = findByAlias(*reg, normalizeAlias(requested));
 	}
 	if (existing) {
 		DEBUG_LOG("  found existing module alias %s (builtin=%d)\n", alias.c_str(), existing->module != nullptr);
@@ -756,7 +716,7 @@ HMODULE loadModule(const char *dllName) {
 			lastError = ERROR_SUCCESS;
 			return existing;
 		}
-		bool pinned = reg.pinnedModules.count(existing) != 0;
+		bool pinned = reg->pinnedModules.count(existing) != 0;
 		if (!pinned) {
 			if (ModuleInfo *external = resolveAndLoadExternal()) {
 				DEBUG_LOG("  replaced builtin module %s with external copy\n", requested.c_str());
@@ -777,13 +737,13 @@ HMODULE loadModule(const char *dllName) {
 
 	auto fallbackAlias = normalizedBaseKey(parsed);
 	ModuleInfo *builtin = nullptr;
-	auto builtinIt = reg.builtinAliasMap.find(fallbackAlias);
-	if (builtinIt != reg.builtinAliasMap.end()) {
+	auto builtinIt = reg->builtinAliasMap.find(fallbackAlias);
+	if (builtinIt != reg->builtinAliasMap.end()) {
 		builtin = builtinIt->second;
 	}
 	if (!builtin) {
-		builtinIt = reg.builtinAliasMap.find(normalizeAlias(requested));
-		if (builtinIt != reg.builtinAliasMap.end()) {
+		builtinIt = reg->builtinAliasMap.find(normalizeAlias(requested));
+		if (builtinIt != reg->builtinAliasMap.end()) {
 			builtin = builtinIt->second;
 		}
 	}
@@ -801,7 +761,7 @@ void freeModule(HMODULE module) {
 	if (!module) {
 		return;
 	}
-	std::lock_guard<std::recursive_mutex> lock(registry().mutex);
+	auto reg = registry();
 	ModuleInfo *info = moduleInfoFromHandle(module);
 	if (!info || info->refCount == UINT_MAX) {
 		return;
@@ -811,10 +771,9 @@ void freeModule(HMODULE module) {
 	}
 	info->refCount--;
 	if (info->refCount == 0) {
-		auto &reg = registry();
-		for (auto it = reg.onExitTables.begin(); it != reg.onExitTables.end();) {
+		for (auto it = reg->onExitTables.begin(); it != reg->onExitTables.end();) {
 			if (it->second == info) {
-				it = reg.onExitTables.erase(it);
+				it = reg->onExitTables.erase(it);
 			} else {
 				++it;
 			}
@@ -823,10 +782,10 @@ void freeModule(HMODULE module) {
 		callDllMain(*info, DLL_PROCESS_DETACH);
 		std::string key = info->resolvedPath.empty() ? storageKeyForBuiltin(info->normalizedName)
 													 : storageKeyForPath(info->resolvedPath);
-		reg.modulesByKey.erase(key);
-		for (auto it = reg.modulesByAlias.begin(); it != reg.modulesByAlias.end();) {
+		reg->modulesByKey.erase(key);
+		for (auto it = reg->modulesByAlias.begin(); it != reg->modulesByAlias.end();) {
 			if (it->second == info) {
-				it = reg.modulesByAlias.erase(it);
+				it = reg->modulesByAlias.erase(it);
 			} else {
 				++it;
 			}
@@ -852,7 +811,7 @@ void *resolveFuncByName(HMODULE module, const char *funcName) {
 			return resolveFuncByOrdinal(module, it->second);
 		}
 	}
-	return resolveMissingFuncName(info->originalName.c_str(), funcName);
+	return reinterpret_cast<void *>(resolveMissingFuncName(info->originalName.c_str(), funcName));
 }
 
 void *resolveFuncByOrdinal(HMODULE module, uint16_t ordinal) {
@@ -869,7 +828,7 @@ void *resolveFuncByOrdinal(HMODULE module, uint16_t ordinal) {
 	if (!info->module) {
 		ensureExportsInitialized(*info);
 		if (!info->exportsByOrdinal.empty() && ordinal >= info->exportOrdinalBase) {
-			size_t index = static_cast<size_t>(ordinal - info->exportOrdinalBase);
+			auto index = static_cast<size_t>(ordinal - info->exportOrdinalBase);
 			if (index < info->exportsByOrdinal.size()) {
 				void *addr = info->exportsByOrdinal[index];
 				if (addr) {
@@ -878,22 +837,20 @@ void *resolveFuncByOrdinal(HMODULE module, uint16_t ordinal) {
 			}
 		}
 	}
-	return resolveMissingFuncOrdinal(info->originalName.c_str(), ordinal);
+	return reinterpret_cast<void *>(resolveMissingFuncOrdinal(info->originalName.c_str(), ordinal));
 }
 
 void *resolveMissingImportByName(const char *dllName, const char *funcName) {
 	const char *safeDll = dllName ? dllName : "";
 	const char *safeFunc = funcName ? funcName : "";
-	std::lock_guard<std::recursive_mutex> lock(registry().mutex);
-	ensureInitialized();
-	return resolveMissingFuncName(safeDll, safeFunc);
+	[[maybe_unused]] auto reg = registry();
+	return reinterpret_cast<void *>(resolveMissingFuncName(safeDll, safeFunc));
 }
 
 void *resolveMissingImportByOrdinal(const char *dllName, uint16_t ordinal) {
 	const char *safeDll = dllName ? dllName : "";
-	std::lock_guard<std::recursive_mutex> lock(registry().mutex);
-	ensureInitialized();
-	return resolveMissingFuncOrdinal(safeDll, ordinal);
+	[[maybe_unused]] auto reg = registry();
+	return reinterpret_cast<void *>(resolveMissingFuncOrdinal(safeDll, ordinal));
 }
 
 Executable *executableFromModule(HMODULE module) {

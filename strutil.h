@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 size_t wstrlen(const uint16_t *str);
@@ -18,3 +19,8 @@ std::string wideStringToString(const uint16_t *src, int len = -1);
 std::vector<uint16_t> stringToWideString(const char *src);
 long wstrtol(const uint16_t *string, uint16_t **end_ptr, int base);
 unsigned long wstrtoul(const uint16_t *string, uint16_t **end_ptr, int base);
+void toLowerInPlace(std::string &str);
+void toUpperInPlace(std::string &str);
+std::string stringToLower(std::string_view str);
+std::string stringToUpper(std::string_view str);
+uint16_t wcharToLower(uint16_t ch);

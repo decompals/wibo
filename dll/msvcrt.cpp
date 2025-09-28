@@ -431,6 +431,10 @@ namespace msvcrt {
 		return std::malloc(size);
 	}
 
+	void* WIN_ENTRY calloc(size_t count, size_t size){
+		return std::calloc(count, size);
+	}
+
 	void* WIN_ENTRY _malloc_crt(size_t size) {
 		return std::malloc(size);
 	}
@@ -1300,6 +1304,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "strcmp") == 0) return (void *)msvcrt::strcmp;
 	if (strcmp(name, "strncmp") == 0) return (void *)msvcrt::strncmp;
 	if (strcmp(name, "malloc") == 0) return (void*)msvcrt::malloc;
+	if (strcmp(name, "calloc") == 0) return (void*)msvcrt::calloc;
 	if (strcmp(name, "_malloc_crt") == 0) return (void*)msvcrt::_malloc_crt;
 	if (strcmp(name, "_lock") == 0) return (void*)msvcrt::_lock;
 	if (strcmp(name, "_unlock") == 0) return (void*)msvcrt::_unlock;

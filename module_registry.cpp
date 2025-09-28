@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cerrno>
 #include <climits>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <mutex>
@@ -88,8 +89,11 @@ static std::string makeStubKey(const char *dllName, const char *funcName) {
 }
 
 static void stubBase(int index) {
-	printf("Unhandled function %s (%s)\n", stubFuncNames[index].c_str(), stubDlls[index].c_str());
-	exit(1);
+	const char *func = stubFuncNames[index].empty() ? "<unknown>" : stubFuncNames[index].c_str();
+	const char *dll = stubDlls[index].empty() ? "<unknown>" : stubDlls[index].c_str();
+	fprintf(stderr, "wibo: call reached missing import %s from %s\n", func, dll);
+	fflush(stderr);
+	abort();
 }
 
 void (*stubFuncs[MAX_STUBS])(void) = {

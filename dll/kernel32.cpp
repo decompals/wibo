@@ -12,6 +12,7 @@
 #include <cwctype>
 #include <filesystem>
 #include <fnmatch.h>
+#include <initializer_list>
 #include <string>
 #include <strings.h>
 #include "strutil.h"
@@ -3067,6 +3068,41 @@ namespace kernel32 {
 		return FALSE; // We're not multibyte (yet?)
 	}
 
+	BOOL WIN_FUNC IsDBCSLeadByteEx(unsigned int CodePage, BYTE TestChar) {
+		DEBUG_LOG("IsDBCSLeadByteEx(cp=%u, ch=%u)\n", CodePage, TestChar);
+
+		const auto inRanges = [TestChar](std::initializer_list<std::pair<uint8_t, uint8_t>> ranges) -> BOOL {
+			for (const auto &range : ranges) {
+				if (TestChar >= range.first && TestChar <= range.second) {
+					return TRUE;
+				}
+			}
+			return FALSE;
+		};
+
+		constexpr unsigned int CP_ACP = 0;
+		constexpr unsigned int CP_OEMCP = 1;
+		constexpr unsigned int CP_MACCP = 2;
+		constexpr unsigned int CP_THREAD_ACP = 3;
+
+		if (CodePage == CP_ACP || CodePage == CP_OEMCP || CodePage == CP_MACCP || CodePage == CP_THREAD_ACP) {
+			return FALSE;
+		}
+
+		switch (CodePage) {
+		case 932: // Japanese Shift-JIS
+			return inRanges({{0x81, 0x9F}, {0xE0, 0xFC}});
+		case 936: // Simplified Chinese (GBK)
+		case 949: // Korean
+		case 950: // Traditional Chinese (Big5)
+		case 1361: // Johab
+			return inRanges({{0x81, 0xFE}});
+		default:
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+	}
+
 	constexpr unsigned int LCMAP_LOWERCASE = 0x00000100;
 	constexpr unsigned int LCMAP_UPPERCASE = 0x00000200;
 	constexpr unsigned int LCMAP_SORTKEY = 0x00000400;
@@ -3437,6 +3473,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "EnumSystemLocalesA") == 0) return (void *) kernel32::EnumSystemLocalesA;
 	if (strcmp(name, "GetUserDefaultLCID") == 0) return (void *) kernel32::GetUserDefaultLCID;
 	if (strcmp(name, "IsDBCSLeadByte") == 0) return (void *) kernel32::IsDBCSLeadByte;
+	if (strcmp(name, "IsDBCSLeadByteEx") == 0) return (void *) kernel32::IsDBCSLeadByteEx;
 
 	// synchapi.h
 	if (strcmp(name, "InitializeCriticalSection") == 0) return (void *) kernel32::InitializeCriticalSection;

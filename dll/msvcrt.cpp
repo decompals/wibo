@@ -4,10 +4,12 @@
 #include <cerrno>
 #include <climits>
 #include <clocale>
+#include <cmath>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <csignal>
 #include <cstring>
 #include <cwchar>
 #include <cwctype>
@@ -18,10 +20,12 @@
 #include <string>
 #include <strings.h>
 #include <type_traits>
+#include <unordered_map>
 #include <unistd.h>
 #include <vector>
 #include <spawn.h>
 #include <sys/wait.h>
+#include <math.h>
 #include "files.h"
 #include "processes.h"
 #include "strutil.h"
@@ -38,6 +42,69 @@ namespace msvcrt {
 	char** __initenv;
 	uint16_t** __winitenv;
 	uint16_t* _wpgmptr;
+	static unsigned int mbCurMaxValue = 1;
+
+	struct IOBProxy {
+		char *_ptr;
+		int _cnt;
+		char *_base;
+		int _flag;
+		int _file;
+		int _charbuf;
+		int _bufsiz;
+		char *_tmpfname;
+	};
+
+	using UserMathErrHandler = int (*)(struct _exception *);
+
+	UserMathErrHandler &mathErrHandler() {
+		static UserMathErrHandler handler = nullptr;
+		return handler;
+	}
+
+	std::mutex &mathErrMutex() {
+		static std::mutex mutex;
+		return mutex;
+	}
+
+	IOBProxy *standardIobEntries() {
+		static IOBProxy entries[3] = {};
+		return entries;
+	}
+
+	std::unordered_map<void *, FILE *> &iobMapping() {
+		static std::unordered_map<void *, FILE *> mapping;
+		return mapping;
+	}
+
+	std::once_flag &iobInitFlag() {
+		static std::once_flag flag;
+		return flag;
+	}
+
+	void initializeIobMapping() {
+		std::call_once(iobInitFlag(), []() {
+			auto &mapping = iobMapping();
+			IOBProxy *entries = standardIobEntries();
+			mapping.emplace(static_cast<void *>(&entries[0]), stdin);
+			mapping.emplace(static_cast<void *>(&entries[1]), stdout);
+			mapping.emplace(static_cast<void *>(&entries[2]), stderr);
+		});
+	}
+
+	FILE *mapToHostFile(FILE *stream) {
+		initializeIobMapping();
+		auto &mapping = iobMapping();
+		auto it = mapping.find(stream);
+		if (it != mapping.end()) {
+			return it->second;
+		}
+		return stream;
+	}
+
+	void refreshMbCurMax() {
+		mbCurMaxValue = static_cast<unsigned int>(MB_CUR_MAX);
+	}
 
 	namespace {
 		struct DllOnExitTable {
@@ -336,9 +403,13 @@ namespace msvcrt {
 		return std::getenv(varname);
 	}
 
-	char* WIN_ENTRY setlocale(int category, const char *locale){
-		return std::setlocale(category, locale);
+char* WIN_ENTRY setlocale(int category, const char *locale){
+	char *result = std::setlocale(category, locale);
+	if (result) {
+		refreshMbCurMax();
 	}
+	return result;
+}
 
 	int WIN_ENTRY _wdupenv_s(uint16_t **buffer, size_t *numberOfElements, const uint16_t *varname){
 		if (buffer) {
@@ -433,6 +504,10 @@ namespace msvcrt {
 
 	void* WIN_ENTRY calloc(size_t count, size_t size){
 		return std::calloc(count, size);
+	}
+
+	void* WIN_ENTRY realloc(void *ptr, size_t size) {
+		return std::realloc(ptr, size);
 	}
 
 	void* WIN_ENTRY _malloc_crt(size_t size) {
@@ -807,9 +882,111 @@ namespace msvcrt {
 		return -1;
 	}
 
+	void WIN_ENTRY __setusermatherr(UserMathErrHandler handler) {
+		std::lock_guard<std::mutex> lock(mathErrMutex());
+		mathErrHandler() = handler;
+	}
+
+	void WIN_ENTRY _cexit() {
+		DEBUG_LOG("_cexit()\n");
+		std::fflush(nullptr);
+	}
+
+	static FILE *resolveFileStream(FILE *stream) {
+		if (!stream) {
+			return nullptr;
+		}
+		return mapToHostFile(stream);
+	}
+
+	int WIN_ENTRY vfprintf(FILE *stream, const char *format, va_list args) {
+		if (!format || !stream) {
+			errno = EINVAL;
+			return -1;
+		}
+		FILE *native = resolveFileStream(stream);
+		if (!native) {
+			errno = EINVAL;
+			return -1;
+		}
+		va_list argsCopy;
+		va_copy(argsCopy, args);
+		int result = std::vfprintf(native, format, argsCopy);
+		va_end(argsCopy);
+		return result;
+	}
+
+	int WIN_ENTRY fprintf(FILE *stream, const char *format, ...) {
+		va_list args;
+		va_start(args, format);
+		int result = msvcrt::vfprintf(stream, format, args);
+		va_end(args);
+		return result;
+	}
+
+	int WIN_ENTRY fputc(int ch, FILE *stream) {
+		if (!stream) {
+			errno = EINVAL;
+			return EOF;
+		}
+		FILE *native = resolveFileStream(stream);
+		if (!native) {
+			errno = EINVAL;
+			return EOF;
+		}
+		return std::fputc(ch, native);
+	}
+
+	size_t WIN_ENTRY fwrite(const void *buffer, size_t size, size_t count, FILE *stream) {
+		if (!buffer || !stream) {
+			errno = EINVAL;
+			return 0;
+		}
+		FILE *native = resolveFileStream(stream);
+		if (!native) {
+			errno = EINVAL;
+			return 0;
+		}
+		return std::fwrite(buffer, size, count, native);
+	}
+
+	char *WIN_ENTRY strerror(int errnum) {
+		return std::strerror(errnum);
+	}
+
+	char *WIN_ENTRY strchr(const char *str, int character) {
+		return const_cast<char *>(std::strchr(str, character));
+	}
+
+	struct lconv *WIN_ENTRY localeconv() {
+		return std::localeconv();
+	}
+
+	using SignalHandler = void (*)(int);
+
+	SignalHandler WIN_ENTRY signal(int sig, SignalHandler handler) {
+		return std::signal(sig, handler);
+	}
+
+	size_t WIN_ENTRY wcslen(const uint16_t *str) {
+		return wstrlen(str);
+	}
+
 	static void abort_and_log(const char *reason) {
 		DEBUG_LOG("Runtime abort: %s\n", reason ? reason : "");
 		std::abort();
+	}
+
+	void WIN_ENTRY abort() {
+		abort_and_log("abort");
+	}
+
+	int WIN_ENTRY atoi(const char *str) {
+		if (!str) {
+			errno = EINVAL;
+			return 0;
+		}
+		return std::atoi(str);
 	}
 
 	int WIN_ENTRY _amsg_exit(int reason) {
@@ -1299,6 +1476,8 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "__getmainargs") == 0) return (void*)msvcrt::__getmainargs;
 	if (strcmp(name, "__wgetmainargs") == 0) return (void*)msvcrt::__wgetmainargs;
 	if (strcmp(name, "setlocale") == 0) return (void*)msvcrt::setlocale;
+	if (strcmp(name, "__mb_cur_max") == 0) return (void *)&msvcrt::mbCurMaxValue;
+	if (strcmp(name, "__setusermatherr") == 0) return (void *)msvcrt::__setusermatherr;
 	if (strcmp(name, "_wdupenv_s") == 0) return (void*)msvcrt::_wdupenv_s;
 	if (strcmp(name, "strlen") == 0) return (void *)msvcrt::strlen;
 	if (strcmp(name, "strcmp") == 0) return (void *)msvcrt::strcmp;
@@ -1373,6 +1552,19 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "_wspawnvp") == 0) return (void*)msvcrt::_wspawnvp;
 	if (strcmp(name, "_wunlink") == 0) return (void*)msvcrt::_wunlink;
 	if (strcmp(name, "_wfullpath") == 0) return (void*)msvcrt::_wfullpath;
+	if (strcmp(name, "_cexit") == 0) return (void*)msvcrt::_cexit;
+	if (strcmp(name, "_iob") == 0) return (void*)msvcrt::standardIobEntries();
+	if (strcmp(name, "abort") == 0) return (void*)msvcrt::abort;
+	if (strcmp(name, "atoi") == 0) return (void*)msvcrt::atoi;
+	if (strcmp(name, "fprintf") == 0) return (void*)msvcrt::fprintf;
+	if (strcmp(name, "vfprintf") == 0) return (void*)msvcrt::vfprintf;
+	if (strcmp(name, "fputc") == 0) return (void*)msvcrt::fputc;
+	if (strcmp(name, "fwrite") == 0) return (void*)msvcrt::fwrite;
+	if (strcmp(name, "localeconv") == 0) return (void*)msvcrt::localeconv;
+	if (strcmp(name, "signal") == 0) return (void*)msvcrt::signal;
+	if (strcmp(name, "strchr") == 0) return (void*)msvcrt::strchr;
+	if (strcmp(name, "strerror") == 0) return (void*)msvcrt::strerror;
+	if (strcmp(name, "wcslen") == 0) return (void*)msvcrt::wcslen;
 	return nullptr;
 }
 

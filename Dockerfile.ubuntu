@@ -1,0 +1,28 @@
+# Ubuntu 24.04 environment that matches CI toolchain and fixture tests.
+FROM ubuntu:24.04 AS deps
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        binutils \
+        binutils-mingw-w64-i686 \
+        cmake \
+        file \
+        g++-multilib \
+        gcc-mingw-w64-i686 \
+        gdb \
+        ninja-build \
+        unzip \
+        wget \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /wibo
+
+FROM deps AS dev
+COPY . /wibo
+
+ARG BUILD_TYPE=Debug
+# Configure default build folders so docker build can cache compilation layers if desired.
+RUN cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DBUILD_TESTING=ON -DWIBO_ENABLE_FIXTURE_TESTS=ON \
+    && cmake --build build
+
+ENTRYPOINT ["/bin/bash"]

@@ -1,7 +1,3 @@
 .git/
 .vscode/
 build/
-test/
-
-Dockerfile
-README.md

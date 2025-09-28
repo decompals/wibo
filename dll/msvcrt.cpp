@@ -570,6 +570,10 @@ char* WIN_ENTRY setlocale(int category, const char *locale){
 		return std::memmove(dest, src, count);
 	}
 
+	int WIN_ENTRY memcmp(const void *lhs, const void *rhs, size_t count) {
+		return std::memcmp(lhs, rhs, count);
+	}
+
 	int WIN_ENTRY fflush(FILE *stream) {
 		return std::fflush(stream);
 	}
@@ -1485,6 +1489,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "memset") == 0) return (void*)msvcrt::memset;
 	if (strcmp(name, "memcpy") == 0) return (void*)msvcrt::memcpy;
 	if (strcmp(name, "memmove") == 0) return (void*)msvcrt::memmove;
+	if (strcmp(name, "memcmp") == 0) return (void*)msvcrt::memcmp;
 	if (strcmp(name, "fflush") == 0) return (void*)msvcrt::fflush;
 	if (strcmp(name, "fopen") == 0) return (void*)msvcrt::fopen;
 	if (strcmp(name, "fseek") == 0) return (void*)msvcrt::fseek;

@@ -132,6 +132,12 @@ void WIN_ENTRY free(void *ptr) { ::free(ptr); }
 
 void *WIN_ENTRY memcpy(void *dest, const void *src, size_t count) { return std::memcpy(dest, src, count); }
 
+void *WIN_ENTRY memmove(void *dest, const void *src, size_t count) { return std::memmove(dest, src, count); }
+
+void *WIN_ENTRY memset(void *dest, int ch, size_t count) { return std::memset(dest, ch, count); }
+
+int WIN_ENTRY memcmp(const void *lhs, const void *rhs, size_t count) { return std::memcmp(lhs, rhs, count); }
+
 int WIN_ENTRY __setusermatherr(void *handler) {
 	DEBUG_LOG("STUB: __setusermatherr(%p)\n", handler);
 	return 0;
@@ -266,6 +272,12 @@ static void *resolveByName(const char *name) {
 		return (void *)crt::free;
 	if (strcmp(name, "memcpy") == 0)
 		return (void *)crt::memcpy;
+	if (strcmp(name, "memmove") == 0)
+		return (void *)crt::memmove;
+	if (strcmp(name, "memset") == 0)
+		return (void *)crt::memset;
+	if (strcmp(name, "memcmp") == 0)
+		return (void *)crt::memcmp;
 	if (strcmp(name, "exit") == 0)
 		return (void *)crt::exit;
 	if (strcmp(name, "_cexit") == 0)

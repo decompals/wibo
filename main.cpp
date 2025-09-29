@@ -1,26 +1,28 @@
 #include "common.h"
 #include "files.h"
+#include "processes.h"
 #include "strutil.h"
 #include <asm/ldt.h>
 #include <charconv>
+#include <cstdarg>
 #include <cstring>
 #include <fcntl.h>
 #include <filesystem>
 #include <memory>
-#include <stdarg.h>
-#include <system_error>
 #include <sys/mman.h>
 #include <sys/syscall.h>
+#include <system_error>
 #include <unistd.h>
 #include <vector>
 
 uint32_t wibo::lastError = 0;
-char** wibo::argv;
+char **wibo::argv;
 int wibo::argc;
+std::filesystem::path wibo::guestExecutablePath;
 std::string wibo::executableName;
 std::string wibo::commandLine;
 std::vector<uint16_t> wibo::commandLineW;
-wibo::Executable *wibo::mainModule = 0;
+wibo::ModuleInfo *wibo::mainModule = nullptr;
 bool wibo::debugEnabled = false;
 unsigned int wibo::debugIndent = 0;
 uint16_t wibo::tibSelector = 0;
@@ -109,7 +111,7 @@ static void printHelp(const char *argv0) {
  * @param buffer The buffer to read into.
  * @return The number of bytes read.
  */
-static size_t readMaps(char* buffer) {
+static size_t readMaps(char *buffer) {
 	int fd = open("/proc/self/maps", O_RDONLY);
 	if (fd == -1) {
 		perror("Failed to open /proc/self/maps");
@@ -187,7 +189,8 @@ static void blockUpper2GB() {
 			holdingMapStart = std::max(holdingMapStart, FILL_MEMORY_ABOVE);
 
 			// DEBUG_LOG("Mapping %08x-%08x\n", holdingMapStart, holdingMapEnd);
-			void* holdingMap = mmap((void*) holdingMapStart, holdingMapEnd - holdingMapStart, PROT_READ | PROT_WRITE, MAP_ANONYMOUS|MAP_FIXED|MAP_PRIVATE, -1, 0);
+			void *holdingMap = mmap((void *)holdingMapStart, holdingMapEnd - holdingMapStart, PROT_READ | PROT_WRITE,
+									MAP_ANONYMOUS | MAP_FIXED | MAP_PRIVATE, -1, 0);
 
 			if (holdingMap == MAP_FAILED) {
 				perror("Failed to create holding map");
@@ -288,13 +291,13 @@ int main(int argc, char **argv) {
 	// Create TIB
 	memset(&tib, 0, sizeof(tib));
 	tib.tib = &tib;
-	tib.peb = (PEB*)calloc(sizeof(PEB), 1);
-	tib.peb->ProcessParameters = (RTL_USER_PROCESS_PARAMETERS*)calloc(sizeof(RTL_USER_PROCESS_PARAMETERS), 1);
+	tib.peb = (PEB *)calloc(sizeof(PEB), 1);
+	tib.peb->ProcessParameters = (RTL_USER_PROCESS_PARAMETERS *)calloc(sizeof(RTL_USER_PROCESS_PARAMETERS), 1);
 
 	struct user_desc tibDesc;
 	memset(&tibDesc, 0, sizeof tibDesc);
 	tibDesc.entry_number = 0;
-	tibDesc.base_addr = (unsigned int) &tib;
+	tibDesc.base_addr = (unsigned int)&tib;
 	tibDesc.limit = 0x1000;
 	tibDesc.seg_32bit = 1;
 	tibDesc.contents = 0; // hopefully this is ok
@@ -312,12 +315,25 @@ int main(int argc, char **argv) {
 	char **guestArgv = argv + programIndex;
 	int guestArgc = argc - programIndex;
 
+	const char *pePath = guestArgv[0];
+	if (!pePath || pePath[0] == '\0') {
+		fprintf(stderr, "No guest binary specified\n");
+		return 1;
+	}
+
+	std::string originalName = pePath;
+	std::filesystem::path resolvedGuestPath = processes::resolveExecutable(originalName, true).value_or({});
+	if (resolvedGuestPath.empty()) {
+		fprintf(stderr, "Failed to resolve path to guest binary %s\n", originalName.c_str());
+		return 1;
+	}
+
 	// Build a command line
 	std::string cmdLine;
 	for (int i = 0; i < guestArgc; ++i) {
 		std::string arg;
 		if (i == 0) {
-			arg = files::pathToWindows(std::filesystem::absolute(guestArgv[0]));
+			arg = files::pathToWindows(resolvedGuestPath);
 		} else {
 			cmdLine += ' ';
 			arg = guestArgv[i];
@@ -326,7 +342,7 @@ int main(int argc, char **argv) {
 		if (needQuotes)
 			cmdLine += '"';
 		int backslashes = 0;
-		for (const char *p = arg.c_str(); ; p++) {
+		for (const char *p = arg.c_str();; p++) {
 			char c = *p;
 			if (c == '\\') {
 				backslashes++;
@@ -356,32 +372,50 @@ int main(int argc, char **argv) {
 	wibo::commandLineW = stringToWideString(wibo::commandLine.c_str());
 	DEBUG_LOG("Command line: %s\n", wibo::commandLine.c_str());
 
+	wibo::guestExecutablePath = resolvedGuestPath;
 	wibo::executableName = executablePath;
 	wibo::argv = guestArgv;
 	wibo::argc = guestArgc;
 
 	wibo::initializeModuleRegistry();
 
-	wibo::Executable exec;
-	wibo::mainModule = &exec;
-
-	char* pe_path = guestArgv[0];
-	FILE *f = fopen(pe_path, "rb");
+	FILE *f = fopen(resolvedGuestPath.c_str(), "rb");
 	if (!f) {
-		std::string mesg = std::string("Failed to open file ") + pe_path;
+		std::string mesg = std::string("Failed to open file ") + resolvedGuestPath.string();
 		perror(mesg.c_str());
 		return 1;
 	}
 
-	exec.loadPE(f, true);
+	auto executable = std::make_unique<wibo::Executable>();
+	if (!executable->loadPE(f, true)) {
+		fclose(f);
+		fprintf(stderr, "Failed to load PE image %s\n", resolvedGuestPath.c_str());
+		return 1;
+	}
 	fclose(f);
 
+	const auto entryPoint = executable->entryPoint;
+	if (!entryPoint) {
+		fprintf(stderr, "Executable %s has no entry point\n", resolvedGuestPath.c_str());
+		return 1;
+	}
+
+	wibo::mainModule =
+		wibo::registerProcessModule(std::move(executable), std::move(resolvedGuestPath), std::move(originalName));
+	if (!wibo::mainModule || !wibo::mainModule->executable) {
+		fprintf(stderr, "Failed to register process module\n");
+		return 1;
+	}
+	DEBUG_LOG("Registered main module %s at %p\n", wibo::mainModule->normalizedName.c_str(),
+			  wibo::mainModule->executable->imageBase);
+
+	if (!wibo::mainModule->executable->resolveImports()) {
+		fprintf(stderr, "Failed to resolve imports for main module\n");
+		return 1;
+	}
+
 	// Invoke the damn thing
-	asm(
-		"movw %0, %%fs; call *%1"
-		:
-		: "r"(wibo::tibSelector), "r"(exec.entryPoint)
-	);
+	asm("movw %0, %%fs; call *%1" : : "r"(wibo::tibSelector), "r"(entryPoint));
 	DEBUG_LOG("We came back\n");
 	wibo::shutdownModuleRegistry();
 

@@ -52,12 +52,12 @@ struct PE32Header {
 	uint32_t loaderFlags;
 	uint32_t numberOfRvaAndSizes;
 	PEImageDataDirectory exportTable;
-	PEImageDataDirectory importTable; // *
+	PEImageDataDirectory importTable;	// *
 	PEImageDataDirectory resourceTable; // *
 	PEImageDataDirectory exceptionTable;
 	PEImageDataDirectory certificateTable;
 	PEImageDataDirectory baseRelocationTable; // *
-	PEImageDataDirectory debug; // *
+	PEImageDataDirectory debug;				  // *
 	PEImageDataDirectory architecture;
 	PEImageDataDirectory globalPtr;
 	PEImageDataDirectory tlsTable;
@@ -122,24 +122,10 @@ uint32_t read32(FILE *file) {
 	return v;
 }
 
-
-wibo::Executable::Executable() {
-	imageBuffer = nullptr;
-	imageSize = 0;
-	entryPoint = nullptr;
-	rsrcBase = 0;
-	rsrcSize = 0;
-	preferredImageBase = 0;
-	relocationDelta = 0;
-	exportDirectoryRVA = 0;
-	exportDirectorySize = 0;
-	relocationDirectoryRVA = 0;
-	relocationDirectorySize = 0;
-}
-
 wibo::Executable::~Executable() {
-	if (imageBuffer) {
-		munmap(imageBuffer, imageSize);
+	if (imageBase) {
+		munmap(imageBase, imageSize);
+		imageBase = nullptr;
 	}
 }
 
@@ -167,7 +153,7 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 
 	PE32Header header32;
 	memset(&header32, 0, sizeof header32);
-	fread(&header32, std::min(sizeof(header32), (size_t) header.sizeOfOptionalHeader), 1, file);
+	fread(&header32, std::min(sizeof(header32), (size_t)header.sizeOfOptionalHeader), 1, file);
 	if (header32.magic != 0x10B)
 		return false;
 
@@ -181,6 +167,13 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 	exportDirectorySize = header32.exportTable.size;
 	relocationDirectoryRVA = header32.baseRelocationTable.virtualAddress;
 	relocationDirectorySize = header32.baseRelocationTable.size;
+	importDirectoryRVA = header32.importTable.virtualAddress;
+	importDirectorySize = header32.importTable.size;
+	delayImportDirectoryRVA = header32.delayImportDescriptor.virtualAddress;
+	delayImportDirectorySize = header32.delayImportDescriptor.size;
+	execMapped = exec;
+	importsResolved = false;
+	importsResolving = false;
 
 	// Build buffer
 	imageSize = header32.sizeOfImage;
@@ -188,17 +181,17 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 	if (exec)
 		prot |= PROT_EXEC;
 	void *preferredBase = (void *)(uintptr_t)header32.imageBase;
-	imageBuffer = mmap(preferredBase, header32.sizeOfImage, prot, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-	if (imageBuffer == MAP_FAILED) {
-		imageBuffer = mmap(nullptr, header32.sizeOfImage, prot, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+	imageBase = mmap(preferredBase, header32.sizeOfImage, prot, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+	if (imageBase == MAP_FAILED) {
+		imageBase = mmap(nullptr, header32.sizeOfImage, prot, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
 	}
-	if (imageBuffer == MAP_FAILED) {
+	if (imageBase == MAP_FAILED) {
 		perror("Image mapping failed!");
-		imageBuffer = nullptr;
+		imageBase = nullptr;
 		return false;
 	}
-	relocationDelta = (intptr_t)((uintptr_t)imageBuffer - (uintptr_t)header32.imageBase);
-	memset(imageBuffer, 0, header32.sizeOfImage);
+	relocationDelta = (intptr_t)((uintptr_t)imageBase - (uintptr_t)header32.imageBase);
+	memset(imageBase, 0, header32.sizeOfImage);
 
 	// Read the sections
 	fseek(file, offsetToPE + sizeof header + header.sizeOfOptionalHeader, SEEK_SET);
@@ -210,9 +203,10 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 		char name[9];
 		memcpy(name, section.name, 8);
 		name[8] = 0;
-		DEBUG_LOG("Section %d: name=%s addr=%x size=%x (raw=%x) ptr=%x\n", i, name, section.virtualAddress, section.virtualSize, section.sizeOfRawData, section.pointerToRawData);
+		DEBUG_LOG("Section %d: name=%s addr=%x size=%x (raw=%x) ptr=%x\n", i, name, section.virtualAddress,
+				  section.virtualSize, section.sizeOfRawData, section.pointerToRawData);
 
-		void *sectionBase = (void *) ((uintptr_t) imageBuffer + section.virtualAddress);
+		void *sectionBase = (void *)((uintptr_t)imageBase + section.virtualAddress);
 		if (section.pointerToRawData > 0 && section.sizeOfRawData > 0) {
 			// Grab this data
 			long savePos = ftell(file);
@@ -230,8 +224,8 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 	if (exec && relocationDelta != 0) {
 		if (relocationDirectoryRVA == 0 || relocationDirectorySize == 0) {
 			DEBUG_LOG("Relocation required but no relocation directory present\n");
-			munmap(imageBuffer, imageSize);
-			imageBuffer = nullptr;
+			munmap(imageBase, imageSize);
+			imageBase = nullptr;
 			return false;
 		}
 
@@ -239,7 +233,8 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 		uint8_t *relocEnd = relocCursor + relocationDirectorySize;
 		while (relocCursor < relocEnd) {
 			auto *block = reinterpret_cast<PEBaseRelocationBlock *>(relocCursor);
-			if (block->sizeOfBlock < sizeof(PEBaseRelocationBlock) || block->sizeOfBlock > static_cast<uint32_t>(relocEnd - relocCursor)) {
+			if (block->sizeOfBlock < sizeof(PEBaseRelocationBlock) ||
+				block->sizeOfBlock > static_cast<uint32_t>(relocEnd - relocCursor)) {
 				break;
 			}
 			if (block->sizeOfBlock == sizeof(PEBaseRelocationBlock)) {
@@ -253,7 +248,7 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 				uint16_t offset = entry & 0x0FFF;
 				if (type == IMAGE_REL_BASED_ABSOLUTE)
 					continue;
-				uintptr_t target = reinterpret_cast<uintptr_t>(imageBuffer) + block->virtualAddress + offset;
+				uintptr_t target = reinterpret_cast<uintptr_t>(imageBase) + block->virtualAddress + offset;
 				switch (type) {
 				case IMAGE_REL_BASED_HIGHLOW: {
 					auto *addr = reinterpret_cast<uint32_t *>(target);
@@ -269,13 +264,34 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 		}
 	}
 
-	if (!exec) {
-		// No need to resolve imports
+	entryPoint = header32.addressOfEntryPoint ? fromRVA<void>(header32.addressOfEntryPoint) : nullptr;
+
+	return true;
+}
+
+bool wibo::Executable::resolveImports() {
+	if (importsResolved || !execMapped) {
+		importsResolved = true;
+		importsResolving = false;
+		return true;
+	}
+	if (importsResolving) {
+		return true;
+	}
+	importsResolving = true;
+
+	if (!importDirectoryRVA) {
+		importsResolved = true;
+		importsResolving = false;
 		return true;
 	}
 
-	// Handle imports
-	PEImportDirectoryEntry *dir = fromRVA<PEImportDirectoryEntry>(header32.importTable.virtualAddress);
+	PEImportDirectoryEntry *dir = fromRVA<PEImportDirectoryEntry>(importDirectoryRVA);
+	if (!dir) {
+		importsResolved = true;
+		importsResolving = false;
+		return true;
+	}
 
 	while (dir->name) {
 		char *dllName = fromRVA(dir->name);
@@ -283,15 +299,15 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 		uint32_t *lookupTable = fromRVA(dir->importLookupTable);
 		uint32_t *addressTable = fromRVA(dir->importAddressTable);
 
-		HMODULE module = loadModule(dllName);
+		ModuleInfo *module = loadModule(dllName);
 		while (*lookupTable) {
 			uint32_t lookup = *lookupTable;
 			if (lookup & 0x80000000) {
 				// Import by ordinal
 				uint16_t ordinal = lookup & 0xFFFF;
 				DEBUG_LOG("  Ordinal: %d\n", ordinal);
-				void *func = module ? resolveFuncByOrdinal(module, ordinal)
-									 : resolveMissingImportByOrdinal(dllName, ordinal);
+				void *func =
+					module ? resolveFuncByOrdinal(module, ordinal) : resolveMissingImportByOrdinal(dllName, ordinal);
 				DEBUG_LOG("    -> %p\n", func);
 				*addressTable = reinterpret_cast<uintptr_t>(func);
 			} else {
@@ -299,7 +315,7 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 				PEHintNameTableEntry *hintName = fromRVA<PEHintNameTableEntry>(lookup);
 				DEBUG_LOG("  Name: %s (IAT=%p)\n", hintName->name, addressTable);
 				void *func = module ? resolveFuncByName(module, hintName->name)
-									 : resolveMissingImportByName(dllName, hintName->name);
+									: resolveMissingImportByName(dllName, hintName->name);
 				DEBUG_LOG("    -> %p\n", func);
 				*addressTable = reinterpret_cast<uintptr_t>(func);
 			}
@@ -309,28 +325,29 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 		++dir;
 	}
 
-	if (header32.delayImportDescriptor.virtualAddress) {
-		DEBUG_LOG("Processing delay import table at RVA %x\n", header32.delayImportDescriptor.virtualAddress);
-		PEDelayImportDescriptor *delay = fromRVA<PEDelayImportDescriptor>(header32.delayImportDescriptor.virtualAddress);
-		while (delay->name) {
+	// TODO: actual delay loading from __delayLoadHelper2
+	if (delayImportDirectoryRVA) {
+		DEBUG_LOG("Processing delay import table at RVA %x\n", delayImportDirectoryRVA);
+		PEDelayImportDescriptor *delay = fromRVA<PEDelayImportDescriptor>(delayImportDirectoryRVA);
+		while (delay && delay->name) {
 			char *dllName = fromRVA<char>(delay->name);
 			DEBUG_LOG("Delay DLL Name: %s\n", dllName);
 			uint32_t *lookupTable = fromRVA<uint32_t>(delay->importNameTable);
 			uint32_t *addressTable = fromRVA<uint32_t>(delay->importAddressTable);
-			HMODULE module = loadModule(dllName);
+			ModuleInfo *module = loadModule(dllName);
 			while (*lookupTable) {
 				uint32_t lookup = *lookupTable;
 				if (lookup & 0x80000000) {
 					uint16_t ordinal = lookup & 0xFFFF;
-				DEBUG_LOG("  Ordinal: %d (IAT=%p)\n", ordinal, addressTable);
+					DEBUG_LOG("  Ordinal: %d (IAT=%p)\n", ordinal, addressTable);
 					void *func = module ? resolveFuncByOrdinal(module, ordinal)
-									 : resolveMissingImportByOrdinal(dllName, ordinal);
+										: resolveMissingImportByOrdinal(dllName, ordinal);
 					*addressTable = reinterpret_cast<uintptr_t>(func);
 				} else {
 					PEHintNameTableEntry *hintName = fromRVA<PEHintNameTableEntry>(lookup);
 					DEBUG_LOG("  Name: %s\n", hintName->name);
 					void *func = module ? resolveFuncByName(module, hintName->name)
-									 : resolveMissingImportByName(dllName, hintName->name);
+										: resolveMissingImportByName(dllName, hintName->name);
 					*addressTable = reinterpret_cast<uintptr_t>(func);
 				}
 				++lookupTable;
@@ -346,7 +363,7 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 		}
 	}
 
-	entryPoint = header32.addressOfEntryPoint ? fromRVA<void>(header32.addressOfEntryPoint) : nullptr;
-
+	importsResolved = true;
+	importsResolving = false;
 	return true;
 }

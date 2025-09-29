@@ -7,11 +7,11 @@ Don't run this on any untrusted executables, I implore you. (Or probably just do
 ## Building
 
 ```sh
-cmake -B build -DCMAKE_BUILD_TYPE=Debug
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
 cmake --build build --target wibo
 ```
 
-`cmake -B build -DCMAKE_BUILD_TYPE=Release` to produce an optimized binary instead.
+Set `-DCMAKE_BUILD_TYPE=Release` to produce an optimized binary instead.
 
 ## Running
 

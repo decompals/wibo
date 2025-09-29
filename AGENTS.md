@@ -7,7 +7,7 @@
 - Sample fixtures for exercising the loader live in `test/`; keep new repros small and self-contained.
 
 ## Build, Test, and Development Commands
-- `cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` configures a 32-bit toolchain; ensure multilib packages are present.
+- `cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` configures a 32-bit toolchain; ensure multilib packages are present.
 - `cmake --build build --target wibo` compiles the shim; switch to `-DCMAKE_BUILD_TYPE=Release` for optimised binaries.
 - `./build/wibo /path/to/program.exe` runs a Windows binary. Use `WIBO_DEBUG=1` (or `--debug`/`-D`) for verbose logging. Use `--chdir`/`-C` to set the working directory.
 - `cmake -B build -DBUILD_TESTING=ON` + `ctest --test-dir build --output-on-failure` runs the self-checking WinAPI fixtures (requires `i686-w64-mingw32-gcc` and `i686-w64-mingw32-windres`).

@@ -2685,17 +2685,13 @@ namespace kernel32 {
 
 	HMODULE WIN_FUNC GetModuleHandleA(LPCSTR lpModuleName) {
 		DEBUG_LOG("GetModuleHandleA(%s)\n", lpModuleName);
-
-		if (!lpModuleName) {
-			// If lpModuleName is NULL, GetModuleHandle returns a handle to the file
-			// used to create the calling process (.exe file).
-			// This handle needs to equal the actual image buffer, from which data can be read.
-			return wibo::mainModule->imageBuffer;
+		const auto* module = wibo::findLoadedModule(lpModuleName);
+		if (!module) {
+			wibo::lastError = ERROR_MOD_NOT_FOUND;
+			return nullptr;
 		}
-
-		HMODULE module = wibo::findLoadedModule(lpModuleName);
-		wibo::lastError = module ? ERROR_SUCCESS : ERROR_MOD_NOT_FOUND;
-		return module;
+		wibo::lastError = ERROR_SUCCESS;
+		return module->handle;
 	}
 
 	HMODULE WIN_FUNC GetModuleHandleW(LPCWSTR lpModuleName) {
@@ -2715,22 +2711,16 @@ namespace kernel32 {
 			return 0;
 		}
 
+		auto *info = wibo::moduleInfoFromHandle(hModule);
+		if (!info) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
 		std::string path;
-		if (wibo::isMainModule(hModule)) {
-			const auto exePath = files::pathFromWindows(wibo::argv[0]);
-			const auto absPath = std::filesystem::absolute(exePath);
-			path = files::pathToWindows(absPath);
+		if (!info->resolvedPath.empty()) {
+			path = files::pathToWindows(info->resolvedPath);
 		} else {
-			auto *info = wibo::moduleInfoFromHandle(hModule);
-			if (!info) {
-				wibo::lastError = ERROR_INVALID_PARAMETER;
-				return 0;
-			}
-			if (!info->resolvedPath.empty()) {
-				path = files::pathToWindows(info->resolvedPath);
-			} else {
-				path = info->originalName;
-			}
+			path = info->originalName;
 		}
 		const size_t len = path.size();
 		if (nSize == 0) {
@@ -2759,22 +2749,16 @@ namespace kernel32 {
 			return 0;
 		}
 
+		auto *info = wibo::moduleInfoFromHandle(hModule);
+		if (!info) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
 		std::string path;
-		if (wibo::isMainModule(hModule)) {
-			const auto exePath = files::pathFromWindows(wibo::argv[0]);
-			const auto absPath = std::filesystem::absolute(exePath);
-			path = files::pathToWindows(absPath);
+		if (!info->resolvedPath.empty()) {
+			path = files::pathToWindows(info->resolvedPath);
 		} else {
-			auto *info = wibo::moduleInfoFromHandle(hModule);
-			if (!info) {
-				wibo::lastError = ERROR_INVALID_PARAMETER;
-				return 0;
-			}
-			if (!info->resolvedPath.empty()) {
-				path = files::pathToWindows(info->resolvedPath);
-			} else {
-				path = info->originalName;
-			}
+			path = info->originalName;
 		}
 		if (nSize == 0) {
 			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
@@ -2802,18 +2786,9 @@ namespace kernel32 {
 		return copyLen;
 	}
 
-	static wibo::Executable *module_executable_for_resource(void *hModule) {
-		if (!hModule) {
-			hModule = GetModuleHandleA(nullptr);
-		}
-		return wibo::executableFromModule((HMODULE) hModule);
-    }
-
-	static void *find_resource_internal(void *hModule,
-										 const wibo::ResourceIdentifier &type,
-										 const wibo::ResourceIdentifier &name,
-										 std::optional<uint16_t> language) {
-		auto *exe = module_executable_for_resource(hModule);
+	static void *findResourceInternal(HMODULE hModule, const wibo::ResourceIdentifier &type,
+									  const wibo::ResourceIdentifier &name, std::optional<uint16_t> language) {
+		auto *exe = wibo::executableFromModule(hModule);
 		if (!exe) {
 			wibo::lastError = ERROR_RESOURCE_DATA_NOT_FOUND;
 			return nullptr;
@@ -2825,41 +2800,41 @@ namespace kernel32 {
 		return const_cast<void *>(loc.dataEntry);
 	}
 
-	void *WIN_FUNC FindResourceA(void *hModule, const char *lpName, const char *lpType) {
+	void *WIN_FUNC FindResourceA(HMODULE hModule, const char *lpName, const char *lpType) {
 		DEBUG_LOG("FindResourceA %p %p %p\n", hModule, lpName, lpType);
 		auto type = wibo::resourceIdentifierFromAnsi(lpType);
 		auto name = wibo::resourceIdentifierFromAnsi(lpName);
-		return find_resource_internal(hModule, type, name, std::nullopt);
+		return findResourceInternal(hModule, type, name, std::nullopt);
 	}
 
-	void *WIN_FUNC FindResourceExA(void *hModule, const char *lpType, const char *lpName, uint16_t wLanguage) {
+	void *WIN_FUNC FindResourceExA(HMODULE hModule, const char *lpType, const char *lpName, uint16_t wLanguage) {
 		DEBUG_LOG("FindResourceExA %p %p %p %u\n", hModule, lpName, lpType, wLanguage);
 		auto type = wibo::resourceIdentifierFromAnsi(lpType);
 		auto name = wibo::resourceIdentifierFromAnsi(lpName);
-		return find_resource_internal(hModule, type, name, wLanguage);
+		return findResourceInternal(hModule, type, name, wLanguage);
 	}
 
-	void *WIN_FUNC FindResourceW(void *hModule, const uint16_t *lpName, const uint16_t *lpType) {
+	void *WIN_FUNC FindResourceW(HMODULE hModule, const uint16_t *lpName, const uint16_t *lpType) {
 		DEBUG_LOG("FindResourceW %p\n", hModule);
 		auto type = wibo::resourceIdentifierFromWide(lpType);
 		auto name = wibo::resourceIdentifierFromWide(lpName);
-		return find_resource_internal(hModule, type, name, std::nullopt);
+		return findResourceInternal(hModule, type, name, std::nullopt);
 	}
 
-	void *WIN_FUNC FindResourceExW(void *hModule, const uint16_t *lpType, const uint16_t *lpName, uint16_t wLanguage) {
+	void *WIN_FUNC FindResourceExW(HMODULE hModule, const uint16_t *lpType, const uint16_t *lpName, uint16_t wLanguage) {
 		DEBUG_LOG("FindResourceExW %p %u\n", hModule, wLanguage);
 		auto type = wibo::resourceIdentifierFromWide(lpType);
 		auto name = wibo::resourceIdentifierFromWide(lpName);
-		return find_resource_internal(hModule, type, name, wLanguage);
+		return findResourceInternal(hModule, type, name, wLanguage);
 	}
 
-	void* WIN_FUNC LoadResource(void* hModule, void* res) {
+	void *WIN_FUNC LoadResource(HMODULE hModule, void *res) {
 		DEBUG_LOG("LoadResource %p %p\n", hModule, res);
 		if (!res) {
 			wibo::lastError = ERROR_RESOURCE_DATA_NOT_FOUND;
 			return nullptr;
 		}
-		auto *exe = module_executable_for_resource(hModule);
+		auto *exe = wibo::executableFromModule(hModule);
 		if (!exe || !exe->rsrcBase) {
 			wibo::lastError = ERROR_RESOURCE_DATA_NOT_FOUND;
 			return nullptr;
@@ -2901,13 +2876,13 @@ namespace kernel32 {
 		return res;
 	}
 
-	unsigned int WIN_FUNC SizeofResource(void* hModule, void* res) {
+	unsigned int WIN_FUNC SizeofResource(HMODULE hModule, void* res) {
 		DEBUG_LOG("SizeofResource %p %p\n", hModule, res);
 		if (!res) {
 			wibo::lastError = ERROR_RESOURCE_DATA_NOT_FOUND;
 			return 0;
 		}
-		auto *exe = module_executable_for_resource(hModule);
+		auto *exe = wibo::executableFromModule(hModule);
 		if (!exe || !exe->rsrcBase) {
 			wibo::lastError = ERROR_RESOURCE_DATA_NOT_FOUND;
 			return 0;
@@ -2922,7 +2897,13 @@ namespace kernel32 {
 
 	HMODULE WIN_FUNC LoadLibraryA(LPCSTR lpLibFileName) {
 		DEBUG_LOG("LoadLibraryA(%s)\n", lpLibFileName);
-		return wibo::loadModule(lpLibFileName);
+		const auto *info = wibo::loadModule(lpLibFileName);
+		if (!info) {
+			// loadModule already sets lastError
+			return nullptr;
+		}
+		wibo::lastError = ERROR_SUCCESS;
+		return info->handle;
 	}
 
 	HMODULE WIN_FUNC LoadLibraryW(LPCWSTR lpLibFileName) {
@@ -2943,7 +2924,12 @@ namespace kernel32 {
 
 	BOOL WIN_FUNC FreeLibrary(HMODULE hLibModule) {
 		DEBUG_LOG("FreeLibrary(%p)\n", hLibModule);
-		wibo::freeModule(hLibModule);
+		auto *info = wibo::moduleInfoFromHandle(hLibModule);
+		if (!info) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return FALSE;
+		}
+		wibo::freeModule(info);
 		return TRUE;
 	}
 
@@ -3664,15 +3650,26 @@ namespace kernel32 {
 
 	FARPROC WIN_FUNC GetProcAddress(HMODULE hModule, LPCSTR lpProcName) {
 		FARPROC result;
+		const auto info = wibo::moduleInfoFromHandle(hModule);
+		if (!info) {
+			DEBUG_LOG("GetProcAddress: invalid module handle %p\n", hModule);
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return nullptr;
+		}
 		const auto proc = reinterpret_cast<uintptr_t>(lpProcName);
 		if (proc & ~0xFFFF) {
 			DEBUG_LOG("GetProcAddress(%p, %s) ", hModule, lpProcName);
-			result = wibo::resolveFuncByName(hModule, lpProcName);
+			result = wibo::resolveFuncByName(info, lpProcName);
 		} else {
 			DEBUG_LOG("GetProcAddress(%p, %u) ", hModule, proc);
-			result = wibo::resolveFuncByOrdinal(hModule, static_cast<uint16_t>(proc));
+			result = wibo::resolveFuncByOrdinal(info, static_cast<uint16_t>(proc));
 		}
 		DEBUG_LOG("-> %p\n", result);
+		if (!result) {
+			wibo::lastError = ERROR_PROC_NOT_FOUND;
+		} else {
+			wibo::lastError = ERROR_SUCCESS;
+		}
 		return result;
 	}
 

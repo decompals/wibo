@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cerrno>
 #include <climits>
 #include <cstdio>
 #include <cstdlib>
@@ -253,10 +252,10 @@ std::vector<std::filesystem::path> collectSearchDirectories(ModuleRegistry &reg,
 		}
 	};
 
-	if (wibo::argv && wibo::argc > 0 && wibo::argv[0]) {
-		std::filesystem::path mainBinary = std::filesystem::absolute(wibo::argv[0]);
-		if (mainBinary.has_parent_path()) {
-			addDirectory(mainBinary.parent_path());
+	if (!wibo::guestExecutablePath.empty()) {
+		auto parent = wibo::guestExecutablePath.parent_path();
+		if (!parent.empty()) {
+			addDirectory(parent);
 		}
 	}
 
@@ -369,6 +368,7 @@ void registerBuiltinModule(ModuleRegistry &reg, const wibo::Module *module) {
 		return;
 	}
 	ModulePtr entry = std::make_unique<wibo::ModuleInfo>();
+	entry->handle = entry.get();
 	entry->module = module;
 	entry->refCount = UINT_MAX;
 	entry->originalName = module->names[0] ? module->names[0] : "";
@@ -406,24 +406,24 @@ void registerBuiltinModule(ModuleRegistry &reg, const wibo::Module *module) {
 }
 
 void callDllMain(wibo::ModuleInfo &info, DWORD reason) {
-	if (!info.entryPoint || info.module) {
+	if (!info.executable) {
 		return;
 	}
 	using DllMainFunc = BOOL(WIN_FUNC *)(HMODULE, DWORD, LPVOID);
-	auto dllMain = reinterpret_cast<DllMainFunc>(info.entryPoint);
+	auto dllMain = reinterpret_cast<DllMainFunc>(info.executable->entryPoint);
 	if (!dllMain) {
 		return;
 	}
 
 	auto invokeWithGuestTIB = [&](DWORD callReason) -> BOOL {
 		if (!wibo::tibSelector) {
-			return dllMain(reinterpret_cast<HMODULE>(info.imageBase), callReason, nullptr);
+			return dllMain(reinterpret_cast<HMODULE>(info.executable->imageBase), callReason, nullptr);
 		}
 
 		uint16_t previousSegment = 0;
 		asm volatile("mov %%fs, %0" : "=r"(previousSegment));
 		asm volatile("movw %0, %%fs" : : "r"(wibo::tibSelector) : "memory");
-		BOOL result = dllMain(reinterpret_cast<HMODULE>(info.imageBase), callReason, nullptr);
+		BOOL result = dllMain(reinterpret_cast<HMODULE>(info.executable->imageBase), callReason, nullptr);
 		asm volatile("movw %0, %%fs" : : "r"(previousSegment) : "memory");
 		return result;
 	};
@@ -455,20 +455,13 @@ wibo::ModuleInfo *moduleFromAddress(ModuleRegistry &reg, void *addr) {
 		return nullptr;
 	for (auto &pair : reg.modulesByKey) {
 		wibo::ModuleInfo *info = pair.second.get();
-		if (!info)
+		if (!info || !info->executable)
 			continue;
-		uint8_t *base = nullptr;
-		size_t size = 0;
-		if (info->imageBase && info->imageSize) {
-			base = static_cast<uint8_t *>(info->imageBase);
-			size = info->imageSize;
-		} else if (info->executable) {
-			base = static_cast<uint8_t *>(info->executable->imageBuffer);
-			size = info->executable->imageSize;
-		}
+		const auto *base = static_cast<const uint8_t *>(info->executable->imageBase);
+		size_t size = info->executable->imageSize;
 		if (!base || size == 0)
 			continue;
-		auto *ptr = static_cast<uint8_t *>(addr);
+		const auto *ptr = static_cast<const uint8_t *>(addr);
 		if (ptr >= base && ptr < base + size) {
 			return info;
 		}
@@ -530,6 +523,68 @@ namespace wibo {
 
 void initializeModuleRegistry() { registry(); }
 
+ModuleInfo *registerProcessModule(std::unique_ptr<Executable> executable, std::filesystem::path resolvedPath,
+								  std::string originalName) {
+	if (!executable) {
+		return nullptr;
+	}
+
+	if (originalName.empty() && !resolvedPath.empty()) {
+		originalName = resolvedPath.filename().string();
+	}
+
+	ParsedModuleName parsed = parseModuleName(originalName);
+	std::string normalizedName = normalizedBaseKey(parsed);
+
+	ModulePtr info = std::make_unique<ModuleInfo>();
+	info->handle = executable->imageBase; // Use image base as handle for main module
+	info->module = nullptr;
+	info->originalName = std::move(originalName);
+	info->normalizedName = std::move(normalizedName);
+	info->resolvedPath = std::move(resolvedPath);
+	info->executable = std::move(executable);
+	info->refCount = UINT_MAX;
+
+	ModuleInfo *raw = info.get();
+
+	std::string storageKey;
+	if (!raw->resolvedPath.empty()) {
+		storageKey = storageKeyForPath(raw->resolvedPath);
+	} else if (!raw->normalizedName.empty()) {
+		storageKey = storageKeyForBuiltin(raw->normalizedName);
+	}
+	if (storageKey.empty()) {
+		storageKey = normalizeAlias(raw->originalName);
+	}
+
+	auto reg = registry();
+	reg->modulesByKey[storageKey] = std::move(info);
+
+	if (!raw->resolvedPath.empty()) {
+		registerExternalModuleAliases(*reg, raw->originalName, raw->resolvedPath, raw);
+	} else {
+		registerAlias(*reg, normalizeAlias(raw->originalName), raw);
+		std::string baseAlias = normalizedBaseKey(parsed);
+		if (baseAlias != raw->originalName) {
+			registerAlias(*reg, baseAlias, raw);
+		}
+	}
+
+	ensureExportsInitialized(*raw);
+
+	auto pinAlias = [&](const std::string &alias) {
+		if (!alias.empty()) {
+			reg->pinnedAliases.insert(alias);
+		}
+	};
+	reg->pinnedModules.insert(raw);
+	pinAlias(storageKey);
+	pinAlias(normalizeAlias(raw->originalName));
+	pinAlias(normalizedName);
+
+	return raw;
+}
+
 void shutdownModuleRegistry() {
 	auto reg = registry();
 	for (auto &pair : reg->modulesByKey) {
@@ -549,7 +604,12 @@ void shutdownModuleRegistry() {
 	reg->onExitTables.clear();
 }
 
-ModuleInfo *moduleInfoFromHandle(HMODULE module) { return static_cast<ModuleInfo *>(module); }
+ModuleInfo *moduleInfoFromHandle(HMODULE module) {
+	if (isMainModule(module)) {
+		return wibo::mainModule;
+	}
+	return static_cast<ModuleInfo *>(module);
+}
 
 void setDllDirectoryOverride(const std::filesystem::path &path) {
 	auto canonical = files::canonicalPath(path);
@@ -598,7 +658,7 @@ void addOnExitFunction(void *table, void (*func)()) {
 
 void runPendingOnExit(ModuleInfo &info) {
 	for (auto it = info.onExitFunctions.rbegin(); it != info.onExitFunctions.rend(); ++it) {
-		auto fn = reinterpret_cast<void (*)(void)>(*it);
+		auto fn = reinterpret_cast<void (*)()>(*it);
 		if (fn) {
 			fn();
 		}
@@ -623,9 +683,9 @@ void executeOnExitTable(void *table) {
 	}
 }
 
-HMODULE findLoadedModule(const char *name) {
-	if (!name) {
-		return nullptr;
+ModuleInfo *findLoadedModule(const char *name) {
+	if (!name || *name == '\0') {
+		return wibo::mainModule;
 	}
 	auto reg = registry();
 	ParsedModuleName parsed = parseModuleName(name);
@@ -637,8 +697,8 @@ HMODULE findLoadedModule(const char *name) {
 	return info;
 }
 
-HMODULE loadModule(const char *dllName) {
-	if (!dllName) {
+ModuleInfo *loadModule(const char *dllName) {
+	if (!dllName || *dllName == '\0') {
 		lastError = ERROR_INVALID_PARAMETER;
 		return nullptr;
 	}
@@ -680,22 +740,19 @@ HMODULE loadModule(const char *dllName) {
 		fclose(file);
 
 		ModulePtr info = std::make_unique<ModuleInfo>();
+		info->handle = info.get();
 		info->module = nullptr;
 		info->originalName = requested;
 		info->normalizedName = normalizedBaseKey(parsed);
 		info->resolvedPath = files::canonicalPath(path);
 		info->executable = std::move(executable);
-		info->entryPoint = info->executable->entryPoint;
-		info->imageBase = info->executable->imageBuffer;
-		info->imageSize = info->executable->imageSize;
 		info->refCount = 1;
-		info->dataFile = false;
-		info->dontResolveReferences = false;
 
 		ModuleInfo *raw = info.get();
 		reg->modulesByKey[key] = std::move(info);
 		registerExternalModuleAliases(*reg, requested, raw->resolvedPath, raw);
 		ensureExportsInitialized(*raw);
+		raw->executable->resolveImports();
 		callDllMain(*raw, DLL_PROCESS_ATTACH);
 		return raw;
 	};
@@ -765,12 +822,8 @@ HMODULE loadModule(const char *dllName) {
 	return nullptr;
 }
 
-void freeModule(HMODULE module) {
-	if (!module) {
-		return;
-	}
+void freeModule(ModuleInfo *info) {
 	auto reg = registry();
-	ModuleInfo *info = moduleInfoFromHandle(module);
 	if (!info || info->refCount == UINT_MAX) {
 		return;
 	}
@@ -801,8 +854,7 @@ void freeModule(HMODULE module) {
 	}
 }
 
-void *resolveFuncByName(HMODULE module, const char *funcName) {
-	ModuleInfo *info = moduleInfoFromHandle(module);
+void *resolveFuncByName(ModuleInfo *info, const char *funcName) {
 	if (!info) {
 		return nullptr;
 	}
@@ -816,14 +868,13 @@ void *resolveFuncByName(HMODULE module, const char *funcName) {
 	if (!info->module) {
 		auto it = info->exportNameToOrdinal.find(funcName);
 		if (it != info->exportNameToOrdinal.end()) {
-			return resolveFuncByOrdinal(module, it->second);
+			return resolveFuncByOrdinal(info, it->second);
 		}
 	}
 	return reinterpret_cast<void *>(resolveMissingFuncName(info->originalName.c_str(), funcName));
 }
 
-void *resolveFuncByOrdinal(HMODULE module, uint16_t ordinal) {
-	ModuleInfo *info = moduleInfoFromHandle(module);
+void *resolveFuncByOrdinal(ModuleInfo *info, uint16_t ordinal) {
 	if (!info) {
 		return nullptr;
 	}
@@ -862,9 +913,6 @@ void *resolveMissingImportByOrdinal(const char *dllName, uint16_t ordinal) {
 }
 
 Executable *executableFromModule(HMODULE module) {
-	if (isMainModule(module)) {
-		return mainModule;
-	}
 	ModuleInfo *info = moduleInfoFromHandle(module);
 	if (!info) {
 		return nullptr;

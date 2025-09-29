@@ -17,7 +17,7 @@ BOOL WIN_FUNC EnumProcessModules(HANDLE hProcess, HMODULE *lphModule, DWORD cb, 
 		return FALSE;
 	}
 
-	HMODULE currentModule = wibo::mainModule ? reinterpret_cast<HMODULE>(wibo::mainModule->imageBuffer) : nullptr;
+	HMODULE currentModule = wibo::mainModule ? wibo::mainModule->handle : nullptr;
 	DWORD required = currentModule ? sizeof(HMODULE) : 0;
 	if (lpcbNeeded) {
 		*lpcbNeeded = required;

@@ -169,8 +169,8 @@ namespace msvcrt {
 				std::string converted = files::hostPathListToWindows(value);
 				std::string result = converted.empty() ? value : converted;
 				std::string exeDir;
-				if (wibo::argv && wibo::argv[0]) {
-					std::filesystem::path exePath = std::filesystem::absolute(std::filesystem::path(wibo::argv[0])).parent_path();
+				if (!wibo::guestExecutablePath.empty()) {
+					auto exePath = wibo::guestExecutablePath.parent_path();
 					if (!exePath.empty()) {
 						exeDir = files::pathToWindows(exePath);
 					}

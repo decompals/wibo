@@ -522,7 +522,7 @@ namespace advapi32 {
 				return FALSE;
 			}
 			auto *stats = reinterpret_cast<TokenStatisticsData *>(TokenInformation);
-			memset(stats, 0, required);
+			*stats = {};
 			stats->tokenType = 1; // TokenPrimary
 			stats->impersonationLevel = 0; // SecurityAnonymous
 			stats->tokenId.LowPart = 1;

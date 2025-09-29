@@ -70,6 +70,7 @@ typedef unsigned char BYTE;
 #define ERROR_RESOURCE_NAME_NOT_FOUND 1814
 #define ERROR_RESOURCE_LANG_NOT_FOUND 1815
 #define ERROR_MOD_NOT_FOUND 126
+#define ERROR_PROC_NOT_FOUND 127
 #define ERROR_NEGATIVE_SEEK 131
 #define ERROR_BAD_EXE_FORMAT 193
 #define ERROR_ALREADY_EXISTS 183
@@ -102,6 +103,7 @@ namespace wibo {
 	extern uint32_t lastError;
 	extern char **argv;
 	extern int argc;
+	extern std::filesystem::path guestExecutablePath;
 	extern std::string executableName;
 	extern std::string commandLine;
 	extern std::vector<uint16_t> commandLineW;
@@ -125,16 +127,16 @@ namespace wibo {
 	void setDllDirectoryOverride(const std::filesystem::path &path);
 	void clearDllDirectoryOverride();
 	std::optional<std::filesystem::path> dllDirectoryOverride();
-	HMODULE findLoadedModule(const char *name);
+	ModuleInfo *findLoadedModule(const char *name);
 	void registerOnExitTable(void *table);
 	void addOnExitFunction(void *table, void (*func)());
 	void executeOnExitTable(void *table);
 	void runPendingOnExit(ModuleInfo &info);
 
-	HMODULE loadModule(const char *name);
-	void freeModule(HMODULE module);
-	void *resolveFuncByName(HMODULE module, const char *funcName);
-	void *resolveFuncByOrdinal(HMODULE module, uint16_t ordinal);
+	ModuleInfo *loadModule(const char *name);
+	void freeModule(ModuleInfo *info);
+	void *resolveFuncByName(ModuleInfo *info, const char *funcName);
+	void *resolveFuncByOrdinal(ModuleInfo *info, uint16_t ordinal);
 	void *resolveMissingImportByName(const char *dllName, const char *funcName);
 	void *resolveMissingImportByOrdinal(const char *dllName, uint16_t ordinal);
 
@@ -172,51 +174,63 @@ namespace wibo {
 	};
 
 	struct Executable {
-		Executable();
+		Executable() = default;
 		~Executable();
 		bool loadPE(FILE *file, bool exec);
+		bool resolveImports();
 
-		void *imageBuffer;
-		size_t imageSize;
-		void *entryPoint;
-		void *rsrcBase;
-		uint32_t rsrcSize;
-		uintptr_t preferredImageBase;
-		intptr_t relocationDelta;
-		uint32_t exportDirectoryRVA;
-		uint32_t exportDirectorySize;
-		uint32_t relocationDirectoryRVA;
-		uint32_t relocationDirectorySize;
+		void *imageBase = nullptr;
+		size_t imageSize = 0;
+		void *entryPoint = nullptr;
+		void *rsrcBase = nullptr;
+		uint32_t rsrcSize = 0;
+		uintptr_t preferredImageBase = 0;
+		intptr_t relocationDelta = 0;
+		uint32_t exportDirectoryRVA = 0;
+		uint32_t exportDirectorySize = 0;
+		uint32_t relocationDirectoryRVA = 0;
+		uint32_t relocationDirectorySize = 0;
+		uint32_t importDirectoryRVA = 0;
+		uint32_t importDirectorySize = 0;
+		uint32_t delayImportDirectoryRVA = 0;
+		uint32_t delayImportDirectorySize = 0;
+		bool execMapped = false;
+		bool importsResolved = false;
+		bool importsResolving = false;
 
-		bool findResource(const ResourceIdentifier &type,
-					 const ResourceIdentifier &name,
-					 std::optional<uint16_t> language,
-					 ResourceLocation &out) const;
+		bool findResource(const ResourceIdentifier &type, const ResourceIdentifier &name,
+						  std::optional<uint16_t> language, ResourceLocation &out) const;
 
 		template <typename T>
-		T *fromRVA(uint32_t rva) const {
-			return (T *) (rva + (uint8_t *) imageBuffer);
+		T *fromRVA(uintptr_t rva) const {
+			return (T *) (rva + (uint8_t *) imageBase);
 		}
 
 		template <typename T>
 		T *fromRVA(T *rva) const {
-			return fromRVA<T>((uint32_t) rva);
+			return fromRVA<T>((uintptr_t) rva);
 		}
 	};
+
+	extern ModuleInfo *mainModule;
 	struct ModuleInfo {
+		// Windows-style handle to the module. For the main module, this is the image base.
+		// For other modules, this is a pointer to the ModuleInfo structure.
+		HMODULE handle;
+		// Original name used to load the module
 		std::string originalName;
+		// Normalized module name
 		std::string normalizedName;
+		// Full path to the loaded module
 		std::filesystem::path resolvedPath;
+		// Pointer to the built-in module, nullptr if loaded from file
 		const wibo::Module *module = nullptr;
+		// Loaded PE executable
 		std::unique_ptr<wibo::Executable> executable;
-		void *entryPoint = nullptr;
-		void *imageBase = nullptr;
-		size_t imageSize = 0;
+		// Reference count, or UINT_MAX for built-in modules
 		unsigned int refCount = 0;
-		bool dataFile = false;
 		bool processAttachCalled = false;
 		bool processAttachSucceeded = false;
-		bool dontResolveReferences = false;
 		uint32_t exportOrdinalBase = 0;
 		std::vector<void *> exportsByOrdinal;
 		std::unordered_map<std::string, uint16_t> exportNameToOrdinal;
@@ -224,14 +238,16 @@ namespace wibo {
 		std::vector<void *> onExitFunctions;
 	};
 
-	extern Executable *mainModule;
+	ModuleInfo *registerProcessModule(std::unique_ptr<Executable> executable, std::filesystem::path resolvedPath,
+									  std::string originalName);
 	Executable *executableFromModule(HMODULE module);
 
 	/**
-	 * HMODULE will be `nullptr` or `mainModule->imageBuffer` if it's the main module,
+	 * HMODULE will be `nullptr` or `mainModule->imageBase` if it's the main module,
 	 * otherwise it will be a pointer to a `wibo::ModuleInfo`.
 	 */
 	inline bool isMainModule(HMODULE hModule) {
-		return hModule == nullptr || hModule == mainModule->imageBuffer;
+		return hModule == nullptr || hModule == reinterpret_cast<HMODULE>(mainModule) ||
+			   (mainModule && mainModule->executable && hModule == mainModule->executable->imageBase);
 	}
 } // namespace wibo

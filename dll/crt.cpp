@@ -122,6 +122,8 @@ int WIN_ENTRY strcmp(const char *lhs, const char *rhs) { return ::strcmp(lhs, rh
 
 int WIN_ENTRY strncmp(const char *lhs, const char *rhs, size_t count) { return ::strncmp(lhs, rhs, count); }
 
+char *WIN_ENTRY strcpy(char *dest, const char *src) { return ::strcpy(dest, src); }
+
 void *WIN_ENTRY malloc(size_t size) { return ::malloc(size); }
 
 void *WIN_ENTRY calloc(size_t count, size_t size) { return ::calloc(count, size); }
@@ -262,6 +264,8 @@ static void *resolveByName(const char *name) {
 		return (void *)crt::strcmp;
 	if (strcmp(name, "strncmp") == 0)
 		return (void *)crt::strncmp;
+	if (strcmp(name, "strcpy") == 0)
+		return (void *)crt::strcpy;
 	if (strcmp(name, "malloc") == 0)
 		return (void *)crt::malloc;
 	if (strcmp(name, "calloc") == 0)

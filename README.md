@@ -16,10 +16,15 @@ cmake --build build --target wibo
 ## Running
 
 ```sh
-./build/wibo /path/to/program.exe
-# or, with debug logging:
-WIBO_DEBUG=1 ./build/wibo /path/to/program.exe
+./build/wibo /path/to/program.exe [arguments...]
 ```
+
+Supported command line options:
+
+- `--help`: Print usage information.
+- `-D`, `--debug`: Enable shim debug logging (equivalent to `WIBO_DEBUG=1`).
+- `-C DIR`, `--chdir DIR`, `--chdir=DIR`: Change to `DIR` before running the program.
+- `--`: Stop option parsing; following arguments are interpreted as the program command line.
 
 ## Tests
 
@@ -40,8 +45,6 @@ This will cross-compile the fixture executables, run them through `wibo`, and fa
 Rough to-do list:
 
 - Implement more APIs
-- Do something intelligent with Windows `HANDLE`s
-- Convert paths in environment variables (and the structure of `PATH` itself, maybe) to Windows format
 
 ---
 

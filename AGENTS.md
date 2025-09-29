@@ -9,7 +9,7 @@
 ## Build, Test, and Development Commands
 - `cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` configures a 32-bit toolchain; ensure multilib packages are present.
 - `cmake --build build --target wibo` compiles the shim; switch to `-DCMAKE_BUILD_TYPE=Release` for optimised binaries.
-- `./build/wibo /path/to/program.exe` runs a Windows binary through the shim; use `WIBO_DEBUG=1` for verbose logging.
+- `./build/wibo /path/to/program.exe` runs a Windows binary. Use `WIBO_DEBUG=1` (or `--debug`/`-D`) for verbose logging. Use `--chdir`/`-C` to set the working directory.
 - `cmake -B build -DBUILD_TESTING=ON` + `ctest --test-dir build --output-on-failure` runs the self-checking WinAPI fixtures (requires `i686-w64-mingw32-gcc` and `i686-w64-mingw32-windres`).
 - `clang-format -i path/to/file.cpp` and `clang-tidy path/to/file.cpp -p build` keep contributions aligned with the repo's tooling.
 - DON'T use `clang-format` on existing files, only new or heavily modified ones; the repo hasn't been fully formatted yet.

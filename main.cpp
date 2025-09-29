@@ -3,12 +3,14 @@
 #include "strutil.h"
 #include <asm/ldt.h>
 #include <charconv>
+#include <cstring>
 #include <fcntl.h>
 #include <filesystem>
 #include <memory>
 #include <stdarg.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
+#include <unistd.h>
 #include <vector>
 
 uint32_t wibo::lastError = 0;
@@ -83,6 +85,18 @@ struct TIB {
 TIB tib;
 
 const size_t MAPS_BUFFER_SIZE = 0x10000;
+
+static void printHelp(const char *argv0) {
+	std::filesystem::path exePath(argv0 ? argv0 : "wibo");
+	std::string exeName = exePath.filename().string();
+	fprintf(stdout, "Usage: %s [options] <program.exe> [arguments...]\n", exeName.c_str());
+	fprintf(stdout, "\n");
+	fprintf(stdout, "Options:\n");
+	fprintf(stdout, "  --help\t\tShow this help message and exit\n");
+	fprintf(stdout, "  -C, --chdir DIR\tChange working directory before launching the program\n");
+	fprintf(stdout, "  -D, --debug\tEnable shim debug logging (same as WIBO_DEBUG=1)\n");
+	fprintf(stdout, "  --\t\tStop option parsing; following arguments are interpreted as the program command line\n");
+}
 
 /**
  * Read /proc/self/maps into a buffer.
@@ -186,17 +200,73 @@ static void blockUpper2GB() {
 }
 
 int main(int argc, char **argv) {
-	if (argc <= 1) {
-		printf("Usage: ./wibo program.exe ...\n");
-		return 1;
+	std::string chdirPath;
+	bool optionDebug = false;
+	bool parsingOptions = true;
+	int programIndex = -1;
+
+	for (int i = 1; i < argc; ++i) {
+		const char *arg = argv[i];
+		if (parsingOptions) {
+			if (strcmp(arg, "--") == 0) {
+				parsingOptions = false;
+				continue;
+			}
+			if (strcmp(arg, "--help") == 0) {
+				printHelp(argv[0]);
+				return 0;
+			}
+			if (strcmp(arg, "-D") == 0 || strcmp(arg, "--debug") == 0) {
+				optionDebug = true;
+				continue;
+			}
+			if (strncmp(arg, "--chdir=", 8) == 0) {
+				chdirPath = arg + 8;
+				continue;
+			}
+			if (strcmp(arg, "-C") == 0 || strcmp(arg, "--chdir") == 0) {
+				if (i + 1 >= argc) {
+					fprintf(stderr, "Option %s requires a directory argument\n", arg);
+					return 1;
+				}
+				chdirPath = argv[++i];
+				continue;
+			}
+			if (strncmp(arg, "-C", 2) == 0 && arg[2] != '\0') {
+				chdirPath = arg + 2;
+				continue;
+			}
+			if (arg[0] == '-' && arg[1] != '\0') {
+				fprintf(stderr, "Unknown option: %s\n", arg);
+				fprintf(stderr, "\n");
+				printHelp(argv[0]);
+				return 1;
+			}
+		}
+
+		programIndex = i;
+		break;
 	}
 
-	if (getenv("WIBO_DEBUG")) {
+	if (programIndex == -1) {
+		printHelp(argv[0]);
+		return argc <= 1 ? 0 : 1;
+	}
+
+	if (!chdirPath.empty()) {
+		if (chdir(chdirPath.c_str()) != 0) {
+			std::string message = std::string("Failed to chdir to ") + chdirPath;
+			perror(message.c_str());
+			return 1;
+		}
+	}
+
+	if (optionDebug || getenv("WIBO_DEBUG")) {
 		wibo::debugEnabled = true;
 	}
 
-	if (getenv("WIBO_DEBUG_INDENT")) {
-		wibo::debugIndent = std::stoul(getenv("WIBO_DEBUG_INDENT"));
+	if (const char *debugIndentEnv = getenv("WIBO_DEBUG_INDENT")) {
+		wibo::debugIndent = std::stoul(debugIndentEnv);
 	}
 
 	blockUpper2GB();
@@ -226,15 +296,18 @@ int main(int argc, char **argv) {
 
 	wibo::tibSelector = static_cast<uint16_t>((tibDesc.entry_number << 3) | 7);
 
+	char **guestArgv = argv + programIndex;
+	int guestArgc = argc - programIndex;
+
 	// Build a command line
 	std::string cmdLine;
-	for (int i = 1; i < argc; i++) {
+	for (int i = 0; i < guestArgc; ++i) {
 		std::string arg;
-		if (i == 1) {
-			arg = files::pathToWindows(std::filesystem::absolute(argv[1]));
+		if (i == 0) {
+			arg = files::pathToWindows(std::filesystem::absolute(guestArgv[0]));
 		} else {
 			cmdLine += ' ';
-			arg = argv[i];
+			arg = guestArgv[i];
 		}
 		bool needQuotes = arg.find_first_of("\\\" \t\n") != std::string::npos;
 		if (needQuotes)
@@ -271,15 +344,15 @@ int main(int argc, char **argv) {
 	DEBUG_LOG("Command line: %s\n", wibo::commandLine);
 
 	wibo::executableName = argv[0];
-	wibo::argv = argv + 1;
-	wibo::argc = argc - 1;
+	wibo::argv = guestArgv;
+	wibo::argc = guestArgc;
 
 	wibo::initializeModuleRegistry();
 
 	wibo::Executable exec;
 	wibo::mainModule = &exec;
 
-	char* pe_path = argv[1];
+	char* pe_path = guestArgv[0];
 	FILE *f = fopen(pe_path, "rb");
 	if (!f) {
 		std::string mesg = std::string("Failed to open file ") + pe_path;

@@ -7,6 +7,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         binutils \
         binutils-mingw-w64-i686 \
+        ca-certificates \
         cmake \
         file \
         g++-multilib \

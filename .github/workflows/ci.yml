@@ -97,8 +97,10 @@ jobs:
           cp artifacts/static-release/wibo artifacts/out/wibo
 
       - name: Publish release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             artifacts/out/wibo
             artifacts/out/wibo_debug
+          draft: true
+          generate_release_notes: true

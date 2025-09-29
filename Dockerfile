@@ -9,6 +9,7 @@ RUN apk add --no-cache \
     g++ \
     linux-headers \
     binutils \
+    git \
     mingw-w64-binutils \
     mingw-w64-gcc
 

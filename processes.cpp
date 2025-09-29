@@ -192,9 +192,9 @@ namespace processes {
 
 		std::vector<char *> nativeArgs;
 		nativeArgs.reserve(storage.size() + 2);
-		nativeArgs.push_back(wibo::executableName);
+		nativeArgs.push_back(const_cast<char *>(wibo::executableName.c_str()));
 		for (auto &entry : storage) {
-			nativeArgs.push_back(entry.data());
+			nativeArgs.push_back(const_cast<char *>(entry.c_str()));
 		}
 		nativeArgs.push_back(nullptr);
 
@@ -205,7 +205,7 @@ namespace processes {
 		setenv("WIBO_DEBUG_INDENT", indent.c_str(), 1);
 
 		pid_t pid = -1;
-		int spawnResult = posix_spawn(&pid, wibo::executableName, &actions, nullptr, nativeArgs.data(), environ);
+		int spawnResult = posix_spawn(&pid, wibo::executableName.c_str(), &actions, nullptr, nativeArgs.data(), environ);
 		posix_spawn_file_actions_destroy(&actions);
 		if (spawnResult != 0) {
 			return spawnResult;

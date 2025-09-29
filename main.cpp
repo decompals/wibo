@@ -17,8 +17,8 @@
 uint32_t wibo::lastError = 0;
 char** wibo::argv;
 int wibo::argc;
-char *wibo::executableName;
-char *wibo::commandLine;
+std::string wibo::executableName;
+std::string wibo::commandLine;
 std::vector<uint16_t> wibo::commandLineW;
 wibo::Executable *wibo::mainModule = 0;
 bool wibo::debugEnabled = false;
@@ -254,6 +254,18 @@ int main(int argc, char **argv) {
 		return argc <= 1 ? 0 : 1;
 	}
 
+	// Try to resolve our own executable path
+	std::error_code ec;
+	auto resolved = std::filesystem::read_symlink("/proc/self/exe", ec);
+	std::string executablePath;
+	if (!ec) {
+		executablePath = resolved.string();
+	} else {
+		const char *selfArg = argv[0] ? argv[0] : "";
+		auto absCandidate = std::filesystem::absolute(selfArg, ec);
+		executablePath = ec ? std::string(selfArg) : absCandidate.string();
+	}
+
 	if (!chdirPath.empty()) {
 		if (chdir(chdirPath.c_str()) != 0) {
 			std::string message = std::string("Failed to chdir to ") + chdirPath;
@@ -340,11 +352,11 @@ int main(int argc, char **argv) {
 	}
 	cmdLine += '\0';
 
-	wibo::commandLine = cmdLine.data();
-	wibo::commandLineW = stringToWideString(wibo::commandLine);
-	DEBUG_LOG("Command line: %s\n", wibo::commandLine);
+	wibo::commandLine = cmdLine;
+	wibo::commandLineW = stringToWideString(wibo::commandLine.c_str());
+	DEBUG_LOG("Command line: %s\n", wibo::commandLine.c_str());
 
-	wibo::executableName = argv[0];
+	wibo::executableName = executablePath;
 	wibo::argv = guestArgv;
 	wibo::argc = guestArgc;
 

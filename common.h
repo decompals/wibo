@@ -102,8 +102,8 @@ namespace wibo {
 	extern uint32_t lastError;
 	extern char **argv;
 	extern int argc;
-	extern char *executableName;
-	extern char *commandLine;
+	extern std::string executableName;
+	extern std::string commandLine;
 	extern std::vector<uint16_t> commandLineW;
 	extern bool debugEnabled;
 	extern unsigned int debugIndent;

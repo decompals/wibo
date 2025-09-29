@@ -1068,7 +1068,7 @@ namespace kernel32 {
 	 */
 	LPSTR WIN_FUNC GetCommandLineA() {
 		DEBUG_LOG("GetCommandLineA\n");
-		return wibo::commandLine;
+		return const_cast<LPSTR>(wibo::commandLine.c_str());
 	}
 
 	LPWSTR WIN_FUNC GetCommandLineW() {

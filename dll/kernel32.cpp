@@ -2882,10 +2882,45 @@ namespace kernel32 {
 
 	int WIN_FUNC GetComputerNameA(char *lpBuffer, unsigned int *nSize) {
 		DEBUG_LOG("GetComputerNameA\n");
-		if (*nSize < 9)
+		if (!nSize || !lpBuffer) {
+			if (nSize) {
+				*nSize = 0;
+			}
+			wibo::lastError = ERROR_INVALID_PARAMETER;
 			return 0;
+		}
+		constexpr unsigned int required = 9; // "COMPNAME" + null terminator
+		if (*nSize < required) {
+			*nSize = required;
+			wibo::lastError = ERROR_BUFFER_OVERFLOW;
+			return 0;
+		}
 		strcpy(lpBuffer, "COMPNAME");
-		*nSize = 8;
+		*nSize = required - 1;
+		wibo::lastError = ERROR_SUCCESS;
+		return 1;
+	}
+
+	int WIN_FUNC GetComputerNameW(uint16_t *lpBuffer, unsigned int *nSize) {
+		DEBUG_LOG("GetComputerNameW\n");
+		if (!nSize || !lpBuffer) {
+			if (nSize) {
+				*nSize = 0;
+			}
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		constexpr uint16_t computerName[] = {'C', 'O', 'M', 'P', 'N', 'A', 'M', 'E', 0};
+		constexpr unsigned int nameLength = 8;
+		constexpr unsigned int required = nameLength + 1;
+		if (*nSize < required) {
+			*nSize = required;
+			wibo::lastError = ERROR_BUFFER_OVERFLOW;
+			return 0;
+		}
+		wstrncpy(lpBuffer, computerName, required);
+		*nSize = nameLength;
+		wibo::lastError = ERROR_SUCCESS;
 		return 1;
 	}
 
@@ -3480,6 +3515,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "SetHandleCount") == 0) return (void *) kernel32::SetHandleCount;
 	if (strcmp(name, "FormatMessageA") == 0) return (void *) kernel32::FormatMessageA;
 	if (strcmp(name, "GetComputerNameA") == 0) return (void *) kernel32::GetComputerNameA;
+	if (strcmp(name, "GetComputerNameW") == 0) return (void *) kernel32::GetComputerNameW;
 	if (strcmp(name, "EncodePointer") == 0) return (void *) kernel32::EncodePointer;
 	if (strcmp(name, "DecodePointer") == 0) return (void *) kernel32::DecodePointer;
 	if (strcmp(name, "SetDllDirectoryA") == 0) return (void *) kernel32::SetDllDirectoryA;

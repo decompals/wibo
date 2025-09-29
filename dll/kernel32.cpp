@@ -20,6 +20,8 @@
 #include <random>
 #include <stdarg.h>
 #include <system_error>
+#include <errno.h>
+#include <functional>
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
@@ -158,6 +160,28 @@ namespace kernel32 {
 		return ret;
 	}
 
+	static void maybeMarkExecutable(void *mem) {
+		if (!mem) {
+			return;
+		}
+		size_t usable = mi_usable_size(mem);
+		if (usable == 0) {
+			return;
+		}
+		long pageSize = sysconf(_SC_PAGESIZE);
+		if (pageSize <= 0) {
+			return;
+		}
+		uintptr_t start = reinterpret_cast<uintptr_t>(mem);
+		uintptr_t alignedStart = start & ~static_cast<uintptr_t>(pageSize - 1);
+		uintptr_t end = (start + usable + pageSize - 1) & ~static_cast<uintptr_t>(pageSize - 1);
+		size_t length = static_cast<size_t>(end - alignedStart);
+		if (length == 0) {
+			return;
+		}
+		mprotect(reinterpret_cast<void *>(alignedStart), length, PROT_READ | PROT_WRITE | PROT_EXEC);
+	}
+
 	struct MutexObject {
 		pthread_mutex_t mutex;
 		bool ownerValid = false;
@@ -169,6 +193,67 @@ namespace kernel32 {
 
 	static std::mutex mutexRegistryLock;
 	static std::unordered_map<std::u16string, MutexObject *> namedMutexes;
+
+	struct EventObject {
+		pthread_mutex_t mutex;
+		pthread_cond_t cond;
+		bool manualReset = false;
+		bool signaled = false;
+		std::u16string name;
+		int refCount = 1;
+	};
+
+	static std::mutex eventRegistryLock;
+	static std::unordered_map<std::u16string, EventObject *> namedEvents;
+
+	static void releaseEventObject(EventObject *obj) {
+		if (!obj) {
+			return;
+		}
+		std::lock_guard<std::mutex> lock(eventRegistryLock);
+		obj->refCount--;
+		if (obj->refCount == 0) {
+			if (!obj->name.empty()) {
+				namedEvents.erase(obj->name);
+			}
+			pthread_cond_destroy(&obj->cond);
+			pthread_mutex_destroy(&obj->mutex);
+			delete obj;
+		}
+	}
+
+	typedef DWORD (WIN_FUNC *LPTHREAD_START_ROUTINE)(LPVOID);
+
+	struct ThreadObject {
+		pthread_t thread;
+		bool finished = false;
+		bool joined = false;
+		bool detached = false;
+		DWORD exitCode = 0;
+		int refCount = 1;
+		pthread_mutex_t mutex;
+		pthread_cond_t cond;
+	};
+
+	struct ThreadStartData {
+		LPTHREAD_START_ROUTINE startRoutine;
+		void *parameter;
+		ThreadObject *threadObject;
+	};
+
+	static void destroyThreadObject(ThreadObject *obj) {
+		if (!obj) {
+			return;
+		}
+		pthread_cond_destroy(&obj->cond);
+		pthread_mutex_destroy(&obj->mutex);
+		delete obj;
+	}
+
+	static void releaseThreadObject(ThreadObject *obj);
+	static void *threadTrampoline(void *param);
+	static thread_local ThreadObject *currentThreadObject = nullptr;
+	static constexpr uintptr_t PSEUDO_CURRENT_THREAD_HANDLE_VALUE = 0x100007u;
 
 	static std::u16string makeMutexName(LPCWSTR name) {
 		if (!name) {
@@ -194,6 +279,82 @@ namespace kernel32 {
 			pthread_mutex_destroy(&obj->mutex);
 			delete obj;
 		}
+	}
+
+	static void releaseThreadObject(ThreadObject *obj) {
+		if (!obj) {
+			return;
+		}
+		pthread_t thread = 0;
+		bool shouldDelete = false;
+		bool shouldDetach = false;
+		bool finished = false;
+		bool joined = false;
+		bool detached = false;
+		pthread_mutex_lock(&obj->mutex);
+		obj->refCount--;
+		finished = obj->finished;
+		joined = obj->joined;
+		detached = obj->detached;
+		thread = obj->thread;
+		if (obj->refCount == 0) {
+			if (finished) {
+				shouldDelete = true;
+			} else if (!detached) {
+				obj->detached = true;
+				shouldDetach = true;
+				detached = true;
+			}
+		}
+		pthread_mutex_unlock(&obj->mutex);
+
+		if (shouldDetach) {
+			pthread_detach(thread);
+		}
+
+		if (shouldDelete) {
+			if (!joined && !detached) {
+				pthread_join(thread, nullptr);
+			}
+			destroyThreadObject(obj);
+		}
+	}
+
+	static void *threadTrampoline(void *param) {
+		ThreadStartData *data = static_cast<ThreadStartData *>(param);
+		ThreadObject *obj = data->threadObject;
+		LPTHREAD_START_ROUTINE startRoutine = data->startRoutine;
+		void *userParam = data->parameter;
+		delete data;
+
+		uint16_t previousSegment = 0;
+		bool tibInstalled = false;
+		if (wibo::tibSelector) {
+			asm volatile("mov %%fs, %0" : "=r"(previousSegment));
+			asm volatile("movw %0, %%fs" : : "r"(wibo::tibSelector) : "memory");
+			tibInstalled = true;
+		}
+
+		currentThreadObject = obj;
+		DWORD result = startRoutine ? startRoutine(userParam) : 0;
+		pthread_mutex_lock(&obj->mutex);
+		obj->finished = true;
+		obj->exitCode = result;
+		pthread_cond_broadcast(&obj->cond);
+		bool shouldDelete = (obj->refCount == 0);
+		bool detached = obj->detached;
+		pthread_mutex_unlock(&obj->mutex);
+		currentThreadObject = nullptr;
+
+		if (shouldDelete) {
+			assert(detached && "ThreadObject must be detached when refCount reaches zero before completion");
+			destroyThreadObject(obj);
+		}
+
+		if (tibInstalled) {
+			asm volatile("movw %0, %%fs" : : "r"(previousSegment) : "memory");
+		}
+		return nullptr;
 	}
 
 	static int doCompareString(const std::string &a, const std::string &b, unsigned int dwCmpFlags) {
@@ -544,6 +705,47 @@ namespace kernel32 {
 			wibo::lastError = ERROR_SUCCESS;
 			return 0;
 		}
+		case handles::TYPE_EVENT: {
+			EventObject *obj = reinterpret_cast<EventObject *>(data.ptr);
+			if (dwMilliseconds != 0xffffffff) {
+				DEBUG_LOG("WaitForSingleObject: timeout for event not supported\n");
+				wibo::lastError = ERROR_NOT_SUPPORTED;
+				return 0xFFFFFFFF;
+			}
+			pthread_mutex_lock(&obj->mutex);
+			while (!obj->signaled) {
+				pthread_cond_wait(&obj->cond, &obj->mutex);
+			}
+			if (!obj->manualReset) {
+				obj->signaled = false;
+			}
+			pthread_mutex_unlock(&obj->mutex);
+			wibo::lastError = ERROR_SUCCESS;
+			return 0;
+		}
+		case handles::TYPE_THREAD: {
+			ThreadObject *obj = reinterpret_cast<ThreadObject *>(data.ptr);
+			if (dwMilliseconds != 0xffffffff) {
+				DEBUG_LOG("WaitForSingleObject: timeout for thread not supported\n");
+				wibo::lastError = ERROR_NOT_SUPPORTED;
+				return 0xFFFFFFFF;
+			}
+			pthread_mutex_lock(&obj->mutex);
+			while (!obj->finished) {
+				pthread_cond_wait(&obj->cond, &obj->mutex);
+			}
+			bool needJoin = !obj->joined && !obj->detached;
+			pthread_t thread = obj->thread;
+			if (needJoin) {
+				obj->joined = true;
+			}
+			pthread_mutex_unlock(&obj->mutex);
+			if (needJoin) {
+				pthread_join(thread, nullptr);
+			}
+			wibo::lastError = ERROR_SUCCESS;
+			return 0;
+		}
 		case handles::TYPE_MUTEX: {
 			MutexObject *obj = reinterpret_cast<MutexObject *>(data.ptr);
 			if (dwMilliseconds != 0xffffffff) {
@@ -744,6 +946,74 @@ namespace kernel32 {
 		return 0;
 	}
 
+	constexpr uint32_t LMEM_MOVEABLE = 0x0002;
+	constexpr uint32_t LMEM_ZEROINIT = 0x0040;
+
+	void *WIN_FUNC LocalAlloc(uint32_t uFlags, size_t uBytes) {
+		DEBUG_LOG("LocalAlloc(flags=%x, size=%zu)\n", uFlags, uBytes);
+		bool zero = (uFlags & LMEM_ZEROINIT) != 0;
+		if ((uFlags & LMEM_MOVEABLE) != 0) {
+			DEBUG_LOG("  ignoring LMEM_MOVEABLE\n");
+		}
+		void *result = doAlloc(uBytes, zero);
+		if (!result) {
+			wibo::lastError = ERROR_NOT_SUPPORTED;
+			return nullptr;
+		}
+		DEBUG_LOG("  -> %p\n", result);
+		maybeMarkExecutable(result);
+		wibo::lastError = ERROR_SUCCESS;
+		return result;
+	}
+
+	void *WIN_FUNC LocalFree(void *hMem) {
+		// Windows returns NULL on success.
+		free(hMem);
+		wibo::lastError = ERROR_SUCCESS;
+		return nullptr;
+	}
+
+	void *WIN_FUNC LocalReAlloc(void *hMem, size_t uBytes, uint32_t uFlags) {
+		DEBUG_LOG("LocalReAlloc(%p, size=%zu, flags=%x)\n", hMem, uBytes, uFlags);
+		bool zero = (uFlags & LMEM_ZEROINIT) != 0;
+		if ((uFlags & LMEM_MOVEABLE) != 0) {
+			DEBUG_LOG("  ignoring LMEM_MOVEABLE\n");
+		}
+		void *result = doRealloc(hMem, uBytes, zero);
+		if (!result && uBytes != 0) {
+			wibo::lastError = ERROR_NOT_SUPPORTED;
+			return nullptr;
+		}
+		DEBUG_LOG("  -> %p\n", result);
+		maybeMarkExecutable(result);
+		wibo::lastError = ERROR_SUCCESS;
+		return result;
+	}
+
+	void *WIN_FUNC LocalHandle(void *hMem) {
+		return hMem;
+	}
+
+	void *WIN_FUNC LocalLock(void *hMem) {
+		wibo::lastError = ERROR_SUCCESS;
+		return hMem;
+	}
+
+	unsigned int WIN_FUNC LocalUnlock(void *hMem) {
+		(void)hMem;
+		wibo::lastError = ERROR_SUCCESS;
+		return 1;
+	}
+
+	size_t WIN_FUNC LocalSize(void *hMem) {
+		return hMem ? mi_usable_size(hMem) : 0;
+	}
+
+	unsigned int WIN_FUNC LocalFlags(void *hMem) {
+		(void)hMem;
+		return 0;
+	}
+
 	/*
 	 * Environment
 	 */
@@ -858,20 +1128,24 @@ namespace kernel32 {
 			if (!(fp == stdin || fp == stdout || fp == stderr)) {
 				fclose(fp);
 			}
-	} else if (data.type == handles::TYPE_MAPPED) {
-		auto *mapping = reinterpret_cast<MappingObject *>(data.ptr);
-		if (mapping) {
-			mapping->closed = true;
-			tryReleaseMapping(mapping);
-		}
-	} else if (data.type == handles::TYPE_PROCESS) {
-			delete (processes::Process*) data.ptr;
-		} else if (data.type == handles::TYPE_TOKEN) {
-			advapi32::releaseToken(data.ptr);
-		} else if (data.type == handles::TYPE_MUTEX) {
-			releaseMutexObject(reinterpret_cast<MutexObject *>(data.ptr));
-		}
-		return TRUE;
+		} else if (data.type == handles::TYPE_MAPPED) {
+			auto *mapping = reinterpret_cast<MappingObject *>(data.ptr);
+			if (mapping) {
+				mapping->closed = true;
+				tryReleaseMapping(mapping);
+			}
+		} else if (data.type == handles::TYPE_PROCESS) {
+				delete (processes::Process*) data.ptr;
+			} else if (data.type == handles::TYPE_TOKEN) {
+				advapi32::releaseToken(data.ptr);
+			} else if (data.type == handles::TYPE_MUTEX) {
+				releaseMutexObject(reinterpret_cast<MutexObject *>(data.ptr));
+			} else if (data.type == handles::TYPE_EVENT) {
+				releaseEventObject(reinterpret_cast<EventObject *>(data.ptr));
+			} else if (data.type == handles::TYPE_THREAD) {
+				releaseThreadObject(reinterpret_cast<ThreadObject *>(data.ptr));
+			}
+			return TRUE;
 	}
 
 	DWORD WIN_FUNC GetFullPathNameA(LPCSTR lpFileName, DWORD nBufferLength, LPSTR lpBuffer, LPSTR *lpFilePart) {
@@ -1062,6 +1336,10 @@ namespace kernel32 {
 			total = (uint64_t)value.tv_sec * 10000000ULL + (uint64_t)value.tv_nsec / 100ULL;
 		}
 		return fileTimeFromDuration(total);
+	}
+
+	static uint64_t fileTimeToDuration(const FILETIME &value) {
+		return (static_cast<uint64_t>(value.dwHighDateTime) << 32) | value.dwLowDateTime;
 	}
 
 	template<typename CharType>
@@ -1680,8 +1958,53 @@ namespace kernel32 {
 		return DeleteFileA(name.c_str());
 	}
 
+	BOOL WIN_FUNC MoveFileA(const char *lpExistingFileName, const char *lpNewFileName) {
+		DEBUG_LOG("MoveFileA(%s, %s)\n",
+			lpExistingFileName ? lpExistingFileName : "(null)",
+			lpNewFileName ? lpNewFileName : "(null)");
+		if (!lpExistingFileName || !lpNewFileName) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+		auto fromPath = files::pathFromWindows(lpExistingFileName);
+		auto toPath = files::pathFromWindows(lpNewFileName);
+		std::error_code ec;
+		if (std::filesystem::exists(toPath, ec)) {
+			wibo::lastError = ERROR_ALREADY_EXISTS;
+			return FALSE;
+		}
+		if (ec) {
+			errno = ec.value();
+			setLastErrorFromErrno();
+			return FALSE;
+		}
+		std::filesystem::rename(fromPath, toPath, ec);
+		if (ec) {
+			errno = ec.value();
+			setLastErrorFromErrno();
+			return FALSE;
+		}
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+
+	BOOL WIN_FUNC MoveFileW(const uint16_t *lpExistingFileName, const uint16_t *lpNewFileName) {
+		DEBUG_LOG("MoveFileW\n");
+		if (!lpExistingFileName || !lpNewFileName) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+		std::string from = wideStringToString(lpExistingFileName);
+		std::string to = wideStringToString(lpNewFileName);
+		return MoveFileA(from.c_str(), to.c_str());
+	}
+
 	DWORD WIN_FUNC SetFilePointer(HANDLE hFile, LONG lDistanceToMove, PLONG lpDistanceToMoveHigh, DWORD dwMoveMethod) {
 		DEBUG_LOG("SetFilePointer(%p, %d, %d)\n", hFile, lDistanceToMove, dwMoveMethod);
+		if (hFile == nullptr) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return INVALID_SET_FILE_POINTER;
+		}
 		assert(!lpDistanceToMoveHigh || *lpDistanceToMoveHigh == 0);
 		FILE *fp = files::fpFromHandle(hFile);
 		wibo::lastError = ERROR_SUCCESS;
@@ -1702,6 +2025,10 @@ namespace kernel32 {
 
 	BOOL WIN_FUNC SetFilePointerEx(HANDLE hFile, LARGE_INTEGER lDistanceToMove, PLARGE_INTEGER lpDistanceToMoveHigh,
 								   DWORD dwMoveMethod) {
+		if (hFile == nullptr) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return 0;
+		}
 		assert(!lpDistanceToMoveHigh || *lpDistanceToMoveHigh == 0);
 		DEBUG_LOG("SetFilePointerEx(%p, %ld, %d)\n", hFile, lDistanceToMove, dwMoveMethod);
 		FILE *fp = files::fpFromHandle(hFile);
@@ -1856,6 +2183,81 @@ namespace kernel32 {
 		return 1;
 	}
 
+	int WIN_FUNC LocalFileTimeToFileTime(const FILETIME *lpLocalFileTime, FILETIME *lpFileTime) {
+		DEBUG_LOG("LocalFileTimeToFileTime\n");
+		if (!lpLocalFileTime || !lpFileTime) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		*lpFileTime = *lpLocalFileTime;
+		wibo::lastError = ERROR_SUCCESS;
+		return 1;
+	}
+
+	int WIN_FUNC DosDateTimeToFileTime(WORD wFatDate, WORD wFatTime, FILETIME *lpFileTime) {
+		DEBUG_LOG("DosDateTimeToFileTime(date=%04x, time=%04x)\n", wFatDate, wFatTime);
+		if (!lpFileTime) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		unsigned day = wFatDate & 0x1F;
+		unsigned month = (wFatDate >> 5) & 0x0F;
+		unsigned year = ((wFatDate >> 9) & 0x7F) + 1980;
+		unsigned second = (wFatTime & 0x1F) * 2;
+		unsigned minute = (wFatTime >> 5) & 0x3F;
+		unsigned hour = (wFatTime >> 11) & 0x1F;
+		if (day == 0 || month == 0 || month > 12 || day > 31 || hour > 23 || minute > 59 || second > 59) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		struct tm tmValue {};
+		tmValue.tm_year = static_cast<int>(year) - 1900;
+		tmValue.tm_mon = static_cast<int>(month) - 1;
+		tmValue.tm_mday = static_cast<int>(day);
+		tmValue.tm_hour = static_cast<int>(hour);
+		tmValue.tm_min = static_cast<int>(minute);
+		tmValue.tm_sec = static_cast<int>(second);
+		tmValue.tm_isdst = -1;
+		time_t localSeconds = mktime(&tmValue);
+		if (localSeconds == (time_t)-1) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		uint64_t ticks = (static_cast<uint64_t>(localSeconds) + 11644473600ULL) * 10000000ULL;
+		lpFileTime->dwLowDateTime = static_cast<uint32_t>(ticks & 0xFFFFFFFFULL);
+		lpFileTime->dwHighDateTime = static_cast<uint32_t>(ticks >> 32);
+		wibo::lastError = ERROR_SUCCESS;
+		return 1;
+	}
+
+	int WIN_FUNC FileTimeToDosDateTime(const FILETIME *lpFileTime, WORD *lpFatDate, WORD *lpFatTime) {
+		DEBUG_LOG("FileTimeToDosDateTime\n");
+		if (!lpFileTime || !lpFatDate || !lpFatTime) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		uint64_t ticks = fileTimeToDuration(*lpFileTime);
+		if (ticks < UNIX_TIME_ZERO) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		time_t utcSeconds = static_cast<time_t>((ticks / 10000000ULL) - 11644473600ULL);
+		struct tm tmValue {};
+		if (!localtime_r(&utcSeconds, &tmValue)) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		int year = tmValue.tm_year + 1900;
+		if (year < 1980 || year > 2107) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		*lpFatDate = static_cast<WORD>(((year - 1980) << 9) | ((tmValue.tm_mon + 1) << 5) | tmValue.tm_mday);
+		*lpFatTime = static_cast<WORD>(((tmValue.tm_hour & 0x1F) << 11) | ((tmValue.tm_min & 0x3F) << 5) | ((tmValue.tm_sec / 2) & 0x1F));
+		wibo::lastError = ERROR_SUCCESS;
+		return 1;
+	}
+
 	struct BY_HANDLE_FILE_INFORMATION {
 		unsigned long dwFileAttributes;
 		FILETIME ftCreationTime;
@@ -1928,6 +2330,14 @@ namespace kernel32 {
 		return 1;
 	}
 
+	int WIN_FUNC SetConsoleMode(void *hConsoleHandle, unsigned int dwMode) {
+		DEBUG_LOG("STUB: SetConsoleMode(%p, 0x%x)\n", hConsoleHandle, dwMode);
+		(void)hConsoleHandle;
+		(void)dwMode;
+		wibo::lastError = ERROR_SUCCESS;
+		return 1;
+	}
+
 	unsigned int WIN_FUNC GetConsoleOutputCP(){
 		DEBUG_LOG("GetConsoleOutputCP\n");
 		return 65001; // UTF-8
@@ -1983,6 +2393,30 @@ namespace kernel32 {
 			*lpNumberOfCharsWritten = 0;
 		}
 		return FALSE;
+	}
+
+	int WIN_FUNC PeekConsoleInputA(void *hConsoleInput, void *lpBuffer, DWORD nLength, LPDWORD lpNumberOfEventsRead) {
+		DEBUG_LOG("STUB: PeekConsoleInputA(%p, %p, %u)\n", hConsoleInput, lpBuffer, nLength);
+		(void)hConsoleInput;
+		(void)lpBuffer;
+		(void)nLength;
+		if (lpNumberOfEventsRead) {
+			*lpNumberOfEventsRead = 0;
+		}
+		wibo::lastError = ERROR_SUCCESS;
+		return 1;
+	}
+
+	int WIN_FUNC ReadConsoleInputA(void *hConsoleInput, void *lpBuffer, DWORD nLength, LPDWORD lpNumberOfEventsRead) {
+		DEBUG_LOG("STUB: ReadConsoleInputA(%p, %p, %u)\n", hConsoleInput, lpBuffer, nLength);
+		(void)hConsoleInput;
+		(void)lpBuffer;
+		(void)nLength;
+		if (lpNumberOfEventsRead) {
+			*lpNumberOfEventsRead = 0;
+		}
+		wibo::lastError = ERROR_SUCCESS;
+		return 1;
 	}
 
 	unsigned int WIN_FUNC GetSystemDirectoryA(char *lpBuffer, unsigned int uSize) {
@@ -2053,6 +2487,34 @@ namespace kernel32 {
 			lpBuffer[i] = pathCstr[i] & 0xFF;
 		}
 		return path.size();
+	}
+
+	int WIN_FUNC SetCurrentDirectoryA(const char *lpPathName) {
+		DEBUG_LOG("SetCurrentDirectoryA(%s)\n", lpPathName ? lpPathName : "(null)");
+		if (!lpPathName) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		auto hostPath = files::pathFromWindows(lpPathName);
+		std::error_code ec;
+		std::filesystem::current_path(hostPath, ec);
+		if (ec) {
+			errno = ec.value();
+			setLastErrorFromErrno();
+			return 0;
+		}
+		wibo::lastError = ERROR_SUCCESS;
+		return 1;
+	}
+
+	int WIN_FUNC SetCurrentDirectoryW(const uint16_t *lpPathName) {
+		DEBUG_LOG("SetCurrentDirectoryW\n");
+		if (!lpPathName) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		std::string path = wideStringToString(lpPathName);
+		return SetCurrentDirectoryA(path.c_str());
 	}
 
 	HMODULE WIN_FUNC GetModuleHandleA(LPCSTR lpModuleName) {
@@ -2546,12 +3008,144 @@ namespace kernel32 {
 
 	HANDLE WIN_FUNC GetCurrentThread() {
 		DEBUG_LOG("STUB: GetCurrentThread\n");
-		return (HANDLE)0x100007;
+		return reinterpret_cast<HANDLE>(PSEUDO_CURRENT_THREAD_HANDLE_VALUE);
 	}
 
 	HRESULT WIN_FUNC SetThreadDescription(HANDLE hThread, const void * /* PCWSTR */ lpThreadDescription) {
 		DEBUG_LOG("STUB: SetThreadDescription(%p, %p)\n", hThread, lpThreadDescription);
 		return S_OK;
+	}
+
+	HANDLE WIN_FUNC CreateThread(void *lpThreadAttributes, size_t dwStackSize, LPTHREAD_START_ROUTINE lpStartAddress, void *lpParameter, DWORD dwCreationFlags, LPDWORD lpThreadId) {
+		DEBUG_LOG("CreateThread(stack=%zu, flags=0x%x)\n", dwStackSize, dwCreationFlags);
+		(void)lpThreadAttributes;
+		constexpr DWORD SUPPORTED_FLAGS = 0x00010000; // STACK_SIZE_PARAM_IS_A_RESERVATION
+		if ((dwCreationFlags & ~SUPPORTED_FLAGS) != 0) {
+			DEBUG_LOG("CreateThread: unsupported creation flags 0x%x\n", dwCreationFlags);
+			wibo::lastError = ERROR_NOT_SUPPORTED;
+			return nullptr;
+		}
+
+		ThreadObject *obj = new ThreadObject();
+		pthread_mutex_init(&obj->mutex, nullptr);
+		pthread_cond_init(&obj->cond, nullptr);
+		obj->finished = false;
+		obj->joined = false;
+		obj->detached = false;
+		obj->exitCode = 0;
+		obj->refCount = 1;
+
+		ThreadStartData *startData = new ThreadStartData{lpStartAddress, lpParameter, obj};
+
+		pthread_attr_t attr;
+		pthread_attr_t *attrPtr = nullptr;
+		if (dwStackSize != 0) {
+			pthread_attr_init(&attr);
+			size_t stackSize = dwStackSize;
+#ifdef PTHREAD_STACK_MIN
+			if (stackSize < static_cast<size_t>(PTHREAD_STACK_MIN)) {
+				stackSize = PTHREAD_STACK_MIN;
+			}
+#endif
+			if (pthread_attr_setstacksize(&attr, stackSize) == 0) {
+				attrPtr = &attr;
+			} else {
+				pthread_attr_destroy(&attr);
+			}
+		}
+
+		int rc = pthread_create(&obj->thread, attrPtr, threadTrampoline, startData);
+		if (attrPtr) {
+			pthread_attr_destroy(attrPtr);
+		}
+		if (rc != 0) {
+			delete startData;
+			destroyThreadObject(obj);
+			errno = rc;
+			setLastErrorFromErrno();
+			return nullptr;
+		}
+
+		if (lpThreadId) {
+			std::size_t hashed = std::hash<pthread_t>{}(obj->thread);
+			*lpThreadId = static_cast<DWORD>(hashed & 0xffffffffu);
+		}
+
+		wibo::lastError = ERROR_SUCCESS;
+		return handles::allocDataHandle({handles::TYPE_THREAD, obj, 0});
+	}
+
+	void WIN_FUNC ExitThread(DWORD dwExitCode) {
+		DEBUG_LOG("ExitThread(%u)\n", dwExitCode);
+		ThreadObject *obj = currentThreadObject;
+		uint16_t previousSegment = 0;
+		bool tibInstalled = false;
+		if (wibo::tibSelector) {
+			asm volatile("mov %%fs, %0" : "=r"(previousSegment));
+			asm volatile("movw %0, %%fs" : : "r"(wibo::tibSelector) : "memory");
+			tibInstalled = true;
+		}
+		if (obj) {
+			pthread_mutex_lock(&obj->mutex);
+			obj->finished = true;
+			obj->exitCode = dwExitCode;
+			pthread_cond_broadcast(&obj->cond);
+			bool shouldDelete = (obj->refCount == 0);
+			bool detached = obj->detached;
+			pthread_mutex_unlock(&obj->mutex);
+			currentThreadObject = nullptr;
+			if (shouldDelete) {
+				assert(detached && "ThreadObject must be detached when refCount reaches zero before completion");
+				destroyThreadObject(obj);
+			}
+		}
+		if (tibInstalled) {
+			asm volatile("movw %0, %%fs" : : "r"(previousSegment) : "memory");
+		}
+		pthread_exit(nullptr);
+	}
+
+	BOOL WIN_FUNC GetExitCodeThread(HANDLE hThread, LPDWORD lpExitCode) {
+		DEBUG_LOG("GetExitCodeThread(%p, %p)\n", hThread, lpExitCode);
+		if (!lpExitCode) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+		if (reinterpret_cast<uintptr_t>(hThread) == PSEUDO_CURRENT_THREAD_HANDLE_VALUE) {
+			ThreadObject *obj = currentThreadObject;
+			if (obj) {
+				pthread_mutex_lock(&obj->mutex);
+				DWORD code = obj->finished ? obj->exitCode : STILL_ACTIVE;
+				pthread_mutex_unlock(&obj->mutex);
+				*lpExitCode = code;
+			} else {
+				*lpExitCode = STILL_ACTIVE;
+			}
+			wibo::lastError = ERROR_SUCCESS;
+			return TRUE;
+		}
+		auto data = handles::dataFromHandle(hThread, false);
+		if (data.type != handles::TYPE_THREAD) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return FALSE;
+		}
+		ThreadObject *obj = reinterpret_cast<ThreadObject *>(data.ptr);
+		pthread_mutex_lock(&obj->mutex);
+		DWORD code = obj->finished ? obj->exitCode : STILL_ACTIVE;
+		pthread_mutex_unlock(&obj->mutex);
+		*lpExitCode = code;
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+
+	HANDLE WIN_FUNC CreateMutexW(void *lpMutexAttributes, BOOL bInitialOwner, LPCWSTR lpName);
+
+	HANDLE WIN_FUNC CreateMutexA(void *lpMutexAttributes, BOOL bInitialOwner, LPCSTR lpName) {
+		std::vector<uint16_t> wideName;
+		if (lpName) {
+			wideName = stringToWideString(lpName);
+		}
+		return CreateMutexW(lpMutexAttributes, bInitialOwner, lpName ? reinterpret_cast<LPCWSTR>(wideName.data()) : nullptr);
 	}
 
 	HANDLE WIN_FUNC CreateMutexW(void *lpMutexAttributes, BOOL bInitialOwner, LPCWSTR lpName) {
@@ -2625,6 +3219,90 @@ namespace kernel32 {
 		if (obj->recursionCount == 0) {
 			obj->ownerValid = false;
 		}
+		pthread_mutex_unlock(&obj->mutex);
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+
+	HANDLE WIN_FUNC CreateEventW(void *lpEventAttributes, BOOL bManualReset, BOOL bInitialState, LPCWSTR lpName) {
+		std::string nameLog;
+		if (lpName) {
+			nameLog = wideStringToString(reinterpret_cast<const uint16_t *>(lpName));
+		} else {
+			nameLog = "<unnamed>";
+		}
+		DEBUG_LOG("CreateEventW(name=%s, manualReset=%d, initialState=%d)\n", nameLog.c_str(), bManualReset, bInitialState);
+		(void)lpEventAttributes;
+
+		std::u16string name = makeMutexName(lpName);
+		EventObject *obj = nullptr;
+		bool alreadyExists = false;
+		{
+			std::lock_guard<std::mutex> lock(eventRegistryLock);
+			if (!name.empty()) {
+				auto it = namedEvents.find(name);
+				if (it != namedEvents.end()) {
+					obj = it->second;
+					obj->refCount++;
+					alreadyExists = true;
+				}
+			}
+			if (!obj) {
+				obj = new EventObject();
+				pthread_mutex_init(&obj->mutex, nullptr);
+				pthread_cond_init(&obj->cond, nullptr);
+				obj->manualReset = bManualReset;
+				obj->signaled = bInitialState;
+				obj->name = name;
+				obj->refCount = 1;
+				if (!name.empty()) {
+					namedEvents[name] = obj;
+				}
+			}
+		}
+		HANDLE handle = handles::allocDataHandle({handles::TYPE_EVENT, obj, 0});
+		wibo::lastError = alreadyExists ? ERROR_ALREADY_EXISTS : ERROR_SUCCESS;
+		return handle;
+	}
+
+	HANDLE WIN_FUNC CreateEventA(void *lpEventAttributes, BOOL bManualReset, BOOL bInitialState, LPCSTR lpName) {
+		std::vector<uint16_t> wideName;
+		if (lpName) {
+			wideName = stringToWideString(lpName);
+		}
+		return CreateEventW(lpEventAttributes, bManualReset, bInitialState, lpName ? reinterpret_cast<LPCWSTR>(wideName.data()) : nullptr);
+	}
+
+	BOOL WIN_FUNC SetEvent(HANDLE hEvent) {
+		DEBUG_LOG("SetEvent(%p)\n", hEvent);
+		auto data = handles::dataFromHandle(hEvent, false);
+		if (data.type != handles::TYPE_EVENT) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return FALSE;
+		}
+		EventObject *obj = reinterpret_cast<EventObject *>(data.ptr);
+		pthread_mutex_lock(&obj->mutex);
+		obj->signaled = true;
+		if (obj->manualReset) {
+			pthread_cond_broadcast(&obj->cond);
+		} else {
+			pthread_cond_signal(&obj->cond);
+		}
+		pthread_mutex_unlock(&obj->mutex);
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+
+	BOOL WIN_FUNC ResetEvent(HANDLE hEvent) {
+		DEBUG_LOG("ResetEvent(%p)\n", hEvent);
+		auto data = handles::dataFromHandle(hEvent, false);
+		if (data.type != handles::TYPE_EVENT) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return FALSE;
+		}
+		EventObject *obj = reinterpret_cast<EventObject *>(data.ptr);
+		pthread_mutex_lock(&obj->mutex);
+		obj->signaled = false;
 		pthread_mutex_unlock(&obj->mutex);
 		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
@@ -3463,6 +4141,9 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "GetExitCodeProcess") == 0) return (void *) kernel32::GetExitCodeProcess;
 	if (strcmp(name, "CreateProcessW") == 0) return (void *) kernel32::CreateProcessW;
 	if (strcmp(name, "CreateProcessA") == 0) return (void *) kernel32::CreateProcessA;
+	if (strcmp(name, "CreateThread") == 0) return (void *) kernel32::CreateThread;
+	if (strcmp(name, "ExitThread") == 0) return (void *) kernel32::ExitThread;
+	if (strcmp(name, "GetExitCodeThread") == 0) return (void *) kernel32::GetExitCodeThread;
 	if (strcmp(name, "TlsAlloc") == 0) return (void *) kernel32::TlsAlloc;
 	if (strcmp(name, "TlsFree") == 0) return (void *) kernel32::TlsFree;
 	if (strcmp(name, "TlsGetValue") == 0) return (void *) kernel32::TlsGetValue;
@@ -3507,7 +4188,12 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "ReleaseSRWLockExclusive") == 0) return (void *) kernel32::ReleaseSRWLockExclusive;
 	if (strcmp(name, "TryAcquireSRWLockExclusive") == 0) return (void *) kernel32::TryAcquireSRWLockExclusive;
 	if (strcmp(name, "WaitForSingleObject") == 0) return (void *) kernel32::WaitForSingleObject;
+	if (strcmp(name, "CreateMutexA") == 0) return (void *) kernel32::CreateMutexA;
 	if (strcmp(name, "CreateMutexW") == 0) return (void *) kernel32::CreateMutexW;
+	if (strcmp(name, "CreateEventA") == 0) return (void *) kernel32::CreateEventA;
+	if (strcmp(name, "CreateEventW") == 0) return (void *) kernel32::CreateEventW;
+	if (strcmp(name, "SetEvent") == 0) return (void *) kernel32::SetEvent;
+	if (strcmp(name, "ResetEvent") == 0) return (void *) kernel32::ResetEvent;
 	if (strcmp(name, "ReleaseMutex") == 0) return (void *) kernel32::ReleaseMutex;
 
 	// winbase.h
@@ -3515,8 +4201,18 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "GlobalReAlloc") == 0) return (void *) kernel32::GlobalReAlloc;
 	if (strcmp(name, "GlobalFree") == 0) return (void *) kernel32::GlobalFree;
 	if (strcmp(name, "GlobalFlags") == 0) return (void *) kernel32::GlobalFlags;
+	if (strcmp(name, "LocalAlloc") == 0) return (void *) kernel32::LocalAlloc;
+	if (strcmp(name, "LocalReAlloc") == 0) return (void *) kernel32::LocalReAlloc;
+	if (strcmp(name, "LocalFree") == 0) return (void *) kernel32::LocalFree;
+	if (strcmp(name, "LocalHandle") == 0) return (void *) kernel32::LocalHandle;
+	if (strcmp(name, "LocalLock") == 0) return (void *) kernel32::LocalLock;
+	if (strcmp(name, "LocalUnlock") == 0) return (void *) kernel32::LocalUnlock;
+	if (strcmp(name, "LocalSize") == 0) return (void *) kernel32::LocalSize;
+	if (strcmp(name, "LocalFlags") == 0) return (void *) kernel32::LocalFlags;
 	if (strcmp(name, "GetCurrentDirectoryA") == 0) return (void *) kernel32::GetCurrentDirectoryA;
 	if (strcmp(name, "GetCurrentDirectoryW") == 0) return (void *) kernel32::GetCurrentDirectoryW;
+	if (strcmp(name, "SetCurrentDirectoryA") == 0) return (void *) kernel32::SetCurrentDirectoryA;
+	if (strcmp(name, "SetCurrentDirectoryW") == 0) return (void *) kernel32::SetCurrentDirectoryW;
 	if (strcmp(name, "FindResourceA") == 0) return (void *) kernel32::FindResourceA;
 	if (strcmp(name, "FindResourceExA") == 0) return (void *) kernel32::FindResourceExA;
 	if (strcmp(name, "FindResourceW") == 0) return (void *) kernel32::FindResourceW;
@@ -3550,10 +4246,13 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "DuplicateHandle") == 0) return (void *) kernel32::DuplicateHandle;
 	if (strcmp(name, "CloseHandle") == 0) return (void *) kernel32::CloseHandle;
 	if (strcmp(name, "GetConsoleMode") == 0) return (void *) kernel32::GetConsoleMode;
+	if (strcmp(name, "SetConsoleMode") == 0) return (void *) kernel32::SetConsoleMode;
 	if (strcmp(name, "SetConsoleCtrlHandler") == 0) return (void *) kernel32::SetConsoleCtrlHandler;
 	if (strcmp(name, "GetConsoleScreenBufferInfo") == 0) return (void *) kernel32::GetConsoleScreenBufferInfo;
 	if (strcmp(name, "WriteConsoleW") == 0) return (void *) kernel32::WriteConsoleW;
 	if (strcmp(name, "GetConsoleOutputCP") == 0) return (void *) kernel32::GetConsoleOutputCP;
+	if (strcmp(name, "PeekConsoleInputA") == 0) return (void *) kernel32::PeekConsoleInputA;
+	if (strcmp(name, "ReadConsoleInputA") == 0) return (void *) kernel32::ReadConsoleInputA;
 
 	// fileapi.h
 	if (strcmp(name, "GetFullPathNameA") == 0) return (void *) kernel32::GetFullPathNameA;
@@ -3577,6 +4276,8 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "UnmapViewOfFile") == 0) return (void *) kernel32::UnmapViewOfFile;
 	if (strcmp(name, "DeleteFileA") == 0) return (void *) kernel32::DeleteFileA;
 	if (strcmp(name, "DeleteFileW") == 0) return (void *) kernel32::DeleteFileW;
+	if (strcmp(name, "MoveFileA") == 0) return (void *) kernel32::MoveFileA;
+	if (strcmp(name, "MoveFileW") == 0) return (void *) kernel32::MoveFileW;
 	if (strcmp(name, "SetFilePointer") == 0) return (void *) kernel32::SetFilePointer;
 	if (strcmp(name, "SetFilePointerEx") == 0) return (void *) kernel32::SetFilePointerEx;
 	if (strcmp(name, "SetEndOfFile") == 0) return (void *) kernel32::SetEndOfFile;
@@ -3588,6 +4289,9 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "SetFileTime") == 0) return (void *) kernel32::SetFileTime;
 	if (strcmp(name, "GetFileType") == 0) return (void *) kernel32::GetFileType;
 	if (strcmp(name, "FileTimeToLocalFileTime") == 0) return (void *) kernel32::FileTimeToLocalFileTime;
+	if (strcmp(name, "LocalFileTimeToFileTime") == 0) return (void *) kernel32::LocalFileTimeToFileTime;
+	if (strcmp(name, "DosDateTimeToFileTime") == 0) return (void *) kernel32::DosDateTimeToFileTime;
+	if (strcmp(name, "FileTimeToDosDateTime") == 0) return (void *) kernel32::FileTimeToDosDateTime;
 	if (strcmp(name, "GetFileInformationByHandle") == 0) return (void *) kernel32::GetFileInformationByHandle;
 	if (strcmp(name, "GetTempFileNameA") == 0) return (void *) kernel32::GetTempFileNameA;
 	if (strcmp(name, "GetTempPathA") == 0) return (void *) kernel32::GetTempPathA;

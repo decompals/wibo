@@ -126,12 +126,24 @@ if(BUILD_TESTING)
                     ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h
                     ${WIBO_TEST_BIN_DIR}/test_resources_res.o)
 
+            add_custom_command(
+                OUTPUT ${WIBO_TEST_BIN_DIR}/test_threading.exe
+                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
+                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
+                        -o test_threading.exe
+                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_threading.c
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_threading.c
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
+
             add_custom_target(wibo_test_fixtures
                 DEPENDS
                     ${WIBO_TEST_BIN_DIR}/external_exports.dll
                     ${WIBO_TEST_BIN_DIR}/test_external_dll.exe
                     ${WIBO_TEST_BIN_DIR}/test_bcrypt.exe
-                    ${WIBO_TEST_BIN_DIR}/test_resources.exe)
+                    ${WIBO_TEST_BIN_DIR}/test_resources.exe
+                    ${WIBO_TEST_BIN_DIR}/test_threading.exe)
 
             if(CMAKE_CONFIGURATION_TYPES)
                 set(_wibo_fixture_build_command
@@ -158,6 +170,12 @@ if(BUILD_TESTING)
             add_test(NAME wibo.test_resources
                 COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_resources.exe)
             set_tests_properties(wibo.test_resources PROPERTIES
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS wibo.build_fixtures)
+
+            add_test(NAME wibo.test_threading
+                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_threading.exe)
+            set_tests_properties(wibo.test_threading PROPERTIES
                 WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
                 DEPENDS wibo.build_fixtures)
         endif()

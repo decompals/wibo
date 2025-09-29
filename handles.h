@@ -9,7 +9,9 @@ namespace handles {
 		TYPE_MAPPED,
 		TYPE_PROCESS,
 		TYPE_TOKEN,
-		TYPE_MUTEX
+		TYPE_MUTEX,
+		TYPE_EVENT,
+		TYPE_THREAD
 	};
 
     struct Data {

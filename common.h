@@ -75,6 +75,8 @@ typedef unsigned char BYTE;
 #define ERROR_ALREADY_EXISTS 183
 #define ERROR_NOT_OWNER 288
 
+#define STILL_ACTIVE 259
+
 #define INVALID_SET_FILE_POINTER ((DWORD)-1)
 #define INVALID_HANDLE_VALUE ((HANDLE)-1)
 

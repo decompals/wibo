@@ -309,7 +309,7 @@ int main(int argc, char **argv) {
 			cmdLine += ' ';
 			arg = guestArgv[i];
 		}
-		bool needQuotes = arg.find_first_of("\\\" \t\n") != std::string::npos;
+		bool needQuotes = arg.find_first_of("\" \t\n") != std::string::npos;
 		if (needQuotes)
 			cmdLine += '"';
 		int backslashes = 0;

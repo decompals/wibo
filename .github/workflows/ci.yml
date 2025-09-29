@@ -11,65 +11,94 @@ env:
   DOCKER_BUILDKIT: 1
 
 jobs:
-  build_and_test:
-    name: Build and test
+  build:
+    name: Build (${{ matrix.display }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: ubuntu-debug
+            display: Debug
+            dockerfile: Dockerfile.ubuntu
+            build_type: Debug
+            image: wibo-host-debug
+          - id: ubuntu-release
+            display: Release
+            dockerfile: Dockerfile.ubuntu
+            build_type: Release
+            image: wibo-host-release
+          - id: static-debug
+            display: Static, Debug
+            dockerfile: Dockerfile
+            build_type: Debug
+            image: wibo-static-debug
+          - id: static-release
+            display: Static, Release
+            dockerfile: Dockerfile
+            build_type: Release
+            image: wibo-static-release
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Build
+        run: >-
+          docker build
+          -f ${{ matrix.dockerfile }}
+          --build-arg build_type=${{ matrix.build_type }}
+          --target build
+          -t ${{ matrix.image }}
+          .
+
+      - name: Tests
+        run: docker run --rm ${{ matrix.image }} ctest --test-dir /wibo/build --output-on-failure
+
+      - name: Export binary
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            file \
-            unzip \
-            wget \
-            cmake \
-            ninja-build \
-            g++-multilib \
-            gcc-mingw-w64-i686 \
-            binutils-mingw-w64-i686
+          rm -rf dist
+          docker build \
+            -f ${{ matrix.dockerfile }} \
+            --build-arg build_type=${{ matrix.build_type }} \
+            --target export \
+            --output dist \
+            .
 
-      - name: Build debug
-        run: docker build --build-arg build_type=Debug --target export --output build_debug .
-
-      - name: Build release
-        run: docker build --build-arg build_type=Release --target export --output build .
-
-      - name: Test
-        shell: bash
-        run: |
-          mv build_debug/wibo build/wibo_debug
-          wget -q https://files.decomp.dev/compilers_latest.zip
-          unzip -q compilers_latest.zip
-          set -x
-          build/wibo_debug Wii/1.7/mwcceppc.exe -nodefaults -c test/test.c -Itest -o test_debug.o
-          file test_debug.o
-          build/wibo Wii/1.7/mwcceppc.exe -nodefaults -c test/test.c -Itest -o test.o
-          file test.o
-
-      - name: Fixture tests
-        run: |
-          cmake -S . -B build_ctest -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DWIBO_ENABLE_FIXTURE_TESTS=ON
-          cmake --build build_ctest
-          ctest --test-dir build_ctest --output-on-failure
-
-      - name: Upload release
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: wibo
-          path: build/wibo
+          name: ${{ matrix.id }}
+          path: dist/wibo
 
-      - name: Upload debug
-        uses: actions/upload-artifact@v4
+  release:
+    name: Publish Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download static debug
+        uses: actions/download-artifact@v4
         with:
-          name: wibo_debug
-          path: build/wibo_debug
+          name: static-debug
+          path: artifacts/static-debug
+
+      - name: Download static release
+        uses: actions/download-artifact@v4
+        with:
+          name: static-release
+          path: artifacts/static-release
+
+      - name: Prepare assets
+        run: |
+          mkdir -p artifacts/out
+          cp artifacts/static-debug/wibo artifacts/out/wibo_debug
+          cp artifacts/static-release/wibo artifacts/out/wibo
 
       - name: Publish release
         uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
-            build/wibo
-            build/wibo_debug
+            artifacts/out/wibo
+            artifacts/out/wibo_debug

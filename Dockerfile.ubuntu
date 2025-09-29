@@ -1,5 +1,7 @@
-# Ubuntu 24.04 environment that matches CI toolchain and fixture tests.
-FROM ubuntu:24.04 AS deps
+# Build stage
+FROM ubuntu:24.04 AS build
+
+# Install dependencies
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -15,14 +17,25 @@ RUN apt-get update \
         wget \
     && rm -rf /var/lib/apt/lists/*
 
+# Copy source files
 WORKDIR /wibo
-
-FROM deps AS dev
 COPY . /wibo
 
-ARG BUILD_TYPE=Debug
-# Configure default build folders so docker build can cache compilation layers if desired.
-RUN cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DBUILD_TESTING=ON -DWIBO_ENABLE_FIXTURE_TESTS=ON \
-    && cmake --build build
+# Build type (Release, Debug, RelWithDebInfo, MinSizeRel)
+ARG build_type=Release
 
-ENTRYPOINT ["/bin/bash"]
+RUN cmake -S /wibo -B /wibo/build -G Ninja \
+        -DCMAKE_BUILD_TYPE="$build_type" \
+        -DBUILD_TESTING=ON \
+        -DWIBO_ENABLE_FIXTURE_TESTS=ON \
+    && cmake --build /wibo/build \
+    && ( [ "$build_type" != "Release" ] || strip -g /wibo/build/wibo )
+
+# Export binary (usage: docker build -f Dockerfile.ubuntu --target export --output dist .)
+FROM scratch AS export
+COPY --from=build /wibo/build/wibo .
+
+# Runnable container
+FROM ubuntu:24.04
+COPY --from=build /wibo/build/wibo /usr/local/sbin/wibo
+CMD ["/usr/local/sbin/wibo"]

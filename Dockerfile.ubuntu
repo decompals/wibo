@@ -12,6 +12,7 @@ RUN apt-get update \
         g++-multilib \
         gcc-mingw-w64-i686 \
         gdb \
+        git \
         ninja-build \
         unzip \
         wget \

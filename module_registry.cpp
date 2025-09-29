@@ -234,23 +234,31 @@ std::optional<std::filesystem::path> combineAndFind(const std::filesystem::path 
 std::vector<std::filesystem::path> collectSearchDirectories(ModuleRegistry &reg, bool alteredSearchPath) {
 	std::vector<std::filesystem::path> dirs;
 	std::unordered_set<std::string> seen;
-		auto addDirectory = [&](const std::filesystem::path &dir) {
-			if (dir.empty())
-				return;
-			std::error_code ec;
-			auto canonical = std::filesystem::weakly_canonical(dir, ec);
+
+	auto addDirectory = [&](const std::filesystem::path &dir) {
+		if (dir.empty())
+			return;
+		std::error_code ec;
+		auto canonical = std::filesystem::weakly_canonical(dir, ec);
 		if (ec) {
 			canonical = std::filesystem::absolute(dir, ec);
 		}
 		if (ec)
 			return;
-			if (!std::filesystem::exists(canonical, ec) || ec)
-				return;
-			std::string key = stringToLower(canonical.string());
-			if (seen.insert(key).second) {
-				dirs.push_back(canonical);
-			}
-		};
+		if (!std::filesystem::exists(canonical, ec) || ec)
+			return;
+		std::string key = stringToLower(canonical.string());
+		if (seen.insert(key).second) {
+			dirs.push_back(canonical);
+		}
+	};
+
+	if (wibo::argv && wibo::argc > 0 && wibo::argv[0]) {
+		std::filesystem::path mainBinary = std::filesystem::absolute(wibo::argv[0]);
+		if (mainBinary.has_parent_path()) {
+			addDirectory(mainBinary.parent_path());
+		}
+	}
 
 	if (reg.dllDirectory.has_value()) {
 		addDirectory(*reg.dllDirectory);

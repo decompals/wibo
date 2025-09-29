@@ -72,6 +72,10 @@ namespace msvcrt {
 		return entries;
 	}
 
+	IOBProxy *WIN_ENTRY __iob_func() {
+		return standardIobEntries();
+	}
+
 	std::unordered_map<void *, FILE *> &iobMapping() {
 		static std::unordered_map<void *, FILE *> mapping;
 		return mapping;
@@ -100,6 +104,15 @@ namespace msvcrt {
 			return it->second;
 		}
 		return stream;
+	}
+
+	int WIN_ENTRY _fileno(FILE *stream) {
+		if (!stream) {
+			errno = EINVAL;
+			return -1;
+		}
+		FILE *host = mapToHostFile(stream);
+		return ::fileno(host);
 	}
 
 	void refreshMbCurMax() {
@@ -496,6 +509,106 @@ char* WIN_ENTRY setlocale(int category, const char *locale){
 
 	int WIN_ENTRY strncmp(const char *lhs, const char *rhs, size_t count) { return ::strncmp(lhs, rhs, count); }
 
+	void WIN_ENTRY _exit(int status) {
+		_Exit(status);
+	}
+
+	int WIN_ENTRY strcpy_s(char *dest, size_t dest_size, const char *src) {
+		if (!dest || !src || dest_size == 0) {
+			return 22;
+		}
+
+		size_t src_len = ::strlen(src);
+		if (src_len + 1 > dest_size) {
+			dest[0] = 0;
+			return 34;
+		}
+
+		std::memcpy(dest, src, src_len + 1);
+		return 0;
+	}
+
+	int WIN_ENTRY strcat_s(char *dest, size_t numberOfElements, const char *src) {
+		if (!dest || !src || numberOfElements == 0) {
+			return 22;
+		}
+
+		size_t dest_len = ::strlen(dest);
+		size_t src_len = ::strlen(src);
+		if (dest_len + src_len + 1 > numberOfElements) {
+			dest[0] = 0;
+			return 34;
+		}
+
+		std::memcpy(dest + dest_len, src, src_len + 1);
+		return 0;
+	}
+
+	int WIN_ENTRY strncpy_s(char *dest, size_t dest_size, const char *src, size_t count) {
+		constexpr size_t TRUNCATE = static_cast<size_t>(-1);
+		constexpr int STRUNCATE = 80;
+
+		if (!dest || dest_size == 0) {
+			return 22;
+		}
+
+		if (!src) {
+			dest[0] = 0;
+			return count == 0 ? 0 : 22;
+		}
+
+		if (count == 0) {
+			dest[0] = 0;
+			return 0;
+		}
+
+		if (count == TRUNCATE) {
+			size_t src_len = ::strlen(src);
+			if (src_len + 1 > dest_size) {
+				size_t copy_len = dest_size > 0 ? dest_size - 1 : 0;
+				if (copy_len > 0) {
+					std::memcpy(dest, src, copy_len);
+				}
+				dest[copy_len] = '\0';
+				return STRUNCATE;
+			}
+			std::memcpy(dest, src, src_len + 1);
+			return 0;
+		}
+
+		size_t src_len = ::strlen(src);
+		size_t copy_len = count < src_len ? count : src_len;
+		if (copy_len >= dest_size) {
+			dest[0] = 0;
+			return 34;
+		}
+
+		if (copy_len > 0) {
+			std::memcpy(dest, src, copy_len);
+		}
+		dest[copy_len] = '\0';
+		return 0;
+	}
+
+	char *WIN_ENTRY _strdup(const char *strSource) {
+		if (!strSource) {
+			return nullptr;
+		}
+
+		size_t length = ::strlen(strSource);
+		auto *copy = static_cast<char *>(std::malloc(length + 1));
+		if (!copy) {
+			return nullptr;
+		}
+
+		std::memcpy(copy, strSource, length + 1);
+		return copy;
+	}
+
+	unsigned long WIN_ENTRY strtoul(const char *str, char **endptr, int base) {
+		return ::strtoul(str, endptr, base);
+	}
+
 	void* WIN_ENTRY malloc(size_t size){
 		return std::malloc(size);
 	}
@@ -574,8 +687,28 @@ char* WIN_ENTRY setlocale(int category, const char *locale){
 		return std::memcmp(lhs, rhs, count);
 	}
 
+	void WIN_ENTRY qsort(void *base, size_t num, size_t size, int (*compar)(const void *, const void *)) {
+		std::qsort(base, num, size, compar);
+	}
+
 	int WIN_ENTRY fflush(FILE *stream) {
-		return std::fflush(stream);
+		if (!stream) {
+			return std::fflush(nullptr);
+		}
+		FILE *host = mapToHostFile(stream);
+		return std::fflush(host);
+	}
+
+	int WIN_ENTRY vfwprintf(FILE *stream, const uint16_t *format, va_list args) {
+		FILE *host = mapToHostFile(stream ? stream : stdout);
+		std::wstring fmt;
+		if (format) {
+			for (const uint16_t *ptr = format; *ptr; ++ptr) {
+				fmt.push_back(static_cast<wchar_t>(*ptr));
+			}
+		}
+		fmt.push_back(L'\0');
+		return std::vfwprintf(host, fmt.c_str(), args);
 	}
 
 	FILE *WIN_ENTRY fopen(const char *filename, const char *mode) {
@@ -610,6 +743,10 @@ char* WIN_ENTRY setlocale(int category, const char *locale){
 			}
 		}
 		return std::fputws(temp.c_str(), stream);
+	}
+
+	int WIN_ENTRY _cputws(const uint16_t *string) {
+		return fputws(string, stdout);
 	}
 
 	uint16_t* WIN_ENTRY fgetws(uint16_t *buffer, int size, FILE *stream) {
@@ -994,6 +1131,11 @@ char* WIN_ENTRY setlocale(int category, const char *locale){
 		abort_and_log("terminate");
 	}
 
+	int WIN_ENTRY _purecall() {
+		abort_and_log("_purecall");
+		return 0;
+	}
+
 	int WIN_ENTRY _except_handler4_common(void *, void *, void *, void *) {
 		DEBUG_LOG("_except_handler4_common\n");
 		return 0;
@@ -1204,6 +1346,42 @@ char* WIN_ENTRY setlocale(int category, const char *locale){
 		return wstrtol(str, nullptr, 10);
 	}
 
+	int WIN_ENTRY _ltoa_s(long value, char *buffer, size_t sizeInChars, int radix) {
+		if (!buffer || sizeInChars == 0) {
+			return 22;
+		}
+		if (radix < 2 || radix > 36) {
+			buffer[0] = 0;
+			return 22;
+		}
+
+		bool isNegative = (value < 0) && (radix == 10);
+		uint64_t magnitude = isNegative ? static_cast<uint64_t>(-(int64_t)value) : static_cast<uint64_t>(static_cast<int64_t>(value));
+		char temp[65];
+		size_t index = 0;
+		do {
+			uint64_t digit = magnitude % static_cast<uint64_t>(radix);
+			temp[index++] = static_cast<char>((digit < 10) ? ('0' + digit) : ('a' + (digit - 10)));
+			magnitude /= static_cast<uint64_t>(radix);
+		} while (magnitude != 0 && index < sizeof(temp));
+
+		if (isNegative) {
+			temp[index++] = '-';
+		}
+
+		size_t required = index + 1; // include null terminator
+		if (required > sizeInChars) {
+			buffer[0] = 0;
+			return 34;
+		}
+
+		for (size_t i = 0; i < index; ++i) {
+			buffer[i] = temp[index - i - 1];
+		}
+		buffer[index] = '\0';
+		return 0;
+	}
+
 	int WIN_ENTRY wcscpy_s(uint16_t *dest, size_t dest_size, const uint16_t *src){
 		std::string src_str = wideStringToString(src);
 		DEBUG_LOG("wcscpy_s %s\n", src_str.c_str());
@@ -1218,6 +1396,54 @@ char* WIN_ENTRY setlocale(int category, const char *locale){
 
 		wstrcpy(dest, src);
 		return 0;
+	}
+
+	int WIN_ENTRY swprintf_s(uint16_t *buffer, size_t sizeOfBuffer, const uint16_t *format, ...) {
+		if (!buffer || sizeOfBuffer == 0 || !format) {
+			errno = EINVAL;
+			return EINVAL;
+		}
+		std::wstring fmt;
+		for (const uint16_t *ptr = format; *ptr; ++ptr) {
+			fmt.push_back(static_cast<wchar_t>(*ptr));
+		}
+		fmt.push_back(L'\0');
+		std::vector<wchar_t> temp(sizeOfBuffer);
+		va_list args;
+		va_start(args, format);
+		int written = std::vswprintf(temp.data(), temp.size(), fmt.c_str(), args);
+		va_end(args);
+		if (written < 0 || static_cast<size_t>(written) >= sizeOfBuffer) {
+			buffer[0] = 0;
+			errno = ERANGE;
+			return ERANGE;
+		}
+		for (int i = 0; i <= written; ++i) {
+			buffer[i] = static_cast<uint16_t>(temp[static_cast<size_t>(i)]);
+		}
+		return written;
+	}
+
+	int WIN_ENTRY swscanf_s(const uint16_t *buffer, const uint16_t *format, ...) {
+		if (!buffer || !format) {
+			errno = EINVAL;
+			return EOF;
+		}
+		std::wstring bufW;
+		for (const uint16_t *ptr = buffer; *ptr; ++ptr) {
+			bufW.push_back(static_cast<wchar_t>(*ptr));
+		}
+		bufW.push_back(L'\0');
+		std::wstring fmt;
+		for (const uint16_t *ptr = format; *ptr; ++ptr) {
+			fmt.push_back(static_cast<wchar_t>(*ptr));
+		}
+		fmt.push_back(L'\0');
+		va_list args;
+		va_start(args, format);
+		int result = std::vswscanf(bufW.c_str(), fmt.c_str(), args);
+		va_end(args);
+		return result;
 	}
 
 	int* WIN_ENTRY _get_osfhandle(int fd){
@@ -1457,6 +1683,8 @@ static void *resolveByName(const char *name) {
     if (strcmp(name, "_commode") == 0) return (void *)&msvcrt::_commode;
 	if (strcmp(name, "__initenv") == 0) return (void *)&msvcrt::__initenv;
 	if (strcmp(name, "__winitenv") == 0) return (void *)&msvcrt::__winitenv;
+	if (strcmp(name, "__iob_func") == 0) return (void *) msvcrt::__iob_func;
+	if (strcmp(name, "_exit") == 0) return (void *) msvcrt::_exit;
 	if (strcmp(name, "__p__fmode") == 0) return (void *) msvcrt::__p__fmode;
 	if (strcmp(name, "__p__commode") == 0) return (void *) msvcrt::__p__commode;
 	if (strcmp(name, "_initterm") == 0) return (void *)msvcrt::_initterm;
@@ -1472,6 +1700,11 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "strlen") == 0) return (void *)msvcrt::strlen;
 	if (strcmp(name, "strcmp") == 0) return (void *)msvcrt::strcmp;
 	if (strcmp(name, "strncmp") == 0) return (void *)msvcrt::strncmp;
+	if (strcmp(name, "strcpy_s") == 0) return (void *)msvcrt::strcpy_s;
+	if (strcmp(name, "strcat_s") == 0) return (void *)msvcrt::strcat_s;
+	if (strcmp(name, "strncpy_s") == 0) return (void *)msvcrt::strncpy_s;
+	if (strcmp(name, "_strdup") == 0) return (void *)msvcrt::_strdup;
+	if (strcmp(name, "strtoul") == 0) return (void *)msvcrt::strtoul;
 	if (strcmp(name, "malloc") == 0) return (void*)msvcrt::malloc;
 	if (strcmp(name, "calloc") == 0) return (void*)msvcrt::calloc;
 	if (strcmp(name, "_malloc_crt") == 0) return (void*)msvcrt::_malloc_crt;
@@ -1490,6 +1723,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "memcpy") == 0) return (void*)msvcrt::memcpy;
 	if (strcmp(name, "memmove") == 0) return (void*)msvcrt::memmove;
 	if (strcmp(name, "memcmp") == 0) return (void*)msvcrt::memcmp;
+	if (strcmp(name, "qsort") == 0) return (void*)msvcrt::qsort;
 	if (strcmp(name, "fflush") == 0) return (void*)msvcrt::fflush;
 	if (strcmp(name, "fopen") == 0) return (void*)msvcrt::fopen;
 	if (strcmp(name, "fseek") == 0) return (void*)msvcrt::fseek;
@@ -1498,13 +1732,18 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "fgetws") == 0) return (void*)msvcrt::fgetws;
 	if (strcmp(name, "fgetwc") == 0) return (void*)msvcrt::fgetwc;
 	if (strcmp(name, "fputws") == 0) return (void*)msvcrt::fputws;
+	if (strcmp(name, "_cputws") == 0) return (void*)msvcrt::_cputws;
+	if (strcmp(name, "vfwprintf") == 0) return (void*)msvcrt::vfwprintf;
 	if (strcmp(name, "_wfopen_s") == 0) return (void*)msvcrt::_wfopen_s;
 	if (strcmp(name, "wcsspn") == 0) return (void*)msvcrt::wcsspn;
+	if (strcmp(name, "_fileno") == 0) return (void*)msvcrt::_fileno;
 	if (strcmp(name, "_wtol") == 0) return (void*)msvcrt::_wtol;
 	if (strcmp(name, "_wcsupr_s") == 0) return (void*)msvcrt::_wcsupr_s;
 	if (strcmp(name, "_wcslwr_s") == 0) return (void*)msvcrt::_wcslwr_s;
 	if (strcmp(name, "_dup2") == 0) return (void*)msvcrt::_dup2;
 	if (strcmp(name, "_isatty") == 0) return (void*)msvcrt::_isatty;
+	if (strcmp(name, "swprintf_s") == 0) return (void*)msvcrt::swprintf_s;
+	if (strcmp(name, "swscanf_s") == 0) return (void*)msvcrt::swscanf_s;
 	if (strcmp(name, "towlower") == 0) return (void*)msvcrt::towlower;
 	if (strcmp(name, "_ftime64_s") == 0) return (void*)msvcrt::_ftime64_s;
 	if (strcmp(name, "_crt_debugger_hook") == 0) return (void*)msvcrt::_crt_debugger_hook;
@@ -1514,10 +1753,12 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "_except_handler4_common") == 0) return (void*)msvcrt::_except_handler4_common;
 	if (strcmp(name, "_XcptFilter") == 0) return (void*)msvcrt::_XcptFilter;
 	if (strcmp(name, "?terminate@@YAXXZ") == 0) return (void*)msvcrt::terminateShim;
+	if (strcmp(name, "_purecall") == 0) return (void*)msvcrt::_purecall;
 	if (strcmp(name, "wcsncpy_s") == 0) return (void*)msvcrt::wcsncpy_s;
 	if (strcmp(name, "wcsncat_s") == 0) return (void*)msvcrt::wcsncat_s;
 	if (strcmp(name, "_itow_s") == 0) return (void*)msvcrt::_itow_s;
 	if (strcmp(name, "_wtoi") == 0) return (void*)msvcrt::_wtoi;
+	if (strcmp(name, "_ltoa_s") == 0) return (void*)msvcrt::_ltoa_s;
 	if (strcmp(name, "wcscpy_s") == 0) return (void*)msvcrt::wcscpy_s;
 	if (strcmp(name, "_get_osfhandle") == 0) return (void*)msvcrt::_get_osfhandle;
 	if (strcmp(name, "_write") == 0) return (void*)msvcrt::_write;

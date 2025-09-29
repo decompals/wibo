@@ -11,7 +11,8 @@ namespace handles {
 		TYPE_TOKEN,
 		TYPE_MUTEX,
 		TYPE_EVENT,
-		TYPE_THREAD
+		TYPE_THREAD,
+		TYPE_HEAP
 	};
 
     struct Data {

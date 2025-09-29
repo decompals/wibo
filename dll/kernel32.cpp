@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fnmatch.h>
 #include <initializer_list>
+#include <new>
 #include <string>
 #include <strings.h>
 #include "strutil.h"
@@ -35,6 +36,7 @@
 #include <pthread.h>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace advapi32 {
 	void releaseToken(void *tokenPtr);
@@ -138,6 +140,67 @@ typedef struct _EXCEPTION_POINTERS {
 typedef LONG (*PVECTORED_EXCEPTION_HANDLER)(PEXCEPTION_POINTERS ExceptionInfo);
 
 namespace kernel32 {
+	constexpr DWORD HEAP_NO_SERIALIZE = 0x00000001;
+	constexpr DWORD HEAP_GENERATE_EXCEPTIONS = 0x00000004;
+	constexpr DWORD HEAP_ZERO_MEMORY = 0x00000008;
+	constexpr DWORD HEAP_REALLOC_IN_PLACE_ONLY = 0x00000010;
+	constexpr DWORD HEAP_CREATE_ENABLE_EXECUTE = 0x00040000;
+
+	struct HeapRecord {
+		mi_heap_t *heap = nullptr;
+		DWORD createFlags = 0;
+		size_t initialSize = 0;
+		size_t maximumSize = 0;
+		DWORD compatibility = 0;
+		bool isProcessHeap = false;
+	};
+
+	static std::once_flag processHeapInitFlag;
+	static void *processHeapHandle = nullptr;
+	static HeapRecord *processHeapRecord = nullptr;
+
+	static void ensureProcessHeapInitialized() {
+		std::call_once(processHeapInitFlag, []() {
+			mi_heap_t *heap = mi_heap_get_default();
+			auto *record = new (std::nothrow) HeapRecord{};
+			record->heap = heap;
+			record->isProcessHeap = true;
+			processHeapRecord = record;
+			processHeapHandle = handles::allocDataHandle({handles::TYPE_HEAP, record, 0});
+		});
+	}
+
+	static HeapRecord *activeHeapRecord(void *hHeap) {
+		if (!hHeap) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return nullptr;
+		}
+		ensureProcessHeapInitialized();
+		auto data = handles::dataFromHandle(hHeap, false);
+		if (data.type != handles::TYPE_HEAP || data.ptr == nullptr) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return nullptr;
+		}
+		wibo::lastError = ERROR_SUCCESS;
+		return static_cast<HeapRecord *>(data.ptr);
+	}
+
+	static HeapRecord *popHeapRecord(void *hHeap) {
+		ensureProcessHeapInitialized();
+		auto preview = handles::dataFromHandle(hHeap, false);
+		if (preview.type != handles::TYPE_HEAP || preview.ptr == nullptr) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return nullptr;
+		}
+		auto data = handles::dataFromHandle(hHeap, true);
+		wibo::lastError = ERROR_SUCCESS;
+		return static_cast<HeapRecord *>(data.ptr);
+	}
+
+	static bool isExecutableHeap(const HeapRecord *record) {
+		return record && ((record->createFlags & HEAP_CREATE_ENABLE_EXECUTE) != 0);
+	}
+
 	static void *doAlloc(unsigned int dwBytes, bool zero) {
 		if (dwBytes == 0)
 			dwBytes = 1;
@@ -2969,24 +3032,51 @@ namespace kernel32 {
 
 	void *WIN_FUNC HeapCreate(unsigned int flOptions, unsigned int dwInitialSize, unsigned int dwMaximumSize) {
 		DEBUG_LOG("HeapCreate %u %u %u\n", flOptions, dwInitialSize, dwMaximumSize);
-		if (flOptions & 0x00000001) {
-			// HEAP_NO_SERIALIZE
-		}
-		if (flOptions & 0x00040000) {
-			// HEAP_CREATE_ENABLE_EXECUTE
-		}
-		if (flOptions & 0x00000004) {
-			// HEAP_GENERATE_EXCEPTIONS
+		if (dwMaximumSize != 0 && dwInitialSize > dwMaximumSize) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return nullptr;
 		}
 
-		// return a dummy value
-		wibo::lastError = 0;
-		return (void *) 0x100006;
+		mi_heap_t *heap = mi_heap_new();
+		if (!heap) {
+			wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+			return nullptr;
+		}
+
+		auto *record = new (std::nothrow) HeapRecord{};
+		if (!record) {
+			mi_heap_delete(heap);
+			wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+			return nullptr;
+		}
+
+		record->heap = heap;
+		record->createFlags = flOptions;
+		record->initialSize = dwInitialSize;
+		record->maximumSize = dwMaximumSize;
+		record->isProcessHeap = false;
+
+		void *handle = handles::allocDataHandle({handles::TYPE_HEAP, record, 0});
+		wibo::lastError = ERROR_SUCCESS;
+		return handle;
 	}
 
 	BOOL WIN_FUNC HeapDestroy(void *hHeap) {
 		DEBUG_LOG("HeapDestroy(%p)\n", hHeap);
-		(void) hHeap;
+		HeapRecord *record = activeHeapRecord(hHeap);
+		if (!record) {
+			return FALSE;
+		}
+		if (record->isProcessHeap) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+		record = popHeapRecord(hHeap);
+		if (!record) {
+			return FALSE;
+		}
+		mi_heap_destroy(record->heap);
+		delete record;
 		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
@@ -3674,39 +3764,167 @@ namespace kernel32 {
 	}
 
 	void *WIN_FUNC HeapAlloc(void *hHeap, unsigned int dwFlags, size_t dwBytes) {
-		DEBUG_LOG("HeapAlloc(heap=%p, flags=%x, bytes=%u) ", hHeap, dwFlags, dwBytes);
-
-		void *mem = doAlloc(dwBytes, dwFlags & 8);
+		DEBUG_LOG("HeapAlloc(heap=%p, flags=%x, bytes=%zu) ", hHeap, dwFlags, dwBytes);
+		HeapRecord *record = activeHeapRecord(hHeap);
+		if (!record) {
+			DEBUG_LOG("-> NULL\n");
+			return nullptr;
+		}
+		assert(!((record->createFlags | dwFlags) & HEAP_GENERATE_EXCEPTIONS)); // Unsupported
+		const bool zeroMemory = (dwFlags & HEAP_ZERO_MEMORY) != 0;
+		const size_t requestSize = std::max<size_t>(1, dwBytes);
+		void *mem = zeroMemory ? mi_heap_zalloc(record->heap, requestSize) : mi_heap_malloc(record->heap, requestSize);
+		if (!mem) {
+			wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+			return nullptr;
+		}
+		if (isExecutableHeap(record)) {
+			maybeMarkExecutable(mem);
+		}
+		wibo::lastError = ERROR_SUCCESS;
 		DEBUG_LOG("-> %p\n", mem);
 		return mem;
 	}
 
 	void *WIN_FUNC HeapReAlloc(void *hHeap, unsigned int dwFlags, void *lpMem, size_t dwBytes) {
-		DEBUG_LOG("HeapReAlloc(heap=%p, flags=%x, mem=%p, bytes=%u) ", hHeap, dwFlags, lpMem, dwBytes);
-		void *ret = doRealloc(lpMem, dwBytes, dwFlags & 8);
+		DEBUG_LOG("HeapReAlloc(heap=%p, flags=%x, mem=%p, bytes=%zu) ", hHeap, dwFlags, lpMem, dwBytes);
+		HeapRecord *record = activeHeapRecord(hHeap);
+		if (!record) {
+			DEBUG_LOG("-> NULL\n");
+			return nullptr;
+		}
+		if (lpMem == nullptr) {
+			void *alloc = HeapAlloc(hHeap, dwFlags, dwBytes);
+			DEBUG_LOG("-> %p (alloc)\n", alloc);
+			return alloc;
+		}
+		if (!mi_heap_check_owned(record->heap, lpMem)) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			DEBUG_LOG("-> NULL (not owned)\n");
+			return nullptr;
+		}
+		assert(!((record->createFlags | dwFlags) & HEAP_GENERATE_EXCEPTIONS)); // Unsupported
+		const bool inplaceOnly = (dwFlags & HEAP_REALLOC_IN_PLACE_ONLY) != 0;
+		const bool zeroMemory = (dwFlags & HEAP_ZERO_MEMORY) != 0;
+		if (dwBytes == 0) {
+			if (!inplaceOnly) {
+				mi_free(lpMem);
+				wibo::lastError = ERROR_SUCCESS;
+				DEBUG_LOG("-> NULL (freed)\n");
+				return nullptr;
+			}
+			wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+			DEBUG_LOG("-> NULL (zero size with in-place flag)\n");
+			return nullptr;
+		}
+
+		const size_t requestSize = std::max<size_t>(1, dwBytes);
+		const size_t oldSize = mi_usable_size(lpMem);
+		if (inplaceOnly) {
+			if (requestSize > oldSize) {
+				wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+				DEBUG_LOG("-> NULL (cannot grow in place)\n");
+				return nullptr;
+			}
+			wibo::lastError = ERROR_SUCCESS;
+			DEBUG_LOG("-> %p (in-place)\n", lpMem);
+			return lpMem;
+		}
+
+		void *ret = mi_heap_realloc(record->heap, lpMem, requestSize);
+		if (!ret) {
+			wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+			return nullptr;
+		}
+		if (zeroMemory && requestSize > oldSize) {
+			size_t newUsable = mi_usable_size(ret);
+			if (newUsable > oldSize) {
+				size_t zeroLen = std::min(newUsable, requestSize) - oldSize;
+				memset(static_cast<char *>(ret) + oldSize, 0, zeroLen);
+			}
+		}
+		if (isExecutableHeap(record)) {
+			maybeMarkExecutable(ret);
+		}
+		wibo::lastError = ERROR_SUCCESS;
 		DEBUG_LOG("-> %p\n", ret);
 		return ret;
 	}
 
 	unsigned int WIN_FUNC HeapSize(void *hHeap, unsigned int dwFlags, void *lpMem) {
 		DEBUG_LOG("HeapSize(heap=%p, flags=%x, mem=%p)\n", hHeap, dwFlags, lpMem);
-		return mi_usable_size(lpMem);
+		(void) dwFlags;
+		HeapRecord *record = activeHeapRecord(hHeap);
+		if (!record) {
+			return static_cast<unsigned int>(-1);
+		}
+		if (lpMem == nullptr) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return static_cast<unsigned int>(-1);
+		}
+		if (!mi_heap_check_owned(record->heap, lpMem)) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return static_cast<unsigned int>(-1);
+		}
+		size_t size = mi_usable_size(lpMem);
+		wibo::lastError = ERROR_SUCCESS;
+		return static_cast<unsigned int>(size);
 	}
 
 	void *WIN_FUNC GetProcessHeap() {
 		DEBUG_LOG("GetProcessHeap\n");
-		return (void *) 0x100006;
+		ensureProcessHeapInitialized();
+		wibo::lastError = ERROR_SUCCESS;
+		return processHeapHandle;
 	}
 
 	int WIN_FUNC HeapSetInformation(void *HeapHandle, int HeapInformationClass, void *HeapInformation, size_t HeapInformationLength) {
 		DEBUG_LOG("HeapSetInformation %p %d\n", HeapHandle, HeapInformationClass);
-		return 1;
+		ensureProcessHeapInitialized();
+		switch (HeapInformationClass) {
+		case 0: { // HeapCompatibilityInformation
+			if (!HeapInformation || HeapInformationLength < sizeof(unsigned int)) {
+				wibo::lastError = ERROR_INVALID_PARAMETER;
+				return 0;
+			}
+			HeapRecord *target = HeapHandle ? activeHeapRecord(HeapHandle) : processHeapRecord;
+			if (!target) {
+				return 0;
+			}
+			target->compatibility = *static_cast<unsigned int *>(HeapInformation);
+			wibo::lastError = ERROR_SUCCESS;
+			return 1;
+		}
+		case 1: // HeapEnableTerminationOnCorruption
+			wibo::lastError = ERROR_SUCCESS;
+			return 1;
+		case 3: // HeapOptimizeResources
+			wibo::lastError = ERROR_CALL_NOT_IMPLEMENTED;
+			return 0;
+		default:
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
 	}
 
 	unsigned int WIN_FUNC HeapFree(void *hHeap, unsigned int dwFlags, void *lpMem) {
 		DEBUG_LOG("HeapFree(heap=%p, flags=%x, mem=%p)\n", hHeap, dwFlags, lpMem);
-		free(lpMem);
-		return 1;
+		(void) dwFlags;
+		if (lpMem == nullptr) {
+			wibo::lastError = ERROR_SUCCESS;
+			return TRUE;
+		}
+		HeapRecord *record = activeHeapRecord(hHeap);
+		if (!record) {
+			return FALSE;
+		}
+		if (!mi_heap_check_owned(record->heap, lpMem)) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+		mi_free(lpMem);
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
 	}
 
 	unsigned int WIN_FUNC FormatMessageA(unsigned int dwFlags, void *lpSource, unsigned int dwMessageId,

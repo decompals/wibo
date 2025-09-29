@@ -1247,78 +1247,163 @@ namespace kernel32 {
 				tryReleaseMapping(mapping);
 			}
 		} else if (data.type == handles::TYPE_PROCESS) {
-				delete (processes::Process*) data.ptr;
-			} else if (data.type == handles::TYPE_TOKEN) {
-				advapi32::releaseToken(data.ptr);
-			} else if (data.type == handles::TYPE_MUTEX) {
-				releaseMutexObject(reinterpret_cast<MutexObject *>(data.ptr));
-			} else if (data.type == handles::TYPE_EVENT) {
-				releaseEventObject(reinterpret_cast<EventObject *>(data.ptr));
-			} else if (data.type == handles::TYPE_THREAD) {
-				releaseThreadObject(reinterpret_cast<ThreadObject *>(data.ptr));
+			delete (processes::Process*) data.ptr;
+		} else if (data.type == handles::TYPE_TOKEN) {
+			advapi32::releaseToken(data.ptr);
+		} else if (data.type == handles::TYPE_MUTEX) {
+			releaseMutexObject(reinterpret_cast<MutexObject *>(data.ptr));
+		} else if (data.type == handles::TYPE_EVENT) {
+			releaseEventObject(reinterpret_cast<EventObject *>(data.ptr));
+		} else if (data.type == handles::TYPE_THREAD) {
+			releaseThreadObject(reinterpret_cast<ThreadObject *>(data.ptr));
+		}
+		return TRUE;
+	}
+
+	struct FullPathInfo {
+		std::string path;
+		size_t filePartOffset = std::string::npos;
+	};
+
+	static bool computeFullPath(const std::string &input, FullPathInfo &outInfo) {
+		bool endsWithSeparator = false;
+		if (!input.empty()) {
+			char last = input.back();
+			endsWithSeparator = (last == '\\' || last == '/');
+		}
+
+		std::filesystem::path hostPath = files::pathFromWindows(input.c_str());
+		std::error_code ec;
+		std::filesystem::path absPath = std::filesystem::absolute(hostPath, ec);
+		if (ec) {
+			errno = ec.value();
+			setLastErrorFromErrno();
+			return false;
+		}
+
+		std::string windowsPath = files::pathToWindows(absPath);
+		if (endsWithSeparator && !windowsPath.empty() && windowsPath.back() != '\\') {
+			windowsPath.push_back('\\');
+		}
+
+		if (!windowsPath.empty() && windowsPath.back() != '\\') {
+			size_t lastSlash = windowsPath.find_last_of('\\');
+			if (lastSlash == std::string::npos) {
+				outInfo.filePartOffset = 0;
+			} else if (lastSlash + 1 < windowsPath.size()) {
+				outInfo.filePartOffset = lastSlash + 1;
 			}
-			return TRUE;
+		} else {
+			outInfo.filePartOffset = std::string::npos;
+		}
+
+		outInfo.path = std::move(windowsPath);
+		return true;
 	}
 
 	DWORD WIN_FUNC GetFullPathNameA(LPCSTR lpFileName, DWORD nBufferLength, LPSTR lpBuffer, LPSTR *lpFilePart) {
-		DEBUG_LOG("GetFullPathNameA(%s) ", lpFileName);
-		std::filesystem::path absPath = std::filesystem::absolute(files::pathFromWindows(lpFileName));
-		std::string absStr = files::pathToWindows(absPath);
-		DEBUG_LOG("-> %s\n", absStr.c_str());
+		DEBUG_LOG("GetFullPathNameA(%s, %u)\n", lpFileName ? lpFileName : "(null)", nBufferLength);
 
-		// Enough space?
-		if ((absStr.size() + 1) <= nBufferLength) {
-			strcpy(lpBuffer, absStr.c_str());
-
-			// Do we need to fill in FilePart?
-			if (lpFilePart) {
-				*lpFilePart = 0;
-				if (!std::filesystem::is_directory(absPath)) {
-					*lpFilePart = strrchr(lpBuffer, '\\');
-					if (*lpFilePart)
-						*lpFilePart += 1;
-				}
-			}
-
-			return absStr.size();
-		} else {
-			return absStr.size() + 1;
+		if (lpFilePart) {
+			*lpFilePart = nullptr;
 		}
+
+		if (!lpFileName) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+
+		FullPathInfo info;
+		if (!computeFullPath(lpFileName, info)) {
+			return 0;
+		}
+
+		DEBUG_LOG(" -> %s\n", info.path.c_str());
+
+		const size_t pathLen = info.path.size();
+		const auto required = static_cast<DWORD>(pathLen + 1);
+
+		if (nBufferLength == 0) {
+			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			return required;
+		}
+
+		if (!lpBuffer) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+
+		if (nBufferLength < required) {
+			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			return required;
+		}
+
+		memcpy(lpBuffer, info.path.c_str(), pathLen);
+		lpBuffer[pathLen] = '\0';
+
+		if (lpFilePart) {
+			if (info.filePartOffset != std::string::npos && info.filePartOffset < pathLen) {
+				*lpFilePart = lpBuffer + info.filePartOffset;
+			} else {
+				*lpFilePart = nullptr;
+			}
+		}
+
+		wibo::lastError = ERROR_SUCCESS;
+		return static_cast<DWORD>(pathLen);
 	}
 
 	DWORD WIN_FUNC GetFullPathNameW(LPCWSTR lpFileName, DWORD nBufferLength, LPWSTR lpBuffer, LPWSTR *lpFilePart) {
-		std::string narrowName = wideStringToString(lpFileName);
-		DEBUG_LOG("GetFullPathNameW(%s) ", narrowName.c_str());
+		DEBUG_LOG("GetFullPathNameW(%p, %u)\n", lpFileName, nBufferLength);
 
-		std::filesystem::path absPath = std::filesystem::absolute(files::pathFromWindows(narrowName.c_str()));
-		std::string absStr = files::pathToWindows(absPath);
-		auto absStrW = stringToWideString(absStr.c_str());
-		DEBUG_LOG("-> %s\n", absStr.c_str());
-
-		size_t len = wstrlen(absStrW.data());
-		if (nBufferLength == 0 || nBufferLength <= len) {
-			if (lpFilePart) {
-				*lpFilePart = nullptr;
-			}
-			return len + 1;
-		}
-
-		wstrncpy(lpBuffer, absStrW.data(), len + 1);
 		if (lpFilePart) {
 			*lpFilePart = nullptr;
-			std::error_code ec;
-			bool pathIsDir = std::filesystem::is_directory(absPath, ec) && !ec;
-			if (!pathIsDir) {
-				uint16_t *lastSlash = wstrrchr(lpBuffer, '\\');
-				if (lastSlash && *(lastSlash + 1) != 0) {
-					*lpFilePart = lastSlash + 1;
-				} else if (!lastSlash && len > 0) {
-					*lpFilePart = lpBuffer;
-				}
+		}
+
+		if (!lpFileName) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+
+		std::string narrow = wideStringToString(lpFileName);
+		FullPathInfo info;
+		if (!computeFullPath(narrow, info)) {
+			return 0;
+		}
+
+		DEBUG_LOG(" -> %s\n", info.path.c_str());
+
+		auto widePath = stringToWideString(info.path.c_str());
+		const size_t wideLen = widePath.size();
+		const auto required = static_cast<DWORD>(wideLen);
+
+		if (nBufferLength == 0) {
+			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			return required;
+		}
+
+		if (!lpBuffer) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+
+		if (nBufferLength < required) {
+			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			return required;
+		}
+
+		std::copy(widePath.begin(), widePath.end(), lpBuffer);
+
+		if (lpFilePart) {
+			if (info.filePartOffset != std::string::npos && info.filePartOffset < info.path.size()) {
+				*lpFilePart = lpBuffer + info.filePartOffset;
+			} else {
+				*lpFilePart = nullptr;
 			}
 		}
+
 		wibo::lastError = ERROR_SUCCESS;
-		return len;
+		return static_cast<DWORD>(wideLen - 1);
 	}
 
 	/**
@@ -2686,36 +2771,85 @@ namespace kernel32 {
 		return len;
 	}
 
-	unsigned int WIN_FUNC GetCurrentDirectoryA(unsigned int uSize, char *lpBuffer) {
-		DEBUG_LOG("GetCurrentDirectoryA(%u, %p)", uSize, lpBuffer);
+	static bool tryGetCurrentDirectoryPath(std::string &outPath) {
+		std::error_code ec;
+		std::filesystem::path cwd = std::filesystem::current_path(ec);
+		if (ec) {
+			errno = ec.value();
+			setLastErrorFromErrno();
+			return false;
+		}
+		outPath = files::pathToWindows(cwd);
+		return true;
+	}
 
-		std::filesystem::path cwd = std::filesystem::current_path();
-		std::string path = files::pathToWindows(cwd);
+	DWORD WIN_FUNC GetCurrentDirectoryA(DWORD uSize, char *lpBuffer) {
+		DEBUG_LOG("GetCurrentDirectoryA(%u, %p)\n", uSize, lpBuffer);
 
-		// If the buffer is too small, return the required buffer size.
-		// (Add 1 to include the NUL terminator)
-		if (path.size() + 1 > uSize) {
-			DEBUG_LOG(" !! Buffer too small: %i, %i\n", path.size() + 1, uSize);
-			return path.size() + 1;
+		std::string path;
+		if (!tryGetCurrentDirectoryPath(path)) {
+			return 0;
 		}
 
 		DEBUG_LOG(" -> %s\n", path.c_str());
-		strcpy(lpBuffer, path.c_str());
-		return path.size();
+
+		const size_t pathLen = path.size();
+		const auto required = static_cast<DWORD>(pathLen + 1);
+
+		if (uSize == 0) {
+			wibo::lastError = ERROR_SUCCESS;
+			return required;
+		}
+
+		if (lpBuffer == nullptr) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+
+		if (uSize < required) {
+			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			return required;
+		}
+
+		memcpy(lpBuffer, path.c_str(), pathLen);
+		lpBuffer[pathLen] = '\0';
+
+		wibo::lastError = ERROR_SUCCESS;
+		return static_cast<DWORD>(pathLen);
 	}
 
-	unsigned int WIN_FUNC GetCurrentDirectoryW(unsigned int uSize, uint16_t *lpBuffer) {
-		DEBUG_LOG("GetCurrentDirectoryW\n");
+	DWORD WIN_FUNC GetCurrentDirectoryW(DWORD uSize, uint16_t *lpBuffer) {
+		DEBUG_LOG("GetCurrentDirectoryW(%u, %p)\n", uSize, lpBuffer);
 
-		std::filesystem::path cwd = std::filesystem::current_path();
-		std::string path = files::pathToWindows(cwd);
-
-		assert(path.size() < uSize);
-		const char *pathCstr = path.c_str();
-		for (size_t i = 0; i < path.size() + 1; i++) {
-			lpBuffer[i] = pathCstr[i] & 0xFF;
+		std::string path;
+		if (!tryGetCurrentDirectoryPath(path)) {
+			return 0;
 		}
-		return path.size();
+
+		DEBUG_LOG(" -> %s\n", path.c_str());
+
+		auto widePath = stringToWideString(path.c_str());
+		const auto required = static_cast<DWORD>(widePath.size());
+
+		if (uSize == 0) {
+			wibo::lastError = ERROR_SUCCESS;
+			return required;
+		}
+
+		if (lpBuffer == nullptr) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+
+		if (uSize < required) {
+			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			return required;
+		}
+
+		std::copy(widePath.begin(), widePath.end(), lpBuffer);
+
+		wibo::lastError = ERROR_SUCCESS;
+		return required - 1;
 	}
 
 	int WIN_FUNC SetCurrentDirectoryA(const char *lpPathName) {

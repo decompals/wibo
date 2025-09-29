@@ -488,6 +488,38 @@ namespace kernel32 {
 		exit(uExitCode);
 	}
 
+	BOOL WIN_FUNC TerminateProcess(HANDLE hProcess, unsigned int uExitCode) {
+		DEBUG_LOG("TerminateProcess(%p, %u)\n", hProcess, uExitCode);
+		if (hProcess == (HANDLE)0xFFFFFFFF) {
+			ExitProcess(uExitCode);
+		}
+		auto data = handles::dataFromHandle(hProcess, false);
+		if (data.type != handles::TYPE_PROCESS || data.ptr == nullptr) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return FALSE;
+		}
+		auto *process = reinterpret_cast<processes::Process *>(data.ptr);
+		if (kill(process->pid, SIGKILL) != 0) {
+			int err = errno;
+			DEBUG_LOG("TerminateProcess: kill(%d) failed: %s\n", process->pid, strerror(err));
+			switch (err) {
+			case ESRCH:
+			case EPERM:
+				wibo::lastError = ERROR_ACCESS_DENIED;
+				break;
+			default:
+				wibo::lastError = ERROR_INVALID_PARAMETER;
+				break;
+			}
+			return FALSE;
+		}
+		process->forcedExitCode = uExitCode;
+		process->terminationRequested = true;
+		process->exitCode = uExitCode;
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+
 	BOOL WIN_FUNC GetExitCodeProcess(HANDLE hProcess, LPDWORD lpExitCode) {
 		DEBUG_LOG("GetExitCodeProcess\n");
 
@@ -693,20 +725,37 @@ namespace kernel32 {
 		case handles::TYPE_PROCESS: {
 			// TODO: wait for less than forever
 			assert(dwMilliseconds == 0xffffffff);
-			processes::Process *process = reinterpret_cast<processes::Process *>(data.ptr);
-			int status;
-			waitpid(process->pid, &status, 0);
-			if (WIFEXITED(status)) {
-				process->exitCode = WEXITSTATUS(status);
+			auto *process = reinterpret_cast<processes::Process *>(data.ptr);
+			int status = 0;
+			for (;;) {
+				if (waitpid(process->pid, &status, 0) == -1) {
+					if (errno == EINTR) {
+						continue;
+					}
+					if (errno == ECHILD && process->terminationRequested) {
+						process->exitCode = process->forcedExitCode;
+						break;
+					}
+					DEBUG_LOG("WaitForSingleObject: waitpid(%d) failed: %s\n", process->pid, strerror(errno));
+					wibo::lastError = ERROR_INVALID_HANDLE;
+					return 0xFFFFFFFF;
+				}
+				break;
+			}
+			if (process->terminationRequested) {
+				process->exitCode = process->forcedExitCode;
+			} else if (WIFEXITED(status)) {
+				process->exitCode = static_cast<DWORD>(WEXITSTATUS(status));
 			} else {
 				DEBUG_LOG("WaitForSingleObject: Child process exited abnormally - returning exit code 1.\n");
 				process->exitCode = 1;
 			}
+			process->terminationRequested = false;
 			wibo::lastError = ERROR_SUCCESS;
 			return 0;
 		}
 		case handles::TYPE_EVENT: {
-			EventObject *obj = reinterpret_cast<EventObject *>(data.ptr);
+			auto *obj = reinterpret_cast<EventObject *>(data.ptr);
 			if (dwMilliseconds != 0xffffffff) {
 				DEBUG_LOG("WaitForSingleObject: timeout for event not supported\n");
 				wibo::lastError = ERROR_NOT_SUPPORTED;
@@ -724,7 +773,7 @@ namespace kernel32 {
 			return 0;
 		}
 		case handles::TYPE_THREAD: {
-			ThreadObject *obj = reinterpret_cast<ThreadObject *>(data.ptr);
+			auto *obj = reinterpret_cast<ThreadObject *>(data.ptr);
 			if (dwMilliseconds != 0xffffffff) {
 				DEBUG_LOG("WaitForSingleObject: timeout for thread not supported\n");
 				wibo::lastError = ERROR_NOT_SUPPORTED;
@@ -747,7 +796,7 @@ namespace kernel32 {
 			return 0;
 		}
 		case handles::TYPE_MUTEX: {
-			MutexObject *obj = reinterpret_cast<MutexObject *>(data.ptr);
+			auto *obj = reinterpret_cast<MutexObject *>(data.ptr);
 			if (dwMilliseconds != 0xffffffff) {
 				DEBUG_LOG("WaitForSingleObject: timeout for mutex not supported\n");
 				wibo::lastError = ERROR_NOT_SUPPORTED;
@@ -1621,6 +1670,27 @@ namespace kernel32 {
 		return (written == nNumberOfBytesToWrite);
 	}
 
+	BOOL WIN_FUNC FlushFileBuffers(HANDLE hFile) {
+		DEBUG_LOG("FlushFileBuffers(%p)\n", hFile);
+		auto data = handles::dataFromHandle(hFile, false);
+		if (data.type != handles::TYPE_FILE || data.ptr == nullptr) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return FALSE;
+		}
+		FILE *fp = reinterpret_cast<FILE *>(data.ptr);
+		if (fflush(fp) != 0) {
+			wibo::lastError = ERROR_ACCESS_DENIED;
+			return FALSE;
+		}
+		int fd = fileno(fp);
+		if (fd >= 0 && fsync(fd) != 0) {
+			wibo::lastError = ERROR_ACCESS_DENIED;
+			return FALSE;
+		}
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+
 	unsigned int WIN_FUNC ReadFile(void *hFile, void *lpBuffer, unsigned int nNumberOfBytesToRead, unsigned int *lpNumberOfBytesRead, void *lpOverlapped) {
 		DEBUG_LOG("ReadFile %p %d\n", hFile, nNumberOfBytesToRead);
 		assert(!lpOverlapped);
@@ -2091,9 +2161,55 @@ namespace kernel32 {
 	 */
 	int WIN_FUNC GetFileTime(void *hFile, FILETIME *lpCreationTime, FILETIME *lpLastAccessTime, FILETIME *lpLastWriteTime) {
 		DEBUG_LOG("GetFileTime %p %p %p\n", lpCreationTime, lpLastAccessTime, lpLastWriteTime);
-		if (lpCreationTime) *lpCreationTime = defaultFiletime;
-		if (lpLastAccessTime) *lpLastAccessTime = defaultFiletime;
-		if (lpLastWriteTime) *lpLastWriteTime = defaultFiletime;
+		FILE *fp = files::fpFromHandle(hFile);
+		if (!fp) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return 0;
+		}
+		int fd = fileno(fp);
+		if (fd < 0) {
+			setLastErrorFromErrno();
+			return 0;
+		}
+		struct stat st;
+		if (fstat(fd, &st) != 0) {
+			setLastErrorFromErrno();
+			return 0;
+		}
+		auto makeFileTime = [](time_t sec, long nanos) {
+			uint64_t ticks = UNIX_TIME_ZERO;
+			ticks += static_cast<uint64_t>(sec) * 10000000ULL;
+			ticks += static_cast<uint64_t>(nanos) / 100ULL;
+			return fileTimeFromDuration(ticks);
+		};
+		if (lpCreationTime) {
+#if defined(__APPLE__)
+			*lpCreationTime = makeFileTime(st.st_ctimespec.tv_sec, st.st_ctimespec.tv_nsec);
+#elif defined(__linux__)
+			*lpCreationTime = makeFileTime(st.st_ctim.tv_sec, st.st_ctim.tv_nsec);
+#else
+			*lpCreationTime = makeFileTime(st.st_ctime, 0);
+#endif
+		}
+		if (lpLastAccessTime) {
+#if defined(__APPLE__)
+			*lpLastAccessTime = makeFileTime(st.st_atimespec.tv_sec, st.st_atimespec.tv_nsec);
+#elif defined(__linux__)
+			*lpLastAccessTime = makeFileTime(st.st_atim.tv_sec, st.st_atim.tv_nsec);
+#else
+			*lpLastAccessTime = makeFileTime(st.st_atime, 0);
+#endif
+		}
+		if (lpLastWriteTime) {
+#if defined(__APPLE__)
+			*lpLastWriteTime = makeFileTime(st.st_mtimespec.tv_sec, st.st_mtimespec.tv_nsec);
+#elif defined(__linux__)
+			*lpLastWriteTime = makeFileTime(st.st_mtim.tv_sec, st.st_mtim.tv_nsec);
+#else
+			*lpLastWriteTime = makeFileTime(st.st_mtime, 0);
+#endif
+		}
+		wibo::lastError = ERROR_SUCCESS;
 		return 1;
 	}
 
@@ -2317,8 +2433,58 @@ namespace kernel32 {
 
 	int WIN_FUNC GetTimeZoneInformation(TIME_ZONE_INFORMATION *lpTimeZoneInformation) {
 		DEBUG_LOG("GetTimeZoneInformation\n");
+		if (!lpTimeZoneInformation) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
 		memset(lpTimeZoneInformation, 0, sizeof(*lpTimeZoneInformation));
-		return 0;
+		tzset();
+		auto copyName = [](short *dest, const char *src) {
+			if (!src) {
+				dest[0] = 0;
+				return;
+			}
+			for (size_t i = 0; i < 31 && src[i]; ++i) {
+				dest[i] = static_cast<unsigned char>(src[i]);
+				dest[i + 1] = 0;
+			}
+		};
+		time_t now = time(nullptr);
+		struct tm localTm{};
+#if defined(_GNU_SOURCE) || defined(__APPLE__)
+		localtime_r(&now, &localTm);
+#else
+		struct tm *tmp = localtime(&now);
+		if (tmp) {
+			localTm = *tmp;
+		}
+#endif
+		long offsetSeconds = 0;
+#if defined(__APPLE__) || defined(__linux__)
+		offsetSeconds = -localTm.tm_gmtoff;
+#else
+		extern long timezone;
+		offsetSeconds = timezone;
+		if (localTm.tm_isdst > 0) {
+			extern int daylight;
+			if (daylight) {
+				offsetSeconds -= 3600;
+			}
+		}
+#endif
+		lpTimeZoneInformation->Bias = static_cast<int>(offsetSeconds / 60);
+		copyName(lpTimeZoneInformation->StandardName, tzname[0]);
+		const char *daylightName = (daylight && tzname[1]) ? tzname[1] : tzname[0];
+		copyName(lpTimeZoneInformation->DaylightName, daylightName);
+		int result = TIME_ZONE_ID_UNKNOWN;
+		if (daylight && localTm.tm_isdst > 0) {
+			lpTimeZoneInformation->DaylightBias = -60;
+			result = TIME_ZONE_ID_DAYLIGHT;
+		} else {
+			result = TIME_ZONE_ID_STANDARD;
+		}
+		wibo::lastError = ERROR_SUCCESS;
+		return result;
 	}
 
 	/*
@@ -2832,6 +2998,13 @@ namespace kernel32 {
 		return (void *) 0x100006;
 	}
 
+	BOOL WIN_FUNC HeapDestroy(void *hHeap) {
+		DEBUG_LOG("HeapDestroy(%p)\n", hHeap);
+		(void) hHeap;
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+
 	static int translateProtect(DWORD flProtect) {
 		switch (flProtect) {
 		case 0x01: /* PAGE_NOACCESS */
@@ -3321,7 +3494,9 @@ namespace kernel32 {
 			return FALSE;
 		}
 
-		bool isPseudoCurrentThread = hThread == (HANDLE)0x100007 || hThread == (HANDLE)0xFFFFFFFE || hThread == (HANDLE)0 || hThread == (HANDLE)0xFFFFFFFF;
+		bool isPseudoCurrentThread = reinterpret_cast<uintptr_t>(hThread) == PSEUDO_CURRENT_THREAD_HANDLE_VALUE ||
+									 hThread == (HANDLE)0xFFFFFFFE || hThread == (HANDLE)0 ||
+									 hThread == (HANDLE)0xFFFFFFFF;
 		if (!isPseudoCurrentThread) {
 			DEBUG_LOG("GetThreadTimes: unsupported handle %p\n", hThread);
 			wibo::lastError = ERROR_INVALID_HANDLE;
@@ -3448,19 +3623,19 @@ namespace kernel32 {
 			cchSrc = wstrlen(lpSrcStr);
 
 		for (int i = 0; i < cchSrc; i++) {
-			uint16_t c = lpSrcStr[i];
-			assert(c < 256);
-
-			bool upper = ('A' <= c && c <= 'Z');
-			bool lower = ('a' <= c && c <= 'z');
-			bool alpha = (lower || upper);
-			bool digit = ('0' <= c && c <= '9');
-			bool space = (c == ' ' || c == '\n' || c == '\t' || c == '\r' || c == '\f' || c == '\v');
-			bool blank = (c == ' ' || c == '\t');
-			bool hex = (digit || ('A' <= c && c <= 'F') || ('a' <= c && c <= 'f'));
-			bool cntrl = (c < 0x20 || c == 127);
-			bool punct = (!cntrl && !digit && !alpha);
-			lpCharType[i] = (upper ? 1 : 0) | (lower ? 2 : 0) | (digit ? 4 : 0) | (space ? 8 : 0) | (punct ? 0x10 : 0) | (cntrl ? 0x20 : 0) | (blank ? 0x40 : 0) | (hex ? 0x80 : 0) | (alpha ? 0x100 : 0);
+			wint_t c = lpSrcStr[i];
+			bool upper = std::iswupper(c);
+			bool lower = std::iswlower(c);
+			bool alpha = std::iswalpha(c);
+			bool digit = std::iswdigit(c);
+			bool space = std::iswspace(c);
+			bool blank = (c == L' ' || c == L'\t');
+			bool hex = std::iswxdigit(c);
+			bool cntrl = std::iswcntrl(c);
+			bool punct = std::iswpunct(c);
+			lpCharType[i] = (upper ? 1 : 0) | (lower ? 2 : 0) | (digit ? 4 : 0) | (space ? 8 : 0) |
+				(punct ? 0x10 : 0) | (cntrl ? 0x20 : 0) | (blank ? 0x40 : 0) |
+				(hex ? 0x80 : 0) | (alpha ? 0x100 : 0);
 		}
 
 		return 1;
@@ -4138,6 +4313,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "GetCurrentProcessId") == 0) return (void *) kernel32::GetCurrentProcessId;
 	if (strcmp(name, "GetCurrentThreadId") == 0) return (void *) kernel32::GetCurrentThreadId;
 	if (strcmp(name, "ExitProcess") == 0) return (void *) kernel32::ExitProcess;
+	if (strcmp(name, "TerminateProcess") == 0) return (void *) kernel32::TerminateProcess;
 	if (strcmp(name, "GetExitCodeProcess") == 0) return (void *) kernel32::GetExitCodeProcess;
 	if (strcmp(name, "CreateProcessW") == 0) return (void *) kernel32::CreateProcessW;
 	if (strcmp(name, "CreateProcessA") == 0) return (void *) kernel32::CreateProcessA;
@@ -4267,6 +4443,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "GetFileAttributesA") == 0) return (void *) kernel32::GetFileAttributesA;
 	if (strcmp(name, "GetFileAttributesW") == 0) return (void *) kernel32::GetFileAttributesW;
 	if (strcmp(name, "WriteFile") == 0) return (void *) kernel32::WriteFile;
+	if (strcmp(name, "FlushFileBuffers") == 0) return (void *) kernel32::FlushFileBuffers;
 	if (strcmp(name, "ReadFile") == 0) return (void *) kernel32::ReadFile;
 	if (strcmp(name, "CreateFileA") == 0) return (void *) kernel32::CreateFileA;
 	if (strcmp(name, "CreateFileW") == 0) return (void *) kernel32::CreateFileW;
@@ -4333,6 +4510,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "GetProcessHeap") == 0) return (void *) kernel32::GetProcessHeap;
 	if (strcmp(name, "HeapSetInformation") == 0) return (void *) kernel32::HeapSetInformation;
 	if (strcmp(name, "HeapAlloc") == 0) return (void *) kernel32::HeapAlloc;
+	if (strcmp(name, "HeapDestroy") == 0) return (void *) kernel32::HeapDestroy;
 	if (strcmp(name, "HeapReAlloc") == 0) return (void *) kernel32::HeapReAlloc;
 	if (strcmp(name, "HeapSize") == 0) return (void *) kernel32::HeapSize;
 	if (strcmp(name, "HeapFree") == 0) return (void *) kernel32::HeapFree;

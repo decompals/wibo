@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <memory>
 #include <stdarg.h>
+#include <system_error>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <unistd.h>

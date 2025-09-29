@@ -19,6 +19,9 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -fno-pie -no-pie -D_LARGEFILE64_SO
 
 find_package(Filesystem REQUIRED)
 
+# Disable mimalloc tests
+set(MI_BUILD_TESTS OFF CACHE BOOL "Build test executables" FORCE)
+
 include(FetchContent)
 FetchContent_Declare(
     mimalloc

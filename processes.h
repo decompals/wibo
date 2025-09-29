@@ -11,6 +11,8 @@ namespace processes {
     struct Process {
         pid_t pid;
         uint32_t exitCode;
+        uint32_t forcedExitCode;
+        bool terminationRequested;
     };
 
     void *allocProcessHandle(pid_t pid);

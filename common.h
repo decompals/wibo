@@ -77,6 +77,10 @@ typedef unsigned char BYTE;
 
 #define STILL_ACTIVE 259
 
+#define TIME_ZONE_ID_UNKNOWN 0
+#define TIME_ZONE_ID_STANDARD 1
+#define TIME_ZONE_ID_DAYLIGHT 2
+
 #define INVALID_SET_FILE_POINTER ((DWORD)-1)
 #define INVALID_HANDLE_VALUE ((HANDLE)-1)
 

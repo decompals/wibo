@@ -21,7 +21,9 @@ namespace processes {
     void *allocProcessHandle(pid_t pid) {
 		auto* process = new Process;
 		process->pid = pid;
-		process->exitCode = 0;
+		process->exitCode = STILL_ACTIVE;
+		process->forcedExitCode = STILL_ACTIVE;
+		process->terminationRequested = false;
 
 		return handles::allocDataHandle(handles::Data{handles::TYPE_PROCESS, (void*)process, 0});
 	}

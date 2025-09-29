@@ -26,6 +26,7 @@ RUN cmake -S /wibo -B /wibo/build -G Ninja \
         -DCMAKE_CXX_FLAGS="-static" \
         -DBUILD_TESTING=ON \
         -DWIBO_ENABLE_FIXTURE_TESTS=ON \
+        -DMI_LIBC_MUSL=ON \
     && cmake --build /wibo/build \
     && ( [ "$build_type" != "Release" ] || strip -g /wibo/build/wibo )
 

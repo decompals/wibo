@@ -495,7 +495,7 @@ namespace kernel32 {
 	}
 
 	BOOL WIN_FUNC Wow64DisableWow64FsRedirection(void **OldValue) {
-		DEBUG_LOG("Wow64DisableWow64FsRedirection\n");
+		DEBUG_LOG("STUB: Wow64DisableWow64FsRedirection\n");
 		if (OldValue) {
 			*OldValue = nullptr;
 		}
@@ -504,7 +504,7 @@ namespace kernel32 {
 	}
 
 	BOOL WIN_FUNC Wow64RevertWow64FsRedirection(void *OldValue) {
-		DEBUG_LOG("Wow64RevertWow64FsRedirection\n");
+		DEBUG_LOG("STUB: Wow64RevertWow64FsRedirection\n");
 		(void) OldValue;
 		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
@@ -523,6 +523,7 @@ namespace kernel32 {
 
 	// @brief returns a pseudo handle to the current process
 	void *WIN_FUNC GetCurrentProcess() {
+		DEBUG_LOG("STUB: GetCurrentProcess() -> %p\n", (void *) 0xFFFFFFFF);
 		// pseudo handle is always returned, and is -1 (a special constant)
 		return (void *) 0xFFFFFFFF;
 	}
@@ -530,15 +531,14 @@ namespace kernel32 {
 	// @brief DWORD (unsigned int) returns a process identifier of the calling process.
 	unsigned int WIN_FUNC GetCurrentProcessId() {
 		uint32_t pid = getpid();
-		DEBUG_LOG("Current processID is: %d\n", pid);
-
+		DEBUG_LOG("GetCurrentProcessId() -> %d\n", pid);
 		return pid;
 	}
 
 	unsigned int WIN_FUNC GetCurrentThreadId() {
 		pthread_t thread_id;
 		thread_id = pthread_self();
-		DEBUG_LOG("Current thread ID is: %lu\n", thread_id);
+		DEBUG_LOG("GetCurrentThreadId() -> %lu\n", thread_id);
 
 		// Cast thread_id to unsigned int to fit a DWORD
 		unsigned int u_thread_id = (unsigned int) thread_id;
@@ -547,7 +547,7 @@ namespace kernel32 {
 	}
 
 	void WIN_FUNC ExitProcess(unsigned int uExitCode) {
-		DEBUG_LOG("ExitProcess %d\n", uExitCode);
+		DEBUG_LOG("ExitProcess(%u)\n", uExitCode);
 		exit(uExitCode);
 	}
 
@@ -680,9 +680,12 @@ namespace kernel32 {
 			lpProcessInformation
 		);
 
-		std::string application = lpApplicationName ? lpApplicationName : "";
+		bool useSearchPath = lpApplicationName == nullptr;
+		std::string application;
 		std::vector<std::string> arguments = processes::splitCommandLine(lpCommandLine);
-		if (application.empty()) {
+		if (lpApplicationName) {
+			application = lpApplicationName;
+		} else {
 			if (arguments.empty()) {
 				wibo::lastError = ERROR_FILE_NOT_FOUND;
 				return 0;
@@ -692,8 +695,13 @@ namespace kernel32 {
 		if (arguments.empty()) {
 			arguments.push_back(application);
 		}
+		DEBUG_LOG(" -> args:");
+		for (const auto &arg : arguments) {
+			DEBUG_LOG(" '%s'", arg.c_str());
+		}
+		DEBUG_LOG("\n");
 
-		auto resolved = processes::resolveExecutable(application, true);
+		auto resolved = processes::resolveExecutable(application, useSearchPath);
 		if (!resolved) {
 			wibo::lastError = ERROR_FILE_NOT_FOUND;
 			return 0;

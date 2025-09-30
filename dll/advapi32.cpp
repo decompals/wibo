@@ -286,18 +286,18 @@ namespace {
 
 namespace advapi32 {
 	unsigned int WIN_FUNC RegOpenKeyExA(void *hKey, const char *lpSubKey, unsigned int ulOptions, void *samDesired, void **phkResult) {
-		DEBUG_LOG("RegOpenKeyExA(key=%p, subkey=%s, ...)\n", hKey, lpSubKey);
+		DEBUG_LOG("STUB: RegOpenKeyExA(%p, %s, ...)\n", hKey, lpSubKey);
 		return 1; // screw them for now
 	}
 
 	BOOL WIN_FUNC CryptReleaseContext(void* hProv, unsigned int dwFlags) {
-		DEBUG_LOG("STUB: CryptReleaseContext %p %u\n", hProv, dwFlags);
+		DEBUG_LOG("STUB: CryptReleaseContext(%p, %u)\n", hProv, dwFlags);
 		return TRUE;
 	}
 
 	BOOL WIN_FUNC CryptAcquireContextW(void **phProv, const uint16_t *pszContainer, const uint16_t *pszProvider,
 					  unsigned int dwProvType, unsigned int dwFlags) {
-		DEBUG_LOG("STUB: CryptAcquireContextW(%p)\n", phProv);
+		DEBUG_LOG("STUB: CryptAcquireContextW(%p, %p, %p, %u, %u)\n", phProv, pszContainer, pszProvider, dwProvType, dwFlags);
 
 		// to quote the guy above me: screw them for now
 		static int lmao = 42;
@@ -310,7 +310,7 @@ namespace advapi32 {
 	}
 
 	BOOL WIN_FUNC CryptGenRandom(void* hProv, unsigned int dwLen, unsigned char* pbBuffer){
-		DEBUG_LOG("STUB: CryptGenRandom(%p)\n", hProv);
+		DEBUG_LOG("CryptGenRandom(%p)\n", hProv);
 		if (!pbBuffer || dwLen == 0) return FALSE;
 
 		ssize_t ret = getrandom(pbBuffer, dwLen, 0);
@@ -322,7 +322,7 @@ namespace advapi32 {
 	}
 
 	BOOL WIN_FUNC CryptCreateHash(void* hProv, unsigned int Algid, void* hKey, unsigned int dwFlags, void** phHash) {
-		DEBUG_LOG("CryptCreateHash(Algid=0x%x)\n", Algid);
+		DEBUG_LOG("CryptCreateHash(%p, %u, %p, %u, %p)\n", hProv, Algid, hKey, dwFlags, phHash);
 		(void)hProv;
 		if (!phHash) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -351,7 +351,7 @@ namespace advapi32 {
 	}
 
 	BOOL WIN_FUNC CryptHashData(void* hHash, const unsigned char* pbData, unsigned int dwDataLen, unsigned int dwFlags) {
-		DEBUG_LOG("CryptHashData(%p, %u bytes)\n", hHash, dwDataLen);
+		DEBUG_LOG("CryptHashData(%p, %p, %u, %u)\n", hHash, pbData, dwDataLen, dwFlags);
 		if (!hHash || (dwDataLen && !pbData) || dwFlags != 0) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
 			return FALSE;
@@ -367,7 +367,7 @@ namespace advapi32 {
 	}
 
 	BOOL WIN_FUNC CryptGetHashParam(void* hHash, unsigned int dwParam, unsigned char* pbData, unsigned int* pdwDataLen, unsigned int dwFlags) {
-		DEBUG_LOG("CryptGetHashParam(%p, param=0x%x)\n", hHash, dwParam);
+		DEBUG_LOG("CryptGetHashParam(%p, %u, %p, %p, %u)\n", hHash, dwParam, pbData, pdwDataLen, dwFlags);
 		if (!hHash || !pdwDataLen || dwFlags != 0) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
 			return FALSE;
@@ -458,7 +458,7 @@ namespace advapi32 {
 	}
 
 	BOOL WIN_FUNC OpenProcessToken(HANDLE ProcessHandle, DWORD DesiredAccess, HANDLE *TokenHandle) {
-		DEBUG_LOG("OpenProcessToken(process=%p, access=0x%x)\n", ProcessHandle, DesiredAccess);
+		DEBUG_LOG("OpenProcessToken(%p, %u, %p)\n", ProcessHandle, DesiredAccess, TokenHandle);
 		if (!TokenHandle) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
 			return FALSE;
@@ -480,7 +480,8 @@ namespace advapi32 {
 	}
 
 	BOOL WIN_FUNC GetTokenInformation(HANDLE TokenHandle, unsigned int TokenInformationClass, void *TokenInformation, unsigned int TokenInformationLength, unsigned int *ReturnLength) {
-		DEBUG_LOG("GetTokenInformation(%p, class=%u, len=%u)\n", TokenHandle, TokenInformationClass, TokenInformationLength);
+		DEBUG_LOG("GetTokenInformation(%p, %u, %p, %u, %p)\n", TokenHandle, TokenInformationClass, TokenInformation,
+				  TokenInformationLength, ReturnLength);
 		if (!ReturnLength) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
 			return FALSE;
@@ -547,10 +548,11 @@ namespace advapi32 {
 	}
 
 	BOOL WIN_FUNC LookupAccountSidW(const uint16_t *lpSystemName, const void *sidPointer, uint16_t *Name,
-				       unsigned long *cchName, uint16_t *ReferencedDomainName,
-				       unsigned long *cchReferencedDomainName, SID_NAME_USE *peUse) {
+									unsigned long *cchName, uint16_t *ReferencedDomainName,
+									unsigned long *cchReferencedDomainName, SID_NAME_USE *peUse) {
 		std::string systemName = lpSystemName ? wideStringToString(lpSystemName) : std::string("(null)");
-		DEBUG_LOG("LookupAccountSidW(system=%s, sid=%p)\n", systemName.c_str(), sidPointer);
+		DEBUG_LOG("LookupAccountSidW(%s, %p, %p, %p, %p, %p, %p)\n", systemName.c_str(), sidPointer, Name, cchName,
+				  ReferencedDomainName, cchReferencedDomainName, peUse);
 		(void) lpSystemName; // Only local lookup supported
 		if (!sidPointer || !cchName || !cchReferencedDomainName || !peUse) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;

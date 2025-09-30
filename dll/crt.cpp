@@ -40,16 +40,20 @@ std::vector<_PVFV> atexitFuncs;
 _invalid_parameter_handler invalidParameterHandler = nullptr;
 
 void WIN_ENTRY _initterm(const _PVFV *ppfn, const _PVFV *end) {
+	DEBUG_LOG("_initterm(%p, %p)\n", ppfn, end);
 	do {
 		if (_PVFV pfn = *++ppfn) {
+			DEBUG_LOG("-> calling %p\n", pfn);
 			pfn();
 		}
 	} while (ppfn < end);
 }
 
 int WIN_ENTRY _initterm_e(const _PIFV *ppfn, const _PIFV *end) {
+	DEBUG_LOG("_initterm_e(%p, %p)\n", ppfn, end);
 	do {
 		if (_PIFV pfn = *++ppfn) {
+			DEBUG_LOG("-> calling %p\n", pfn);
 			if (int err = pfn())
 				return err;
 		}
@@ -66,9 +70,15 @@ int WIN_ENTRY _set_fmode(int mode) {
 	return 0;
 }
 
-int *WIN_ENTRY __p__commode() { return &_commode; }
+int *WIN_ENTRY __p__commode() {
+	DEBUG_LOG("__p__commode()\n");
+	return &_commode;
+}
 
-int *WIN_ENTRY __p__fmode() { return &_fmode; }
+int *WIN_ENTRY __p__fmode() {
+	DEBUG_LOG("__p__fmode()\n");
+	return &_fmode;
+}
 
 int WIN_ENTRY _crt_atexit(void (*func)()) {
 	DEBUG_LOG("_crt_atexit(%p)\n", func);
@@ -108,37 +118,85 @@ int WIN_ENTRY _set_new_mode(int newhandlermode) {
 	return 0;
 }
 
-char **WIN_ENTRY _get_initial_narrow_environment() { return environ; }
+char **WIN_ENTRY _get_initial_narrow_environment() {
+	DEBUG_LOG("_get_initial_narrow_environment()\n");
+	return environ;
+}
 
-char ***WIN_ENTRY __p__environ() { return &environ; }
+char ***WIN_ENTRY __p__environ() {
+	DEBUG_LOG("__p__environ()\n");
+	return &environ;
+}
 
-char ***WIN_ENTRY __p___argv() { return &wibo::argv; }
+char ***WIN_ENTRY __p___argv() {
+	DEBUG_LOG("__p___argv()\n");
+	return &wibo::argv;
+}
 
-int *WIN_ENTRY __p___argc() { return &wibo::argc; }
+int *WIN_ENTRY __p___argc() {
+	DEBUG_LOG("__p___argc()\n");
+	return &wibo::argc;
+}
 
-size_t WIN_ENTRY strlen(const char *str) { return ::strlen(str); }
+size_t WIN_ENTRY strlen(const char *str) {
+	VERBOSE_LOG("strlen(%p)\n", str);
+	return ::strlen(str);
+}
 
-int WIN_ENTRY strcmp(const char *lhs, const char *rhs) { return ::strcmp(lhs, rhs); }
+int WIN_ENTRY strcmp(const char *lhs, const char *rhs) {
+	VERBOSE_LOG("strcmp(%p, %p)\n", lhs, rhs);
+	return ::strcmp(lhs, rhs);
+}
 
-int WIN_ENTRY strncmp(const char *lhs, const char *rhs, size_t count) { return ::strncmp(lhs, rhs, count); }
+int WIN_ENTRY strncmp(const char *lhs, const char *rhs, size_t count) {
+	VERBOSE_LOG("strncmp(%p, %p, %zu)\n", lhs, rhs, count);
+	return ::strncmp(lhs, rhs, count);
+}
 
-char *WIN_ENTRY strcpy(char *dest, const char *src) { return ::strcpy(dest, src); }
+char *WIN_ENTRY strcpy(char *dest, const char *src) {
+	VERBOSE_LOG("strcpy(%p, %p)\n", dest, src);
+	return ::strcpy(dest, src);
+}
 
-void *WIN_ENTRY malloc(size_t size) { return ::malloc(size); }
+void *WIN_ENTRY malloc(size_t size) {
+	VERBOSE_LOG("malloc(%zu)\n", size);
+	return ::malloc(size);
+}
 
-void *WIN_ENTRY calloc(size_t count, size_t size) { return ::calloc(count, size); }
+void *WIN_ENTRY calloc(size_t count, size_t size) {
+	VERBOSE_LOG("calloc(%zu, %zu)\n", count, size);
+	return ::calloc(count, size);
+}
 
-void *WIN_ENTRY realloc(void *ptr, size_t newSize) { return ::realloc(ptr, newSize); }
+void *WIN_ENTRY realloc(void *ptr, size_t newSize) {
+	VERBOSE_LOG("realloc(%p, %zu)\n", ptr, newSize);
+	return ::realloc(ptr, newSize);
+}
 
-void WIN_ENTRY free(void *ptr) { ::free(ptr); }
+void WIN_ENTRY free(void *ptr) {
+	VERBOSE_LOG("free(%p)\n", ptr);
+	::free(ptr);
+}
 
-void *WIN_ENTRY memcpy(void *dest, const void *src, size_t count) { return std::memcpy(dest, src, count); }
+void *WIN_ENTRY memcpy(void *dest, const void *src, size_t count) {
+	VERBOSE_LOG("memcpy(%p, %p, %zu)\n", dest, src, count);
+	return std::memcpy(dest, src, count);
+}
 
-void *WIN_ENTRY memmove(void *dest, const void *src, size_t count) { return std::memmove(dest, src, count); }
+void *WIN_ENTRY memmove(void *dest, const void *src, size_t count) {
+	VERBOSE_LOG("memmove(%p, %p, %zu)\n", dest, src, count);
+	return std::memmove(dest, src, count);
+}
 
-void *WIN_ENTRY memset(void *dest, int ch, size_t count) { return std::memset(dest, ch, count); }
+void *WIN_ENTRY memset(void *dest, int ch, size_t count) {
+	VERBOSE_LOG("memset(%p, %i, %zu)\n", dest, ch, count);
+	return std::memset(dest, ch, count);
+}
 
-int WIN_ENTRY memcmp(const void *lhs, const void *rhs, size_t count) { return std::memcmp(lhs, rhs, count); }
+int WIN_ENTRY memcmp(const void *lhs, const void *rhs, size_t count) {
+	VERBOSE_LOG("memcmp(%p, %p, %zu)\n", lhs, rhs, count);
+	return std::memcmp(lhs, rhs, count);
+}
 
 int WIN_ENTRY __setusermatherr(void *handler) {
 	DEBUG_LOG("STUB: __setusermatherr(%p)\n", handler);
@@ -192,9 +250,13 @@ void WIN_ENTRY abort(void) {
 
 using signal_handler = void (*)(int);
 
-signal_handler WIN_ENTRY signal(int signum, signal_handler handler) { return std::signal(signum, handler); }
+signal_handler WIN_ENTRY signal(int signum, signal_handler handler) {
+	DEBUG_LOG("signal(%i, %p)\n", signum, handler);
+	return std::signal(signum, handler);
+}
 
 void *WIN_ENTRY __acrt_iob_func(unsigned int index) {
+	DEBUG_LOG("__acrt_iob_func(%u)\n", index);
 	if (index == 0)
 		return stdin;
 	if (index == 1)
@@ -204,13 +266,15 @@ void *WIN_ENTRY __acrt_iob_func(unsigned int index) {
 	return nullptr;
 }
 
-int WIN_ENTRY __stdio_common_vfprintf(unsigned long long /*options*/, FILE *stream, const char *format,
-									  void * /*locale*/, va_list args) {
+int WIN_ENTRY __stdio_common_vfprintf(unsigned long long options, FILE *stream, const char *format, void *locale,
+									  va_list args) {
+	DEBUG_LOG("__stdio_common_vfprintf(%llu, %p, %s, %p, %p)\n", options, stream, format, locale, args);
 	return vfprintf(stream, format, args);
 }
 
-int WIN_ENTRY __stdio_common_vsprintf(unsigned long long /*options*/, char *buffer, size_t len, const char *format,
-									  void * /*locale*/, va_list args) {
+int WIN_ENTRY __stdio_common_vsprintf(unsigned long long options, char *buffer, size_t len, const char *format,
+									  void *locale, va_list args) {
+	DEBUG_LOG("__stdio_common_vsprintf(%llu, %p, %zu, %s, %p, ...)\n", options, buffer, len, format, locale);
 	if (!buffer || !format)
 		return -1;
 	int result = vsnprintf(buffer, len, format, args);

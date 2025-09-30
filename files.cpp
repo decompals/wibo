@@ -69,7 +69,7 @@ namespace files {
 		}
 
 		// Remove the drive letter
-		if (str.rfind("z:/", 0) == 0 || str.rfind("Z:/", 0) == 0) {
+		if (str.rfind("z:/", 0) == 0 || str.rfind("Z:/", 0) == 0 || str.rfind("c:/", 0) == 0 || str.rfind("C:/", 0) == 0) {
 			str.erase(0, 2);
 		}
 

@@ -19,7 +19,18 @@
 // force_align_arg_pointer will realign the stack to match GCC's 16 byte alignment.
 #define WIN_ENTRY __attribute__((force_align_arg_pointer, callee_pop_aggregate_return(0)))
 #define WIN_FUNC WIN_ENTRY __attribute__((stdcall))
-#define DEBUG_LOG(...) wibo::debug_log(__VA_ARGS__)
+#define DEBUG_LOG(...) \
+	do { \
+		if (wibo::debugEnabled) { \
+			wibo::debug_log(__VA_ARGS__); \
+		} \
+	} while (0)
+
+#ifndef NDEBUG
+#define VERBOSE_LOG(...) DEBUG_LOG(__VA_ARGS__)
+#else
+#define VERBOSE_LOG(...) ((void)0)
+#endif
 
 typedef void *HANDLE;
 typedef void *HMODULE;

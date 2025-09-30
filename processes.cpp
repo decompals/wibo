@@ -112,6 +112,9 @@ namespace processes {
 
 	static std::vector<std::filesystem::path> buildSearchDirectories() {
 		std::vector<std::filesystem::path> dirs;
+		if (wibo::guestExecutablePath.has_parent_path()) {
+			dirs.push_back(wibo::guestExecutablePath.parent_path());
+		}
 		dirs.push_back(std::filesystem::current_path());
 		if (const char *envPath = std::getenv("PATH")) {
 			auto parsed = parseHostPath(envPath);
@@ -197,6 +200,15 @@ namespace processes {
 			nativeArgs.push_back(const_cast<char *>(entry.c_str()));
 		}
 		nativeArgs.push_back(nullptr);
+
+		DEBUG_LOG("Spawning process: %s, args: [", wibo::executableName.c_str());
+		for (size_t i = 0; i < storage.size(); ++i) {
+			if (i != 0) {
+				DEBUG_LOG(", ");
+			}
+			DEBUG_LOG("'%s'", storage[i].c_str());
+		}
+		DEBUG_LOG("]\n");
 
 		posix_spawn_file_actions_t actions;
 		posix_spawn_file_actions_init(&actions);

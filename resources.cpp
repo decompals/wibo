@@ -1,4 +1,5 @@
 #include "resources.h"
+#include "errors.h"
 #include "common.h"
 
 namespace {

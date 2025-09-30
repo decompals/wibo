@@ -1,4 +1,5 @@
 #include "common.h"
+#include "errors.h"
 #include "handles.h"
 
 namespace psapi {

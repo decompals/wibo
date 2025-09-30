@@ -1,4 +1,5 @@
 #include "common.h"
+#include "errors.h"
 #include "files.h"
 #include "resources.h"
 #include "strutil.h"

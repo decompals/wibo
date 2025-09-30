@@ -1,7 +1,10 @@
 #include "common.h"
+#include "errors.h"
 #include "files.h"
 
 #include <sys/mman.h>
+
+#include <optional>
 
 #define PIO_APC_ROUTINE void *
 
@@ -13,6 +16,11 @@ typedef struct _IO_STATUS_BLOCK {
 	ULONG_PTR Information;
 } IO_STATUS_BLOCK, *PIO_STATUS_BLOCK;
 
+namespace kernel32 {
+BOOL WIN_FUNC SetEvent(HANDLE hEvent);
+BOOL WIN_FUNC ResetEvent(HANDLE hEvent);
+} // namespace kernel32
+
 namespace ntdll {
 
 NTSTATUS WIN_FUNC NtReadFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext,
@@ -20,34 +28,55 @@ NTSTATUS WIN_FUNC NtReadFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE Ap
 							 PULONG Key) {
 	DEBUG_LOG("NtReadFile(%p, %p, %p, %p, %p, %p, %u, %p, %p) ", FileHandle, Event, ApcRoutine, ApcContext,
 			  IoStatusBlock, Buffer, Length, ByteOffset, Key);
-	assert(Event == nullptr);
-	assert(ApcRoutine == nullptr);
-	assert(ApcContext == nullptr);
-	assert(ByteOffset == nullptr);
-	assert(Key == nullptr);
+	(void)ApcRoutine;
+	(void)ApcContext;
+	(void)Key;
 
-	wibo::lastError = 0;
-	FILE *fp = files::fpFromHandle(FileHandle);
-	if (!fp) {
+	if (!IoStatusBlock) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return STATUS_INVALID_PARAMETER;
+	}
+
+	auto file = files::fileHandleFromHandle(FileHandle);
+	if (!file || !file->fp) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
+		IoStatusBlock->Status = STATUS_INVALID_HANDLE;
+		IoStatusBlock->Information = 0;
 		return STATUS_INVALID_HANDLE;
 	}
 
-	size_t read = fread(Buffer, 1, Length, fp);
+	bool handleOverlapped = (file->flags & FILE_FLAG_OVERLAPPED) != 0;
+	std::optional<uint64_t> offset;
+	bool updateFilePointer = !handleOverlapped;
+	if (ByteOffset) {
+		offset = static_cast<uint64_t>(*ByteOffset);
+	} else if (handleOverlapped) {
+		updateFilePointer = false;
+	}
+
+	if (Event) {
+		kernel32::ResetEvent(Event);
+	}
+
+	auto io = files::read(file, Buffer, Length, offset, updateFilePointer);
+	DWORD winError = ERROR_SUCCESS;
 	NTSTATUS status = STATUS_SUCCESS;
-	if (read < Length) {
-		if (feof(fp)) {
-			wibo::lastError = ERROR_HANDLE_EOF;
-			status = STATUS_END_OF_FILE;
-		} else {
-			wibo::lastError = ERROR_READ_FAULT; // ?
-			status = STATUS_UNEXPECTED_IO_ERROR;
-		}
+	if (io.unixError != 0) {
+		winError = wibo::winErrorFromErrno(io.unixError);
+		status = wibo::statusFromWinError(winError);
+	} else if (io.reachedEnd && io.bytesTransferred == 0) {
+		winError = ERROR_HANDLE_EOF;
+		status = STATUS_END_OF_FILE;
 	}
-	if (IoStatusBlock) {
-		IoStatusBlock->Status = status;
-		IoStatusBlock->Information = read;
+
+	IoStatusBlock->Status = status;
+	IoStatusBlock->Information = static_cast<ULONG_PTR>(io.bytesTransferred);
+	wibo::lastError = winError;
+
+	if (Event) {
+		kernel32::SetEvent(Event);
 	}
+
 	DEBUG_LOG("-> 0x%x\n", status);
 	return status;
 }

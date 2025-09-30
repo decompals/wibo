@@ -1,5 +1,6 @@
 #include "common.h"
 #include "files.h"
+#include "errors.h"
 #include "processes.h"
 #include "handles.h"
 #include "resources.h"
@@ -454,26 +455,42 @@ namespace kernel32 {
 	}
 
 	void setLastErrorFromErrno() {
-		switch (errno) {
-		case 0:
-			wibo::lastError = ERROR_SUCCESS;
-			break;
-		case EACCES:
-			wibo::lastError = ERROR_ACCESS_DENIED;
-			break;
-		case EEXIST:
-			wibo::lastError = ERROR_ALREADY_EXISTS;
-			break;
-		case ENOENT:
-			wibo::lastError = ERROR_FILE_NOT_FOUND;
-			break;
-		case ENOTDIR:
-			wibo::lastError = ERROR_PATH_NOT_FOUND;
-			break;
-		default:
-			wibo::lastError = ERROR_NOT_SUPPORTED;
-			break;
+		wibo::lastError = wibo::winErrorFromErrno(errno);
+	}
+
+	static void setEventSignaledState(HANDLE hEvent, bool signaled) {
+		if (!hEvent) {
+			return;
 		}
+		auto data = handles::dataFromHandle(hEvent, false);
+		if (data.type != handles::TYPE_EVENT || data.ptr == nullptr) {
+			return;
+		}
+		EventObject *obj = reinterpret_cast<EventObject *>(data.ptr);
+		pthread_mutex_lock(&obj->mutex);
+		obj->signaled = signaled;
+		if (signaled) {
+			if (obj->manualReset) {
+				pthread_cond_broadcast(&obj->cond);
+			} else {
+				pthread_cond_signal(&obj->cond);
+			}
+		}
+		pthread_mutex_unlock(&obj->mutex);
+	}
+
+	static void resetOverlappedEvent(OVERLAPPED *ov) {
+		if (!ov || !ov->hEvent) {
+			return;
+		}
+		setEventSignaledState(ov->hEvent, false);
+	}
+
+	static void signalOverlappedEvent(OVERLAPPED *ov) {
+		if (!ov || !ov->hEvent) {
+			return;
+		}
+		setEventSignaledState(ov->hEvent, true);
 	}
 
 	uint32_t WIN_FUNC GetLastError() {
@@ -1244,10 +1261,10 @@ namespace kernel32 {
 		(void)dwDesiredAccess;
 		(void)bInheritHandle;
 		(void)dwOptions;
-		FILE *fp = files::fpFromHandle(hSourceHandle);
-		if (fp == stdin || fp == stdout || fp == stderr) {
+		auto file = files::fileHandleFromHandle(hSourceHandle);
+		if (file && (file->fp == stdin || file->fp == stdout || file->fp == stderr)) {
 			// we never close standard handles so they are fine to duplicate
-			void *handle = files::allocFpHandle(fp);
+			void *handle = files::duplicateFileHandle(file, false);
 			DEBUG_LOG("-> %p\n", handle);
 			*lpTargetHandle = handle;
 			return 1;
@@ -1261,9 +1278,13 @@ namespace kernel32 {
 		DEBUG_LOG("CloseHandle(%p)\n", hObject);
 		auto data = handles::dataFromHandle(hObject, true);
 		if (data.type == handles::TYPE_FILE) {
-			FILE *fp = (FILE *) data.ptr;
-			if (!(fp == stdin || fp == stdout || fp == stderr)) {
-				fclose(fp);
+			auto file = reinterpret_cast<files::FileHandle *>(data.ptr);
+			if (file) {
+				if (file->closeOnDestroy && file->fp &&
+					!(file->fp == stdin || file->fp == stdout || file->fp == stderr)) {
+					fclose(file->fp);
+				}
+				delete file;
 			}
 		} else if (data.type == handles::TYPE_MAPPED) {
 			auto *mapping = reinterpret_cast<MappingObject *>(data.ptr);
@@ -1272,7 +1293,7 @@ namespace kernel32 {
 				tryReleaseMapping(mapping);
 			}
 		} else if (data.type == handles::TYPE_PROCESS) {
-			delete (processes::Process*) data.ptr;
+			delete (processes::Process *)data.ptr;
 		} else if (data.type == handles::TYPE_TOKEN) {
 			advapi32::releaseToken(data.ptr);
 		} else if (data.type == handles::TYPE_MUTEX) {
@@ -1820,27 +1841,66 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC WriteFile(void *hFile, const void *lpBuffer, unsigned int nNumberOfBytesToWrite, unsigned int *lpNumberOfBytesWritten, void *lpOverlapped) {
-		DEBUG_LOG("WriteFile(%p, %d)\n", hFile, nNumberOfBytesToWrite);
-		assert(!lpOverlapped);
-		wibo::lastError = 0;
+		DEBUG_LOG("WriteFile(%p, %u)\n", hFile, nNumberOfBytesToWrite);
+		wibo::lastError = ERROR_SUCCESS;
 
-		FILE *fp = files::fpFromHandle(hFile);
-		size_t written = fwrite(lpBuffer, 1, nNumberOfBytesToWrite, fp);
-		if (lpNumberOfBytesWritten)
-			*lpNumberOfBytesWritten = written;
-
-#if 0
-		printf("writing:\n");
-		for (unsigned int i = 0; i < nNumberOfBytesToWrite; i++) {
-			printf("%c", ((const char*)lpBuffer)[i]);
+		auto file = files::fileHandleFromHandle(hFile);
+		if (!file || !file->fp) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return FALSE;
 		}
-		printf("\n");
-#endif
 
-		if (written == 0)
-			wibo::lastError = 29; // ERROR_WRITE_FAULT
+		bool handleOverlapped = (file->flags & FILE_FLAG_OVERLAPPED) != 0;
+		auto *overlapped = reinterpret_cast<OVERLAPPED *>(lpOverlapped);
+		bool usingOverlapped = overlapped != nullptr;
+		if (!usingOverlapped && lpNumberOfBytesWritten == nullptr) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
 
-		return (written == nNumberOfBytesToWrite);
+		std::optional<uint64_t> offset;
+		bool updateFilePointer = true;
+		if (usingOverlapped) {
+			offset = (static_cast<uint64_t>(overlapped->Offset) | (static_cast<uint64_t>(overlapped->OffsetHigh) << 32));
+			overlapped->Internal = STATUS_PENDING;
+			overlapped->InternalHigh = 0;
+			updateFilePointer = !handleOverlapped;
+			resetOverlappedEvent(overlapped);
+		}
+
+		auto io = files::write(file, lpBuffer, nNumberOfBytesToWrite, offset, updateFilePointer);
+		DWORD completionStatus = STATUS_SUCCESS;
+		if (io.unixError != 0) {
+			completionStatus = wibo::winErrorFromErrno(io.unixError);
+			wibo::lastError = completionStatus;
+			if (lpNumberOfBytesWritten) {
+				*lpNumberOfBytesWritten = static_cast<DWORD>(io.bytesTransferred);
+			}
+			if (usingOverlapped) {
+				overlapped->Internal = completionStatus;
+				overlapped->InternalHigh = io.bytesTransferred;
+				signalOverlappedEvent(overlapped);
+			}
+			return FALSE;
+		}
+
+		if (lpNumberOfBytesWritten && (!handleOverlapped || !usingOverlapped)) {
+			*lpNumberOfBytesWritten = static_cast<DWORD>(io.bytesTransferred);
+		}
+
+		if (usingOverlapped) {
+			overlapped->Internal = completionStatus;
+			overlapped->InternalHigh = io.bytesTransferred;
+			if (!handleOverlapped) {
+				uint64_t baseOffset = offset.value_or(0);
+				uint64_t newOffset = baseOffset + io.bytesTransferred;
+				overlapped->Offset = static_cast<DWORD>(newOffset & 0xFFFFFFFFu);
+				overlapped->OffsetHigh = static_cast<DWORD>(newOffset >> 32);
+			}
+			signalOverlappedEvent(overlapped);
+		}
+
+		return (io.bytesTransferred == nNumberOfBytesToWrite);
 	}
 
 	BOOL WIN_FUNC FlushFileBuffers(HANDLE hFile) {
@@ -1850,12 +1910,17 @@ namespace kernel32 {
 			wibo::lastError = ERROR_INVALID_HANDLE;
 			return FALSE;
 		}
-		FILE *fp = reinterpret_cast<FILE *>(data.ptr);
+		auto file = reinterpret_cast<files::FileHandle *>(data.ptr);
+		if (!file || !file->fp) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return FALSE;
+		}
+		FILE *fp = file->fp;
 		if (fflush(fp) != 0) {
 			wibo::lastError = ERROR_ACCESS_DENIED;
 			return FALSE;
 		}
-		int fd = fileno(fp);
+		int fd = file->fd;
 		if (fd >= 0 && fsync(fd) != 0) {
 			wibo::lastError = ERROR_ACCESS_DENIED;
 			return FALSE;
@@ -1865,14 +1930,70 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC ReadFile(void *hFile, void *lpBuffer, unsigned int nNumberOfBytesToRead, unsigned int *lpNumberOfBytesRead, void *lpOverlapped) {
-		DEBUG_LOG("ReadFile %p %d\n", hFile, nNumberOfBytesToRead);
-		assert(!lpOverlapped);
-		wibo::lastError = 0;
+		DEBUG_LOG("ReadFile(%p, %u)\n", hFile, nNumberOfBytesToRead);
+		wibo::lastError = ERROR_SUCCESS;
 
-		FILE *fp = files::fpFromHandle(hFile);
-		size_t read = fread(lpBuffer, 1, nNumberOfBytesToRead, fp);
-		*lpNumberOfBytesRead = read;
-		return 1;
+		auto file = files::fileHandleFromHandle(hFile);
+		if (!file || !file->fp) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return FALSE;
+		}
+
+		bool handleOverlapped = (file->flags & FILE_FLAG_OVERLAPPED) != 0;
+		auto *overlapped = reinterpret_cast<OVERLAPPED *>(lpOverlapped);
+		bool usingOverlapped = overlapped != nullptr;
+		if (!usingOverlapped && lpNumberOfBytesRead == nullptr) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+
+		std::optional<uint64_t> offset;
+		bool updateFilePointer = true;
+		if (usingOverlapped) {
+			offset = (static_cast<uint64_t>(overlapped->Offset) | (static_cast<uint64_t>(overlapped->OffsetHigh) << 32));
+			overlapped->Internal = STATUS_PENDING;
+			overlapped->InternalHigh = 0;
+			updateFilePointer = !handleOverlapped;
+			resetOverlappedEvent(overlapped);
+		}
+
+		auto io = files::read(file, lpBuffer, nNumberOfBytesToRead, offset, updateFilePointer);
+		DWORD completionStatus = STATUS_SUCCESS;
+		if (io.unixError != 0) {
+			completionStatus = wibo::winErrorFromErrno(io.unixError);
+			wibo::lastError = completionStatus;
+			if (lpNumberOfBytesRead) {
+				*lpNumberOfBytesRead = static_cast<DWORD>(io.bytesTransferred);
+			}
+			if (usingOverlapped) {
+				overlapped->Internal = completionStatus;
+				overlapped->InternalHigh = io.bytesTransferred;
+				signalOverlappedEvent(overlapped);
+			}
+			return FALSE;
+		}
+
+		if (io.reachedEnd && io.bytesTransferred == 0 && handleOverlapped) {
+			completionStatus = ERROR_HANDLE_EOF;
+		}
+
+		if (lpNumberOfBytesRead && (!handleOverlapped || !usingOverlapped)) {
+			*lpNumberOfBytesRead = static_cast<DWORD>(io.bytesTransferred);
+		}
+
+		if (usingOverlapped) {
+			overlapped->Internal = completionStatus;
+			overlapped->InternalHigh = io.bytesTransferred;
+			if (!handleOverlapped) {
+				uint64_t baseOffset = offset.value_or(0);
+				uint64_t newOffset = baseOffset + io.bytesTransferred;
+				overlapped->Offset = static_cast<DWORD>(newOffset & 0xFFFFFFFFu);
+				overlapped->OffsetHigh = static_cast<DWORD>(newOffset >> 32);
+			}
+			signalOverlappedEvent(overlapped);
+		}
+
+		return TRUE;
 	}
 
 	enum {
@@ -1961,7 +2082,7 @@ namespace kernel32 {
 		}
 
 		if (fp) {
-			void *handle = files::allocFpHandle(fp);
+			void *handle = files::allocFpHandle(fp, dwDesiredAccess, dwShareMode, dwFlagsAndAttributes, true);
 			DEBUG_LOG("-> %p\n", handle);
 			return handle;
 		} else {
@@ -4665,8 +4786,42 @@ namespace kernel32 {
 	}
 
 	BOOL WIN_FUNC GetOverlappedResult(void *hFile, void *lpOverlapped, int *lpNumberOfBytesTransferred, BOOL bWait) {
-		// DEBUG_LOG("GetOverlappedResult(%p, %p, %p, %u)\n", hFile, lpOverlapped, lpNumberOfBytesTransferred, bWait);
-		return 1;
+		(void)hFile;
+		OVERLAPPED *overlapped = reinterpret_cast<OVERLAPPED *>(lpOverlapped);
+		if (!overlapped) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+		if (bWait && overlapped->Internal == STATUS_PENDING) {
+			if (overlapped->hEvent) {
+				WaitForSingleObject(overlapped->hEvent, 0xFFFFFFFF);
+			}
+		}
+
+		DWORD status = static_cast<DWORD>(overlapped->Internal);
+		if (status == STATUS_PENDING) {
+			wibo::lastError = ERROR_IO_INCOMPLETE;
+			if (lpNumberOfBytesTransferred) {
+				*lpNumberOfBytesTransferred = static_cast<int>(overlapped->InternalHigh);
+			}
+			return FALSE;
+		}
+
+		if (lpNumberOfBytesTransferred) {
+			*lpNumberOfBytesTransferred = static_cast<int>(overlapped->InternalHigh);
+		}
+
+		if (status == STATUS_SUCCESS) {
+			wibo::lastError = ERROR_SUCCESS;
+			return TRUE;
+		}
+		if (status == STATUS_END_OF_FILE || status == ERROR_HANDLE_EOF) {
+			wibo::lastError = ERROR_HANDLE_EOF;
+			return FALSE;
+		}
+
+		wibo::lastError = status;
+		return FALSE;
 	}
 
 }

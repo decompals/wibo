@@ -3,6 +3,7 @@
 #include "handles.h"
 #include "strutil.h"
 #include <algorithm>
+#include <cerrno>
 #include <map>
 #include <optional>
 #include <strings.h>
@@ -120,20 +121,183 @@ namespace files {
 		return str;
 	}
 
+	FileHandle *fileHandleFromHandle(void *handle) {
+		handles::Data data = handles::dataFromHandle(handle, false);
+		if (data.type != handles::TYPE_FILE) {
+			return nullptr;
+		}
+		return reinterpret_cast<FileHandle *>(data.ptr);
+	}
+
 	FILE *fpFromHandle(void *handle, bool pop) {
 		handles::Data data = handles::dataFromHandle(handle, pop);
 		if (data.type == handles::TYPE_FILE) {
-			return (FILE*)data.ptr;
+			return reinterpret_cast<FileHandle *>(data.ptr)->fp;
 		} else if (data.type == handles::TYPE_UNUSED && pop) {
-			return 0;
+			return nullptr;
 		} else {
 			printf("Invalid file handle %p\n", handle);
 			assert(0);
 		}
 	}
 
-	void *allocFpHandle(FILE *fp) {
-		return handles::allocDataHandle(handles::Data{handles::TYPE_FILE, fp, 0});
+	void *allocFpHandle(FILE *fp, unsigned int desiredAccess, unsigned int shareMode, unsigned int flags, bool closeOnDestroy) {
+		auto *handle = new FileHandle();
+		handle->fp = fp;
+		handle->fd = (fp ? fileno(fp) : -1);
+		handle->desiredAccess = desiredAccess;
+		handle->shareMode = shareMode;
+		handle->flags = flags;
+		handle->closeOnDestroy = closeOnDestroy;
+		return handles::allocDataHandle({handles::TYPE_FILE, handle, 0});
+	}
+
+	void *duplicateFileHandle(FileHandle *source, bool closeOnDestroy) {
+		if (!source) {
+			return nullptr;
+		}
+		auto *clone = new FileHandle();
+		clone->fp = source->fp;
+		clone->fd = source->fd;
+		clone->desiredAccess = source->desiredAccess;
+		clone->shareMode = source->shareMode;
+		clone->flags = source->flags;
+		clone->closeOnDestroy = closeOnDestroy;
+		return handles::allocDataHandle({handles::TYPE_FILE, clone, 0});
+	}
+
+	IOResult read(FileHandle *handle, void *buffer, size_t bytesToRead, const std::optional<uint64_t> &offset, bool updateFilePointer) {
+		IOResult result{};
+		if (!handle || !handle->fp) {
+			result.unixError = EBADF;
+			return result;
+		}
+		if (bytesToRead == 0) {
+			return result;
+		}
+
+		bool useOffset = offset.has_value();
+		if (useOffset && !updateFilePointer && handle->fd >= 0) {
+			size_t total = 0;
+			size_t remaining = bytesToRead;
+			off_t pos = static_cast<off_t>(*offset);
+			while (remaining > 0) {
+				ssize_t rc = pread(handle->fd, static_cast<uint8_t *>(buffer) + total, remaining, pos);
+				if (rc == -1) {
+					if (errno == EINTR) {
+						continue;
+					}
+					result.bytesTransferred = total;
+					result.unixError = errno ? errno : EIO;
+					return result;
+				}
+				if (rc == 0) {
+					result.bytesTransferred = total;
+					result.reachedEnd = true;
+					return result;
+				}
+				total += static_cast<size_t>(rc);
+				remaining -= static_cast<size_t>(rc);
+				pos += rc;
+			}
+			result.bytesTransferred = total;
+			return result;
+		}
+
+		off_t originalPos = -1;
+		std::unique_lock<std::mutex> lock(handle->mutex);
+		if (useOffset) {
+			originalPos = ftello(handle->fp);
+			if (!updateFilePointer && originalPos == -1) {
+				result.unixError = errno ? errno : ESPIPE;
+				return result;
+			}
+			if (fseeko(handle->fp, static_cast<off_t>(*offset), SEEK_SET) != 0) {
+				result.unixError = errno ? errno : EINVAL;
+				return result;
+			}
+		}
+
+		size_t readCount = fread(buffer, 1, bytesToRead, handle->fp);
+		result.bytesTransferred = readCount;
+		if (readCount < bytesToRead) {
+			if (feof(handle->fp)) {
+				result.reachedEnd = true;
+				clearerr(handle->fp);
+			} else if (ferror(handle->fp)) {
+				result.unixError = errno ? errno : EIO;
+				clearerr(handle->fp);
+			}
+		}
+
+		if (useOffset && !updateFilePointer) {
+			if (originalPos != -1) {
+				fseeko(handle->fp, originalPos, SEEK_SET);
+			}
+		}
+		return result;
+	}
+
+	IOResult write(FileHandle *handle, const void *buffer, size_t bytesToWrite, const std::optional<uint64_t> &offset, bool updateFilePointer) {
+		IOResult result{};
+		if (!handle || !handle->fp) {
+			result.unixError = EBADF;
+			return result;
+		}
+		if (bytesToWrite == 0) {
+			return result;
+		}
+
+		bool useOffset = offset.has_value();
+		if (useOffset && !updateFilePointer && handle->fd >= 0) {
+			size_t total = 0;
+			size_t remaining = bytesToWrite;
+			off_t pos = static_cast<off_t>(*offset);
+			while (remaining > 0) {
+				ssize_t rc = pwrite(handle->fd, static_cast<const uint8_t *>(buffer) + total, remaining, pos);
+				if (rc == -1) {
+					if (errno == EINTR) {
+						continue;
+					}
+					result.bytesTransferred = total;
+					result.unixError = errno ? errno : EIO;
+					return result;
+				}
+				total += static_cast<size_t>(rc);
+				remaining -= static_cast<size_t>(rc);
+				pos += rc;
+			}
+			result.bytesTransferred = total;
+			return result;
+		}
+
+		off_t originalPos = -1;
+		std::unique_lock<std::mutex> lock(handle->mutex);
+		if (useOffset) {
+			originalPos = ftello(handle->fp);
+			if (!updateFilePointer && originalPos == -1) {
+				result.unixError = errno ? errno : ESPIPE;
+				return result;
+			}
+			if (fseeko(handle->fp, static_cast<off_t>(*offset), SEEK_SET) != 0) {
+				result.unixError = errno ? errno : EINVAL;
+				return result;
+			}
+		}
+
+		size_t writeCount = fwrite(buffer, 1, bytesToWrite, handle->fp);
+		result.bytesTransferred = writeCount;
+		if (writeCount < bytesToWrite) {
+			result.unixError = errno ? errno : EIO;
+			clearerr(handle->fp);
+		}
+
+		if (useOffset && !updateFilePointer) {
+			if (originalPos != -1) {
+				fseeko(handle->fp, originalPos, SEEK_SET);
+			}
+		}
+		return result;
 	}
 
 	void *getStdHandle(uint32_t nStdHandle) {
@@ -167,9 +331,9 @@ namespace files {
 	}
 
 	void init() {
-		stdinHandle = allocFpHandle(stdin);
-		stdoutHandle = allocFpHandle(stdout);
-		stderrHandle = allocFpHandle(stderr);
+		stdinHandle = allocFpHandle(stdin, 0, 0, 0, false);
+		stdoutHandle = allocFpHandle(stdout, 0, 0, 0, false);
+		stderrHandle = allocFpHandle(stderr, 0, 0, 0, false);
 	}
 
 	std::optional<std::filesystem::path> findCaseInsensitiveFile(const std::filesystem::path &directory,

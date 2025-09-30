@@ -23,7 +23,7 @@
 - Target pre-XP behavior; our binaries are old and don't expect modern WinAPI behavior.
 - Use the `microsoft_docs` tools to fetch WinAPI signatures and documentation; always fetch the documentation when working on an API function.
 - Create minimal, self-contained repros in `test/` when implementing or debugging APIs; this aids both development and future testing.
-- Stub unimplemented APIs with `DEBUG_LOG` calls to track usage; prioritize based on the needs of real-world binaries.
+- Add `DEBUG_LOG` calls to trace execution and parameter values; these are invaluable when diagnosing issues with real-world binaries.
 
 ## Testing Guidelines
 - Fixture binaries live in `test/` and are compiled automatically when `BUILD_TESTING` is enabled; keep new repros small and self-contained (`test_<feature>.c`).

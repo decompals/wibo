@@ -584,7 +584,7 @@ namespace kernel32 {
 	}
 
 	BOOL WIN_FUNC GetExitCodeProcess(HANDLE hProcess, LPDWORD lpExitCode) {
-		DEBUG_LOG("GetExitCodeProcess\n");
+		DEBUG_LOG("GetExitCodeProcess(%p, %p)\n", hProcess, lpExitCode);
 
 		processes::Process* process = processes::processFromHandle(hProcess, false);
 		*lpExitCode = process->exitCode;
@@ -598,7 +598,7 @@ namespace kernel32 {
 	}
 
 	void WIN_FUNC GetSystemInfo(SYSTEM_INFO *lpSystemInfo) {
-		DEBUG_LOG("GetSystemInfo\n");
+		DEBUG_LOG("GetSystemInfo(%p)\n", lpSystemInfo);
 		if (!lpSystemInfo) {
 			return;
 		}
@@ -783,7 +783,7 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC WaitForSingleObject(void *hHandle, unsigned int dwMilliseconds) {
-		DEBUG_LOG("WaitForSingleObject (%u)\n", dwMilliseconds);
+		DEBUG_LOG("WaitForSingleObject(%p, %u)\n", hHandle, dwMilliseconds);
 		handles::Data data = handles::dataFromHandle(hHandle, false);
 		switch (data.type) {
 		case handles::TYPE_PROCESS: {
@@ -886,7 +886,7 @@ namespace kernel32 {
 	}
 
 	int WIN_FUNC GetSystemDefaultLangID() {
-		DEBUG_LOG("STUB GetSystemDefaultLangID\n");
+		DEBUG_LOG("STUB: GetSystemDefaultLangID()\n");
 		return 0;
 	}
 
@@ -919,32 +919,35 @@ namespace kernel32 {
 	};
 
 	void WIN_FUNC InitializeCriticalSection(CRITICAL_SECTION *param) {
-		// DEBUG_LOG("InitializeCriticalSection(...)\n");
-	}
-	void WIN_FUNC InitializeCriticalSectionEx(CRITICAL_SECTION *param) {
-		// DEBUG_LOG("InitializeCriticalSection(...)\n");
-	}
-	void WIN_FUNC DeleteCriticalSection(CRITICAL_SECTION *param) {
-		// DEBUG_LOG("DeleteCriticalSection(...)\n");
-	}
-	void WIN_FUNC EnterCriticalSection(CRITICAL_SECTION *param) {
-		// DEBUG_LOG("EnterCriticalSection(...)\n");
-	}
-	void WIN_FUNC LeaveCriticalSection(CRITICAL_SECTION *param) {
-		// DEBUG_LOG("LeaveCriticalSection(...)\n");
+		VERBOSE_LOG("STUB: InitializeCriticalSection(%p)\n", param);
 	}
 
-	unsigned int WIN_FUNC InitializeCriticalSectionAndSpinCount(CRITICAL_SECTION *lpCriticalSection, unsigned int dwSpinCount) {
-		DEBUG_LOG("InitializeCriticalSectionAndSpinCount (%i)\n", dwSpinCount);
-		// can we get away with doing nothing...?
+	void WIN_FUNC InitializeCriticalSectionEx(CRITICAL_SECTION *param) {
+		VERBOSE_LOG("STUB: InitializeCriticalSectionEx(%p)\n", param);
+	}
+
+	void WIN_FUNC DeleteCriticalSection(CRITICAL_SECTION *param) {
+		VERBOSE_LOG("STUB: DeleteCriticalSection(%p)\n", param);
+	}
+
+	void WIN_FUNC EnterCriticalSection(CRITICAL_SECTION *param) {
+		VERBOSE_LOG("STUB: EnterCriticalSection(%p)\n", param);
+	}
+
+	void WIN_FUNC LeaveCriticalSection(CRITICAL_SECTION *param) {
+		VERBOSE_LOG("STUB: LeaveCriticalSection(%p)\n", param);
+	}
+
+	unsigned int WIN_FUNC InitializeCriticalSectionAndSpinCount(CRITICAL_SECTION *lpCriticalSection,
+																unsigned int dwSpinCount) {
+		DEBUG_LOG("STUB: InitializeCriticalSectionAndSpinCount(%p, %i)\n", lpCriticalSection, dwSpinCount);
 		memset(lpCriticalSection, 0, sizeof(CRITICAL_SECTION));
 		lpCriticalSection->SpinCount = dwSpinCount;
-
 		return 1;
 	}
 
-	int WIN_FUNC InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBOOL fPending, LPVOID* lpContext) {
-		DEBUG_LOG("STUB: InitOnceBeginInitialize\n");
+	int WIN_FUNC InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBOOL fPending, LPVOID *lpContext) {
+		DEBUG_LOG("STUB: InitOnceBeginInitialize(%p, %u, %p, %p)\n", lpInitOnce, dwFlags, fPending, lpContext);
 		if (fPending != nullptr) {
 			*fPending = TRUE;
 		}
@@ -952,20 +955,24 @@ namespace kernel32 {
 	}
 
 	BOOL WIN_FUNC InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpContext) {
-		DEBUG_LOG("STUB: InitOnceComplete\n");
+		DEBUG_LOG("STUB: InitOnceComplete(%p, %u, %p)\n", lpInitOnce, dwFlags, lpContext);
 		return TRUE;
 	}
 
-	void WIN_FUNC AcquireSRWLockShared(void *SRWLock) { DEBUG_LOG("STUB: AcquireSRWLockShared(%p)\n", SRWLock); }
+	void WIN_FUNC AcquireSRWLockShared(void *SRWLock) { VERBOSE_LOG("STUB: AcquireSRWLockShared(%p)\n", SRWLock); }
 
-	void WIN_FUNC ReleaseSRWLockShared(void *SRWLock) { DEBUG_LOG("STUB: ReleaseSRWLockShared(%p)\n", SRWLock); }
+	void WIN_FUNC ReleaseSRWLockShared(void *SRWLock) { VERBOSE_LOG("STUB: ReleaseSRWLockShared(%p)\n", SRWLock); }
 
-	void WIN_FUNC AcquireSRWLockExclusive(void *SRWLock) { DEBUG_LOG("STUB: AcquireSRWLockExclusive(%p)\n", SRWLock); }
+	void WIN_FUNC AcquireSRWLockExclusive(void *SRWLock) {
+		VERBOSE_LOG("STUB: AcquireSRWLockExclusive(%p)\n", SRWLock);
+	}
 
-	void WIN_FUNC ReleaseSRWLockExclusive(void *SRWLock) { DEBUG_LOG("STUB: ReleaseSRWLockExclusive(%p)\n", SRWLock); }
+	void WIN_FUNC ReleaseSRWLockExclusive(void *SRWLock) {
+		VERBOSE_LOG("STUB: ReleaseSRWLockExclusive(%p)\n", SRWLock);
+	}
 
 	int WIN_FUNC TryAcquireSRWLockExclusive(void *SRWLock) {
-		DEBUG_LOG("STUB: TryAcquireSRWLockExclusive(%p)\n", SRWLock);
+		VERBOSE_LOG("STUB: TryAcquireSRWLockExclusive(%p)\n", SRWLock);
 		return 1;
 	}
 
@@ -976,22 +983,22 @@ namespace kernel32 {
 	static bool tlsValuesUsed[MAX_TLS_VALUES] = { false };
 	static void *tlsValues[MAX_TLS_VALUES];
 	unsigned int WIN_FUNC TlsAlloc() {
-		DEBUG_LOG("TlsAlloc()\n");
+		VERBOSE_LOG("TlsAlloc()\n");
 		for (size_t i = 0; i < MAX_TLS_VALUES; i++) {
 			if (tlsValuesUsed[i] == false) {
 				tlsValuesUsed[i] = true;
 				tlsValues[i] = 0;
-				DEBUG_LOG("...returning %d\n", i);
+				VERBOSE_LOG("...returning %d\n", i);
 				return i;
 			}
 		}
-		DEBUG_LOG("...returning nothing\n");
+		VERBOSE_LOG("...returning nothing\n");
 		wibo::lastError = 1;
 		return 0xFFFFFFFF; // TLS_OUT_OF_INDEXES
 	}
 
 	unsigned int WIN_FUNC TlsFree(unsigned int dwTlsIndex) {
-		DEBUG_LOG("TlsFree(%u)\n", dwTlsIndex);
+		VERBOSE_LOG("TlsFree(%u)\n", dwTlsIndex);
 		if (dwTlsIndex >= 0 && dwTlsIndex < MAX_TLS_VALUES && tlsValuesUsed[dwTlsIndex]) {
 			tlsValuesUsed[dwTlsIndex] = false;
 			return 1;
@@ -1002,7 +1009,7 @@ namespace kernel32 {
 	}
 
 	void *WIN_FUNC TlsGetValue(unsigned int dwTlsIndex) {
-		// DEBUG_LOG("TlsGetValue(%u)", dwTlsIndex);
+		VERBOSE_LOG("TlsGetValue(%u)\n", dwTlsIndex);
 		void *result = nullptr;
 		if (dwTlsIndex >= 0 && dwTlsIndex < MAX_TLS_VALUES && tlsValuesUsed[dwTlsIndex]) {
 			result = tlsValues[dwTlsIndex];
@@ -1016,7 +1023,7 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC TlsSetValue(unsigned int dwTlsIndex, void *lpTlsValue) {
-		// DEBUG_LOG("TlsSetValue(%u, %p)\n", dwTlsIndex, lpTlsValue);
+		VERBOSE_LOG("TlsSetValue(%u, %p)\n", dwTlsIndex, lpTlsValue);
 		if (dwTlsIndex >= 0 && dwTlsIndex < MAX_TLS_VALUES && tlsValuesUsed[dwTlsIndex]) {
 			tlsValues[dwTlsIndex] = lpTlsValue;
 			return 1;
@@ -1030,7 +1037,7 @@ namespace kernel32 {
 	 * Memory
 	 */
 	void *WIN_FUNC GlobalAlloc(uint32_t uFlags, size_t dwBytes) {
-		// DEBUG_LOG("GlobalAlloc(flags=%x, size=%x)\n", uFlags, dwBytes);
+		VERBOSE_LOG("GlobalAlloc(%x, %zu)\n", uFlags, dwBytes);
 		if (uFlags & 2) {
 			// GMEM_MOVEABLE - not implemented rn
 			assert(0);
@@ -1042,11 +1049,13 @@ namespace kernel32 {
 		}
 	}
 	void *WIN_FUNC GlobalFree(void *hMem) {
+		VERBOSE_LOG("GlobalFree(%p)\n", hMem);
 		free(hMem);
 		return 0;
 	}
 
 	void *WIN_FUNC GlobalReAlloc(void *hMem, size_t dwBytes, uint32_t uFlags) {
+		VERBOSE_LOG("GlobalReAlloc(%p, %zu, %x)\n", hMem, dwBytes, uFlags);
 		if (uFlags & 0x80) { // GMEM_MODIFY
 			assert(0);
 		} else {
@@ -1056,6 +1065,7 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC GlobalFlags(void *hMem) {
+		VERBOSE_LOG("GlobalFlags(%p)\n", hMem);
 		return 0;
 	}
 
@@ -1063,7 +1073,7 @@ namespace kernel32 {
 	constexpr uint32_t LMEM_ZEROINIT = 0x0040;
 
 	void *WIN_FUNC LocalAlloc(uint32_t uFlags, size_t uBytes) {
-		DEBUG_LOG("LocalAlloc(flags=%x, size=%zu)\n", uFlags, uBytes);
+		VERBOSE_LOG("LocalAlloc(%x, %zu)\n", uFlags, uBytes);
 		bool zero = (uFlags & LMEM_ZEROINIT) != 0;
 		if ((uFlags & LMEM_MOVEABLE) != 0) {
 			DEBUG_LOG("  ignoring LMEM_MOVEABLE\n");
@@ -1080,6 +1090,7 @@ namespace kernel32 {
 	}
 
 	void *WIN_FUNC LocalFree(void *hMem) {
+		VERBOSE_LOG("LocalFree(%p)\n", hMem);
 		// Windows returns NULL on success.
 		free(hMem);
 		wibo::lastError = ERROR_SUCCESS;
@@ -1087,7 +1098,7 @@ namespace kernel32 {
 	}
 
 	void *WIN_FUNC LocalReAlloc(void *hMem, size_t uBytes, uint32_t uFlags) {
-		DEBUG_LOG("LocalReAlloc(%p, size=%zu, flags=%x)\n", hMem, uBytes, uFlags);
+		VERBOSE_LOG("LocalReAlloc(%p, %zu, %x)\n", hMem, uBytes, uFlags);
 		bool zero = (uFlags & LMEM_ZEROINIT) != 0;
 		if ((uFlags & LMEM_MOVEABLE) != 0) {
 			DEBUG_LOG("  ignoring LMEM_MOVEABLE\n");
@@ -1104,25 +1115,30 @@ namespace kernel32 {
 	}
 
 	void *WIN_FUNC LocalHandle(void *hMem) {
+		VERBOSE_LOG("LocalHandle(%p)\n", hMem);
 		return hMem;
 	}
 
 	void *WIN_FUNC LocalLock(void *hMem) {
+		VERBOSE_LOG("LocalLock(%p)\n", hMem);
 		wibo::lastError = ERROR_SUCCESS;
 		return hMem;
 	}
 
 	unsigned int WIN_FUNC LocalUnlock(void *hMem) {
+		VERBOSE_LOG("LocalUnlock(%p)\n", hMem);
 		(void)hMem;
 		wibo::lastError = ERROR_SUCCESS;
 		return 1;
 	}
 
 	size_t WIN_FUNC LocalSize(void *hMem) {
+		VERBOSE_LOG("LocalSize(%p)\n", hMem);
 		return hMem ? mi_usable_size(hMem) : 0;
 	}
 
 	unsigned int WIN_FUNC LocalFlags(void *hMem) {
+		VERBOSE_LOG("LocalFlags(%p)\n", hMem);
 		(void)hMem;
 		return 0;
 	}
@@ -1131,17 +1147,17 @@ namespace kernel32 {
 	 * Environment
 	 */
 	LPSTR WIN_FUNC GetCommandLineA() {
-		DEBUG_LOG("GetCommandLineA\n");
+		DEBUG_LOG("GetCommandLineA() -> %s\n", wibo::commandLine.c_str());
 		return const_cast<LPSTR>(wibo::commandLine.c_str());
 	}
 
 	LPWSTR WIN_FUNC GetCommandLineW() {
-		DEBUG_LOG("GetCommandLineW -> \n");
+		DEBUG_LOG("GetCommandLineW() -> %s\n", wideStringToString(wibo::commandLineW.data()).c_str());
 		return wibo::commandLineW.data();
 	}
 
 	char *WIN_FUNC GetEnvironmentStrings() {
-		DEBUG_LOG("GetEnvironmentStrings\n");
+		DEBUG_LOG("GetEnvironmentStrings()\n");
 		// Step 1, figure out the size of the buffer we need.
 		size_t bufSize = 0;
 		char **work = environ;
@@ -1170,7 +1186,7 @@ namespace kernel32 {
 	}
 
 	uint16_t* WIN_FUNC GetEnvironmentStringsW() {
-		DEBUG_LOG("GetEnvironmentStringsW\n");
+		DEBUG_LOG("GetEnvironmentStringsW()\n");
 		// Step 1, figure out the size of the buffer we need.
 		size_t bufSizeW = 0;
 		char **work = environ;
@@ -1201,7 +1217,7 @@ namespace kernel32 {
 	}
 
 	void WIN_FUNC FreeEnvironmentStringsA(char *buffer) {
-		DEBUG_LOG("FreeEnvironmentStringsA\n");
+		DEBUG_LOG("FreeEnvironmentStringsA(%p)\n", buffer);
 		free(buffer);
 	}
 
@@ -1209,17 +1225,25 @@ namespace kernel32 {
 	 * I/O
 	 */
 	void *WIN_FUNC GetStdHandle(uint32_t nStdHandle) {
-		DEBUG_LOG("GetStdHandle %d\n", nStdHandle);
+		DEBUG_LOG("GetStdHandle(%d)\n", nStdHandle);
 		return files::getStdHandle(nStdHandle);
 	}
 
 	unsigned int WIN_FUNC SetStdHandle(uint32_t nStdHandle, void *hHandle) {
-		DEBUG_LOG("SetStdHandle %d %p\n", nStdHandle, hHandle);
+		DEBUG_LOG("SetStdHandle(%d, %p)\n", nStdHandle, hHandle);
 		return files::setStdHandle(nStdHandle, hHandle);
 	}
 
-	unsigned int WIN_FUNC DuplicateHandle(void *hSourceProcessHandle, void *hSourceHandle, void *hTargetProcessHandle, void **lpTargetHandle, unsigned int dwDesiredAccess, unsigned int bInheritHandle, unsigned int dwOptions) {
-		DEBUG_LOG("DuplicateHandle(source=%p)\n", hSourceHandle);
+	unsigned int WIN_FUNC DuplicateHandle(void *hSourceProcessHandle, void *hSourceHandle, void *hTargetProcessHandle,
+										  void **lpTargetHandle, unsigned int dwDesiredAccess,
+										  unsigned int bInheritHandle, unsigned int dwOptions) {
+		DEBUG_LOG("DuplicateHandle(%p, %p, %p, %p, %x, %d, %x)\n", hSourceProcessHandle, hSourceHandle,
+				  hTargetProcessHandle, lpTargetHandle, dwDesiredAccess, bInheritHandle, dwOptions);
+		assert(hSourceProcessHandle == (void *)0xFFFFFFFF); // current process
+		assert(hTargetProcessHandle == (void *)0xFFFFFFFF); // current process
+		(void)dwDesiredAccess;
+		(void)bInheritHandle;
+		(void)dwOptions;
 		FILE *fp = files::fpFromHandle(hSourceHandle);
 		if (fp == stdin || fp == stdout || fp == stderr) {
 			// we never close standard handles so they are fine to duplicate

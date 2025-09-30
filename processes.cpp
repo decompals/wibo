@@ -181,32 +181,21 @@ namespace processes {
 		return std::nullopt;
 	}
 
-	int spawnViaWibo(const std::filesystem::path &hostExecutable, const std::vector<std::string> &arguments, pid_t *pidOut) {
-		if (hostExecutable.empty()) {
-			return ENOENT;
+	static int spawnInternal(const std::vector<std::string> &args, pid_t *pidOut) {
+		std::vector<char *> argv;
+		argv.reserve(args.size() + 2);
+		argv.push_back(const_cast<char *>(wibo::executableName.c_str()));
+		for (auto &arg : args) {
+			argv.push_back(const_cast<char *>(arg.c_str()));
 		}
-
-		std::vector<std::string> storage;
-		storage.reserve(arguments.size() + 1);
-		storage.push_back(hostExecutable.string());
-		for (const auto &arg : arguments) {
-			storage.push_back(arg);
-		}
-
-		std::vector<char *> nativeArgs;
-		nativeArgs.reserve(storage.size() + 2);
-		nativeArgs.push_back(const_cast<char *>(wibo::executableName.c_str()));
-		for (auto &entry : storage) {
-			nativeArgs.push_back(const_cast<char *>(entry.c_str()));
-		}
-		nativeArgs.push_back(nullptr);
+		argv.push_back(nullptr);
 
 		DEBUG_LOG("Spawning process: %s, args: [", wibo::executableName.c_str());
-		for (size_t i = 0; i < storage.size(); ++i) {
+		for (size_t i = 0; i < args.size(); ++i) {
 			if (i != 0) {
 				DEBUG_LOG(", ");
 			}
-			DEBUG_LOG("'%s'", storage[i].c_str());
+			DEBUG_LOG("'%s'", args[i].c_str());
 		}
 		DEBUG_LOG("]\n");
 
@@ -217,7 +206,7 @@ namespace processes {
 		setenv("WIBO_DEBUG_INDENT", indent.c_str(), 1);
 
 		pid_t pid = -1;
-		int spawnResult = posix_spawn(&pid, wibo::executableName.c_str(), &actions, nullptr, nativeArgs.data(), environ);
+		int spawnResult = posix_spawn(&pid, wibo::executableName.c_str(), &actions, nullptr, argv.data(), environ);
 		posix_spawn_file_actions_destroy(&actions);
 		if (spawnResult != 0) {
 			return spawnResult;
@@ -226,6 +215,42 @@ namespace processes {
 			*pidOut = pid;
 		}
 		return 0;
+	}
+
+	int spawnWithCommandLine(const std::string &applicationName, const std::string &commandLine, pid_t *pidOut) {
+		if (wibo::executableName.empty() || (applicationName.empty() && commandLine.empty())) {
+			return ENOENT;
+		}
+
+		std::vector<std::string> args;
+		args.reserve(3);
+		if (!commandLine.empty()) {
+			args.emplace_back("--cmdline");
+			args.push_back(commandLine);
+		}
+		if (!applicationName.empty()) {
+			args.push_back(applicationName);
+		}
+
+		return spawnInternal(args, pidOut);
+	}
+
+	int spawnWithArgv(const std::string &applicationName, const std::vector<std::string> &argv, pid_t *pidOut) {
+		if (wibo::executableName.empty() || (applicationName.empty() && argv.empty())) {
+			return ENOENT;
+		}
+
+		std::vector<std::string> args;
+		args.reserve(argv.size() + 1);
+		if (!applicationName.empty()) {
+			args.push_back(applicationName);
+		}
+		args.emplace_back("--");
+		for (const auto &arg : argv) {
+			args.push_back(arg);
+		}
+
+		return spawnInternal(args, pidOut);
 	}
 
 	std::vector<std::string> splitCommandLine(const char *commandLine) {

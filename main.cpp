@@ -98,7 +98,9 @@ static void printHelp(const char *argv0) {
 	fprintf(stdout, "  --help\t\tShow this help message and exit\n");
 	fprintf(stdout, "  -C, --chdir DIR\tChange working directory before launching the program\n");
 	fprintf(stdout, "  -D, --debug\tEnable shim debug logging (same as WIBO_DEBUG=1)\n");
-	fprintf(stdout, "  --\t\tStop option parsing; following arguments are interpreted as the program command line\n");
+	fprintf(stdout, "  --cmdline STRING\tUse STRING as the exact guest command line\n");
+	fprintf(stdout,
+			"  --\t\tStop option parsing; following arguments are interpreted as the exact guest command line\n");
 }
 
 /**
@@ -208,12 +210,25 @@ int main(int argc, char **argv) {
 	bool optionDebug = false;
 	bool parsingOptions = true;
 	int programIndex = -1;
+	std::string cmdLine;
 
 	for (int i = 1; i < argc; ++i) {
 		const char *arg = argv[i];
 		if (parsingOptions) {
 			if (strcmp(arg, "--") == 0) {
 				parsingOptions = false;
+				continue;
+			}
+			if (strncmp(arg, "--cmdline=", 10) == 0) {
+				cmdLine = arg + 10;
+				continue;
+			}
+			if (strcmp(arg, "--cmdline") == 0) {
+				if (i + 1 >= argc) {
+					fprintf(stderr, "Option %s requires a command line argument\n", arg);
+					return 1;
+				}
+				cmdLine = argv[++i];
 				continue;
 			}
 			if (strcmp(arg, "--help") == 0) {
@@ -252,7 +267,7 @@ int main(int argc, char **argv) {
 		break;
 	}
 
-	if (programIndex == -1) {
+	if (programIndex == -1 && cmdLine.empty()) {
 		printHelp(argv[0]);
 		return argc <= 1 ? 0 : 1;
 	}
@@ -312,61 +327,76 @@ int main(int argc, char **argv) {
 
 	wibo::tibSelector = static_cast<uint16_t>((tibDesc.entry_number << 3) | 7);
 
-	char **guestArgv = argv + programIndex;
-	int guestArgc = argc - programIndex;
-
-	const char *pePath = guestArgv[0];
-	if (!pePath || pePath[0] == '\0') {
-		fprintf(stderr, "No guest binary specified\n");
+	// Determine the guest program name
+	auto guestArgs = processes::splitCommandLine(cmdLine.c_str());
+	std::string programName;
+	if (programIndex != -1) {
+		programName = argv[programIndex];
+	} else if (!guestArgs.empty()) {
+		programName = guestArgs[0];
+	}
+	if (programName.empty()) {
+		fprintf(stderr, "No guest program specified\n");
 		return 1;
 	}
 
-	std::string originalName = pePath;
-	std::filesystem::path resolvedGuestPath = processes::resolveExecutable(originalName, true).value_or({});
+	// Resolve the guest program path
+	std::filesystem::path resolvedGuestPath = processes::resolveExecutable(programName, true).value_or({});
 	if (resolvedGuestPath.empty()) {
-		fprintf(stderr, "Failed to resolve path to guest binary %s\n", originalName.c_str());
+		fprintf(stderr, "Failed to resolve path to guest program %s\n", programName.c_str());
 		return 1;
+	}
+
+	// Build guest arguments
+	if (guestArgs.empty()) {
+		guestArgs.push_back(files::pathToWindows(resolvedGuestPath));
+	}
+	for (int i = programIndex + 1; i < argc; ++i) {
+		guestArgs.emplace_back(argv[i]);
 	}
 
 	// Build a command line
-	std::string cmdLine;
-	for (int i = 0; i < guestArgc; ++i) {
-		std::string arg;
-		if (i == 0) {
-			arg = files::pathToWindows(resolvedGuestPath);
-		} else {
-			cmdLine += ' ';
-			arg = guestArgv[i];
-		}
-		bool needQuotes = arg.find_first_of("\" \t\n") != std::string::npos;
-		if (needQuotes)
-			cmdLine += '"';
-		int backslashes = 0;
-		for (const char *p = arg.c_str();; p++) {
-			char c = *p;
-			if (c == '\\') {
-				backslashes++;
-				continue;
+	if (cmdLine.empty()) {
+		for (int i = 0; i < guestArgs.size(); ++i) {
+			std::string arg;
+			if (i == 0) {
+				arg = files::pathToWindows(resolvedGuestPath);
+			} else {
+				cmdLine += ' ';
+				arg = guestArgs[i];
 			}
+			bool needQuotes = arg.find_first_of("\" \t\n") != std::string::npos;
+			if (needQuotes)
+				cmdLine += '"';
+			int backslashes = 0;
+			for (const char *p = arg.c_str();; p++) {
+				char c = *p;
+				if (c == '\\') {
+					backslashes++;
+					continue;
+				}
 
-			// Backslashes are doubled *before quotes*
-			for (int j = 0; j < backslashes; j++) {
-				cmdLine += '\\';
-				if (c == '\0' || c == '"')
+				// Backslashes are doubled *before quotes*
+				for (int j = 0; j < backslashes; j++) {
 					cmdLine += '\\';
-			}
-			backslashes = 0;
+					if (c == '\0' || c == '"')
+						cmdLine += '\\';
+				}
+				backslashes = 0;
 
-			if (c == '\0')
-				break;
-			if (c == '\"')
-				cmdLine += '\\';
-			cmdLine += c;
+				if (c == '\0')
+					break;
+				if (c == '\"')
+					cmdLine += '\\';
+				cmdLine += c;
+			}
+			if (needQuotes)
+				cmdLine += '"';
 		}
-		if (needQuotes)
-			cmdLine += '"';
 	}
-	cmdLine += '\0';
+	if (cmdLine.empty() || cmdLine.back() != '\0') {
+		cmdLine.push_back('\0');
+	}
 
 	wibo::commandLine = cmdLine;
 	wibo::commandLineW = stringToWideString(wibo::commandLine.c_str());
@@ -374,8 +404,16 @@ int main(int argc, char **argv) {
 
 	wibo::guestExecutablePath = resolvedGuestPath;
 	wibo::executableName = executablePath;
-	wibo::argv = guestArgv;
-	wibo::argc = guestArgc;
+
+	// Build argv/argc
+	std::vector<char *> guestArgv;
+	guestArgv.reserve(guestArgs.size() + 1);
+	for (const auto &arg : guestArgs) {
+		guestArgv.push_back(const_cast<char *>(arg.c_str()));
+	}
+	guestArgv.push_back(nullptr);
+	wibo::argv = guestArgv.data();
+	wibo::argc = static_cast<int>(guestArgv.size()) - 1;
 
 	wibo::initializeModuleRegistry();
 
@@ -401,7 +439,7 @@ int main(int argc, char **argv) {
 	}
 
 	wibo::mainModule =
-		wibo::registerProcessModule(std::move(executable), std::move(resolvedGuestPath), std::move(originalName));
+		wibo::registerProcessModule(std::move(executable), std::move(resolvedGuestPath), std::move(programName));
 	if (!wibo::mainModule || !wibo::mainModule->executable) {
 		fprintf(stderr, "Failed to register process module\n");
 		return 1;

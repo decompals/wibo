@@ -19,6 +19,7 @@ namespace processes {
     Process* processFromHandle(void* hHandle, bool pop);
 
     std::optional<std::filesystem::path> resolveExecutable(const std::string &command, bool searchPath);
-    int spawnViaWibo(const std::filesystem::path &hostExecutable, const std::vector<std::string> &arguments, pid_t *pidOut);
+    int spawnWithCommandLine(const std::string &applicationName, const std::string &commandLine, pid_t *pidOut);
+    int spawnWithArgv(const std::string &applicationName, const std::vector<std::string> &argv, pid_t *pidOut);
     std::vector<std::string> splitCommandLine(const char *commandLine);
 }

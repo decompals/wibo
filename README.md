@@ -23,8 +23,9 @@ Supported command line options:
 
 - `--help`: Print usage information.
 - `-D`, `--debug`: Enable shim debug logging (equivalent to `WIBO_DEBUG=1`).
-- `-C DIR`, `--chdir DIR`, `--chdir=DIR`: Change to `DIR` before running the program.
-- `--`: Stop option parsing; following arguments are interpreted as the program command line.
+- `-C DIR`, `--chdir DIR`, `--chdir=DIR`: Change to `DIR` before running the guest program.
+- `--cmdline STRING`, `--cmdline=STRING`: Use `STRING` as the exact guest command line. (Including the program name as the first argument.)
+- `--`: Stop option parsing; following arguments are interpreted as the exact guest command line. (Including the program name as the first argument.)
 
 ## Tests
 

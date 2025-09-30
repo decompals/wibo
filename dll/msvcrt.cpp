@@ -2688,15 +2688,9 @@ namespace msvcrt {
 		DEBUG_LOG("_wspawnvp(%d, %s)\n", mode, command.c_str());
 
 		std::vector<std::string> argStorage;
+		argStorage.emplace_back(command);
 		for (const uint16_t *const *cursor = argv; *cursor; ++cursor) {
 			argStorage.emplace_back(wideStringToString(*cursor));
-		}
-		if (argStorage.empty()) {
-			argStorage.emplace_back(command);
-		}
-		DEBUG_LOG("-> argv:");
-		for (const auto &arg : argStorage) {
-			DEBUG_LOG(" '%s'", arg.c_str());
 		}
 
 		auto resolved = processes::resolveExecutable(command, false);
@@ -2708,10 +2702,10 @@ namespace msvcrt {
 		DEBUG_LOG("-> resolved to %s\n", resolved->c_str());
 
 		pid_t pid = -1;
-		int spawnResult = processes::spawnViaWibo(*resolved, argStorage, &pid);
+		int spawnResult = processes::spawnWithArgv(*resolved, argStorage, &pid);
 		if (spawnResult != 0) {
 			errno = spawnResult;
-			DEBUG_LOG("-> spawnViaWibo failed: %d\n", spawnResult);
+			DEBUG_LOG("-> spawnWithArgv failed: %d\n", spawnResult);
 			return -1;
 		}
 		DEBUG_LOG("-> spawned pid %d\n", pid);
@@ -2752,15 +2746,9 @@ namespace msvcrt {
 		DEBUG_LOG("_spawnvp(%d, %s)\n", mode, command.c_str());
 
 		std::vector<std::string> argStorage;
+		argStorage.emplace_back(command);
 		for (const char * const *cursor = argv; *cursor; ++cursor) {
 			argStorage.emplace_back(*cursor);
-		}
-		if (argStorage.empty()) {
-			argStorage.emplace_back(command);
-		}
-		DEBUG_LOG("-> argv:");
-		for (const auto &arg : argStorage) {
-			DEBUG_LOG(" '%s'", arg.c_str());
 		}
 
 		auto resolved = processes::resolveExecutable(command, false);
@@ -2772,10 +2760,10 @@ namespace msvcrt {
 		DEBUG_LOG("-> resolved to %s\n", resolved->c_str());
 
 		pid_t pid = -1;
-		int spawnResult = processes::spawnViaWibo(*resolved, argStorage, &pid);
+		int spawnResult = processes::spawnWithArgv(*resolved, argStorage, &pid);
 		if (spawnResult != 0) {
 			errno = spawnResult;
-			DEBUG_LOG("-> spawnViaWibo failed: %d\n", spawnResult);
+			DEBUG_LOG("-> spawnWithArgv failed: %d\n", spawnResult);
 			return -1;
 		}
 		DEBUG_LOG("-> spawned pid %d\n", pid);

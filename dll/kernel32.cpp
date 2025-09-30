@@ -682,24 +682,17 @@ namespace kernel32 {
 
 		bool useSearchPath = lpApplicationName == nullptr;
 		std::string application;
-		std::vector<std::string> arguments = processes::splitCommandLine(lpCommandLine);
+		std::string commandLine = lpCommandLine ? lpCommandLine : "";
 		if (lpApplicationName) {
 			application = lpApplicationName;
 		} else {
+			std::vector<std::string> arguments = processes::splitCommandLine(commandLine.c_str());
 			if (arguments.empty()) {
 				wibo::lastError = ERROR_FILE_NOT_FOUND;
 				return 0;
 			}
 			application = arguments.front();
 		}
-		if (arguments.empty()) {
-			arguments.push_back(application);
-		}
-		DEBUG_LOG(" -> args:");
-		for (const auto &arg : arguments) {
-			DEBUG_LOG(" '%s'", arg.c_str());
-		}
-		DEBUG_LOG("\n");
 
 		auto resolved = processes::resolveExecutable(application, useSearchPath);
 		if (!resolved) {
@@ -708,7 +701,7 @@ namespace kernel32 {
 		}
 
 		pid_t pid = -1;
-		int spawnResult = processes::spawnViaWibo(*resolved, arguments, &pid);
+		int spawnResult = processes::spawnWithCommandLine(*resolved, commandLine, &pid);
 		if (spawnResult != 0) {
 			wibo::lastError = (spawnResult == ENOENT) ? ERROR_FILE_NOT_FOUND : ERROR_ACCESS_DENIED;
 			return 0;

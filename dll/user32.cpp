@@ -67,7 +67,6 @@ static void *resolveByName(const char *name) {
 wibo::Module lib_user32 = {
 	(const char *[]){
 		"user32",
-		"user32.dll",
 		nullptr,
 	},
 	resolveByName,

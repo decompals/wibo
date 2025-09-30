@@ -186,7 +186,6 @@ static void *resolveByName(const char *name) {
 wibo::Module lib_ntdll = {
 	(const char *[]){
 		"ntdll",
-		"ntdll.dll",
 		nullptr,
 	},
 	resolveByName,

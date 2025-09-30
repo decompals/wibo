@@ -603,7 +603,6 @@ static void *resolveByName(const char *name) {
 wibo::Module lib_advapi32 = {
 	(const char *[]){
 		"advapi32",
-		"advapi32.dll",
 		nullptr,
 	},
 	resolveByName,

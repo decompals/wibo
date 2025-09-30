@@ -74,7 +74,6 @@ static void *resolveByName(const char *name) {
 wibo::Module lib_bcrypt = {
 	(const char *[]){
 		"bcrypt",
-		"bcrypt.dll",
 		nullptr,
 	},
 	resolveByName,

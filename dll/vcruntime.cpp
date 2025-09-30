@@ -27,7 +27,6 @@ static void *resolveByName(const char *name) {
 wibo::Module lib_vcruntime = {
 	(const char *[]){
 		"vcruntime140",
-		"vcruntime140.dll",
 		nullptr,
 	},
 	resolveByName,

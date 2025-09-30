@@ -5092,7 +5092,6 @@ static void *resolveByName(const char *name) {
 wibo::Module lib_kernel32 = {
 	(const char *[]){
 		"kernel32",
-		"kernel32.dll",
 		nullptr,
 	},
 	resolveByName,

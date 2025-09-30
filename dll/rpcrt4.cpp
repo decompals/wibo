@@ -276,7 +276,7 @@ void *resolveByName(const char *name) {
 } // namespace
 
 wibo::Module lib_rpcrt4 = {
-	(const char *[]){"rpcrt4", "rpcrt4.dll", nullptr},
+	(const char *[]){"rpcrt4", nullptr},
 	resolveByName,
 	nullptr,
 };

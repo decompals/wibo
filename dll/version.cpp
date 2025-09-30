@@ -318,7 +318,6 @@ static void *resolveByName(const char *name) {
 wibo::Module lib_version = {
 	(const char *[]){
 		"version",
-		"version.dll",
 		nullptr,
 	},
 	resolveByName,

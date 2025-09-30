@@ -26,11 +26,8 @@ static void *resolveByOrdinal(uint16_t ordinal) {
 wibo::Module lib_lmgr = {
 	(const char *[]){
 		"lmgr11",
-		"lmgr11.dll",
 		"lmgr326b",
-		"lmgr326b.dll",
 		"lmgr8c",
-		"lmgr8c.dll",
 		nullptr,
 	},
 	nullptr,

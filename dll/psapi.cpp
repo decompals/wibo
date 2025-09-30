@@ -60,7 +60,6 @@ static void *resolveByOrdinal(uint16_t ordinal) {
 wibo::Module lib_psapi = {
 	(const char *[]){
 		"psapi",
-		"psapi.dll",
 		nullptr,
 	},
 	resolveByName,

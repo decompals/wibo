@@ -37,7 +37,6 @@ static void *resolveByName(const char *name) {
 wibo::Module lib_ole32 = {
 	(const char *[]){
 		"ole32",
-		"ole32.dll",
 		nullptr,
 	},
 	resolveByName,

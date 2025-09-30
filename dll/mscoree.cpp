@@ -18,7 +18,6 @@ static void *resolveByName(const char *name) {
 wibo::Module lib_mscoree = {
 	(const char *[]){
 		"mscoree",
-		"mscoree.dll",
 		nullptr,
 	},
 	resolveByName,

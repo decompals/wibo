@@ -37,6 +37,8 @@
 #include <mutex>
 #include <unordered_map>
 #include <limits>
+#include <map>
+#include <iterator>
 
 namespace advapi32 {
 	void releaseToken(void *tokenPtr);
@@ -4195,6 +4197,170 @@ namespace kernel32 {
 		return TRUE;
 	}
 
+	constexpr DWORD MEM_COMMIT = 0x00001000;
+	constexpr DWORD MEM_RESERVE = 0x00002000;
+	constexpr DWORD MEM_DECOMMIT = 0x00004000;
+	constexpr DWORD MEM_RELEASE = 0x00008000;
+	constexpr DWORD MEM_RESET = 0x00080000;
+	constexpr DWORD MEM_RESET_UNDO = 0x01000000;
+	constexpr DWORD MEM_TOP_DOWN = 0x00100000;
+	constexpr DWORD MEM_WRITE_WATCH = 0x00200000;
+	constexpr DWORD MEM_PHYSICAL = 0x00400000;
+	constexpr DWORD MEM_PRIVATE = 0x00020000;
+	constexpr DWORD MEM_LARGE_PAGES = 0x20000000;
+	constexpr size_t VIRTUAL_ALLOCATION_GRANULARITY = 64 * 1024;
+	constexpr DWORD MEM_COALESCE_PLACEHOLDERS = 0x00000001;
+	constexpr DWORD MEM_PRESERVE_PLACEHOLDER = 0x00000002;
+
+	namespace {
+	struct VirtualAllocation {
+		uintptr_t base = 0;
+		size_t size = 0;
+		DWORD allocationProtect = 0;
+		std::vector<DWORD> pageProtect; // 0 indicates reserved/uncommitted
+	};
+
+	static std::map<uintptr_t, VirtualAllocation> g_virtualAllocations;
+	static std::mutex g_virtualAllocMutex;
+
+	static size_t systemPageSize() {
+		static size_t cached = []() {
+			long detected = sysconf(_SC_PAGESIZE);
+			if (detected <= 0) {
+				return static_cast<size_t>(4096);
+			}
+			return static_cast<size_t>(detected);
+		}();
+		return cached;
+	}
+
+	static uintptr_t alignDown(uintptr_t value, size_t alignment) {
+		const uintptr_t mask = static_cast<uintptr_t>(alignment) - 1;
+		return value & ~mask;
+	}
+
+	static uintptr_t alignUp(uintptr_t value, size_t alignment) {
+		const uintptr_t mask = static_cast<uintptr_t>(alignment) - 1;
+		if (mask == std::numeric_limits<uintptr_t>::max()) {
+			return value;
+		}
+		if (value > std::numeric_limits<uintptr_t>::max() - mask) {
+			return std::numeric_limits<uintptr_t>::max();
+		}
+		return (value + mask) & ~mask;
+	}
+
+	static bool addOverflows(uintptr_t base, size_t amount) {
+		return base > std::numeric_limits<uintptr_t>::max() - static_cast<uintptr_t>(amount);
+	}
+
+	static uintptr_t regionEnd(const VirtualAllocation &region) { return region.base + region.size; }
+
+	static bool rangeOverlapsLocked(uintptr_t base, size_t length) {
+		if (length == 0) {
+			return false;
+		}
+		if (addOverflows(base, length - 1)) {
+			return true;
+		}
+		uintptr_t end = base + length;
+		auto next = g_virtualAllocations.lower_bound(base);
+		if (next != g_virtualAllocations.begin()) {
+			auto prev = std::prev(next);
+			if (regionEnd(prev->second) > base) {
+				return true;
+			}
+		}
+		if (next != g_virtualAllocations.end() && next->second.base < end) {
+			return true;
+		}
+		return false;
+	}
+
+	static std::map<uintptr_t, VirtualAllocation>::iterator findRegionIterator(uintptr_t address) {
+		auto it = g_virtualAllocations.upper_bound(address);
+		if (it == g_virtualAllocations.begin()) {
+			return g_virtualAllocations.end();
+		}
+		--it;
+		if (address >= regionEnd(it->second)) {
+			return g_virtualAllocations.end();
+		}
+		return it;
+	}
+
+	static VirtualAllocation *lookupRegion(uintptr_t address) {
+		auto it = findRegionIterator(address);
+		if (it == g_virtualAllocations.end()) {
+			return nullptr;
+		}
+		return &it->second;
+	}
+
+	static bool rangeWithinRegion(const VirtualAllocation &region, uintptr_t start, size_t length) {
+		if (length == 0) {
+			return start >= region.base && start <= regionEnd(region);
+		}
+		if (start < region.base) {
+			return false;
+		}
+		if (addOverflows(start, length)) {
+			return false;
+		}
+		return (start + length) <= regionEnd(region);
+	}
+
+	static void markCommitted(VirtualAllocation &region, uintptr_t start, size_t length, DWORD protect) {
+		if (length == 0) {
+			return;
+		}
+		const size_t pageSize = systemPageSize();
+		const size_t firstPage = (start - region.base) / pageSize;
+		const size_t pageCount = length / pageSize;
+		for (size_t i = 0; i < pageCount; ++i) {
+			region.pageProtect[firstPage + i] = protect;
+		}
+	}
+
+	static void markDecommitted(VirtualAllocation &region, uintptr_t start, size_t length) {
+		if (length == 0) {
+			return;
+		}
+		const size_t pageSize = systemPageSize();
+		const size_t firstPage = (start - region.base) / pageSize;
+		const size_t pageCount = length / pageSize;
+		for (size_t i = 0; i < pageCount; ++i) {
+			region.pageProtect[firstPage + i] = 0;
+		}
+	}
+
+	static void *alignedReserve(size_t length, int prot, int flags) {
+		const size_t granularity = VIRTUAL_ALLOCATION_GRANULARITY;
+		const size_t request = length + granularity;
+		void *raw = mmap(nullptr, request, prot, flags, -1, 0);
+		if (raw == MAP_FAILED) {
+			return MAP_FAILED;
+		}
+		uintptr_t rawAddr = reinterpret_cast<uintptr_t>(raw);
+		uintptr_t aligned = alignUp(rawAddr, granularity);
+		size_t front = aligned - rawAddr;
+		size_t back = (rawAddr + request) - (aligned + length);
+		if (front != 0) {
+			if (munmap(raw, front) != 0) {
+				munmap(raw, request);
+				return MAP_FAILED;
+			}
+		}
+		if (back != 0) {
+			if (munmap(reinterpret_cast<void *>(aligned + length), back) != 0) {
+				munmap(reinterpret_cast<void *>(aligned), length);
+				return MAP_FAILED;
+			}
+		}
+		return reinterpret_cast<void *>(aligned);
+	}
+	} // namespace
+
 	static int translateProtect(DWORD flProtect) {
 		switch (flProtect) {
 		case 0x01: /* PAGE_NOACCESS */
@@ -4219,31 +4385,290 @@ namespace kernel32 {
 		}
 	}
 
-	void *WIN_FUNC VirtualAlloc(void *lpAddress, unsigned int dwSize, unsigned int flAllocationType, unsigned int flProtect) {
+	void *WIN_FUNC VirtualAlloc(void *lpAddress, unsigned int dwSize, unsigned int flAllocationType,
+								unsigned int flProtect) {
 		DEBUG_LOG("VirtualAlloc(%p, %u, %u, %u)\n", lpAddress, dwSize, flAllocationType, flProtect);
 
-		int prot = translateProtect(flProtect);
-
-		int flags = MAP_PRIVATE | MAP_ANONYMOUS; // MAP_ANONYMOUS ensures the memory is zeroed out
-		if (lpAddress != NULL) {
-			flags |= MAP_FIXED;
+		if (dwSize == 0) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return nullptr;
 		}
 
-		void* result = mmap(lpAddress, dwSize, prot, flags, -1, 0);
-		// Windows only fences off the lower 2GB of the 32-bit address space for the private use of processes.
-		assert(result < (void*)0x80000000);
-		if (result == MAP_FAILED) {
-			DEBUG_LOG("mmap failed\n");
-			return NULL;
+		const DWORD unsupportedFlags =
+			flAllocationType & (MEM_WRITE_WATCH | MEM_PHYSICAL | MEM_LARGE_PAGES | MEM_RESET_UNDO);
+		if (unsupportedFlags != 0) {
+			DEBUG_LOG("VirtualAlloc unsupported flags: 0x%x\n", unsupportedFlags);
+			wibo::lastError = ERROR_NOT_SUPPORTED;
+			return nullptr;
 		}
-		else {
-			DEBUG_LOG("-> %p\n", result);
+
+		bool reserve = (flAllocationType & MEM_RESERVE) != 0;
+		bool commit = (flAllocationType & MEM_COMMIT) != 0;
+		const bool reset = (flAllocationType & MEM_RESET) != 0;
+
+		if (!reserve && commit && lpAddress == nullptr) {
+			reserve = true;
+		}
+
+		if (reset) {
+			if (reserve || commit) {
+				wibo::lastError = ERROR_INVALID_PARAMETER;
+				return nullptr;
+			}
+			if (!lpAddress) {
+				wibo::lastError = ERROR_INVALID_ADDRESS;
+				return nullptr;
+			}
+			const size_t pageSize = systemPageSize();
+			uintptr_t request = reinterpret_cast<uintptr_t>(lpAddress);
+			if (addOverflows(request, static_cast<size_t>(dwSize))) {
+				wibo::lastError = ERROR_INVALID_PARAMETER;
+				return nullptr;
+			}
+			uintptr_t start = alignDown(request, pageSize);
+			uintptr_t end = alignUp(request + static_cast<uintptr_t>(dwSize), pageSize);
+			size_t length = static_cast<size_t>(end - start);
+			std::unique_lock<std::mutex> lock(g_virtualAllocMutex);
+			VirtualAllocation *region = lookupRegion(start);
+			if (!region || !rangeWithinRegion(*region, start, length)) {
+				wibo::lastError = ERROR_INVALID_ADDRESS;
+				return nullptr;
+			}
+#ifdef MADV_FREE
+			int advice = MADV_FREE;
+#else
+			int advice = MADV_DONTNEED;
+#endif
+			if (madvise(reinterpret_cast<void *>(start), length, advice) != 0) {
+				wibo::lastError = wibo::winErrorFromErrno(errno);
+				return nullptr;
+			}
+			wibo::lastError = ERROR_SUCCESS;
+			return reinterpret_cast<void *>(start);
+		}
+
+		if (!reserve && !commit) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return nullptr;
+		}
+
+		const size_t pageSize = systemPageSize();
+		std::unique_lock<std::mutex> lock(g_virtualAllocMutex);
+
+		if (reserve) {
+			uintptr_t base = 0;
+			size_t length = 0;
+			if (lpAddress) {
+				uintptr_t request = reinterpret_cast<uintptr_t>(lpAddress);
+				base = alignDown(request, VIRTUAL_ALLOCATION_GRANULARITY);
+				size_t offset = static_cast<size_t>(request - base);
+				if (addOverflows(offset, static_cast<size_t>(dwSize))) {
+					wibo::lastError = ERROR_INVALID_PARAMETER;
+					return nullptr;
+				}
+				size_t span = static_cast<size_t>(dwSize) + offset;
+				uintptr_t alignedSpan = alignUp(span, pageSize);
+				if (alignedSpan == std::numeric_limits<uintptr_t>::max()) {
+					wibo::lastError = ERROR_INVALID_PARAMETER;
+					return nullptr;
+				}
+				length = static_cast<size_t>(alignedSpan);
+				if (length == 0 || rangeOverlapsLocked(base, length)) {
+					wibo::lastError = ERROR_INVALID_ADDRESS;
+					return nullptr;
+				}
+			} else {
+				uintptr_t aligned = alignUp(static_cast<uintptr_t>(dwSize), pageSize);
+				if (aligned == std::numeric_limits<uintptr_t>::max() || aligned == 0) {
+					wibo::lastError = ERROR_INVALID_PARAMETER;
+					return nullptr;
+				}
+				length = static_cast<size_t>(aligned);
+			}
+			const int prot = commit ? translateProtect(flProtect) : PROT_NONE;
+			int flags = MAP_PRIVATE | MAP_ANONYMOUS;
+			if (!commit) {
+				flags |= MAP_NORESERVE;
+			}
+			void *result = MAP_FAILED;
+			if (lpAddress) {
+#ifdef MAP_FIXED_NOREPLACE
+				flags |= MAP_FIXED_NOREPLACE;
+#else
+				flags |= MAP_FIXED;
+#endif
+				result = mmap(reinterpret_cast<void *>(base), length, prot, flags, -1, 0);
+			} else {
+				result = alignedReserve(length, prot, flags);
+			}
+			if (result == MAP_FAILED) {
+				wibo::lastError = wibo::winErrorFromErrno(errno);
+				return nullptr;
+			}
+			if (reinterpret_cast<uintptr_t>(result) >= 0x80000000) {
+				munmap(result, length);
+				wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+				return nullptr;
+			}
+			uintptr_t actualBase = reinterpret_cast<uintptr_t>(result);
+			VirtualAllocation allocation{};
+			allocation.base = actualBase;
+			allocation.size = length;
+			allocation.allocationProtect = flProtect;
+			allocation.pageProtect.assign(length / pageSize, commit ? flProtect : 0);
+			g_virtualAllocations[actualBase] = std::move(allocation);
+			wibo::lastError = ERROR_SUCCESS;
 			return result;
 		}
+
+		uintptr_t request = reinterpret_cast<uintptr_t>(lpAddress);
+		if (addOverflows(request, static_cast<size_t>(dwSize))) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return nullptr;
+		}
+		uintptr_t start = alignDown(request, pageSize);
+		uintptr_t end = alignUp(request + static_cast<uintptr_t>(dwSize), pageSize);
+		size_t length = static_cast<size_t>(end - start);
+		if (length == 0) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return nullptr;
+		}
+		VirtualAllocation *region = lookupRegion(start);
+		if (!region || !rangeWithinRegion(*region, start, length)) {
+			wibo::lastError = ERROR_INVALID_ADDRESS;
+			return nullptr;
+		}
+		const int prot = translateProtect(flProtect);
+		const size_t firstPage = (start - region->base) / pageSize;
+		const size_t pageCount = length / pageSize;
+		DEBUG_LOG("VirtualAlloc commit within region base=%p size=%zu firstPage=%zu pageCount=%zu vectorSize=%zu\n",
+				  reinterpret_cast<void *>(region->base), region->size, firstPage, pageCount,
+				  region->pageProtect.size());
+		std::vector<std::pair<uintptr_t, size_t>> committedRuns;
+		committedRuns.reserve(pageCount);
+		size_t localIndex = 0;
+		while (localIndex < pageCount) {
+			size_t absoluteIndex = firstPage + localIndex;
+			if (region->pageProtect[absoluteIndex] != 0) {
+				++localIndex;
+				continue;
+			}
+			size_t runBeginLocal = localIndex;
+			while (localIndex < pageCount && region->pageProtect[firstPage + localIndex] == 0) {
+				++localIndex;
+			}
+			size_t runPages = localIndex - runBeginLocal;
+			uintptr_t runBase = region->base + (firstPage + runBeginLocal) * pageSize;
+			size_t runLength = runPages * pageSize;
+			void *mapped = mmap(reinterpret_cast<void *>(runBase), runLength, prot,
+								MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+			if (mapped == MAP_FAILED) {
+				for (const auto &run : committedRuns) {
+					mmap(reinterpret_cast<void *>(run.first), run.second, PROT_NONE,
+						 MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED | MAP_NORESERVE, -1, 0);
+					markDecommitted(*region, run.first, run.second);
+				}
+				wibo::lastError = wibo::winErrorFromErrno(errno);
+				return nullptr;
+			}
+			committedRuns.emplace_back(runBase, runLength);
+			markCommitted(*region, runBase, runLength, flProtect);
+		}
+		wibo::lastError = ERROR_SUCCESS;
+		DEBUG_LOG("VirtualAlloc commit success -> %p\n", reinterpret_cast<void *>(start));
+		return reinterpret_cast<void *>(start);
 	}
 
 	unsigned int WIN_FUNC VirtualFree(void *lpAddress, unsigned int dwSize, int dwFreeType) {
-		DEBUG_LOG("STUB: VirtualFree(%p, %u, %i)\n", lpAddress, dwSize, dwFreeType);
+		DEBUG_LOG("VirtualFree(%p, %u, %i)\n", lpAddress, dwSize, dwFreeType);
+		if (!lpAddress) {
+			wibo::lastError = ERROR_INVALID_ADDRESS;
+			return 0;
+		}
+
+		DWORD freeType = static_cast<DWORD>(dwFreeType);
+		if ((freeType & (MEM_COALESCE_PLACEHOLDERS | MEM_PRESERVE_PLACEHOLDER)) != 0) {
+			wibo::lastError = ERROR_NOT_SUPPORTED;
+			return 0;
+		}
+
+		const bool release = (freeType & MEM_RELEASE) != 0;
+		const bool decommit = (freeType & MEM_DECOMMIT) != 0;
+		if (release == decommit) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+
+		const size_t pageSize = systemPageSize();
+		std::unique_lock<std::mutex> lock(g_virtualAllocMutex);
+
+		if (release) {
+			uintptr_t base = reinterpret_cast<uintptr_t>(lpAddress);
+			auto exact = g_virtualAllocations.find(base);
+			if (exact == g_virtualAllocations.end()) {
+				auto containing = findRegionIterator(base);
+				if (dwSize != 0 && containing != g_virtualAllocations.end()) {
+					wibo::lastError = ERROR_INVALID_PARAMETER;
+				} else {
+					wibo::lastError = ERROR_INVALID_ADDRESS;
+				}
+				return 0;
+			}
+			if (dwSize != 0) {
+				wibo::lastError = ERROR_INVALID_PARAMETER;
+				return 0;
+			}
+			size_t length = exact->second.size;
+			g_virtualAllocations.erase(exact);
+			lock.unlock();
+			if (munmap(lpAddress, length) != 0) {
+				wibo::lastError = wibo::winErrorFromErrno(errno);
+				return 0;
+			}
+			wibo::lastError = ERROR_SUCCESS;
+			return 1;
+		}
+
+		uintptr_t request = reinterpret_cast<uintptr_t>(lpAddress);
+		auto regionIt = findRegionIterator(request);
+		if (regionIt == g_virtualAllocations.end()) {
+			wibo::lastError = ERROR_INVALID_ADDRESS;
+			return 0;
+		}
+		VirtualAllocation &region = regionIt->second;
+		uintptr_t start = alignDown(request, pageSize);
+		uintptr_t end = 0;
+		if (dwSize == 0) {
+			if (request != region.base) {
+				wibo::lastError = ERROR_INVALID_PARAMETER;
+				return 0;
+			}
+			start = region.base;
+			end = region.base + region.size;
+		} else {
+			if (addOverflows(request, static_cast<size_t>(dwSize))) {
+				wibo::lastError = ERROR_INVALID_PARAMETER;
+				return 0;
+			}
+			end = alignUp(request + static_cast<uintptr_t>(dwSize), pageSize);
+		}
+		if (end <= start) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		size_t length = static_cast<size_t>(end - start);
+		if (!rangeWithinRegion(region, start, length)) {
+			wibo::lastError = ERROR_INVALID_ADDRESS;
+			return 0;
+		}
+		void *result = mmap(reinterpret_cast<void *>(start), length, PROT_NONE,
+							MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED | MAP_NORESERVE, -1, 0);
+		if (result == MAP_FAILED) {
+			wibo::lastError = wibo::winErrorFromErrno(errno);
+			return 0;
+		}
+		markDecommitted(region, start, length);
+		wibo::lastError = ERROR_SUCCESS;
 		return 1;
 	}
 
@@ -4253,16 +4678,56 @@ namespace kernel32 {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
 			return FALSE;
 		}
-		if (lpflOldProtect)
-			*lpflOldProtect = flNewProtect;
-		size_t pageSize = static_cast<size_t>(sysconf(_SC_PAGESIZE));
-		uintptr_t base = reinterpret_cast<uintptr_t>(lpAddress) & ~(pageSize - 1);
-		size_t length = ((reinterpret_cast<uintptr_t>(lpAddress) + dwSize) - base + pageSize - 1) & ~(pageSize - 1);
-		int prot = translateProtect(flNewProtect);
-		if (mprotect(reinterpret_cast<void *>(base), length, prot) != 0) {
-			perror("VirtualProtect/mprotect");
+
+		const size_t pageSize = systemPageSize();
+		uintptr_t request = reinterpret_cast<uintptr_t>(lpAddress);
+		uintptr_t start = alignDown(request, pageSize);
+		uintptr_t end = alignUp(request + static_cast<uintptr_t>(dwSize), pageSize);
+		if (end <= start) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
 			return FALSE;
 		}
+
+		std::unique_lock<std::mutex> lock(g_virtualAllocMutex);
+		VirtualAllocation *region = lookupRegion(start);
+		if (!region || !rangeWithinRegion(*region, start, static_cast<size_t>(end - start))) {
+			wibo::lastError = ERROR_INVALID_ADDRESS;
+			return FALSE;
+		}
+
+		const size_t firstPage = (start - region->base) / pageSize;
+		const size_t pageCount = (end - start) / pageSize;
+		if (pageCount == 0) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+
+		DWORD previousProtect = region->pageProtect[firstPage];
+		if (previousProtect == 0) {
+			wibo::lastError = ERROR_NOACCESS;
+			return FALSE;
+		}
+		for (size_t i = 0; i < pageCount; ++i) {
+			if (region->pageProtect[firstPage + i] == 0) {
+				wibo::lastError = ERROR_NOACCESS;
+				return FALSE;
+			}
+		}
+
+		int prot = translateProtect(flNewProtect);
+		if (mprotect(reinterpret_cast<void *>(start), end - start, prot) != 0) {
+			wibo::lastError = wibo::winErrorFromErrno(errno);
+			return FALSE;
+		}
+		for (size_t i = 0; i < pageCount; ++i) {
+			region->pageProtect[firstPage + i] = flNewProtect;
+		}
+		lock.unlock();
+
+		if (lpflOldProtect) {
+			*lpflOldProtect = previousProtect;
+		}
+		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 
@@ -4278,17 +4743,58 @@ namespace kernel32 {
 
 	SIZE_T WIN_FUNC VirtualQuery(const void *lpAddress, PMEMORY_BASIC_INFORMATION lpBuffer, SIZE_T dwLength) {
 		DEBUG_LOG("VirtualQuery(%p, %p, %zu)\n", lpAddress, lpBuffer, dwLength);
-		if (!lpBuffer || dwLength < sizeof(MEMORY_BASIC_INFORMATION)) {
+		if (!lpBuffer || dwLength < sizeof(MEMORY_BASIC_INFORMATION) || !lpAddress) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
 			return 0;
 		}
-		memset(lpBuffer, 0, sizeof(MEMORY_BASIC_INFORMATION));
-		lpBuffer->BaseAddress = const_cast<LPVOID>(lpAddress);
-		lpBuffer->AllocationBase = lpBuffer->BaseAddress;
-		lpBuffer->AllocationProtect = 0x04; // PAGE_READWRITE
-		lpBuffer->RegionSize = static_cast<size_t>(sysconf(_SC_PAGESIZE));
-		lpBuffer->State = 0x1000; // MEM_COMMIT
-		lpBuffer->Protect = 0x04; // PAGE_READWRITE
-		lpBuffer->Type = 0x20000; // MEM_PRIVATE
+
+		std::memset(lpBuffer, 0, sizeof(MEMORY_BASIC_INFORMATION));
+		const size_t pageSize = systemPageSize();
+		uintptr_t request = reinterpret_cast<uintptr_t>(lpAddress);
+		uintptr_t pageBase = alignDown(request, pageSize);
+
+		std::unique_lock<std::mutex> lock(g_virtualAllocMutex);
+		VirtualAllocation *region = lookupRegion(pageBase);
+		if (!region) {
+			wibo::lastError = ERROR_INVALID_ADDRESS;
+			return 0;
+		}
+
+		const size_t pageIndex = (pageBase - region->base) / pageSize;
+		if (pageIndex >= region->pageProtect.size()) {
+			wibo::lastError = ERROR_INVALID_ADDRESS;
+			return 0;
+		}
+		const bool committed = region->pageProtect[pageIndex] != 0;
+		uintptr_t blockStart = pageBase;
+		uintptr_t blockEnd = pageBase + pageSize;
+		while (blockStart > region->base) {
+			size_t idx = (blockStart - region->base) / pageSize - 1;
+			const bool pageCommitted = region->pageProtect[idx] != 0;
+			if (pageCommitted != committed) {
+				break;
+			}
+			blockStart -= pageSize;
+		}
+		while (blockEnd < region->base + region->size) {
+			size_t idx = (blockEnd - region->base) / pageSize;
+			const bool pageCommitted = region->pageProtect[idx] != 0;
+			if (pageCommitted != committed) {
+				break;
+			}
+			blockEnd += pageSize;
+		}
+
+		lpBuffer->BaseAddress = reinterpret_cast<void *>(blockStart);
+		lpBuffer->AllocationBase = reinterpret_cast<void *>(region->base);
+		lpBuffer->AllocationProtect =
+			region->allocationProtect != 0 ? region->allocationProtect : 0x01; // PAGE_NOACCESS fallback
+		lpBuffer->RegionSize = blockEnd - blockStart;
+		lpBuffer->State = committed ? MEM_COMMIT : MEM_RESERVE;
+		lpBuffer->Protect = committed ? region->pageProtect[pageIndex] : 0;
+		lpBuffer->Type = MEM_PRIVATE;
+		lock.unlock();
+		wibo::lastError = ERROR_SUCCESS;
 		return sizeof(MEMORY_BASIC_INFORMATION);
 	}
 
@@ -5935,8 +6441,6 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "DecodePointer") == 0) return (void *) kernel32::DecodePointer;
 	if (strcmp(name, "SetDllDirectoryA") == 0) return (void *) kernel32::SetDllDirectoryA;
 	if (strcmp(name, "Sleep") == 0) return (void *) kernel32::Sleep;
-	if (strcmp(name, "VirtualProtect") == 0) return (void *) kernel32::VirtualProtect;
-	if (strcmp(name, "VirtualQuery") == 0) return (void *) kernel32::VirtualQuery;
 
 	// processenv.h
 	if (strcmp(name, "GetCommandLineA") == 0) return (void *) kernel32::GetCommandLineA;
@@ -6058,6 +6562,8 @@ static void *resolveByName(const char *name) {
 	// memoryapi.h
 	if (strcmp(name, "VirtualAlloc") == 0) return (void *) kernel32::VirtualAlloc;
 	if (strcmp(name, "VirtualFree") == 0) return (void *) kernel32::VirtualFree;
+	if (strcmp(name, "VirtualProtect") == 0) return (void *) kernel32::VirtualProtect;
+	if (strcmp(name, "VirtualQuery") == 0) return (void *) kernel32::VirtualQuery;
 	if (strcmp(name, "GetProcessWorkingSetSize") == 0) return (void *) kernel32::GetProcessWorkingSetSize;
 	if (strcmp(name, "SetProcessWorkingSetSize") == 0) return (void *) kernel32::SetProcessWorkingSetSize;
 

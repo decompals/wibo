@@ -34,10 +34,12 @@
 #include <vector>
 #include <fcntl.h>
 #include <time.h>
+#include <sys/time.h>
 #include <pthread.h>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
+#include <limits>
 
 namespace advapi32 {
 	void releaseToken(void *tokenPtr);
@@ -443,19 +445,23 @@ namespace kernel32 {
 		}
 	}
 
+	void setLastErrorFromErrno() {
+		wibo::lastError = wibo::winErrorFromErrno(errno);
+	}
+
 	int64_t getFileSize(void* hFile) {
 		FILE *fp = files::fpFromHandle(hFile);
+		if (!fp) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return -1; // INVALID_FILE_SIZE
+		}
 		struct stat64 st;
 		fflush(fp);
 		if (fstat64(fileno(fp), &st) == -1 || !S_ISREG(st.st_mode)) {
-			wibo::lastError = 2; // ERROR_FILE_NOT_FOUND (?)
+			setLastErrorFromErrno();
 			return -1; // INVALID_FILE_SIZE
 		}
 		return st.st_size;
-	}
-
-	void setLastErrorFromErrno() {
-		wibo::lastError = wibo::winErrorFromErrno(errno);
 	}
 
 	static void setEventSignaledState(HANDLE hEvent, bool signaled) {
@@ -512,7 +518,7 @@ namespace kernel32 {
 	}
 
 	BOOL WIN_FUNC Wow64DisableWow64FsRedirection(void **OldValue) {
-		DEBUG_LOG("STUB: Wow64DisableWow64FsRedirection\n");
+		DEBUG_LOG("STUB: Wow64DisableWow64FsRedirection(%p)\n", OldValue);
 		if (OldValue) {
 			*OldValue = nullptr;
 		}
@@ -521,14 +527,14 @@ namespace kernel32 {
 	}
 
 	BOOL WIN_FUNC Wow64RevertWow64FsRedirection(void *OldValue) {
-		DEBUG_LOG("STUB: Wow64RevertWow64FsRedirection\n");
+		DEBUG_LOG("STUB: Wow64RevertWow64FsRedirection(%p)\n", OldValue);
 		(void) OldValue;
 		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 
 	void WIN_FUNC RaiseException(DWORD dwExceptionCode, DWORD dwExceptionFlags, DWORD nNumberOfArguments, const ULONG_PTR *lpArguments) {
-		DEBUG_LOG("RaiseException(code=0x%x, flags=0x%x, args=%u)\n", dwExceptionCode, dwExceptionFlags, nNumberOfArguments);
+		DEBUG_LOG("RaiseException(0x%x, 0x%x, %u, %p)\n", dwExceptionCode, dwExceptionFlags, nNumberOfArguments, lpArguments);
 		(void)lpArguments;
 		exit(static_cast<int>(dwExceptionCode));
 	}
@@ -1000,16 +1006,16 @@ namespace kernel32 {
 	static bool tlsValuesUsed[MAX_TLS_VALUES] = { false };
 	static void *tlsValues[MAX_TLS_VALUES];
 	unsigned int WIN_FUNC TlsAlloc() {
-		VERBOSE_LOG("TlsAlloc()\n");
+		VERBOSE_LOG("TlsAlloc()");
 		for (size_t i = 0; i < MAX_TLS_VALUES; i++) {
 			if (tlsValuesUsed[i] == false) {
 				tlsValuesUsed[i] = true;
 				tlsValues[i] = 0;
-				VERBOSE_LOG("...returning %d\n", i);
+				VERBOSE_LOG(" -> %d\n", i);
 				return i;
 			}
 		}
-		VERBOSE_LOG("...returning nothing\n");
+		VERBOSE_LOG(" -> -1\n");
 		wibo::lastError = 1;
 		return 0xFFFFFFFF; // TLS_OUT_OF_INDEXES
 	}
@@ -1221,6 +1227,7 @@ namespace kernel32 {
 		work = environ;
 
 		while (*work) {
+			VERBOSE_LOG("-> %s\n", *work);
 			size_t strSize = strlen(*work);
 			for (size_t i = 0; i < strSize; i++) {
 				*ptr++ = (*work)[i] & 0xFF;
@@ -1494,7 +1501,7 @@ namespace kernel32 {
 	using random_shorts_engine = std::independent_bits_engine<std::default_random_engine, sizeof(unsigned short) * 8, unsigned short>;
 
 	unsigned int WIN_FUNC GetTempFileNameA(LPSTR lpPathName, LPSTR lpPrefixString, unsigned int uUnique, LPSTR lpTempFileName) {
-		DEBUG_LOG("GetTempFileNameA\n");
+		DEBUG_LOG("GetTempFileNameA(%s, %s, %u)\n", lpPathName, lpPrefixString, uUnique);
 		if (lpPathName == 0) {
 			return 0;
 		}
@@ -1527,24 +1534,37 @@ namespace kernel32 {
 			snprintf(uniqueStr, sizeof(uniqueStr), "%.3s%X.TMP", lpPrefixString, uUnique & 0xFFFF);
 			path = files::pathFromWindows(lpPathName) / uniqueStr;
 		}
-		strncpy(lpTempFileName, files::pathToWindows(path).c_str(), MAX_PATH);
+		std::string str = files::pathToWindows(path);
+		DEBUG_LOG(" -> %s\n", str.c_str());
+		strncpy(lpTempFileName, str.c_str(), MAX_PATH);
 		return uUnique;
 	}
 
 	DWORD WIN_FUNC GetTempPathA(DWORD nBufferLength, LPSTR lpBuffer) {
-		DEBUG_LOG("GetTempPathA\n");
+		DEBUG_LOG("GetTempPathA(%u, %p)\n", nBufferLength, lpBuffer);
 
-		if ((nBufferLength == 0) || (lpBuffer == 0)) {
+		if (nBufferLength == 0 || lpBuffer == nullptr) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			DEBUG_LOG(" -> ERROR_INVALID_PARAMETER\n");
 			return 0;
 		}
 
-		const char* tmp_dir;
-		if (!(tmp_dir = getenv("WIBO_TMP_DIR"))) {
-			tmp_dir = "Z:\\tmp\\";
+		const char* path;
+		if (!(path = getenv("WIBO_TMP_DIR"))) {
+			path = "Z:\\tmp\\";
+		}
+		size_t len = strlen(path);
+		if (len + 1 > nBufferLength) {
+			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			DEBUG_LOG(" -> ERROR_INSUFFICIENT_BUFFER\n");
+			return len + 1;
 		}
 
-		strcpy(lpBuffer, tmp_dir);
-		return strlen(tmp_dir);
+		DEBUG_LOG(" -> %s\n", path);
+		strncpy(lpBuffer, path, nBufferLength);
+		lpBuffer[nBufferLength - 1] = '\0';
+		wibo::lastError = ERROR_SUCCESS;
+		return len;
 	}
 
 	struct FILETIME {
@@ -1584,6 +1604,7 @@ namespace kernel32 {
 	static uint64_t fileTimeToDuration(const FILETIME &value) {
 		return (static_cast<uint64_t>(value.dwHighDateTime) << 32) | value.dwLowDateTime;
 	}
+
 
 	template<typename CharType>
 	struct WIN32_FIND_DATA {
@@ -1668,9 +1689,10 @@ namespace kernel32 {
 	}
 
 	void *WIN_FUNC FindFirstFileA(const char *lpFileName, WIN32_FIND_DATA<char> *lpFindFileData) {
+		DEBUG_LOG("FindFirstFileA(%p, %p)\n", lpFileName, lpFindFileData);
 		// This should handle wildcards too, but whatever.
 		auto path = files::pathFromWindows(lpFileName);
-		DEBUG_LOG("FindFirstFileA %s (%s)\n", lpFileName, path.c_str());
+		DEBUG_LOG("FindFirstFileA(%s) -> %s\n", lpFileName, path.c_str());
 
 		lpFindFileData->ftCreationTime = defaultFiletime;
 		lpFindFileData->ftLastAccessTime = defaultFiletime;
@@ -1713,7 +1735,7 @@ namespace kernel32 {
 		std::string filename = wideStringToString(lpFileName);
 		// This should handle wildcards too, but whatever.
 		auto path = files::pathFromWindows(filename.c_str());
-		DEBUG_LOG("FindFirstFileW %s (%s)\n", filename.c_str(), path.c_str());
+		DEBUG_LOG("FindFirstFileW(%s) -> %s\n", filename.c_str(), path.c_str());
 
 		lpFindFileData->ftCreationTime = defaultFiletime;
 		lpFindFileData->ftLastAccessTime = defaultFiletime;
@@ -1768,8 +1790,7 @@ namespace kernel32 {
 	void *WIN_FUNC FindFirstFileExA(const char *lpFileName, FINDEX_INFO_LEVELS fInfoLevelId, void *lpFindFileData, FINDEX_SEARCH_OPS fSearchOp, void *lpSearchFilter, unsigned int dwAdditionalFlags) {
 		assert(fInfoLevelId == FindExInfoStandard);
 
-		auto path = files::pathFromWindows(lpFileName);
-		DEBUG_LOG("FindFirstFileExA %s (%s)\n", lpFileName, path.c_str());
+		DEBUG_LOG("FindFirstFileExA(%s) -> %s\n", lpFileName, files::pathFromWindows(lpFileName).c_str());
 
 		return FindFirstFileA(lpFileName, (WIN32_FIND_DATA<char> *) lpFindFileData);
 	}
@@ -1793,7 +1814,7 @@ namespace kernel32 {
 	}
 
 	int WIN_FUNC FindClose(void *hFindFile) {
-		DEBUG_LOG("FindClose\n");
+		DEBUG_LOG("FindClose(%p)\n", hFindFile);
 		if (hFindFile != (void *) 1) {
 			delete (FindFirstFileHandle *)hFindFile;
 		}
@@ -1802,7 +1823,7 @@ namespace kernel32 {
 
 	unsigned int WIN_FUNC GetFileAttributesA(const char *lpFileName) {
 		auto path = files::pathFromWindows(lpFileName);
-		DEBUG_LOG("GetFileAttributesA(%s)... (%s)\n", lpFileName, path.c_str());
+		DEBUG_LOG("GetFileAttributesA(%s) -> %s\n", lpFileName, path.c_str());
 
 		// See ole32::CoCreateInstance
 		if (endsWith(path, "/license.dat")) {
@@ -1829,14 +1850,13 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC GetFileAttributesW(const uint16_t* lpFileName) {
-		DEBUG_LOG("GetFileAttributesW(");
+		DEBUG_LOG("GetFileAttributesW -> ");
 		std::string str = wideStringToString(lpFileName);
-		DEBUG_LOG("%s)\n", str.c_str());
 		return GetFileAttributesA(str.c_str());
 	}
 
 	unsigned short WIN_FUNC GetUserDefaultUILanguage(){
-		DEBUG_LOG("STUB GetUserDefaultUILanguage\n");
+		DEBUG_LOG("STUB: GetUserDefaultUILanguage()\n");
 		return 0;
 	}
 
@@ -2173,6 +2193,7 @@ namespace kernel32 {
 			unsigned int dwMaximumSizeHigh,
 			unsigned int dwMaximumSizeLow,
 			const uint16_t *lpName) {
+		DEBUG_LOG("CreateFileMappingW -> ");
 		std::string name = wideStringToString(lpName);
 		return CreateFileMappingA(hFile, lpFileMappingAttributes, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow, lpName ? name.c_str() : nullptr);
 	}
@@ -2301,10 +2322,11 @@ namespace kernel32 {
 	BOOL WIN_FUNC DeleteFileA(const char* lpFileName) {
 		if (!lpFileName) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
+			DEBUG_LOG("DeleteFileA(NULL) -> ERROR_INVALID_PARAMETER\n");
 			return FALSE;
 		}
 		std::string path = files::pathFromWindows(lpFileName);
-		DEBUG_LOG("DeleteFileA %s (%s)\n", lpFileName, path.c_str());
+		DEBUG_LOG("DeleteFileA(%s) -> %s\n", lpFileName, path.c_str());
 		if (unlink(path.c_str()) == 0) {
 			wibo::lastError = ERROR_SUCCESS;
 			return TRUE;
@@ -2314,8 +2336,10 @@ namespace kernel32 {
 	}
 
 	BOOL WIN_FUNC DeleteFileW(const uint16_t *lpFileName) {
+		DEBUG_LOG("DeleteFileW -> ");
 		if (!lpFileName) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
+			DEBUG_LOG("ERROR_INVALID_PARAMETER\n");
 			return FALSE;
 		}
 		std::string name = wideStringToString(lpFileName);
@@ -2353,9 +2377,10 @@ namespace kernel32 {
 	}
 
 	BOOL WIN_FUNC MoveFileW(const uint16_t *lpExistingFileName, const uint16_t *lpNewFileName) {
-		DEBUG_LOG("MoveFileW\n");
+		DEBUG_LOG("MoveFileW -> ");
 		if (!lpExistingFileName || !lpNewFileName) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
+			DEBUG_LOG("ERROR_INVALID_PARAMETER\n");
 			return FALSE;
 		}
 		std::string from = wideStringToString(lpExistingFileName);
@@ -2371,6 +2396,10 @@ namespace kernel32 {
 		}
 		assert(!lpDistanceToMoveHigh || *lpDistanceToMoveHigh == 0);
 		FILE *fp = files::fpFromHandle(hFile);
+		if (!fp) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return INVALID_SET_FILE_POINTER;
+		}
 		wibo::lastError = ERROR_SUCCESS;
 		int r = fseek(fp, lDistanceToMove, dwMoveMethod == 0 ? SEEK_SET : dwMoveMethod == 1 ? SEEK_CUR : SEEK_END);
 
@@ -2396,6 +2425,10 @@ namespace kernel32 {
 		assert(!lpDistanceToMoveHigh || *lpDistanceToMoveHigh == 0);
 		DEBUG_LOG("SetFilePointerEx(%p, %ld, %d)\n", hFile, lDistanceToMove, dwMoveMethod);
 		FILE *fp = files::fpFromHandle(hFile);
+		if (!fp) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return 0;
+		}
 		wibo::lastError = ERROR_SUCCESS;
 		int r = fseeko64(fp, lDistanceToMove, dwMoveMethod == 0 ? SEEK_SET : dwMoveMethod == 1 ? SEEK_CUR : SEEK_END);
 
@@ -2412,11 +2445,18 @@ namespace kernel32 {
 		return TRUE;
 	}
 
-	int WIN_FUNC SetEndOfFile(void *hFile) {
-		DEBUG_LOG("SetEndOfFile\n");
+	BOOL WIN_FUNC SetEndOfFile(HANDLE hFile) {
+		DEBUG_LOG("SetEndOfFile(%p)\n", hFile);
 		FILE *fp = files::fpFromHandle(hFile);
-		fflush(fp);
-		return ftruncate(fileno(fp), ftell(fp)) == 0;
+		if (!fp) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return FALSE;
+		}
+		if (fflush(fp) != 0 || ftruncate(fileno(fp), ftell(fp)) != 0) {
+			setLastErrorFromErrno();
+			return FALSE;
+		}
+		return TRUE;
 	}
 
 	int WIN_FUNC CreateDirectoryA(const char *lpPathName, void *lpSecurityAttributes) {
@@ -2437,24 +2477,25 @@ namespace kernel32 {
 		return 1;
 	}
 
-	unsigned int WIN_FUNC GetFileSize(void *hFile, unsigned int *lpFileSizeHigh) {
-		DEBUG_LOG("GetFileSize\n");
+	DWORD WIN_FUNC GetFileSize(HANDLE hFile, LPDWORD lpFileSizeHigh) {
+		DEBUG_LOG("GetFileSize(%p, %p) ", hFile, lpFileSizeHigh);
 		int64_t size = getFileSize(hFile);
 		if (size == -1) {
+			DEBUG_LOG("-> INVALID_FILE_SIZE\n");
 			return 0xFFFFFFFF; // INVALID_FILE_SIZE
 		}
 		DEBUG_LOG("-> %ld\n", size);
 		if (lpFileSizeHigh != nullptr) {
 			*lpFileSizeHigh = size >> 32;
 		}
-		return size;
+		return static_cast<DWORD>(size);
 	}
 
 	/*
 	 * Time
 	 */
 	int WIN_FUNC GetFileTime(void *hFile, FILETIME *lpCreationTime, FILETIME *lpLastAccessTime, FILETIME *lpLastWriteTime) {
-		DEBUG_LOG("GetFileTime %p %p %p\n", lpCreationTime, lpLastAccessTime, lpLastWriteTime);
+		DEBUG_LOG("GetFileTime(%p, %p, %p, %p)\n", hFile, lpCreationTime, lpLastAccessTime, lpLastWriteTime);
 		FILE *fp = files::fpFromHandle(hFile);
 		if (!fp) {
 			wibo::lastError = ERROR_INVALID_HANDLE;
@@ -2518,8 +2559,227 @@ namespace kernel32 {
 		short wMilliseconds;
 	};
 
+	static constexpr int64_t HUNDRED_NS_PER_SECOND = 10000000LL;
+	static constexpr int64_t HUNDRED_NS_PER_MILLISECOND = 10000LL;
+	static constexpr int64_t SECONDS_PER_DAY = 86400LL;
+	static constexpr uint64_t TICKS_PER_DAY = static_cast<uint64_t>(SECONDS_PER_DAY) * HUNDRED_NS_PER_SECOND;
+	static constexpr uint64_t MAX_VALID_FILETIME = 0x8000000000000000ULL;
+	static constexpr int64_t DAYS_TO_UNIX_EPOCH = 134774LL;
+
+	struct CivilDate {
+		int year;
+		unsigned month;
+		unsigned day;
+	};
+
+	static int64_t daysFromCivil(int year, unsigned month, unsigned day) {
+		year -= month <= 2 ? 1 : 0;
+		const int era = (year >= 0 ? year : year - 399) / 400;
+		const unsigned yoe = static_cast<unsigned>(year - era * 400);
+		const unsigned doy = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1;
+		const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + yoe / 400 + doy;
+		return era * 146097 + static_cast<int64_t>(doe) - 719468;
+	}
+
+	static CivilDate civilFromDays(int64_t z) {
+		z += 719468;
+		const int64_t era = (z >= 0 ? z : z - 146096) / 146097;
+		const unsigned doe = static_cast<unsigned>(z - era * 146097);
+		const unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+		int year = static_cast<int>(yoe) + static_cast<int>(era) * 400;
+		const unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+		const unsigned mp = (5 * doy + 2) / 153;
+		const unsigned day = doy - (153 * mp + 2) / 5 + 1;
+		int month = static_cast<int>(mp) + (mp < 10 ? 3 : -9);
+		year += (month <= 2) ? 1 : 0;
+		return {year, static_cast<unsigned>(month), day};
+	}
+
+	static bool isLeapYear(int year) {
+		if (year % 400 == 0) {
+			return true;
+		}
+		if (year % 100 == 0) {
+			return false;
+		}
+		return (year % 4) == 0;
+	}
+
+	static unsigned daysInMonth(int year, unsigned month) {
+		static const unsigned baseDays[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+		unsigned idx = month - 1;
+		unsigned value = baseDays[idx];
+		if (month == 2 && isLeapYear(year)) {
+			value += 1;
+		}
+		return value;
+	}
+
+	static bool validateSystemTime(const SYSTEMTIME &st) {
+		if (st.wYear < 1601) {
+			return false;
+		}
+		if (st.wMonth < 1 || st.wMonth > 12) {
+			return false;
+		}
+		if (st.wDay < 1 || st.wDay > static_cast<short>(daysInMonth(st.wYear, static_cast<unsigned>(st.wMonth)))) {
+			return false;
+		}
+		if (st.wHour < 0 || st.wHour > 23) {
+			return false;
+		}
+		if (st.wMinute < 0 || st.wMinute > 59) {
+			return false;
+		}
+		if (st.wSecond < 0 || st.wSecond > 59) {
+			return false;
+		}
+		if (st.wMilliseconds < 0 || st.wMilliseconds > 999) {
+			return false;
+		}
+		return true;
+	}
+
+	static bool systemTimeToUnixParts(const SYSTEMTIME &st, int64_t &secondsOut, uint32_t &hundredsOut) {
+		if (!validateSystemTime(st)) {
+			return false;
+		}
+		int64_t days = daysFromCivil(st.wYear, static_cast<unsigned>(st.wMonth), static_cast<unsigned>(st.wDay));
+		int64_t secondsOfDay = static_cast<int64_t>(st.wHour) * 3600LL + static_cast<int64_t>(st.wMinute) * 60LL + st.wSecond;
+		secondsOut = days * SECONDS_PER_DAY + secondsOfDay;
+		hundredsOut = static_cast<uint32_t>(st.wMilliseconds) * static_cast<uint32_t>(HUNDRED_NS_PER_MILLISECOND);
+		return true;
+	}
+
+	static bool fileTimeToUnixParts(const FILETIME &ft, int64_t &secondsOut, uint32_t &hundredsOut) {
+		uint64_t ticks = fileTimeToDuration(ft);
+		if (ticks >= UNIX_TIME_ZERO) {
+			uint64_t diff = ticks - UNIX_TIME_ZERO;
+			secondsOut = static_cast<int64_t>(diff / HUNDRED_NS_PER_SECOND);
+			hundredsOut = static_cast<uint32_t>(diff % HUNDRED_NS_PER_SECOND);
+		}
+		else {
+			uint64_t diff = UNIX_TIME_ZERO - ticks;
+			secondsOut = -static_cast<int64_t>(diff / HUNDRED_NS_PER_SECOND);
+			uint64_t rem = diff % HUNDRED_NS_PER_SECOND;
+			if (rem != 0) {
+				secondsOut -= 1;
+				rem = HUNDRED_NS_PER_SECOND - rem;
+			}
+			hundredsOut = static_cast<uint32_t>(rem);
+		}
+		return true;
+	}
+
+	static bool unixPartsToFileTime(int64_t seconds, uint32_t hundreds, FILETIME &out) {
+		if (hundreds >= HUNDRED_NS_PER_SECOND) {
+			return false;
+		}
+#if defined(__SIZEOF_INT128__)
+		__int128 total = static_cast<__int128>(seconds) * HUNDRED_NS_PER_SECOND;
+		total += static_cast<__int128>(hundreds);
+		total += static_cast<__int128>(UNIX_TIME_ZERO);
+		if (total < 0 || total > static_cast<__int128>(std::numeric_limits<uint64_t>::max())) {
+			return false;
+		}
+		uint64_t ticks = static_cast<uint64_t>(total);
+#else
+		long double total = static_cast<long double>(seconds) * static_cast<long double>(HUNDRED_NS_PER_SECOND);
+		total += static_cast<long double>(hundreds);
+		total += static_cast<long double>(UNIX_TIME_ZERO);
+		if (total < 0.0L || total > static_cast<long double>(std::numeric_limits<uint64_t>::max())) {
+			return false;
+		}
+		uint64_t ticks = static_cast<uint64_t>(total);
+#endif
+		out = fileTimeFromDuration(ticks);
+		return true;
+	}
+
+	static bool unixPartsToTimespec(int64_t seconds, uint32_t hundreds, struct timespec &out) {
+		if (hundreds >= HUNDRED_NS_PER_SECOND) {
+			return false;
+		}
+		if (seconds > static_cast<int64_t>(std::numeric_limits<time_t>::max()) ||
+		    seconds < static_cast<int64_t>(std::numeric_limits<time_t>::min())) {
+			return false;
+		}
+		out.tv_sec = static_cast<time_t>(seconds);
+		out.tv_nsec = static_cast<long>(hundreds) * 100L;
+		return true;
+	}
+
+	static bool tmToUnixSeconds(const struct tm &tmValue, int64_t &secondsOut) {
+		int year = tmValue.tm_year + 1900;
+		int month = tmValue.tm_mon + 1;
+		int day = tmValue.tm_mday;
+		int hour = tmValue.tm_hour;
+		int minute = tmValue.tm_min;
+		int second = tmValue.tm_sec;
+		if (month < 1 || month > 12) {
+			return false;
+		}
+		if (day < 1 || day > static_cast<int>(daysInMonth(year, static_cast<unsigned>(month)))) {
+			return false;
+		}
+		if (hour < 0 || hour > 23) {
+			return false;
+		}
+		if (minute < 0 || minute > 59) {
+			return false;
+		}
+		if (second < 0 || second > 60) {
+			return false;
+		}
+		if (second == 60) {
+			second = 59;
+		}
+		int64_t days = daysFromCivil(year, static_cast<unsigned>(month), static_cast<unsigned>(day));
+		secondsOut = days * SECONDS_PER_DAY + static_cast<int64_t>(hour) * 3600LL + static_cast<int64_t>(minute) * 60LL + second;
+		return true;
+	}
+
+	static bool shouldIgnoreFileTimeParam(const FILETIME *ft) {
+		if (!ft) {
+			return true;
+		}
+		if (ft->dwLowDateTime == 0 && ft->dwHighDateTime == 0) {
+			return true;
+		}
+		if (ft->dwLowDateTime == 0xFFFFFFFF && ft->dwHighDateTime == 0xFFFFFFFF) {
+			return true;
+		}
+		return false;
+	}
+
+	static struct timespec statAccessTimespec(const struct stat &st) {
+#if defined(__APPLE__)
+		return st.st_atimespec;
+#elif defined(__linux__)
+		return st.st_atim;
+#else
+		struct timespec ts {};
+		ts.tv_sec = st.st_atime;
+		ts.tv_nsec = 0;
+		return ts;
+#endif
+	}
+
+	static struct timespec statModifyTimespec(const struct stat &st) {
+#if defined(__APPLE__)
+		return st.st_mtimespec;
+#elif defined(__linux__)
+		return st.st_mtim;
+#else
+		struct timespec ts {};
+		ts.tv_sec = st.st_mtime;
+		ts.tv_nsec = 0;
+		return ts;
+#endif
+	}
+
 	void WIN_FUNC GetSystemTime(SYSTEMTIME *lpSystemTime) {
-		DEBUG_LOG("GetSystemTime\n");
+		DEBUG_LOG("GetSystemTime(%p)\n", lpSystemTime);
 
 		time_t t = time(NULL);
 		struct tm *tm = gmtime(&t);
@@ -2536,7 +2796,7 @@ namespace kernel32 {
 	}
 
 	void WIN_FUNC GetLocalTime(SYSTEMTIME *lpSystemTime) {
-		DEBUG_LOG("GetLocalTime\n");
+		DEBUG_LOG("GetLocalTime(%p)\n", lpSystemTime);
 
 		time_t t = time(NULL);
 		struct tm *tm = localtime(&t);
@@ -2553,59 +2813,266 @@ namespace kernel32 {
 	}
 
 	int WIN_FUNC SystemTimeToFileTime(const SYSTEMTIME *lpSystemTime, FILETIME *lpFileTime) {
-		DEBUG_LOG("SystemTimeToFileTime\n");
-		*lpFileTime = defaultFiletime;
+		DEBUG_LOG("SystemTimeToFileTime(%p, %p)\n", lpSystemTime, lpFileTime);
+		if (!lpSystemTime || !lpFileTime) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		int64_t seconds = 0;
+		uint32_t hundreds = 0;
+		if (!systemTimeToUnixParts(*lpSystemTime, seconds, hundreds)) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		FILETIME result;
+		if (!unixPartsToFileTime(seconds, hundreds, result)) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		if (fileTimeToDuration(result) >= MAX_VALID_FILETIME) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		*lpFileTime = result;
+		wibo::lastError = ERROR_SUCCESS;
 		return 1;
 	}
 
 	void WIN_FUNC GetSystemTimeAsFileTime(FILETIME *lpSystemTimeAsFileTime) {
-		DEBUG_LOG("GetSystemTimeAsFileTime\n");
+		DEBUG_LOG("GetSystemTimeAsFileTime(%p)\n", lpSystemTimeAsFileTime);
+		if (!lpSystemTimeAsFileTime) {
+			return;
+		}
+#if defined(CLOCK_REALTIME)
+		struct timespec ts {};
+		if (clock_gettime(CLOCK_REALTIME, &ts) == 0) {
+			uint64_t ticks = UNIX_TIME_ZERO;
+			ticks += static_cast<uint64_t>(ts.tv_sec) * HUNDRED_NS_PER_SECOND;
+			ticks += static_cast<uint64_t>(ts.tv_nsec) / 100ULL;
+			*lpSystemTimeAsFileTime = fileTimeFromDuration(ticks);
+			return;
+		}
+#endif
+		struct timeval tv {};
+		if (gettimeofday(&tv, nullptr) == 0) {
+			uint64_t ticks = UNIX_TIME_ZERO;
+			ticks += static_cast<uint64_t>(tv.tv_sec) * HUNDRED_NS_PER_SECOND;
+			ticks += static_cast<uint64_t>(tv.tv_usec) * 10ULL;
+			*lpSystemTimeAsFileTime = fileTimeFromDuration(ticks);
+			return;
+		}
 		*lpSystemTimeAsFileTime = defaultFiletime;
 	}
 
-	int WIN_FUNC GetTickCount() {
-		DEBUG_LOG("GetTickCount\n");
+	DWORD WIN_FUNC GetTickCount() {
+		DEBUG_LOG("GetTickCount()");
+#if defined(CLOCK_MONOTONIC)
+		struct timespec ts {};
+		if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+			uint64_t milliseconds = static_cast<uint64_t>(ts.tv_sec) * 1000ULL + static_cast<uint64_t>(ts.tv_nsec) / 1000000ULL;
+			int ticks = static_cast<int>(milliseconds & 0xFFFFFFFFu);
+			DEBUG_LOG(" -> %u\n", ticks);
+			return ticks;
+		}
+#endif
+		struct timeval tv {};
+		if (gettimeofday(&tv, nullptr) == 0) {
+			uint64_t milliseconds = static_cast<uint64_t>(tv.tv_sec) * 1000ULL + static_cast<uint64_t>(tv.tv_usec) / 1000ULL;
+			int ticks = static_cast<int>(milliseconds & 0xFFFFFFFFu);
+			DEBUG_LOG(" -> %u\n", ticks);
+			return ticks;
+		}
+		DEBUG_LOG(" -> 0\n");
 		return 0;
 	}
 
 	int WIN_FUNC FileTimeToSystemTime(const FILETIME *lpFileTime, SYSTEMTIME *lpSystemTime) {
-		DEBUG_LOG("FileTimeToSystemTime\n");
-		lpSystemTime->wYear = 0;
-		lpSystemTime->wMonth = 0;
-		lpSystemTime->wDayOfWeek = 0;
-		lpSystemTime->wDay = 0;
-		lpSystemTime->wHour = 0;
-		lpSystemTime->wMinute = 0;
-		lpSystemTime->wSecond = 0;
-		lpSystemTime->wMilliseconds = 0;
+		DEBUG_LOG("FileTimeToSystemTime(%p, %p)\n", lpFileTime, lpSystemTime);
+		if (!lpFileTime || !lpSystemTime) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		uint64_t ticks = fileTimeToDuration(*lpFileTime);
+		if (ticks >= MAX_VALID_FILETIME) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		uint64_t daysSince1601 = ticks / TICKS_PER_DAY;
+		uint64_t ticksOfDay = ticks % TICKS_PER_DAY;
+		uint32_t secondsOfDay = static_cast<uint32_t>(ticksOfDay / HUNDRED_NS_PER_SECOND);
+		uint32_t hundredNs = static_cast<uint32_t>(ticksOfDay % HUNDRED_NS_PER_SECOND);
+		int64_t daysSince1970 = static_cast<int64_t>(daysSince1601) - DAYS_TO_UNIX_EPOCH;
+		CivilDate date = civilFromDays(daysSince1970);
+		lpSystemTime->wYear = static_cast<short>(date.year);
+		lpSystemTime->wMonth = static_cast<short>(date.month);
+		lpSystemTime->wDay = static_cast<short>(date.day);
+		lpSystemTime->wDayOfWeek = static_cast<short>((daysSince1601 + 1ULL) % 7ULL);
+		lpSystemTime->wHour = static_cast<short>(secondsOfDay / 3600U);
+		lpSystemTime->wMinute = static_cast<short>((secondsOfDay % 3600U) / 60U);
+		lpSystemTime->wSecond = static_cast<short>(secondsOfDay % 60U);
+		lpSystemTime->wMilliseconds = static_cast<short>(hundredNs / HUNDRED_NS_PER_MILLISECOND);
+		wibo::lastError = ERROR_SUCCESS;
 		return 1;
 	}
 
 	int WIN_FUNC SetFileTime(void *hFile, const FILETIME *lpCreationTime, const FILETIME *lpLastAccessTime, const FILETIME *lpLastWriteTime) {
-		DEBUG_LOG("SetFileTime\n");
+		DEBUG_LOG("SetFileTime(%p, %p, %p, %p)\n", hFile, lpCreationTime, lpLastAccessTime, lpLastWriteTime);
+		FILE *fp = files::fpFromHandle(hFile);
+		if (!fp) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return 0;
+		}
+		int fd = fileno(fp);
+		if (fd < 0) {
+			setLastErrorFromErrno();
+			return 0;
+		}
+		bool changeAccess = !shouldIgnoreFileTimeParam(lpLastAccessTime);
+		bool changeWrite = !shouldIgnoreFileTimeParam(lpLastWriteTime);
+		if (!changeAccess && !changeWrite) {
+			wibo::lastError = ERROR_SUCCESS;
+			return 1;
+		}
+		struct stat st {};
+		if (fstat(fd, &st) != 0) {
+			setLastErrorFromErrno();
+			return 0;
+		}
+		struct timespec accessSpec = statAccessTimespec(st);
+		struct timespec writeSpec = statModifyTimespec(st);
+		if (changeAccess) {
+			int64_t seconds = 0;
+			uint32_t hundreds = 0;
+			if (!fileTimeToUnixParts(*lpLastAccessTime, seconds, hundreds) || !unixPartsToTimespec(seconds, hundreds, accessSpec)) {
+				wibo::lastError = ERROR_INVALID_PARAMETER;
+				return 0;
+			}
+		}
+		if (changeWrite) {
+			int64_t seconds = 0;
+			uint32_t hundreds = 0;
+			if (!fileTimeToUnixParts(*lpLastWriteTime, seconds, hundreds) || !unixPartsToTimespec(seconds, hundreds, writeSpec)) {
+				wibo::lastError = ERROR_INVALID_PARAMETER;
+				return 0;
+			}
+		}
+#if defined(__APPLE__) || defined(__FreeBSD__)
+		struct timeval tv[2];
+		tv[0].tv_sec = accessSpec.tv_sec;
+		tv[0].tv_usec = accessSpec.tv_nsec / 1000L;
+		tv[1].tv_sec = writeSpec.tv_sec;
+		tv[1].tv_usec = writeSpec.tv_nsec / 1000L;
+		if (futimes(fd, tv) != 0) {
+			setLastErrorFromErrno();
+			return 0;
+		}
+#else
+		struct timespec times[2] = {accessSpec, writeSpec};
+		if (futimens(fd, times) != 0) {
+			setLastErrorFromErrno();
+			return 0;
+		}
+#endif
+		if (!shouldIgnoreFileTimeParam(lpCreationTime) && lpCreationTime) {
+			DEBUG_LOG("SetFileTime: creation time not supported\n");
+		}
+		wibo::lastError = ERROR_SUCCESS;
 		return 1;
 	}
 
 	int WIN_FUNC FileTimeToLocalFileTime(const FILETIME *lpFileTime, FILETIME *lpLocalFileTime) {
-		DEBUG_LOG("FileTimeToLocalFileTime\n");
-		// we live on Iceland
-		*lpLocalFileTime = *lpFileTime;
+		DEBUG_LOG("FileTimeToLocalFileTime(%p, %p)\n", lpFileTime, lpLocalFileTime);
+		if (!lpFileTime || !lpLocalFileTime) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		int64_t seconds = 0;
+		uint32_t hundreds = 0;
+		if (!fileTimeToUnixParts(*lpFileTime, seconds, hundreds)) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		if (seconds > static_cast<int64_t>(std::numeric_limits<time_t>::max()) ||
+		    seconds < static_cast<int64_t>(std::numeric_limits<time_t>::min())) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		time_t unixTime = static_cast<time_t>(seconds);
+		struct tm localTm {};
+#if defined(_POSIX_VERSION)
+		if (!localtime_r(&unixTime, &localTm)) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+#else
+		struct tm *tmp = localtime(&unixTime);
+		if (!tmp) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		localTm = *tmp;
+#endif
+		int64_t localAsUtcSeconds = 0;
+		if (!tmToUnixSeconds(localTm, localAsUtcSeconds)) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		int64_t offsetSeconds = localAsUtcSeconds - seconds;
+		int64_t localSeconds = seconds + offsetSeconds;
+		FILETIME result;
+		if (!unixPartsToFileTime(localSeconds, hundreds, result)) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		*lpLocalFileTime = result;
+		wibo::lastError = ERROR_SUCCESS;
 		return 1;
 	}
 
 	int WIN_FUNC LocalFileTimeToFileTime(const FILETIME *lpLocalFileTime, FILETIME *lpFileTime) {
-		DEBUG_LOG("LocalFileTimeToFileTime\n");
+		DEBUG_LOG("LocalFileTimeToFileTime(%p, %p)\n", lpLocalFileTime, lpFileTime);
 		if (!lpLocalFileTime || !lpFileTime) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
 			return 0;
 		}
-		*lpFileTime = *lpLocalFileTime;
+		uint64_t ticks = fileTimeToDuration(*lpLocalFileTime);
+		if (ticks >= MAX_VALID_FILETIME) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		uint32_t hundredNs = static_cast<uint32_t>(ticks % HUNDRED_NS_PER_SECOND);
+		uint64_t daysSince1601 = ticks / TICKS_PER_DAY;
+		uint64_t ticksOfDay = ticks % TICKS_PER_DAY;
+		uint32_t secondsOfDay = static_cast<uint32_t>(ticksOfDay / HUNDRED_NS_PER_SECOND);
+		int64_t daysSince1970 = static_cast<int64_t>(daysSince1601) - DAYS_TO_UNIX_EPOCH;
+		CivilDate date = civilFromDays(daysSince1970);
+		struct tm localTm {};
+		localTm.tm_year = date.year - 1900;
+		localTm.tm_mon = static_cast<int>(date.month) - 1;
+		localTm.tm_mday = static_cast<int>(date.day);
+		localTm.tm_hour = static_cast<int>(secondsOfDay / 3600U);
+		localTm.tm_min = static_cast<int>((secondsOfDay % 3600U) / 60U);
+		localTm.tm_sec = static_cast<int>(secondsOfDay % 60U);
+		localTm.tm_isdst = -1;
+		struct tm tmCopy = localTm;
+		errno = 0;
+		time_t utcTime = mktime(&tmCopy);
+		if (utcTime == static_cast<time_t>(-1) && errno != 0) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		FILETIME result;
+		if (!unixPartsToFileTime(static_cast<int64_t>(utcTime), hundredNs, result)) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		*lpFileTime = result;
 		wibo::lastError = ERROR_SUCCESS;
 		return 1;
 	}
 
 	int WIN_FUNC DosDateTimeToFileTime(WORD wFatDate, WORD wFatTime, FILETIME *lpFileTime) {
-		DEBUG_LOG("DosDateTimeToFileTime(date=%04x, time=%04x)\n", wFatDate, wFatTime);
+		DEBUG_LOG("DosDateTimeToFileTime(%04x, %04x, %p)\n", wFatDate, wFatTime, lpFileTime);
 		if (!lpFileTime) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
 			return 0;
@@ -2641,7 +3108,7 @@ namespace kernel32 {
 	}
 
 	int WIN_FUNC FileTimeToDosDateTime(const FILETIME *lpFileTime, WORD *lpFatDate, WORD *lpFatTime) {
-		DEBUG_LOG("FileTimeToDosDateTime\n");
+		DEBUG_LOG("FileTimeToDosDateTime(%p, %p, %p)\n", lpFileTime, lpFatDate, lpFatTime);
 		if (!lpFileTime || !lpFatDate || !lpFatTime) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
 			return 0;
@@ -2726,7 +3193,7 @@ namespace kernel32 {
 	};
 
 	int WIN_FUNC GetTimeZoneInformation(TIME_ZONE_INFORMATION *lpTimeZoneInformation) {
-		DEBUG_LOG("GetTimeZoneInformation\n");
+		DEBUG_LOG("GetTimeZoneInformation(%p)\n", lpTimeZoneInformation);
 		if (!lpTimeZoneInformation) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
 			return 0;
@@ -2784,32 +3251,32 @@ namespace kernel32 {
 	/*
 	 * Console Nonsense
 	 */
-	int WIN_FUNC GetConsoleMode(void *hConsoleHandle, unsigned int *lpMode) {
-		DEBUG_LOG("GetConsoleMode(%p)\n", hConsoleHandle);
+	BOOL WIN_FUNC GetConsoleMode(HANDLE hConsoleHandle, LPDWORD lpMode) {
+		DEBUG_LOG("STUB: GetConsoleMode(%p)\n", hConsoleHandle);
 		*lpMode = 0;
-		return 1;
+		return TRUE;
 	}
 
-	int WIN_FUNC SetConsoleMode(void *hConsoleHandle, unsigned int dwMode) {
+	BOOL WIN_FUNC SetConsoleMode(HANDLE hConsoleHandle, DWORD dwMode) {
 		DEBUG_LOG("STUB: SetConsoleMode(%p, 0x%x)\n", hConsoleHandle, dwMode);
 		(void)hConsoleHandle;
 		(void)dwMode;
 		wibo::lastError = ERROR_SUCCESS;
-		return 1;
+		return TRUE;
 	}
 
-	unsigned int WIN_FUNC GetConsoleOutputCP(){
-		DEBUG_LOG("GetConsoleOutputCP\n");
+	UINT WIN_FUNC GetConsoleOutputCP() {
+		DEBUG_LOG("STUB: GetConsoleOutputCP() -> 65001\n");
 		return 65001; // UTF-8
 	}
 
-	unsigned int WIN_FUNC SetConsoleCtrlHandler(void *HandlerRoutine, unsigned int Add) {
-		DEBUG_LOG("STUB SetConsoleCtrlHandler\n");
+	BOOL WIN_FUNC SetConsoleCtrlHandler(void *HandlerRoutine, BOOL Add) {
+		DEBUG_LOG("STUB: SetConsoleCtrlHandler(%p, %u)\n", HandlerRoutine, Add);
 		// This is a function that gets called when doing ^C
 		// We might want to call this later (being mindful that it'll be stdcall I think)
 
 		// For now, just pretend we did the thing
-		return 1;
+		return TRUE;
 	}
 
 	struct CONSOLE_SCREEN_BUFFER_INFO {
@@ -2826,14 +3293,14 @@ namespace kernel32 {
 		int16_t dwMaximumWindowSize_y;
 	};
 
-	unsigned int WIN_FUNC GetConsoleScreenBufferInfo(void *hConsoleOutput, CONSOLE_SCREEN_BUFFER_INFO *lpConsoleScreenBufferInfo) {
-		DEBUG_LOG("GetConsoleScreenBufferInfo(%p, %p)\n", hConsoleOutput, lpConsoleScreenBufferInfo);
+	BOOL WIN_FUNC GetConsoleScreenBufferInfo(HANDLE hConsoleOutput, CONSOLE_SCREEN_BUFFER_INFO *lpConsoleScreenBufferInfo) {
+		DEBUG_LOG("STUB: GetConsoleScreenBufferInfo(%p, %p)\n", hConsoleOutput, lpConsoleScreenBufferInfo);
 		// Tell a lie
 		// mwcc doesn't care about anything else
 		lpConsoleScreenBufferInfo->dwSize_x = 80;
 		lpConsoleScreenBufferInfo->dwSize_y = 25;
 
-		return 1;
+		return TRUE;
 	}
 
 	BOOL WIN_FUNC WriteConsoleW(HANDLE hConsoleOutput, LPCWSTR lpBuffer, DWORD nNumberOfCharsToWrite, LPDWORD lpNumberOfCharsWritten,
@@ -3048,7 +3515,7 @@ namespace kernel32 {
 	}
 
 	DWORD WIN_FUNC GetModuleFileNameA(HMODULE hModule, LPSTR lpFilename, DWORD nSize) {
-		DEBUG_LOG("GetModuleFileNameA (hModule=%p, nSize=%i)\n", hModule, nSize);
+		DEBUG_LOG("GetModuleFileNameA(%p, %p, %i)\n", hModule, lpFilename, nSize);
 		if (lpFilename == nullptr) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
 			return 0;
@@ -3065,6 +3532,8 @@ namespace kernel32 {
 		} else {
 			path = info->originalName;
 		}
+		DEBUG_LOG("-> %s\n", path.c_str());
+
 		const size_t len = path.size();
 		if (nSize == 0) {
 			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
@@ -3086,7 +3555,7 @@ namespace kernel32 {
 	}
 
 	DWORD WIN_FUNC GetModuleFileNameW(HMODULE hModule, LPWSTR lpFilename, DWORD nSize) {
-		DEBUG_LOG("GetModuleFileNameW (hModule=%p, nSize=%i)\n", hModule, nSize);
+		DEBUG_LOG("GetModuleFileNameW(%p, %s, %i)\n", hModule, wideStringToString(lpFilename).c_str(), nSize);
 		if (lpFilename == nullptr) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
 			return 0;
@@ -3301,7 +3770,7 @@ namespace kernel32 {
 	} OSVERSIONINFOA;
 
 	int WIN_FUNC GetVersionExA(OSVERSIONINFOA* lpVersionInformation) {
-		DEBUG_LOG("GetVersionExA\n");
+		DEBUG_LOG("GetVersionExA(%p)\n", lpVersionInformation);
 		memset(lpVersionInformation, 0, lpVersionInformation->dwOSVersionInfoSize);
 		lpVersionInformation->dwMajorVersion = MAJOR_VER;
 		lpVersionInformation->dwMinorVersion = MINOR_VER;
@@ -3311,7 +3780,7 @@ namespace kernel32 {
 	}
 
 	void *WIN_FUNC HeapCreate(unsigned int flOptions, unsigned int dwInitialSize, unsigned int dwMaximumSize) {
-		DEBUG_LOG("HeapCreate %u %u %u\n", flOptions, dwInitialSize, dwMaximumSize);
+		DEBUG_LOG("HeapCreate(%u, %u, %u)\n", flOptions, dwInitialSize, dwMaximumSize);
 		if (dwMaximumSize != 0 && dwInitialSize > dwMaximumSize) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
 			return nullptr;
@@ -3478,6 +3947,10 @@ namespace kernel32 {
 		return 1;
 	}
 
+	constexpr DWORD STARTF_USESHOWWINDOW = 0x00000001;
+	constexpr DWORD STARTF_USESTDHANDLES = 0x00000100;
+	constexpr WORD SW_SHOWNORMAL = 1;
+
 	typedef struct _STARTUPINFOA {
 		unsigned int   cb;
 		char		  *lpReserved;
@@ -3498,11 +3971,6 @@ namespace kernel32 {
 		void		  *hStdOutput;
 		void		  *hStdError;
 	} STARTUPINFOA, *LPSTARTUPINFOA;
-
-	void WIN_FUNC GetStartupInfoA(STARTUPINFOA *lpStartupInfo) {
-		DEBUG_LOG("GetStartupInfoA\n");
-		memset(lpStartupInfo, 0, sizeof(STARTUPINFOA));
-	}
 
 	typedef struct _STARTUPINFOW {
 		unsigned int  cb;
@@ -3525,9 +3993,29 @@ namespace kernel32 {
 		void *hStdError;
 	} STARTUPINFOW, *LPSTARTUPINFOW;
 
+	template <typename StartupInfo>
+	static void populateStartupInfo(StartupInfo *info) {
+		if (!info) {
+			return;
+		}
+		std::memset(info, 0, sizeof(StartupInfo));
+		info->cb = sizeof(StartupInfo);
+		info->dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
+		info->wShowWindow = SW_SHOWNORMAL;
+		info->cbReserved2 = 0;
+		info->hStdInput = files::getStdHandle(STD_INPUT_HANDLE);
+		info->hStdOutput = files::getStdHandle(STD_OUTPUT_HANDLE);
+		info->hStdError = files::getStdHandle(STD_ERROR_HANDLE);
+	}
+
+	void WIN_FUNC GetStartupInfoA(STARTUPINFOA *lpStartupInfo) {
+		DEBUG_LOG("GetStartupInfoA(%p)\n", lpStartupInfo);
+		populateStartupInfo(lpStartupInfo);
+	}
+
 	void WIN_FUNC GetStartupInfoW(_STARTUPINFOW *lpStartupInfo) {
-		DEBUG_LOG("GetStartupInfoW\n");
-		memset(lpStartupInfo, 0, sizeof(_STARTUPINFOW));
+		DEBUG_LOG("GetStartupInfoW(%p)\n", lpStartupInfo);
+		populateStartupInfo(lpStartupInfo);
 	}
 
 	BOOL WIN_FUNC SetThreadStackGuarantee(PULONG StackSizeInBytes) {
@@ -3795,6 +4283,7 @@ namespace kernel32 {
 	}
 
 	HANDLE WIN_FUNC CreateEventA(void *lpEventAttributes, BOOL bManualReset, BOOL bInitialState, LPCSTR lpName) {
+		DEBUG_LOG("CreateEventA -> ");
 		std::vector<uint16_t> wideName;
 		if (lpName) {
 			wideName = stringToWideString(lpName);
@@ -3889,14 +4378,46 @@ namespace kernel32 {
 		return FALSE;
 	}
 
-	unsigned short WIN_FUNC GetFileType(void *hFile) {
-		DEBUG_LOG("GetFileType %p\n", hFile);
-		return 1; // FILE_TYPE_DISK
+	constexpr DWORD FILE_TYPE_UNKNOWN = 0x0000;
+	constexpr DWORD FILE_TYPE_DISK = 0x0001;
+	constexpr DWORD FILE_TYPE_CHAR = 0x0002;
+	constexpr DWORD FILE_TYPE_PIPE = 0x0003;
+
+	DWORD WIN_FUNC GetFileType(HANDLE hFile) {
+		DEBUG_LOG("GetFileType(%p) ", hFile);
+
+		auto *file = files::fileHandleFromHandle(hFile);
+		if (!file || file->fd < 0) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			DEBUG_LOG("-> ERROR_INVALID_HANDLE\n");
+			return FILE_TYPE_UNKNOWN;
+		}
+
+		struct stat st{};
+		if (fstat(file->fd, &st) != 0) {
+			setLastErrorFromErrno();
+			DEBUG_LOG("-> fstat error\n");
+			return FILE_TYPE_UNKNOWN;
+		}
+
+		wibo::lastError = ERROR_SUCCESS;
+		DWORD type = FILE_TYPE_UNKNOWN;
+		if (S_ISREG(st.st_mode) || S_ISDIR(st.st_mode) || S_ISBLK(st.st_mode)) {
+			type = FILE_TYPE_DISK;
+		}
+		if (S_ISCHR(st.st_mode)) {
+			type = FILE_TYPE_CHAR;
+		}
+		if (S_ISSOCK(st.st_mode) || S_ISFIFO(st.st_mode)) {
+			type = FILE_TYPE_PIPE;
+		}
+		DEBUG_LOG("-> %u\n", type);
+		return type;
 	}
 
-	unsigned int WIN_FUNC SetHandleCount(unsigned int uNumber) {
-		DEBUG_LOG("SetHandleCount %p\n", uNumber);
-		return uNumber + 10;
+	UINT WIN_FUNC SetHandleCount(UINT uNumber) {
+		DEBUG_LOG("SetHandleCount(%u)\n", uNumber);
+		return handles::MAX_HANDLES;
 	}
 
 	void WIN_FUNC Sleep(DWORD dwMilliseconds) {
@@ -3905,7 +4426,7 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC GetACP() {
-		DEBUG_LOG("GetACP\n");
+		DEBUG_LOG("GetACP() -> %u\n", 28591);
 		// return 65001;    // UTF-8
 		// return 1200;     // Unicode (BMP of ISO 10646)
 		return 28591;       // Latin1 (ISO/IEC 8859-1)
@@ -3918,14 +4439,14 @@ namespace kernel32 {
 	} CPINFO, *LPCPINFO;
 
 	unsigned int WIN_FUNC GetCPInfo(unsigned int codePage, CPINFO* lpCPInfo) {
-		DEBUG_LOG("GetCPInfo: %u\n", codePage);
+		DEBUG_LOG("GetCPInfo(%u, %p)\n", codePage, lpCPInfo);
 		lpCPInfo->MaxCharSize = 1;
 		lpCPInfo->DefaultChar[0] = 0;
 		return 1; // success
 	}
 
 	unsigned int WIN_FUNC WideCharToMultiByte(unsigned int codePage, unsigned int dwFlags, uint16_t *lpWideCharStr, int cchWideChar, char *lpMultiByteStr, int cbMultiByte, char *lpDefaultChar, unsigned int *lpUsedDefaultChar) {
-		DEBUG_LOG("WideCharToMultiByte(codePage=%u, flags=%x, wcs=%p, wideChar=%d, mbs=%p, multiByte=%d, defaultChar=%p, usedDefaultChar=%p)\n", codePage, dwFlags, lpWideCharStr, cchWideChar, lpMultiByteStr, cbMultiByte, lpDefaultChar, lpUsedDefaultChar);
+		DEBUG_LOG("WideCharToMultiByte(%u, %u, %p, %d, %p, %d, %p, %p)\n", codePage, dwFlags, lpWideCharStr, cchWideChar, lpMultiByteStr, cbMultiByte, lpDefaultChar, lpUsedDefaultChar);
 
 		if (cchWideChar == -1) {
 			cchWideChar = wstrlen(lpWideCharStr) + 1;
@@ -3947,7 +4468,7 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC MultiByteToWideChar(unsigned int codePage, unsigned int dwFlags, const char *lpMultiByteStr, int cbMultiByte, uint16_t *lpWideCharStr, int cchWideChar) {
-		DEBUG_LOG("MultiByteToWideChar(codePage=%u, dwFlags=%u, multiByte=%d, wideChar=%d)\n", codePage, dwFlags, cbMultiByte, cchWideChar);
+		DEBUG_LOG("MultiByteToWideChar(%u, %u, %d, %d)\n", codePage, dwFlags, cbMultiByte, cchWideChar);
 
 		if (cbMultiByte == -1) {
 			cbMultiByte = strlen(lpMultiByteStr) + 1;
@@ -3971,7 +4492,7 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC GetStringTypeW(unsigned int dwInfoType, const uint16_t *lpSrcStr, int cchSrc, uint16_t *lpCharType) {
-		DEBUG_LOG("GetStringTypeW (dwInfoType=%u, lpSrcStr=%p, cchSrc=%i, lpCharType=%p)\n", dwInfoType, lpSrcStr, cchSrc, lpCharType);
+		DEBUG_LOG("GetStringTypeW(%u, %p, %i, %p)\n", dwInfoType, lpSrcStr, cchSrc, lpCharType);
 
 		assert(dwInfoType == 1); // CT_CTYPE1
 
@@ -3998,13 +4519,13 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC FreeEnvironmentStringsW(void *penv) {
-		DEBUG_LOG("FreeEnvironmentStringsW: %p\n", penv);
+		DEBUG_LOG("FreeEnvironmentStringsW(%p)\n", penv);
 		free(penv);
 		return 1;
 	}
 
 	unsigned int WIN_FUNC IsProcessorFeaturePresent(unsigned int processorFeature) {
-		DEBUG_LOG("IsProcessorFeaturePresent: %u\n", processorFeature);
+		DEBUG_LOG("IsProcessorFeaturePresent(%u)\n", processorFeature);
 
 		if (processorFeature == 0) // PF_FLOATING_POINT_PRECISION_ERRATA
 			return 1;
@@ -4022,16 +4543,16 @@ namespace kernel32 {
 		FARPROC result;
 		const auto info = wibo::moduleInfoFromHandle(hModule);
 		if (!info) {
-			DEBUG_LOG("GetProcAddress: invalid module handle %p\n", hModule);
+			DEBUG_LOG("GetProcAddress(%p) -> ERROR_INVALID_HANDLE\n", hModule);
 			wibo::lastError = ERROR_INVALID_HANDLE;
 			return nullptr;
 		}
 		const auto proc = reinterpret_cast<uintptr_t>(lpProcName);
 		if (proc & ~0xFFFF) {
-			DEBUG_LOG("GetProcAddress(%p, %s) ", hModule, lpProcName);
+			DEBUG_LOG("GetProcAddress(%s, %s) ", info->normalizedName.c_str(), lpProcName);
 			result = wibo::resolveFuncByName(info, lpProcName);
 		} else {
-			DEBUG_LOG("GetProcAddress(%p, %u) ", hModule, proc);
+			DEBUG_LOG("GetProcAddress(%s, %u) ", info->normalizedName.c_str(), proc);
 			result = wibo::resolveFuncByOrdinal(info, static_cast<uint16_t>(proc));
 		}
 		DEBUG_LOG("-> %p\n", result);
@@ -4044,7 +4565,7 @@ namespace kernel32 {
 	}
 
 	void *WIN_FUNC HeapAlloc(void *hHeap, unsigned int dwFlags, size_t dwBytes) {
-		DEBUG_LOG("HeapAlloc(heap=%p, flags=%x, bytes=%zu) ", hHeap, dwFlags, dwBytes);
+		DEBUG_LOG("HeapAlloc(%p, %x, %zu) ", hHeap, dwFlags, dwBytes);
 		HeapRecord *record = activeHeapRecord(hHeap);
 		if (!record) {
 			DEBUG_LOG("-> NULL\n");
@@ -4067,7 +4588,7 @@ namespace kernel32 {
 	}
 
 	void *WIN_FUNC HeapReAlloc(void *hHeap, unsigned int dwFlags, void *lpMem, size_t dwBytes) {
-		DEBUG_LOG("HeapReAlloc(heap=%p, flags=%x, mem=%p, bytes=%zu) ", hHeap, dwFlags, lpMem, dwBytes);
+		DEBUG_LOG("HeapReAlloc(%p, %x, %p, %zu) ", hHeap, dwFlags, lpMem, dwBytes);
 		HeapRecord *record = activeHeapRecord(hHeap);
 		if (!record) {
 			DEBUG_LOG("-> NULL\n");
@@ -4100,7 +4621,9 @@ namespace kernel32 {
 
 		const size_t requestSize = std::max<size_t>(1, dwBytes);
 		const size_t oldSize = mi_usable_size(lpMem);
-		if (inplaceOnly) {
+		// Force in-place reallocation if the size is <= old size
+		// pspsnc.exe relies on this behavior
+		if (inplaceOnly || requestSize <= oldSize) {
 			if (requestSize > oldSize) {
 				wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
 				DEBUG_LOG("-> NULL (cannot grow in place)\n");
@@ -4132,7 +4655,7 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC HeapSize(void *hHeap, unsigned int dwFlags, void *lpMem) {
-		DEBUG_LOG("HeapSize(heap=%p, flags=%x, mem=%p)\n", hHeap, dwFlags, lpMem);
+		DEBUG_LOG("HeapSize(%p, %x, %p)\n", hHeap, dwFlags, lpMem);
 		(void) dwFlags;
 		HeapRecord *record = activeHeapRecord(hHeap);
 		if (!record) {
@@ -4152,14 +4675,16 @@ namespace kernel32 {
 	}
 
 	void *WIN_FUNC GetProcessHeap() {
-		DEBUG_LOG("GetProcessHeap\n");
 		ensureProcessHeapInitialized();
 		wibo::lastError = ERROR_SUCCESS;
+		DEBUG_LOG("GetProcessHeap() -> %p\n", processHeapHandle);
 		return processHeapHandle;
 	}
 
-	int WIN_FUNC HeapSetInformation(void *HeapHandle, int HeapInformationClass, void *HeapInformation, size_t HeapInformationLength) {
-		DEBUG_LOG("HeapSetInformation %p %d\n", HeapHandle, HeapInformationClass);
+	int WIN_FUNC HeapSetInformation(void *HeapHandle, int HeapInformationClass, void *HeapInformation,
+									size_t HeapInformationLength) {
+		DEBUG_LOG("HeapSetInformation(%p, %d, %p, %zu)\n", HeapHandle, HeapInformationClass, HeapInformation,
+				  HeapInformationLength);
 		ensureProcessHeapInitialized();
 		switch (HeapInformationClass) {
 		case 0: { // HeapCompatibilityInformation
@@ -4188,7 +4713,7 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC HeapFree(void *hHeap, unsigned int dwFlags, void *lpMem) {
-		DEBUG_LOG("HeapFree(heap=%p, flags=%x, mem=%p)\n", hHeap, dwFlags, lpMem);
+		DEBUG_LOG("HeapFree(%p, %x, %p)\n", hHeap, dwFlags, lpMem);
 		(void) dwFlags;
 		if (lpMem == nullptr) {
 			wibo::lastError = ERROR_SUCCESS;
@@ -4208,9 +4733,10 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC FormatMessageA(unsigned int dwFlags, void *lpSource, unsigned int dwMessageId,
-										 unsigned int dwLanguageId, char *lpBuffer, unsigned int nSize, va_list *argument) {
-
-		DEBUG_LOG("FormatMessageA: flags: %u, message id: %u\n", dwFlags, dwMessageId);
+										 unsigned int dwLanguageId, char *lpBuffer, unsigned int nSize,
+										 va_list *argument) {
+		DEBUG_LOG("FormatMessageA(%u, %p, %u, %u, %p, %u, %p)\n", dwFlags, lpSource, dwMessageId, dwLanguageId,
+				  lpBuffer, nSize, argument);
 
 		if (dwFlags & 0x00000100) {
 			// FORMAT_MESSAGE_ALLOCATE_BUFFER
@@ -4237,7 +4763,7 @@ namespace kernel32 {
 	}
 
 	int WIN_FUNC GetComputerNameA(char *lpBuffer, unsigned int *nSize) {
-		DEBUG_LOG("GetComputerNameA\n");
+		DEBUG_LOG("GetComputerNameA(%p, %p)\n", lpBuffer, nSize);
 		if (!nSize || !lpBuffer) {
 			if (nSize) {
 				*nSize = 0;
@@ -4258,7 +4784,7 @@ namespace kernel32 {
 	}
 
 	int WIN_FUNC GetComputerNameW(uint16_t *lpBuffer, unsigned int *nSize) {
-		DEBUG_LOG("GetComputerNameW\n");
+		DEBUG_LOG("GetComputerNameW(%p, %p)\n", lpBuffer, nSize);
 		if (!nSize || !lpBuffer) {
 			if (nSize) {
 				*nSize = 0;
@@ -4281,10 +4807,12 @@ namespace kernel32 {
 	}
 
 	void *WIN_FUNC EncodePointer(void *Ptr) {
+		DEBUG_LOG("EncodePointer(%p)\n", Ptr);
 		return Ptr;
 	}
 
 	void *WIN_FUNC DecodePointer(void *Ptr) {
+		DEBUG_LOG("DecodePointer(%p)\n", Ptr);
 		return Ptr;
 	}
 
@@ -4315,7 +4843,7 @@ namespace kernel32 {
 		std::string str1(lpString1, lpString1 + cchCount1);
 		std::string str2(lpString2, lpString2 + cchCount2);
 
-		DEBUG_LOG("CompareStringA: '%s' vs '%s' (%u)\n", str1.c_str(), str2.c_str(), dwCmpFlags);
+		DEBUG_LOG("CompareStringA(%d, %u, %s, %d, %s, %d)\n", Locale, dwCmpFlags, str1.c_str(), cchCount1, str2.c_str(), cchCount2);
 		return doCompareString(str1, str2, dwCmpFlags);
 	}
 
@@ -4323,18 +4851,18 @@ namespace kernel32 {
 		std::string str1 = wideStringToString(lpString1, cchCount1);
 		std::string str2 = wideStringToString(lpString2, cchCount2);
 
-		DEBUG_LOG("CompareStringW: '%s' vs '%s' (%u)\n", str1.c_str(), str2.c_str(), dwCmpFlags);
+		DEBUG_LOG("CompareStringW(%d, %u, %s, %d, %s, %d)\n", Locale, dwCmpFlags, str1.c_str(), cchCount1, str2.c_str(), cchCount2);
 		return doCompareString(str1, str2, dwCmpFlags);
 	}
 
 	int WIN_FUNC IsValidCodePage(unsigned int CodePage) {
-		DEBUG_LOG("IsValidCodePage: %u\n", CodePage);
+		DEBUG_LOG("IsValidCodePage(%u)\n", CodePage);
 		// Returns a nonzero value if the code page is valid, or 0 if the code page is invalid.
 		return 1;
 	}
 
 	int WIN_FUNC IsValidLocale(unsigned int Locale, unsigned int dwFlags) {
-		DEBUG_LOG("IsValidLocale: %u %u\n", Locale, dwFlags);
+		DEBUG_LOG("IsValidLocale(%u, %u)\n", Locale, dwFlags);
 		// Yep, this locale is both supported (dwFlags=1) and installed (dwFlags=2)
 		return 1;
 	}
@@ -4387,7 +4915,7 @@ namespace kernel32 {
 	}
 
 	int WIN_FUNC GetLocaleInfoA(unsigned int Locale, int LCType, LPSTR lpLCData, int cchData) {
-		DEBUG_LOG("GetLocaleInfoA %d %d\n", Locale, LCType);
+		DEBUG_LOG("GetLocaleInfoA(%u, %d, %p, %d)\n", Locale, LCType, lpLCData, cchData);
 		std::string ret = str_for_LCType(LCType);
 		size_t len = ret.size() + 1;
 
@@ -4401,7 +4929,7 @@ namespace kernel32 {
 	}
 
 	int WIN_FUNC GetLocaleInfoW(unsigned int Locale, int LCType, LPWSTR lpLCData, int cchData) {
-		DEBUG_LOG("GetLocaleInfoW %d %d\n", Locale, LCType);
+		DEBUG_LOG("GetLocaleInfoW(%u, %d, %p, %d)\n", Locale, LCType, lpLCData, cchData);
 		std::string info = str_for_LCType(LCType);
 		auto ret = stringToWideString(info.c_str());
 		size_t len = ret.size();
@@ -4416,7 +4944,7 @@ namespace kernel32 {
 	}
 
 	int WIN_FUNC EnumSystemLocalesA(void (*callback)(char *lpLocaleString), int dwFlags) {
-		DEBUG_LOG("EnumSystemLocalesA %p %i\n", callback, dwFlags);
+		DEBUG_LOG("EnumSystemLocalesA(%p, %d)\n", callback, dwFlags);
 		// e.g. something like:
 		// callback("en_US");
 		// callback("ja_JP");
@@ -4424,7 +4952,7 @@ namespace kernel32 {
 	}
 
 	int WIN_FUNC GetUserDefaultLCID() {
-		DEBUG_LOG("GetUserDefaultLCID\n");
+		DEBUG_LOG("GetUserDefaultLCID()\n");
 		return 1;
 	}
 
@@ -4434,7 +4962,7 @@ namespace kernel32 {
 	}
 
 	BOOL WIN_FUNC IsDBCSLeadByteEx(unsigned int CodePage, BYTE TestChar) {
-		DEBUG_LOG("IsDBCSLeadByteEx(cp=%u, ch=%u)\n", CodePage, TestChar);
+		DEBUG_LOG("IsDBCSLeadByteEx(%u, %u)\n", CodePage, TestChar);
 
 		const auto inRanges = [TestChar](std::initializer_list<std::pair<uint8_t, uint8_t>> ranges) -> BOOL {
 			for (const auto &range : ranges) {
@@ -4475,7 +5003,7 @@ namespace kernel32 {
 	constexpr unsigned int LCMAP_LINGUISTIC_CASING = 0x01000000;
 
 	int WIN_FUNC LCMapStringW(int Locale, unsigned int dwMapFlags, const uint16_t* lpSrcStr, int cchSrc, uint16_t* lpDestStr, int cchDest) {
-		DEBUG_LOG("LCMapStringW(locale=%i, flags=0x%x, src=%p, dest=%p, cchSrc=%d, cchDest=%d)\n", Locale, dwMapFlags, lpSrcStr, lpDestStr, cchSrc, cchDest);
+		DEBUG_LOG("LCMapStringW(%u, %u, %p, %d, %p, %d)\n", Locale, dwMapFlags, lpSrcStr, cchSrc, lpDestStr, cchDest);
 		(void) Locale;
 		if (!lpSrcStr || cchSrc == 0) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -4521,12 +5049,13 @@ namespace kernel32 {
 		}
 
 		std::memcpy(lpDestStr, buffer.data(), srcLen * sizeof(uint16_t));
+		DEBUG_LOG("-> %s\n", wideStringToString(lpDestStr, srcLen).c_str());
 		wibo::lastError = ERROR_SUCCESS;
 		return static_cast<int>(srcLen);
 	}
 
 	int WIN_FUNC LCMapStringA(int Locale, unsigned int dwMapFlags, const char* lpSrcStr, int cchSrc, char* lpDestStr, int cchDest) {
-		DEBUG_LOG("LCMapStringA: (locale=%i, flags=%u, src=%p, dest=%p)\n", Locale, dwMapFlags, cchSrc, cchDest);
+		DEBUG_LOG("LCMapStringA(%u, %u, %p, %d, %p, %d)\n", Locale, dwMapFlags, lpSrcStr, cchSrc, lpDestStr, cchDest);
 		if (cchSrc < 0) {
 			cchSrc = strlen(lpSrcStr) + 1;
 		}
@@ -4558,7 +5087,7 @@ namespace kernel32 {
 	}
 
 	DWORD WIN_FUNC GetEnvironmentVariableA(LPCSTR lpName, LPSTR lpBuffer, DWORD nSize) {
-		DEBUG_LOG("GetEnvironmentVariableA: %s\n", lpName);
+		DEBUG_LOG("GetEnvironmentVariableA(%s, %p, %d)\n", lpName, lpBuffer, nSize);
 		if (!lpName) {
 			return 0;
 		}
@@ -4580,7 +5109,7 @@ namespace kernel32 {
 	}
 
 	BOOL WIN_FUNC SetEnvironmentVariableA(const char *lpName, const char *lpValue) {
-		DEBUG_LOG("SetEnvironmentVariableA: %s=%s\n", lpName ? lpName : "(null)", lpValue ? lpValue : "(null)");
+		DEBUG_LOG("SetEnvironmentVariableA(%s, %s)\n", lpName ? lpName : "(null)", lpValue ? lpValue : "(null)");
 		if (!lpName || std::strchr(lpName, '=')) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
 			return FALSE;
@@ -4608,7 +5137,7 @@ namespace kernel32 {
 
 	DWORD WIN_FUNC GetEnvironmentVariableW(LPCWSTR lpName, LPWSTR lpBuffer, DWORD nSize) {
 		std::string name = wideStringToString(lpName);
-		DEBUG_LOG("GetEnvironmentVariableW: %s\n", name.c_str());
+		DEBUG_LOG("GetEnvironmentVariableW(%s, %p, %d)\n", name.c_str(), lpBuffer, nSize);
 		const char *rawValue = getenv(name.c_str());
 		if (!rawValue) {
 			return 0;
@@ -4625,8 +5154,10 @@ namespace kernel32 {
 	}
 
 	BOOL WIN_FUNC SetEnvironmentVariableW(const uint16_t *lpName, const uint16_t *lpValue) {
+		DEBUG_LOG("SetEnvironmentVariableW -> ");
 		if (!lpName) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
+			DEBUG_LOG("ERROR_INVALID_PARAMETER\n");
 			return FALSE;
 		}
 		std::string name = wideStringToString(lpName);
@@ -4634,35 +5165,36 @@ namespace kernel32 {
 		return SetEnvironmentVariableA(name.c_str(), lpValue ? value.c_str() : nullptr);
 	}
 
-	unsigned int WIN_FUNC QueryPerformanceCounter(unsigned long int *lpPerformanceCount) {
-		DEBUG_LOG("QueryPerformanceCounter\n");
+	BOOL WIN_FUNC QueryPerformanceCounter(LARGE_INTEGER *lpPerformanceCount) {
+		VERBOSE_LOG("STUB: QueryPerformanceCounter(%p)\n", lpPerformanceCount);
 		*lpPerformanceCount = 0;
-		return 1;
+		return TRUE;
 	}
 
-	int WIN_FUNC QueryPerformanceFrequency(uint64_t *lpFrequency) {
+	BOOL WIN_FUNC QueryPerformanceFrequency(LARGE_INTEGER *lpFrequency) {
+		VERBOSE_LOG("STUB: QueryPerformanceFrequency(%p)\n", lpFrequency);
 		*lpFrequency = 1;
-		return 1;
+		return TRUE;
 	}
 
-	unsigned int WIN_FUNC IsDebuggerPresent() {
-		DEBUG_LOG("IsDebuggerPresent\n");
+	BOOL WIN_FUNC IsDebuggerPresent() {
+		DEBUG_LOG("STUB: IsDebuggerPresent()\n");
 		// If the current process is not running in the context of a debugger, the return value is zero.
-		return 0;
+		return FALSE;
 	}
 
 	void *WIN_FUNC SetUnhandledExceptionFilter(void *lpTopLevelExceptionFilter) {
-		DEBUG_LOG("SetUnhandledExceptionFilter: %p\n", lpTopLevelExceptionFilter);
-		return (void *)0x100008;
+		DEBUG_LOG("STUB: SetUnhandledExceptionFilter(%p)\n", lpTopLevelExceptionFilter);
+		return nullptr;
 	}
 
-	unsigned int WIN_FUNC UnhandledExceptionFilter(void *ExceptionInfo) {
-		DEBUG_LOG("UnhandledExceptionFilter: %p\n", ExceptionInfo);
+	LONG WIN_FUNC UnhandledExceptionFilter(void *ExceptionInfo) {
+		DEBUG_LOG("STUB: UnhandledExceptionFilter(%p)\n", ExceptionInfo);
 		return 1; // EXCEPTION_EXECUTE_HANDLER
 	}
 
-	unsigned int WIN_FUNC SetErrorMode(unsigned int mode){
-		DEBUG_LOG("SetErrorMode: %d\n", mode);
+	UINT WIN_FUNC SetErrorMode(UINT mode){
+		DEBUG_LOG("STUB: SetErrorMode(%d)\n", mode);
 		return 0;
 	}
 
@@ -4686,7 +5218,7 @@ namespace kernel32 {
 	};
 
 	void WIN_FUNC InitializeSListHead(SLIST_HEADER *ListHead) {
-		DEBUG_LOG("InitializeSListHead\n");
+		DEBUG_LOG("InitializeSListHead(%p)\n", ListHead);
 		// All list items must be aligned on a MEMORY_ALLOCATION_ALIGNMENT boundary.
 		posix_memalign((void**)&ListHead, 16, sizeof(SLIST_HEADER));
 		memset(ListHead, 0, sizeof(SLIST_HEADER));
@@ -4702,25 +5234,29 @@ namespace kernel32 {
 	} EXCEPTION_RECORD;
 
 	void WIN_FUNC RtlUnwind(void *TargetFrame, void *TargetIp, EXCEPTION_RECORD *ExceptionRecord, void *ReturnValue) {
-		DEBUG_LOG("RtlUnwind %p %p %p %p\n", TargetFrame, TargetIp, ExceptionRecord, ReturnValue);
+		DEBUG_LOG("RtlUnwind(%p, %p, %p, %p)\n", TargetFrame, TargetIp, ExceptionRecord, ReturnValue);
 		DEBUG_LOG("WARNING: Silently returning from RtlUnwind - exception handlers and clean up code may not be run");
 	}
 
 	int WIN_FUNC InterlockedIncrement(int *Addend) {
+		VERBOSE_LOG("InterlockedIncrement(%p)\n", Addend);
 		return *Addend += 1;
 	}
 
 	int WIN_FUNC InterlockedDecrement(int *Addend) {
+		VERBOSE_LOG("InterlockedDecrement(%p)\n", Addend);
 		return *Addend -= 1;
 	}
 
 	int WIN_FUNC InterlockedExchange(int *Target, int Value) {
+		VERBOSE_LOG("InterlockedExchange(%p, %d)\n", Target, Value);
 		int initial = *Target;
 		*Target = Value;
 		return initial;
 	}
 
-	LONG WIN_FUNC InterlockedCompareExchange(volatile LONG* destination, LONG exchange, LONG comperand){
+	LONG WIN_FUNC InterlockedCompareExchange(volatile LONG* destination, LONG exchange, LONG comperand) {
+		VERBOSE_LOG("InterlockedCompareExchange(%p, %ld, %ld)\n", destination, exchange, comperand);
 		LONG original = *destination;
 		if (original == comperand) {
 			*destination = exchange;
@@ -4733,18 +5269,18 @@ namespace kernel32 {
 	enum { MAX_FLS_VALUES = 100 };
 	static bool flsValuesUsed[MAX_FLS_VALUES] = { false };
 	static void *flsValues[MAX_FLS_VALUES];
-	int WIN_FUNC FlsAlloc(void *lpCallback) {
-		DEBUG_LOG("FlsAlloc (lpCallback: %x)\n", lpCallback);
+	DWORD WIN_FUNC FlsAlloc(void *lpCallback) {
+		DEBUG_LOG("FlsAlloc(%p)", lpCallback);
 		// If the function succeeds, the return value is an FLS index initialized to zero.
 		for (size_t i = 0; i < MAX_FLS_VALUES; i++) {
 			if (flsValuesUsed[i] == false) {
 				flsValuesUsed[i] = true;
-				flsValues[i] = 0;
-				DEBUG_LOG("...returning %d\n", i);
+				flsValues[i] = nullptr;
+				DEBUG_LOG(" -> %d\n", i);
 				return i;
 			}
 		}
-		DEBUG_LOG("...returning nothing\n");
+		DEBUG_LOG(" -> -1\n");
 		wibo::lastError = 1;
 		return 0xFFFFFFFF; // FLS_OUT_OF_INDEXES
 	}
@@ -4761,7 +5297,7 @@ namespace kernel32 {
 	}
 
 	void *WIN_FUNC FlsGetValue(unsigned int dwFlsIndex) {
-		// DEBUG_LOG("FlsGetValue(%u)", dwFlsIndex);
+		VERBOSE_LOG("FlsGetValue(%u)\n", dwFlsIndex);
 		void *result = nullptr;
 		if (dwFlsIndex >= 0 && dwFlsIndex < MAX_FLS_VALUES && flsValuesUsed[dwFlsIndex]) {
 			result = flsValues[dwFlsIndex];
@@ -4775,7 +5311,7 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC FlsSetValue(unsigned int dwFlsIndex, void *lpFlsData) {
-		// DEBUG_LOG("FlsSetValue(%u, %p)\n", dwFlsIndex, lpFlsData);
+		VERBOSE_LOG("FlsSetValue(%u, %p)\n", dwFlsIndex, lpFlsData);
 		if (dwFlsIndex >= 0 && dwFlsIndex < MAX_FLS_VALUES && flsValuesUsed[dwFlsIndex]) {
 			flsValues[dwFlsIndex] = lpFlsData;
 			return 1;
@@ -4785,30 +5321,31 @@ namespace kernel32 {
 		}
 	}
 
-	BOOL WIN_FUNC GetOverlappedResult(void *hFile, void *lpOverlapped, int *lpNumberOfBytesTransferred, BOOL bWait) {
+	BOOL WIN_FUNC GetOverlappedResult(HANDLE hFile, LPOVERLAPPED lpOverlapped, LPDWORD lpNumberOfBytesTransferred,
+									  BOOL bWait) {
+		DEBUG_LOG("GetOverlappedResult(%p, %p, %p, %d)\n", hFile, lpOverlapped, lpNumberOfBytesTransferred, bWait);
 		(void)hFile;
-		OVERLAPPED *overlapped = reinterpret_cast<OVERLAPPED *>(lpOverlapped);
-		if (!overlapped) {
+		if (!lpOverlapped) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
 			return FALSE;
 		}
-		if (bWait && overlapped->Internal == STATUS_PENDING) {
-			if (overlapped->hEvent) {
-				WaitForSingleObject(overlapped->hEvent, 0xFFFFFFFF);
+		if (bWait && lpOverlapped->Internal == STATUS_PENDING) {
+			if (lpOverlapped->hEvent) {
+				WaitForSingleObject(lpOverlapped->hEvent, 0xFFFFFFFF);
 			}
 		}
 
-		DWORD status = static_cast<DWORD>(overlapped->Internal);
+		const auto status = static_cast<DWORD>(lpOverlapped->Internal);
 		if (status == STATUS_PENDING) {
 			wibo::lastError = ERROR_IO_INCOMPLETE;
 			if (lpNumberOfBytesTransferred) {
-				*lpNumberOfBytesTransferred = static_cast<int>(overlapped->InternalHigh);
+				*lpNumberOfBytesTransferred = static_cast<int>(lpOverlapped->InternalHigh);
 			}
 			return FALSE;
 		}
 
 		if (lpNumberOfBytesTransferred) {
-			*lpNumberOfBytesTransferred = static_cast<int>(overlapped->InternalHigh);
+			*lpNumberOfBytesTransferred = static_cast<int>(lpOverlapped->InternalHigh);
 		}
 
 		if (status == STATUS_SUCCESS) {
@@ -4823,7 +5360,6 @@ namespace kernel32 {
 		wibo::lastError = status;
 		return FALSE;
 	}
-
 }
 
 static void *resolveByName(const char *name) {

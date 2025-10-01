@@ -163,6 +163,17 @@ if(BUILD_TESTING)
                     ${CMAKE_CURRENT_SOURCE_DIR}/test/test_overlapped_io.c
                     ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
 
+            add_custom_command(
+                OUTPUT ${WIBO_TEST_BIN_DIR}/test_time.exe
+                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
+                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
+                        -o test_time.exe
+                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_time.c
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_time.c
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
+
             add_custom_target(wibo_test_fixtures
                 DEPENDS
                     ${WIBO_TEST_BIN_DIR}/external_exports.dll
@@ -171,7 +182,8 @@ if(BUILD_TESTING)
                     ${WIBO_TEST_BIN_DIR}/test_resources.exe
                     ${WIBO_TEST_BIN_DIR}/test_threading.exe
                     ${WIBO_TEST_BIN_DIR}/test_heap.exe
-                    ${WIBO_TEST_BIN_DIR}/test_overlapped_io.exe)
+                    ${WIBO_TEST_BIN_DIR}/test_overlapped_io.exe
+                    ${WIBO_TEST_BIN_DIR}/test_time.exe)
 
             if(CMAKE_CONFIGURATION_TYPES)
                 set(_wibo_fixture_build_command
@@ -216,6 +228,12 @@ if(BUILD_TESTING)
             add_test(NAME wibo.test_overlapped_io
                 COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_overlapped_io.exe)
             set_tests_properties(wibo.test_overlapped_io PROPERTIES
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS wibo.build_fixtures)
+
+            add_test(NAME wibo.test_time
+                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_time.exe)
+            set_tests_properties(wibo.test_time PROPERTIES
                 WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
                 DEPENDS wibo.build_fixtures)
         endif()

@@ -123,22 +123,18 @@ namespace files {
 
 	FileHandle *fileHandleFromHandle(void *handle) {
 		handles::Data data = handles::dataFromHandle(handle, false);
-		if (data.type != handles::TYPE_FILE) {
-			return nullptr;
+		if (data.type == handles::TYPE_FILE) {
+			return reinterpret_cast<FileHandle *>(data.ptr);
 		}
-		return reinterpret_cast<FileHandle *>(data.ptr);
+		return nullptr;
 	}
 
 	FILE *fpFromHandle(void *handle, bool pop) {
 		handles::Data data = handles::dataFromHandle(handle, pop);
 		if (data.type == handles::TYPE_FILE) {
 			return reinterpret_cast<FileHandle *>(data.ptr)->fp;
-		} else if (data.type == handles::TYPE_UNUSED && pop) {
-			return nullptr;
-		} else {
-			printf("Invalid file handle %p\n", handle);
-			assert(0);
 		}
+		return nullptr;
 	}
 
 	void *allocFpHandle(FILE *fp, unsigned int desiredAccess, unsigned int shareMode, unsigned int flags, bool closeOnDestroy) {
@@ -300,32 +296,32 @@ namespace files {
 		return result;
 	}
 
-	void *getStdHandle(uint32_t nStdHandle) {
+	HANDLE getStdHandle(DWORD nStdHandle) {
 		switch (nStdHandle) {
-			case ((uint32_t) -10): // STD_INPUT_HANDLE
-				return stdinHandle;
-			case ((uint32_t) -11): // STD_OUTPUT_HANDLE
-				return stdoutHandle;
-			case ((uint32_t) -12): // STD_ERROR_HANDLE
-				return stderrHandle;
-			default:
-				return (void *) 0xFFFFFFFF;
+		case STD_INPUT_HANDLE:
+			return stdinHandle;
+		case STD_OUTPUT_HANDLE:
+			return stdoutHandle;
+		case STD_ERROR_HANDLE:
+			return stderrHandle;
+		default:
+			return (void *)0xFFFFFFFF;
 		}
 	}
 
-	unsigned int setStdHandle(uint32_t nStdHandle, void *hHandle) {
+	BOOL setStdHandle(DWORD nStdHandle, HANDLE hHandle) {
 		switch (nStdHandle) {
-			case ((uint32_t) -10): // STD_INPUT_HANDLE
-				stdinHandle = hHandle;
-				break;
-			case ((uint32_t) -11): // STD_OUTPUT_HANDLE
-				stdoutHandle = hHandle;
-				break;
-			case ((uint32_t) -12): // STD_ERROR_HANDLE
-				stderrHandle = hHandle;
-				break;
-			default:
-				return 0; // fail
+		case STD_INPUT_HANDLE:
+			stdinHandle = hHandle;
+			break;
+		case STD_OUTPUT_HANDLE:
+			stdoutHandle = hHandle;
+			break;
+		case STD_ERROR_HANDLE:
+			stderrHandle = hHandle;
+			break;
+		default:
+			return 0; // fail
 		}
 		return 1; // success
 	}

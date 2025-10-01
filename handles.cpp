@@ -3,24 +3,21 @@
 #include <utility>
 
 namespace handles {
-	static Data datas[0x10000];
+	static Data datas[MAX_HANDLES];
 
     Data dataFromHandle(void *handle, bool pop) {
 		uintptr_t index = (uintptr_t)handle;
-		if (index > 0 && index < 0x10000) {
+		if (index > 0 && index < MAX_HANDLES) {
 			Data ret = datas[index];
 			if (pop)
 				datas[index] = Data{};
 			return ret;
 		}
-		if (pop)
-			return Data{};
-		printf("Invalid file handle %p\n", handle);
-		assert(0);
+		return Data{};
 	}
 
 	void *allocDataHandle(Data data) {
-		for (int i = 1; i < 0x10000; i++) {
+		for (size_t i = 1; i < MAX_HANDLES; i++) {
 			if (datas[i].type == TYPE_UNUSED) {
 				datas[i] = data;
 				return (void*)i;

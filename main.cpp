@@ -348,23 +348,32 @@ int main(int argc, char **argv) {
 	}
 
 	// Build guest arguments
-	if (guestArgs.empty()) {
+	int argIndex = -1;
+	bool skipProgramName = false;
+	if (programIndex != -1 && argc > programIndex + 1) {
+		argIndex = programIndex + 1;
+		// With "test.exe -- test 1 2 3", treat everything after -- as the full command line
+		if (strcmp(argv[argIndex], "--") == 0) {
+			argIndex++;
+			skipProgramName = true;
+		}
+	}
+	if (guestArgs.empty() && !skipProgramName) {
 		guestArgs.push_back(files::pathToWindows(resolvedGuestPath));
 	}
-	for (int i = programIndex + 1; i < argc; ++i) {
-		guestArgs.emplace_back(argv[i]);
+	if (argIndex != -1) {
+		for (int i = argIndex; i < argc; ++i) {
+			guestArgs.emplace_back(argv[i]);
+		}
 	}
 
 	// Build a command line
 	if (cmdLine.empty()) {
 		for (int i = 0; i < guestArgs.size(); ++i) {
-			std::string arg;
-			if (i == 0) {
-				arg = files::pathToWindows(resolvedGuestPath);
-			} else {
+			if (i != 0) {
 				cmdLine += ' ';
-				arg = guestArgs[i];
 			}
+			const std::string& arg = guestArgs[i];
 			bool needQuotes = arg.find_first_of("\" \t\n") != std::string::npos;
 			if (needQuotes)
 				cmdLine += '"';

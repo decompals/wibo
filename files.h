@@ -1,5 +1,7 @@
 #pragma once
 
+#include "common.h"
+
 #include <cstdio>
 #include <filesystem>
 #include <mutex>
@@ -31,8 +33,8 @@ namespace files {
 	FileHandle *fileHandleFromHandle(void *handle);
 	IOResult read(FileHandle *handle, void *buffer, size_t bytesToRead, const std::optional<uint64_t> &offset, bool updateFilePointer);
 	IOResult write(FileHandle *handle, const void *buffer, size_t bytesToWrite, const std::optional<uint64_t> &offset, bool updateFilePointer);
-	void *getStdHandle(uint32_t nStdHandle);
-	unsigned int setStdHandle(uint32_t nStdHandle, void *hHandle);
+	HANDLE getStdHandle(DWORD nStdHandle);
+	BOOL setStdHandle(DWORD nStdHandle, HANDLE hHandle);
 	void init();
 	std::optional<std::filesystem::path> findCaseInsensitiveFile(const std::filesystem::path &directory, const std::string &filename);
 	std::filesystem::path canonicalPath(const std::filesystem::path &path);

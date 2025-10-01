@@ -769,12 +769,12 @@ namespace msvcrt {
 	}
 
 	char* WIN_ENTRY strcat(char *dest, const char *src) {
-		VERBOSE_LOG("strcat(%s, %s)\n", dest, src);
+		VERBOSE_LOG("strcat(%p, %s)\n", dest, src);
 		return std::strcat(dest, src);
 	}
 
 	char* WIN_ENTRY strcpy(char *dest, const char *src) {
-		VERBOSE_LOG("strcpy(%s, %s)\n", dest, src);
+		VERBOSE_LOG("strcpy(%p, %s)\n", dest, src);
 		return std::strcpy(dest, src);
 	}
 
@@ -838,7 +838,7 @@ namespace msvcrt {
 	}
 
 	void WIN_ENTRY _mbccpy(unsigned char *dest, const unsigned char *src) {
-		DEBUG_LOG("_mbccpy(%s, %s)\n", dest, src);
+		DEBUG_LOG("_mbccpy(%p, %s)\n", dest, src);
 		if (!dest || !src) {
 			return;
 		}
@@ -1234,7 +1234,7 @@ namespace msvcrt {
 	}
 
 	unsigned long WIN_ENTRY _ultoa(unsigned long value, char *str, int radix) {
-		DEBUG_LOG("_ultoa(%lu, %s, %d)\n", value, str ? str : "(null)", radix);
+		DEBUG_LOG("_ultoa(%lu, %p, %d)\n", value, str, radix);
 		if (!str || radix < 2 || radix > 36) {
 			errno = EINVAL;
 			return 0;
@@ -1255,7 +1255,7 @@ namespace msvcrt {
 	}
 
 	char* WIN_ENTRY _ltoa(long value, char *str, int radix) {
-		DEBUG_LOG("_ltoa(%ld, %s, %d)\n", value, str ? str : "(null)", radix);
+		DEBUG_LOG("_ltoa(%ld, %p, %d)\n", value, str, radix);
 		if (!str || radix < 2 || radix > 36) {
 			errno = EINVAL;
 			return nullptr;
@@ -2239,24 +2239,17 @@ namespace msvcrt {
 		return 0;
 	}
 
-	int WIN_ENTRY _get_wpgmptr(uint16_t** pValue){
+	int WIN_ENTRY _get_wpgmptr(uint16_t **pValue) {
 		DEBUG_LOG("_get_wpgmptr(%p)\n", pValue);
-		if(!pValue) return 22;
-
-		char exe_path[PATH_MAX];
-		ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
-		if(len == -1){
-			return 2;
+		if (!pValue) {
+			return 22;
 		}
-		exe_path[len] = 0;
-
-		std::string exePathStr(exe_path);
-		if (_pgmptr) {
-			free(_pgmptr);
+		if (_wpgmptr) {
+			*pValue = _wpgmptr;
+			return 0;
 		}
-		_pgmptr = ::strdup(exePathStr.c_str());
 
-		std::vector<uint16_t> wStr = stringToWideString(exePathStr.c_str());
+		const auto wStr = stringToWideString(wibo::guestExecutablePath.c_str());
 		if (_wpgmptr) {
 			delete[] _wpgmptr;
 		}
@@ -2269,6 +2262,8 @@ namespace msvcrt {
 	}
 
 	char** WIN_ENTRY __p__pgmptr() {
+		DEBUG_LOG("__p__pgmptr()\n");
+		_pgmptr = const_cast<char *>(wibo::guestExecutablePath.c_str());
 		return &_pgmptr;
 	}
 
@@ -2688,7 +2683,6 @@ namespace msvcrt {
 		DEBUG_LOG("_wspawnvp(%d, %s)\n", mode, command.c_str());
 
 		std::vector<std::string> argStorage;
-		argStorage.emplace_back(command);
 		for (const uint16_t *const *cursor = argv; *cursor; ++cursor) {
 			argStorage.emplace_back(wideStringToString(*cursor));
 		}
@@ -2746,7 +2740,6 @@ namespace msvcrt {
 		DEBUG_LOG("_spawnvp(%d, %s)\n", mode, command.c_str());
 
 		std::vector<std::string> argStorage;
-		argStorage.emplace_back(command);
 		for (const char * const *cursor = argv; *cursor; ++cursor) {
 			argStorage.emplace_back(*cursor);
 		}

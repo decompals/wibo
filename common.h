@@ -59,6 +59,7 @@ typedef UCHAR *PUCHAR;
 typedef size_t SIZE_T;
 typedef SIZE_T *PSIZE_T;
 typedef unsigned char BYTE;
+typedef unsigned int UINT;
 
 typedef struct _OVERLAPPED {
 	ULONG_PTR Internal;
@@ -86,6 +87,10 @@ typedef struct _OVERLAPPED {
 #define FILE_FLAG_NO_BUFFERING 0x20000000
 
 #define MAX_PATH (260)
+
+#define STD_INPUT_HANDLE ((DWORD) - 10)
+#define STD_OUTPUT_HANDLE ((DWORD) - 11)
+#define STD_ERROR_HANDLE ((DWORD) - 12)
 
 namespace wibo {
 	extern uint32_t lastError;

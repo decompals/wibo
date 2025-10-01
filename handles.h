@@ -3,6 +3,8 @@
 #include <cstdlib>
 
 namespace handles {
+	constexpr size_t MAX_HANDLES = 0x10000;
+
 	enum Type {
 		TYPE_UNUSED,
 		TYPE_FILE,

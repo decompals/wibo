@@ -206,7 +206,7 @@ static bool loadVersionResource(const char *fileName, std::vector<uint8_t> &buff
 namespace version {
 
 unsigned int WIN_FUNC GetFileVersionInfoSizeA(const char *lptstrFilename, unsigned int *lpdwHandle) {
-	DEBUG_LOG("GetFileVersionInfoSizeA %s\n", lptstrFilename);
+	DEBUG_LOG("GetFileVersionInfoSizeA(%s, %p)\n", lptstrFilename, lpdwHandle);
 	if (lpdwHandle)
 		*lpdwHandle = 0;
 
@@ -218,7 +218,7 @@ unsigned int WIN_FUNC GetFileVersionInfoSizeA(const char *lptstrFilename, unsign
 
 unsigned int WIN_FUNC GetFileVersionInfoA(const char *lptstrFilename, unsigned int dwHandle, unsigned int dwLen, void *lpData) {
 	(void) dwHandle;
-	DEBUG_LOG("GetFileVersionInfoA %s len=%u\n", lptstrFilename, dwLen);
+	DEBUG_LOG("GetFileVersionInfoA(%s, %u, %p)\n", lptstrFilename, dwLen, lpData);
 	if (!lpData || dwLen == 0) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return 0;
@@ -245,7 +245,7 @@ static unsigned int VerQueryValueImpl(const void *pBlock, const std::string &sub
 	if (!pBlock)
 		return 0;
 
-	const uint8_t *base = static_cast<const uint8_t *>(pBlock);
+	const auto *base = static_cast<const uint8_t *>(pBlock);
 	uint16_t totalLength = readU16(base);
 	if (totalLength < 6)
 		return 0;
@@ -279,18 +279,20 @@ static unsigned int VerQueryValueImpl(const void *pBlock, const std::string &sub
 }
 
 unsigned int WIN_FUNC VerQueryValueA(const void *pBlock, const char *lpSubBlock, void **lplpBuffer, unsigned int *puLen) {
-	DEBUG_LOG("VerQueryValueA %p %s\n", pBlock, lpSubBlock ? lpSubBlock : "(null)");
+	DEBUG_LOG("VerQueryValueA(%p, %s, %p, %p)\n", pBlock, lpSubBlock ? lpSubBlock : "(null)", lplpBuffer, puLen);
 	if (!lpSubBlock)
 		return 0;
 	return VerQueryValueImpl(pBlock, lpSubBlock, lplpBuffer, puLen);
 }
 
 unsigned int WIN_FUNC GetFileVersionInfoSizeW(const uint16_t *lptstrFilename, unsigned int *lpdwHandle) {
+	DEBUG_LOG("GetFileVersionInfoSizeW -> ");
 	auto narrow = wideStringToString(lptstrFilename);
 	return GetFileVersionInfoSizeA(narrow.c_str(), lpdwHandle);
 }
 
 unsigned int WIN_FUNC GetFileVersionInfoW(const uint16_t *lptstrFilename, unsigned int dwHandle, unsigned int dwLen, void *lpData) {
+	DEBUG_LOG("GetFileVersionInfoW -> ");
 	auto narrow = wideStringToString(lptstrFilename);
 	return GetFileVersionInfoA(narrow.c_str(), dwHandle, dwLen, lpData);
 }
@@ -299,7 +301,7 @@ unsigned int WIN_FUNC VerQueryValueW(const void *pBlock, const uint16_t *lpSubBl
 	if (!lpSubBlock)
 		return 0;
 	auto narrow = wideStringToString(lpSubBlock);
-	DEBUG_LOG("VerQueryValueW %p %s\n", pBlock, narrow.c_str());
+	DEBUG_LOG("VerQueryValueW(%p, %s, %p, %p)\n", pBlock, narrow.c_str(), lplpBuffer, puLen);
 	return VerQueryValueImpl(pBlock, narrow, lplpBuffer, puLen);
 }
 

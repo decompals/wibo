@@ -850,7 +850,7 @@ namespace msvcrt {
 	}
 
 	unsigned char* WIN_ENTRY _mbsinc(const unsigned char *str) {
-		DEBUG_LOG("_mbsinc(%s)\n", str);
+		DEBUG_LOG("_mbsinc(%p)\n", str);
 		if (!str) {
 			return nullptr;
 		}
@@ -864,7 +864,7 @@ namespace msvcrt {
 	}
 
 	unsigned char* WIN_ENTRY _mbsdec(const unsigned char *start, const unsigned char *current) {
-		DEBUG_LOG("_mbsdec(%s, %s)\n", start, current);
+		DEBUG_LOG("_mbsdec(%p, %p)\n", start, current);
 		if (!start || !current || current <= start) {
 			DEBUG_LOG("_mbsdec invalid args start=%p current=%p\n", start, current);
 			return nullptr;

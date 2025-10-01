@@ -5,11 +5,9 @@
 #include "handles.h"
 #include "resources.h"
 #include <algorithm>
-#include <climits>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <ctype.h>
 #include <cwctype>
 #include <filesystem>
 #include <fnmatch.h>
@@ -20,9 +18,9 @@
 #include "strutil.h"
 #include <mimalloc.h>
 #include <random>
-#include <stdarg.h>
+#include <cstdarg>
 #include <system_error>
-#include <errno.h>
+#include <cerrno>
 #include <functional>
 #include <sys/mman.h>
 #include <sys/resource.h>
@@ -33,12 +31,11 @@
 #include <unistd.h>
 #include <vector>
 #include <fcntl.h>
-#include <time.h>
+#include <ctime>
 #include <sys/time.h>
 #include <pthread.h>
 #include <mutex>
 #include <unordered_map>
-#include <unordered_set>
 #include <limits>
 
 namespace advapi32 {
@@ -66,6 +63,24 @@ namespace {
 	void tryReleaseMapping(MappingObject *mapping);
 	std::unordered_map<void *, ViewInfo> g_viewInfo;
 
+	using DWORD_PTR = uintptr_t;
+
+	static DWORD_PTR computeSystemAffinityMask() {
+		long reported = sysconf(_SC_NPROCESSORS_ONLN);
+		if (reported <= 0) {
+			reported = 1;
+		}
+		const auto bitCount = static_cast<unsigned int>(std::numeric_limits<DWORD_PTR>::digits);
+		const auto usable = static_cast<unsigned int>(reported);
+		if (usable >= bitCount) {
+			return static_cast<DWORD_PTR>(~static_cast<DWORD_PTR>(0));
+		}
+		return (static_cast<DWORD_PTR>(1) << usable) - 1;
+	}
+
+	static DWORD_PTR g_processAffinityMask = 0;
+	static bool g_processAffinityMaskInitialized = false;
+
 	void closeMappingIfPossible(MappingObject *mapping) {
 		if (!mapping) {
 			return;
@@ -85,8 +100,6 @@ namespace {
 			closeMappingIfPossible(mapping);
 		}
 	}
-
-	using DWORD_PTR = uintptr_t;
 
 	constexpr WORD PROCESSOR_ARCHITECTURE_INTEL = 0;
 	constexpr WORD PROCESSOR_ARCHITECTURE_ARM = 5;
@@ -299,6 +312,7 @@ namespace kernel32 {
 		int refCount = 1;
 		pthread_mutex_t mutex;
 		pthread_cond_t cond;
+		unsigned int suspendCount = 0;
 	};
 
 	struct ThreadStartData {
@@ -320,6 +334,21 @@ namespace kernel32 {
 	static void *threadTrampoline(void *param);
 	static thread_local ThreadObject *currentThreadObject = nullptr;
 	static constexpr uintptr_t PSEUDO_CURRENT_THREAD_HANDLE_VALUE = 0x100007u;
+
+	static ThreadObject *threadObjectFromHandle(HANDLE hThread) {
+		auto raw = reinterpret_cast<uintptr_t>(hThread);
+		if (raw == PSEUDO_CURRENT_THREAD_HANDLE_VALUE || raw == static_cast<uintptr_t>(-2)) {
+			return currentThreadObject;
+		}
+		if (raw == static_cast<uintptr_t>(-1) || raw == 0) {
+			return nullptr;
+		}
+		auto data = handles::dataFromHandle(hThread, false);
+		if (data.type != handles::TYPE_THREAD || data.ptr == nullptr) {
+			return nullptr;
+		}
+		return reinterpret_cast<ThreadObject *>(data.ptr);
+	}
 
 	static std::u16string makeMutexName(LPCWSTR name) {
 		if (!name) {
@@ -402,6 +431,11 @@ namespace kernel32 {
 		}
 
 		currentThreadObject = obj;
+		pthread_mutex_lock(&obj->mutex);
+		while (obj->suspendCount > 0) {
+			pthread_cond_wait(&obj->cond, &obj->mutex);
+		}
+		pthread_mutex_unlock(&obj->mutex);
 		DWORD result = startRoutine ? startRoutine(userParam) : 0;
 		pthread_mutex_lock(&obj->mutex);
 		obj->finished = true;
@@ -517,6 +551,14 @@ namespace kernel32 {
 		return FALSE;
 	}
 
+	BOOL WIN_FUNC IsBadWritePtr(void *lp, uintptr_t ucb) {
+		DEBUG_LOG("STUB: IsBadWritePtr(ptr=%p, size=%zu)\n", lp, static_cast<size_t>(ucb));
+		if (!lp && ucb != 0) {
+			return TRUE;
+		}
+		return FALSE;
+	}
+
 	BOOL WIN_FUNC Wow64DisableWow64FsRedirection(void **OldValue) {
 		DEBUG_LOG("STUB: Wow64DisableWow64FsRedirection(%p)\n", OldValue);
 		if (OldValue) {
@@ -567,6 +609,71 @@ namespace kernel32 {
 		unsigned int u_thread_id = (unsigned int) thread_id;
 
 		return u_thread_id;
+	}
+
+	BOOL WIN_FUNC GetProcessAffinityMask(HANDLE hProcess, DWORD_PTR *lpProcessAffinityMask, DWORD_PTR *lpSystemAffinityMask) {
+		DEBUG_LOG("GetProcessAffinityMask(%p, %p, %p)\n", hProcess, lpProcessAffinityMask, lpSystemAffinityMask);
+		if (!lpProcessAffinityMask || !lpSystemAffinityMask) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+
+		uintptr_t rawProcessHandle = reinterpret_cast<uintptr_t>(hProcess);
+		bool isPseudoHandle = rawProcessHandle == static_cast<uintptr_t>(-1);
+		if (!isPseudoHandle) {
+			auto data = handles::dataFromHandle(hProcess, false);
+			if (data.type != handles::TYPE_PROCESS) {
+				wibo::lastError = ERROR_INVALID_HANDLE;
+				return FALSE;
+			}
+		}
+
+		DWORD_PTR systemMask = computeSystemAffinityMask();
+		if (!g_processAffinityMaskInitialized) {
+			g_processAffinityMask = systemMask;
+			g_processAffinityMaskInitialized = true;
+		}
+		DWORD_PTR processMask = g_processAffinityMask & systemMask;
+		if (processMask == 0) {
+			processMask = systemMask;
+		}
+		if (processMask == 0) {
+			processMask = 1;
+		}
+
+		*lpProcessAffinityMask = processMask;
+		*lpSystemAffinityMask = systemMask;
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+
+	BOOL WIN_FUNC SetProcessAffinityMask(HANDLE hProcess, DWORD_PTR dwProcessAffinityMask) {
+		DEBUG_LOG("SetProcessAffinityMask(%p, 0x%lx)\n", hProcess, (unsigned long)dwProcessAffinityMask);
+		if (dwProcessAffinityMask == 0) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+
+		uintptr_t rawProcessHandle = reinterpret_cast<uintptr_t>(hProcess);
+		bool isPseudoHandle = rawProcessHandle == static_cast<uintptr_t>(-1);
+		if (!isPseudoHandle) {
+			auto data = handles::dataFromHandle(hProcess, false);
+			if (data.type != handles::TYPE_PROCESS) {
+				wibo::lastError = ERROR_INVALID_HANDLE;
+				return FALSE;
+			}
+		}
+
+		DWORD_PTR systemMask = computeSystemAffinityMask();
+		if ((dwProcessAffinityMask & systemMask) == 0 || (dwProcessAffinityMask & ~systemMask) != 0) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+
+		g_processAffinityMask = dwProcessAffinityMask & systemMask;
+		g_processAffinityMaskInitialized = true;
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
 	}
 
 	void WIN_FUNC ExitProcess(unsigned int uExitCode) {
@@ -1810,6 +1917,23 @@ namespace kernel32 {
 		}
 
 		setFindFileDataFromPath(lpFindFileData, *handle->it++);
+		return 1;
+	}
+
+	int WIN_FUNC FindNextFileW(void *hFindFile, WIN32_FIND_DATA<uint16_t> *lpFindFileData) {
+		DEBUG_LOG("FindNextFileW(%p, %p)\n", hFindFile, lpFindFileData);
+		if (hFindFile == (void *)1) {
+			wibo::lastError = ERROR_NO_MORE_FILES;
+			return 0;
+		}
+
+		auto *handle = (FindFirstFileHandle *)hFindFile;
+		if (!findNextFile(handle)) {
+			wibo::lastError = ERROR_NO_MORE_FILES;
+			return 0;
+		}
+
+		setFindFileDataFromPathW(lpFindFileData, *handle->it++);
 		return 1;
 	}
 
@@ -3465,6 +3589,100 @@ namespace kernel32 {
 		return required - 1;
 	}
 
+	static bool computeLongWindowsPath(const std::string &inputPath, std::string &longPath) {
+		bool hasTrailingSlash = false;
+		if (!inputPath.empty()) {
+			char last = inputPath.back();
+			hasTrailingSlash = (last == '\\' || last == '/');
+		}
+
+		auto hostPath = files::pathFromWindows(inputPath.c_str());
+		if (hostPath.empty()) {
+			wibo::lastError = ERROR_PATH_NOT_FOUND;
+			return false;
+		}
+
+		std::error_code ec;
+		if (!std::filesystem::exists(hostPath, ec)) {
+			wibo::lastError = ERROR_FILE_NOT_FOUND;
+			return false;
+		}
+
+		longPath = files::pathToWindows(hostPath);
+		if (hasTrailingSlash && !longPath.empty() && longPath.back() != '\\') {
+			longPath.push_back('\\');
+		}
+		wibo::lastError = ERROR_SUCCESS;
+		return true;
+	}
+
+	DWORD WIN_FUNC GetLongPathNameA(const char *lpszShortPath, char *lpszLongPath, DWORD cchBuffer) {
+		DEBUG_LOG("GetLongPathNameA(%s, %p, %u)\n", lpszShortPath ? lpszShortPath : "(null)", lpszLongPath, cchBuffer);
+		if (!lpszShortPath) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+
+		std::string input(lpszShortPath);
+		std::string longPath;
+		if (!computeLongWindowsPath(input, longPath)) {
+			return 0;
+		}
+
+		DWORD required = static_cast<DWORD>(longPath.size() + 1);
+		if (cchBuffer == 0) {
+			return required;
+		}
+
+		if (!lpszLongPath) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+
+		if (cchBuffer < required) {
+			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			return required;
+		}
+
+		std::memcpy(lpszLongPath, longPath.c_str(), required);
+		wibo::lastError = ERROR_SUCCESS;
+		return required - 1;
+	}
+
+	DWORD WIN_FUNC GetLongPathNameW(const uint16_t *lpszShortPath, uint16_t *lpszLongPath, DWORD cchBuffer) {
+		DEBUG_LOG("GetLongPathNameW(%p, %p, %u)\n", lpszShortPath, lpszLongPath, cchBuffer);
+		if (!lpszShortPath) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+
+		std::string input = wideStringToString(lpszShortPath);
+		std::string longPath;
+		if (!computeLongWindowsPath(input, longPath)) {
+			return 0;
+		}
+
+		auto wideLong = stringToWideString(longPath.c_str());
+		DWORD required = static_cast<DWORD>(wideLong.size());
+		if (cchBuffer == 0) {
+			return required;
+		}
+
+		if (!lpszLongPath) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+
+		if (cchBuffer < required) {
+			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			return required;
+		}
+
+		std::copy(wideLong.begin(), wideLong.end(), lpszLongPath);
+		wibo::lastError = ERROR_SUCCESS;
+		return required - 1;
+	}
+
 	int WIN_FUNC SetCurrentDirectoryA(const char *lpPathName) {
 		DEBUG_LOG("SetCurrentDirectoryA(%s)\n", lpPathName ? lpPathName : "(null)");
 		if (!lpPathName) {
@@ -3659,37 +3877,184 @@ namespace kernel32 {
 		return const_cast<void *>(exe->fromRVA<const void>(entry->offsetToData));
 	}
 
-	BOOL WIN_FUNC GetDiskFreeSpaceExW(const uint16_t* lpDirectoryName,
-		uint64_t* lpFreeBytesAvailableToCaller, uint64_t* lpTotalNumberOfBytes, uint64_t* lpTotalNumberOfFreeBytes){
-		if(!lpDirectoryName) return false;
-
-		std::string directoryName = wideStringToString(lpDirectoryName);
-		DEBUG_LOG("GetDiskFreeSpaceExW %s\n", directoryName.c_str());
-
-		struct statvfs buf;
-		if(statvfs(directoryName.c_str(), &buf) != 0){
+	static bool resolveDiskFreeSpaceStat(const char *rootPathName, struct statvfs &outBuf, std::string &resolvedPath) {
+		std::filesystem::path hostPath;
+		if (rootPathName && *rootPathName) {
+			hostPath = files::pathFromWindows(rootPathName);
+		} else {
+			std::error_code ec;
+			hostPath = std::filesystem::current_path(ec);
+			if (ec) {
+				wibo::lastError = ERROR_PATH_NOT_FOUND;
+				return false;
+			}
+		}
+		if (hostPath.empty()) {
+			wibo::lastError = ERROR_PATH_NOT_FOUND;
 			return false;
 		}
 
-		if (lpFreeBytesAvailableToCaller)
-		    *lpFreeBytesAvailableToCaller = (uint64_t)buf.f_bavail * buf.f_bsize;
-		if (lpTotalNumberOfBytes)
-		    *lpTotalNumberOfBytes = (uint64_t)buf.f_blocks * buf.f_bsize;
-		if (lpTotalNumberOfFreeBytes)
-		    *lpTotalNumberOfFreeBytes = (uint64_t)buf.f_bfree * buf.f_bsize;
+		hostPath = hostPath.lexically_normal();
+		if (hostPath.empty()) {
+			hostPath = std::filesystem::path("/");
+		}
 
-		DEBUG_LOG("\t-> available bytes %llu, total bytes %llu, total free bytes %llu\n",
-			*lpFreeBytesAvailableToCaller, *lpTotalNumberOfBytes, *lpTotalNumberOfFreeBytes);
-		return true;
+		std::error_code ec;
+		if (!hostPath.is_absolute()) {
+			auto abs = std::filesystem::absolute(hostPath, ec);
+			if (ec) {
+				wibo::lastError = ERROR_PATH_NOT_FOUND;
+				return false;
+			}
+			hostPath = abs;
+		}
+
+		std::filesystem::path queryPath = hostPath;
+		while (true) {
+			std::string query = queryPath.empty() ? std::string("/") : queryPath.string();
+			if (query.empty()) {
+				query = "/";
+			}
+			if (statvfs(query.c_str(), &outBuf) == 0) {
+				resolvedPath = query;
+				wibo::lastError = ERROR_SUCCESS;
+				return true;
+			}
+
+			int savedErrno = errno;
+			if (savedErrno != ENOENT && savedErrno != ENOTDIR) {
+				errno = savedErrno;
+				setLastErrorFromErrno();
+				return false;
+			}
+
+			std::filesystem::path parent = queryPath.parent_path();
+			if (parent == queryPath) {
+				errno = savedErrno;
+				setLastErrorFromErrno();
+				return false;
+			}
+			if (parent.empty()) {
+				parent = std::filesystem::path("/");
+			}
+			queryPath = parent;
+		}
+	}
+
+	BOOL WIN_FUNC GetDiskFreeSpaceA(const char *lpRootPathName, unsigned int *lpSectorsPerCluster,
+		unsigned int *lpBytesPerSector, unsigned int *lpNumberOfFreeClusters, unsigned int *lpTotalNumberOfClusters) {
+		DEBUG_LOG("GetDiskFreeSpaceA(%s)\n", lpRootPathName ? lpRootPathName : "(null)");
+
+		struct statvfs buf{};
+		std::string resolvedPath;
+		if (!resolveDiskFreeSpaceStat(lpRootPathName, buf, resolvedPath)) {
+			return FALSE;
+		}
+
+		uint64_t blockSize = buf.f_frsize ? buf.f_frsize : buf.f_bsize;
+		if (blockSize == 0) {
+			blockSize = 4096;
+		}
+		unsigned int bytesPerSector = 512;
+		if (blockSize % bytesPerSector != 0) {
+			bytesPerSector = static_cast<unsigned int>(std::min<uint64_t>(blockSize, std::numeric_limits<unsigned int>::max()));
+		}
+		unsigned int sectorsPerCluster = static_cast<unsigned int>(blockSize / bytesPerSector);
+		if (sectorsPerCluster == 0) {
+			sectorsPerCluster = 1;
+			bytesPerSector = static_cast<unsigned int>(std::min<uint64_t>(blockSize, std::numeric_limits<unsigned int>::max()));
+		}
+
+		uint64_t totalClusters64 = buf.f_blocks;
+		uint64_t freeClusters64 = buf.f_bavail;
+
+		if (lpSectorsPerCluster) {
+			*lpSectorsPerCluster = sectorsPerCluster;
+		}
+		if (lpBytesPerSector) {
+			*lpBytesPerSector = bytesPerSector;
+		}
+		if (lpNumberOfFreeClusters) {
+			uint64_t clamped = std::min<uint64_t>(freeClusters64, std::numeric_limits<unsigned int>::max());
+			*lpNumberOfFreeClusters = static_cast<unsigned int>(clamped);
+		}
+		if (lpTotalNumberOfClusters) {
+			uint64_t clamped = std::min<uint64_t>(totalClusters64, std::numeric_limits<unsigned int>::max());
+			*lpTotalNumberOfClusters = static_cast<unsigned int>(clamped);
+		}
+
+		DEBUG_LOG("\t-> host %s, spc %u, bps %u, free clusters %u, total clusters %u\n",
+			resolvedPath.c_str(), lpSectorsPerCluster ? *lpSectorsPerCluster : 0,
+			lpBytesPerSector ? *lpBytesPerSector : 0,
+			lpNumberOfFreeClusters ? *lpNumberOfFreeClusters : 0,
+			lpTotalNumberOfClusters ? *lpTotalNumberOfClusters : 0);
+
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+
+	BOOL WIN_FUNC GetDiskFreeSpaceW(const uint16_t *lpRootPathName, unsigned int *lpSectorsPerCluster,
+		unsigned int *lpBytesPerSector, unsigned int *lpNumberOfFreeClusters, unsigned int *lpTotalNumberOfClusters) {
+		std::string rootPath = wideStringToString(lpRootPathName);
+		return GetDiskFreeSpaceA(lpRootPathName ? rootPath.c_str() : nullptr,
+					      lpSectorsPerCluster, lpBytesPerSector,
+					      lpNumberOfFreeClusters, lpTotalNumberOfClusters);
+	}
+
+	BOOL WIN_FUNC GetDiskFreeSpaceExA(const char *lpDirectoryName,
+		uint64_t *lpFreeBytesAvailableToCaller, uint64_t *lpTotalNumberOfBytes, uint64_t *lpTotalNumberOfFreeBytes) {
+		DEBUG_LOG("GetDiskFreeSpaceExA(%s)\n", lpDirectoryName ? lpDirectoryName : "(null)");
+
+		struct statvfs buf{};
+		std::string resolvedPath;
+		if (!resolveDiskFreeSpaceStat(lpDirectoryName, buf, resolvedPath)) {
+			return FALSE;
+		}
+
+		uint64_t blockSize = buf.f_frsize ? buf.f_frsize : buf.f_bsize;
+		if (blockSize == 0) {
+			blockSize = 4096;
+		}
+
+		uint64_t freeToCaller = static_cast<uint64_t>(buf.f_bavail) * blockSize;
+		uint64_t totalBytes = static_cast<uint64_t>(buf.f_blocks) * blockSize;
+		uint64_t totalFree = static_cast<uint64_t>(buf.f_bfree) * blockSize;
+
+		if (lpFreeBytesAvailableToCaller) {
+			*lpFreeBytesAvailableToCaller = freeToCaller;
+		}
+		if (lpTotalNumberOfBytes) {
+			*lpTotalNumberOfBytes = totalBytes;
+		}
+		if (lpTotalNumberOfFreeBytes) {
+			*lpTotalNumberOfFreeBytes = totalFree;
+		}
+
+		DEBUG_LOG("\t-> host %s, free %llu, total %llu, total free %llu\n",
+			resolvedPath.c_str(), (unsigned long long) freeToCaller,
+			(unsigned long long) totalBytes, (unsigned long long) totalFree);
+
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+
+	BOOL WIN_FUNC GetDiskFreeSpaceExW(const uint16_t *lpDirectoryName,
+		uint64_t *lpFreeBytesAvailableToCaller, uint64_t *lpTotalNumberOfBytes, uint64_t *lpTotalNumberOfFreeBytes) {
+		DEBUG_LOG("GetDiskFreeSpaceExW -> ");
+		std::string directoryName = wideStringToString(lpDirectoryName);
+		return GetDiskFreeSpaceExA(lpDirectoryName ? directoryName.c_str() : nullptr,
+					       lpFreeBytesAvailableToCaller,
+					       lpTotalNumberOfBytes,
+					       lpTotalNumberOfFreeBytes);
 	}
 
 	void* WIN_FUNC LockResource(void* res) {
-		DEBUG_LOG("LockResource %p\n", res);
+		DEBUG_LOG("LockResource(%p)\n", res);
 		return res;
 	}
 
 	unsigned int WIN_FUNC SizeofResource(HMODULE hModule, void* res) {
-		DEBUG_LOG("SizeofResource %p %p\n", hModule, res);
+		DEBUG_LOG("SizeofResource(%p, %p)\n", hModule, res);
 		if (!res) {
 			wibo::lastError = ERROR_RESOURCE_DATA_NOT_FOUND;
 			return 0;
@@ -3719,11 +4084,11 @@ namespace kernel32 {
 	}
 
 	HMODULE WIN_FUNC LoadLibraryW(LPCWSTR lpLibFileName) {
-		DEBUG_LOG("LoadLibraryW\n");
 		if (!lpLibFileName) {
 			return nullptr;
 		}
 		auto filename = wideStringToString(lpLibFileName);
+		DEBUG_LOG("LoadLibraryW(%s)\n", filename.c_str());
 		return LoadLibraryA(filename.c_str());
 	}
 
@@ -3748,7 +4113,7 @@ namespace kernel32 {
 	const unsigned int MAJOR_VER = 6, MINOR_VER = 2, BUILD_NUMBER = 0; // Windows 8
 
 	unsigned int WIN_FUNC GetVersion() {
-		DEBUG_LOG("GetVersion\n");
+		DEBUG_LOG("GetVersion()\n");
 		return MAJOR_VER | MINOR_VER << 8 | 5 << 16 | BUILD_NUMBER << 24;
 	}
 
@@ -3855,7 +4220,7 @@ namespace kernel32 {
 	}
 
 	void *WIN_FUNC VirtualAlloc(void *lpAddress, unsigned int dwSize, unsigned int flAllocationType, unsigned int flProtect) {
-		DEBUG_LOG("VirtualAlloc %p %u %u %u\n", lpAddress, dwSize, flAllocationType, flProtect);
+		DEBUG_LOG("VirtualAlloc(%p, %u, %u, %u)\n", lpAddress, dwSize, flAllocationType, flProtect);
 
 		int prot = translateProtect(flProtect);
 
@@ -3878,12 +4243,12 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC VirtualFree(void *lpAddress, unsigned int dwSize, int dwFreeType) {
-		DEBUG_LOG("VirtualFree %p %u %i\n", lpAddress, dwSize, dwFreeType);
+		DEBUG_LOG("STUB: VirtualFree(%p, %u, %i)\n", lpAddress, dwSize, dwFreeType);
 		return 1;
 	}
 
 	BOOL WIN_FUNC VirtualProtect(LPVOID lpAddress, SIZE_T dwSize, DWORD flNewProtect, PDWORD lpflOldProtect) {
-		DEBUG_LOG("VirtualProtect %p %zu %u\n", lpAddress, dwSize, flNewProtect);
+		DEBUG_LOG("VirtualProtect(%p, %zu, %u)\n", lpAddress, dwSize, flNewProtect);
 		if (!lpAddress || dwSize == 0) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
 			return FALSE;
@@ -3912,7 +4277,7 @@ namespace kernel32 {
 	} MEMORY_BASIC_INFORMATION, *PMEMORY_BASIC_INFORMATION;
 
 	SIZE_T WIN_FUNC VirtualQuery(const void *lpAddress, PMEMORY_BASIC_INFORMATION lpBuffer, SIZE_T dwLength) {
-		DEBUG_LOG("VirtualQuery %p %zu\n", lpAddress, dwLength);
+		DEBUG_LOG("VirtualQuery(%p, %p, %zu)\n", lpAddress, lpBuffer, dwLength);
 		if (!lpBuffer || dwLength < sizeof(MEMORY_BASIC_INFORMATION)) {
 			return 0;
 		}
@@ -3928,7 +4293,7 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC GetProcessWorkingSetSize(void *hProcess, unsigned int *lpMinimumWorkingSetSize, unsigned int *lpMaximumWorkingSetSize) {
-		DEBUG_LOG("GetProcessWorkingSetSize\n");
+		DEBUG_LOG("GetProcessWorkingSetSize(%p, %p, %p)\n", hProcess, lpMinimumWorkingSetSize, lpMaximumWorkingSetSize);
 		// A pointer to a variable that receives the minimum working set size of the specified process, in bytes.
 		// The virtual memory manager attempts to keep at least this much memory resident in the process whenever the process is active.
 		*lpMinimumWorkingSetSize = 32*1024*1024; // 32MB
@@ -3943,7 +4308,7 @@ namespace kernel32 {
 	}
 
 	unsigned int WIN_FUNC SetProcessWorkingSetSize(void *hProcess, unsigned int dwMinimumWorkingSetSize, unsigned int dwMaximumWorkingSetSize) {
-		DEBUG_LOG("SetProcessWorkingSetSize: min %u, max: %u\n", dwMinimumWorkingSetSize, dwMaximumWorkingSetSize);
+		DEBUG_LOG("SetProcessWorkingSetSize(%p, %u, %u)\n", hProcess, dwMinimumWorkingSetSize, dwMaximumWorkingSetSize);
 		return 1;
 	}
 
@@ -4028,20 +4393,80 @@ namespace kernel32 {
 		return reinterpret_cast<HANDLE>(PSEUDO_CURRENT_THREAD_HANDLE_VALUE);
 	}
 
+	DWORD_PTR WIN_FUNC SetThreadAffinityMask(HANDLE hThread, DWORD_PTR dwThreadAffinityMask) {
+		DEBUG_LOG("SetThreadAffinityMask(%p, 0x%lx)\n", hThread, (unsigned long)dwThreadAffinityMask);
+		if (dwThreadAffinityMask == 0) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+
+		uintptr_t rawThreadHandle = reinterpret_cast<uintptr_t>(hThread);
+		bool isPseudoHandle = rawThreadHandle == PSEUDO_CURRENT_THREAD_HANDLE_VALUE ||
+							 rawThreadHandle == static_cast<uintptr_t>(-2) ||
+							 rawThreadHandle == 0 ||
+							 rawThreadHandle == static_cast<uintptr_t>(-1);
+		if (!isPseudoHandle) {
+			auto data = handles::dataFromHandle(hThread, false);
+			if (data.type != handles::TYPE_THREAD) {
+				wibo::lastError = ERROR_INVALID_HANDLE;
+				return 0;
+			}
+		}
+
+		DWORD_PTR systemMask = computeSystemAffinityMask();
+		DWORD_PTR processMask = g_processAffinityMaskInitialized ? (g_processAffinityMask & systemMask) : systemMask;
+		if (processMask == 0) {
+			processMask = systemMask ? systemMask : 1;
+		}
+
+		if ((dwThreadAffinityMask & ~systemMask) != 0 || (dwThreadAffinityMask & processMask) == 0) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+
+		wibo::lastError = ERROR_SUCCESS;
+		return processMask;
+	}
+
+	DWORD WIN_FUNC ResumeThread(HANDLE hThread) {
+		DEBUG_LOG("ResumeThread(%p)\n", hThread);
+		ThreadObject *obj = threadObjectFromHandle(hThread);
+		if (!obj) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return static_cast<DWORD>(-1);
+		}
+		pthread_mutex_lock(&obj->mutex);
+		DWORD previous = obj->suspendCount;
+		if (obj->suspendCount > 0) {
+			obj->suspendCount--;
+			if (obj->suspendCount == 0) {
+				pthread_cond_broadcast(&obj->cond);
+			}
+		}
+		pthread_mutex_unlock(&obj->mutex);
+		wibo::lastError = ERROR_SUCCESS;
+		return previous;
+	}
+
 	HRESULT WIN_FUNC SetThreadDescription(HANDLE hThread, const void * /* PCWSTR */ lpThreadDescription) {
 		DEBUG_LOG("STUB: SetThreadDescription(%p, %p)\n", hThread, lpThreadDescription);
 		return S_OK;
 	}
 
-	HANDLE WIN_FUNC CreateThread(void *lpThreadAttributes, size_t dwStackSize, LPTHREAD_START_ROUTINE lpStartAddress, void *lpParameter, DWORD dwCreationFlags, LPDWORD lpThreadId) {
-		DEBUG_LOG("CreateThread(stack=%zu, flags=0x%x)\n", dwStackSize, dwCreationFlags);
+	HANDLE WIN_FUNC CreateThread(void *lpThreadAttributes, size_t dwStackSize, LPTHREAD_START_ROUTINE lpStartAddress,
+								 void *lpParameter, DWORD dwCreationFlags, LPDWORD lpThreadId) {
+		DEBUG_LOG("CreateThread(%p, %zu, %p, %p, %u, %p)\n", lpThreadAttributes, dwStackSize, lpStartAddress,
+				  lpParameter, dwCreationFlags, lpThreadId);
 		(void)lpThreadAttributes;
-		constexpr DWORD SUPPORTED_FLAGS = 0x00010000; // STACK_SIZE_PARAM_IS_A_RESERVATION
+		constexpr DWORD CREATE_SUSPENDED = 0x00000004;
+		constexpr DWORD STACK_SIZE_PARAM_IS_A_RESERVATION = 0x00010000;
+		constexpr DWORD SUPPORTED_FLAGS = CREATE_SUSPENDED | STACK_SIZE_PARAM_IS_A_RESERVATION;
 		if ((dwCreationFlags & ~SUPPORTED_FLAGS) != 0) {
 			DEBUG_LOG("CreateThread: unsupported creation flags 0x%x\n", dwCreationFlags);
 			wibo::lastError = ERROR_NOT_SUPPORTED;
 			return nullptr;
 		}
+		bool startSuspended = (dwCreationFlags & CREATE_SUSPENDED) != 0;
 
 		ThreadObject *obj = new ThreadObject();
 		pthread_mutex_init(&obj->mutex, nullptr);
@@ -4051,6 +4476,7 @@ namespace kernel32 {
 		obj->detached = false;
 		obj->exitCode = 0;
 		obj->refCount = 1;
+		obj->suspendCount = startSuspended ? 1u : 0u;
 
 		ThreadStartData *startData = new ThreadStartData{lpStartAddress, lpParameter, obj};
 
@@ -4155,16 +4581,6 @@ namespace kernel32 {
 		return TRUE;
 	}
 
-	HANDLE WIN_FUNC CreateMutexW(void *lpMutexAttributes, BOOL bInitialOwner, LPCWSTR lpName);
-
-	HANDLE WIN_FUNC CreateMutexA(void *lpMutexAttributes, BOOL bInitialOwner, LPCSTR lpName) {
-		std::vector<uint16_t> wideName;
-		if (lpName) {
-			wideName = stringToWideString(lpName);
-		}
-		return CreateMutexW(lpMutexAttributes, bInitialOwner, lpName ? reinterpret_cast<LPCWSTR>(wideName.data()) : nullptr);
-	}
-
 	HANDLE WIN_FUNC CreateMutexW(void *lpMutexAttributes, BOOL bInitialOwner, LPCWSTR lpName) {
 		std::string nameLog;
 		if (lpName) {
@@ -4172,7 +4588,7 @@ namespace kernel32 {
 		} else {
 			nameLog = "<unnamed>";
 		}
-		DEBUG_LOG("CreateMutexW(name=%s, initialOwner=%d)\n", nameLog.c_str(), bInitialOwner);
+		DEBUG_LOG("CreateMutexW(%p, %d, %s)\n", lpMutexAttributes, bInitialOwner, nameLog.c_str());
 		(void)lpMutexAttributes;
 
 		std::u16string name = makeMutexName(lpName);
@@ -4215,6 +4631,15 @@ namespace kernel32 {
 		HANDLE handle = handles::allocDataHandle({handles::TYPE_MUTEX, obj, 0});
 		wibo::lastError = alreadyExists ? ERROR_ALREADY_EXISTS : ERROR_SUCCESS;
 		return handle;
+	}
+
+	HANDLE WIN_FUNC CreateMutexA(void *lpMutexAttributes, BOOL bInitialOwner, LPCSTR lpName) {
+		DEBUG_LOG("CreateMutexA -> ");
+		std::vector<uint16_t> wideName;
+		if (lpName) {
+			wideName = stringToWideString(lpName);
+		}
+		return CreateMutexW(lpMutexAttributes, bInitialOwner, lpName ? reinterpret_cast<LPCWSTR>(wideName.data()) : nullptr);
 	}
 
 	BOOL WIN_FUNC ReleaseMutex(HANDLE hMutex) {
@@ -4516,6 +4941,45 @@ namespace kernel32 {
 		}
 
 		return 1;
+	}
+
+	unsigned int WIN_FUNC GetStringTypeA(unsigned int Locale, unsigned int dwInfoType, const char *lpSrcStr, int cchSrc, uint16_t *lpCharType) {
+		DEBUG_LOG("GetStringTypeA(%u, %u, %p, %d, %p)\n", Locale, dwInfoType, lpSrcStr, cchSrc, lpCharType);
+		(void) Locale;
+
+		if (!lpSrcStr || !lpCharType) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+		if (dwInfoType != 1) {
+			wibo::lastError = ERROR_NOT_SUPPORTED;
+			return 0;
+		}
+
+		int length = cchSrc;
+		if (length < 0) {
+			length = static_cast<int>(strlen(lpSrcStr));
+		}
+		if (length < 0) {
+			length = 0;
+		}
+
+		std::vector<uint16_t> wide;
+		wide.reserve(length);
+		for (int i = 0; i < length; ++i) {
+			wide.push_back(static_cast<unsigned char>(lpSrcStr[i]));
+		}
+
+		unsigned int result = 1;
+		if (length > 0) {
+			result = GetStringTypeW(dwInfoType, wide.data(), length, lpCharType);
+		} else {
+			// Nothing to classify but Windows returns success.
+			result = 1;
+		}
+
+		wibo::lastError = ERROR_SUCCESS;
+		return result;
 	}
 
 	unsigned int WIN_FUNC FreeEnvironmentStringsW(void *penv) {
@@ -5367,6 +5831,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "GetLastError") == 0) return (void *) kernel32::GetLastError;
 	if (strcmp(name, "SetLastError") == 0) return (void *) kernel32::SetLastError;
 	if (strcmp(name, "IsBadReadPtr") == 0) return (void *) kernel32::IsBadReadPtr;
+	if (strcmp(name, "IsBadWritePtr") == 0) return (void *) kernel32::IsBadWritePtr;
 	if (strcmp(name, "Wow64DisableWow64FsRedirection") == 0) return (void *) kernel32::Wow64DisableWow64FsRedirection;
 	if (strcmp(name, "Wow64RevertWow64FsRedirection") == 0) return (void *) kernel32::Wow64RevertWow64FsRedirection;
 	if (strcmp(name, "RaiseException") == 0) return (void *) kernel32::RaiseException;
@@ -5436,6 +5901,8 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "SetEvent") == 0) return (void *) kernel32::SetEvent;
 	if (strcmp(name, "ResetEvent") == 0) return (void *) kernel32::ResetEvent;
 	if (strcmp(name, "ReleaseMutex") == 0) return (void *) kernel32::ReleaseMutex;
+	if (strcmp(name, "SetThreadAffinityMask") == 0) return (void *) kernel32::SetThreadAffinityMask;
+	if (strcmp(name, "ResumeThread") == 0) return (void *) kernel32::ResumeThread;
 
 	// winbase.h
 	if (strcmp(name, "GlobalAlloc") == 0) return (void *) kernel32::GlobalAlloc;
@@ -5459,6 +5926,8 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "FindResourceW") == 0) return (void *) kernel32::FindResourceW;
 	if (strcmp(name, "FindResourceExW") == 0) return (void *) kernel32::FindResourceExW;
 	if (strcmp(name, "SetHandleCount") == 0) return (void *) kernel32::SetHandleCount;
+	if (strcmp(name, "GetProcessAffinityMask") == 0) return (void *) kernel32::GetProcessAffinityMask;
+	if (strcmp(name, "SetProcessAffinityMask") == 0) return (void *) kernel32::SetProcessAffinityMask;
 	if (strcmp(name, "FormatMessageA") == 0) return (void *) kernel32::FormatMessageA;
 	if (strcmp(name, "GetComputerNameA") == 0) return (void *) kernel32::GetComputerNameA;
 	if (strcmp(name, "GetComputerNameW") == 0) return (void *) kernel32::GetComputerNameW;
@@ -5504,6 +5973,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "FindFirstFileW") == 0) return (void *) kernel32::FindFirstFileW;
 	if (strcmp(name, "FindFirstFileExA") == 0) return (void *) kernel32::FindFirstFileExA;
 	if (strcmp(name, "FindNextFileA") == 0) return (void *) kernel32::FindNextFileA;
+	if (strcmp(name, "FindNextFileW") == 0) return (void *) kernel32::FindNextFileW;
 	if (strcmp(name, "FindClose") == 0) return (void *) kernel32::FindClose;
 	if (strcmp(name, "GetFileAttributesA") == 0) return (void *) kernel32::GetFileAttributesA;
 	if (strcmp(name, "GetFileAttributesW") == 0) return (void *) kernel32::GetFileAttributesW;
@@ -5537,6 +6007,11 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "GetFileInformationByHandle") == 0) return (void *) kernel32::GetFileInformationByHandle;
 	if (strcmp(name, "GetTempFileNameA") == 0) return (void *) kernel32::GetTempFileNameA;
 	if (strcmp(name, "GetTempPathA") == 0) return (void *) kernel32::GetTempPathA;
+	if (strcmp(name, "GetLongPathNameA") == 0) return (void *) kernel32::GetLongPathNameA;
+	if (strcmp(name, "GetLongPathNameW") == 0) return (void *) kernel32::GetLongPathNameW;
+	if (strcmp(name, "GetDiskFreeSpaceA") == 0) return (void *) kernel32::GetDiskFreeSpaceA;
+	if (strcmp(name, "GetDiskFreeSpaceW") == 0) return (void *) kernel32::GetDiskFreeSpaceW;
+	if (strcmp(name, "GetDiskFreeSpaceExA") == 0) return (void*) kernel32::GetDiskFreeSpaceExA;
 	if (strcmp(name, "GetDiskFreeSpaceExW") == 0) return (void*) kernel32::GetDiskFreeSpaceExW;
 
 	// sysinfoapi.h
@@ -5589,6 +6064,7 @@ static void *resolveByName(const char *name) {
 	// stringapiset.h
 	if (strcmp(name, "WideCharToMultiByte") == 0) return (void *) kernel32::WideCharToMultiByte;
 	if (strcmp(name, "MultiByteToWideChar") == 0) return (void *) kernel32::MultiByteToWideChar;
+	if (strcmp(name, "GetStringTypeA") == 0) return (void *) kernel32::GetStringTypeA;
 	if (strcmp(name, "GetStringTypeW") == 0) return (void *) kernel32::GetStringTypeW;
 
 	// profileapi.h

@@ -326,42 +326,42 @@ bool wibo::Executable::resolveImports() {
 	}
 
 	// TODO: actual delay loading from __delayLoadHelper2
-	if (delayImportDirectoryRVA) {
-		DEBUG_LOG("Processing delay import table at RVA %x\n", delayImportDirectoryRVA);
-		PEDelayImportDescriptor *delay = fromRVA<PEDelayImportDescriptor>(delayImportDirectoryRVA);
-		while (delay && delay->name) {
-			char *dllName = fromRVA<char>(delay->name);
-			DEBUG_LOG("Delay DLL Name: %s\n", dllName);
-			uint32_t *lookupTable = fromRVA<uint32_t>(delay->importNameTable);
-			uint32_t *addressTable = fromRVA<uint32_t>(delay->importAddressTable);
-			ModuleInfo *module = loadModule(dllName);
-			while (*lookupTable) {
-				uint32_t lookup = *lookupTable;
-				if (lookup & 0x80000000) {
-					uint16_t ordinal = lookup & 0xFFFF;
-					DEBUG_LOG("  Ordinal: %d (IAT=%p)\n", ordinal, addressTable);
-					void *func = module ? resolveFuncByOrdinal(module, ordinal)
-										: resolveMissingImportByOrdinal(dllName, ordinal);
-					*addressTable = reinterpret_cast<uintptr_t>(func);
-				} else {
-					PEHintNameTableEntry *hintName = fromRVA<PEHintNameTableEntry>(lookup);
-					DEBUG_LOG("  Name: %s\n", hintName->name);
-					void *func = module ? resolveFuncByName(module, hintName->name)
-										: resolveMissingImportByName(dllName, hintName->name);
-					*addressTable = reinterpret_cast<uintptr_t>(func);
-				}
-				++lookupTable;
-				++addressTable;
-			}
-			if (delay->moduleHandle) {
-				HMODULE *moduleSlot = fromRVA<HMODULE>(delay->moduleHandle);
-				if (moduleSlot) {
-					*moduleSlot = module;
-				}
-			}
-			++delay;
-		}
-	}
+	// if (delayImportDirectoryRVA) {
+	// 	DEBUG_LOG("Processing delay import table at RVA %x\n", delayImportDirectoryRVA);
+	// 	PEDelayImportDescriptor *delay = fromRVA<PEDelayImportDescriptor>(delayImportDirectoryRVA);
+	// 	while (delay && delay->name) {
+	// 		char *dllName = fromRVA<char>(delay->name);
+	// 		DEBUG_LOG("Delay DLL Name: %s\n", dllName);
+	// 		uint32_t *lookupTable = fromRVA<uint32_t>(delay->importNameTable);
+	// 		uint32_t *addressTable = fromRVA<uint32_t>(delay->importAddressTable);
+	// 		ModuleInfo *module = loadModule(dllName);
+	// 		while (*lookupTable) {
+	// 			uint32_t lookup = *lookupTable;
+	// 			if (lookup & 0x80000000) {
+	// 				uint16_t ordinal = lookup & 0xFFFF;
+	// 				DEBUG_LOG("  Ordinal: %d (IAT=%p)\n", ordinal, addressTable);
+	// 				void *func = module ? resolveFuncByOrdinal(module, ordinal)
+	// 									: resolveMissingImportByOrdinal(dllName, ordinal);
+	// 				*addressTable = reinterpret_cast<uintptr_t>(func);
+	// 			} else {
+	// 				PEHintNameTableEntry *hintName = fromRVA<PEHintNameTableEntry>(lookup);
+	// 				DEBUG_LOG("  Name: %s\n", hintName->name);
+	// 				void *func = module ? resolveFuncByName(module, hintName->name)
+	// 									: resolveMissingImportByName(dllName, hintName->name);
+	// 				*addressTable = reinterpret_cast<uintptr_t>(func);
+	// 			}
+	// 			++lookupTable;
+	// 			++addressTable;
+	// 		}
+	// 		if (delay->moduleHandle) {
+	// 			HMODULE *moduleSlot = fromRVA<HMODULE>(delay->moduleHandle);
+	// 			if (moduleSlot) {
+	// 				*moduleSlot = module;
+	// 			}
+	// 		}
+	// 		++delay;
+	// 	}
+	// }
 
 	importsResolved = true;
 	importsResolving = false;

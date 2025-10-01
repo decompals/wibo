@@ -13,8 +13,10 @@ namespace handles {
 		TYPE_TOKEN,
 		TYPE_MUTEX,
 		TYPE_EVENT,
+		TYPE_SEMAPHORE,
 		TYPE_THREAD,
-		TYPE_HEAP
+		TYPE_HEAP,
+		TYPE_REGISTRY_KEY
 	};
 
     struct Data {

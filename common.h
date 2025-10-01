@@ -60,6 +60,10 @@ typedef size_t SIZE_T;
 typedef SIZE_T *PSIZE_T;
 typedef unsigned char BYTE;
 typedef unsigned int UINT;
+typedef void *HKEY;
+typedef HKEY *PHKEY;
+typedef DWORD REGSAM;
+typedef LONG LSTATUS;
 
 typedef struct _OVERLAPPED {
 	ULONG_PTR Internal;

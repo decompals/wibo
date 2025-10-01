@@ -303,6 +303,34 @@ namespace kernel32 {
 		}
 	}
 
+	struct SemaphoreObject {
+		pthread_mutex_t mutex;
+		pthread_cond_t cond;
+		LONG count = 0;
+		LONG maxCount = 0;
+		std::u16string name;
+		int refCount = 1;
+	};
+
+	static std::mutex semaphoreRegistryLock;
+	static std::unordered_map<std::u16string, SemaphoreObject *> namedSemaphores;
+
+	static void releaseSemaphoreObject(SemaphoreObject *obj) {
+		if (!obj) {
+			return;
+		}
+		std::lock_guard<std::mutex> lock(semaphoreRegistryLock);
+		obj->refCount--;
+		if (obj->refCount == 0) {
+			if (!obj->name.empty()) {
+				namedSemaphores.erase(obj->name);
+			}
+			pthread_cond_destroy(&obj->cond);
+			pthread_mutex_destroy(&obj->mutex);
+			delete obj;
+		}
+	}
+
 	typedef DWORD (WIN_FUNC *LPTHREAD_START_ROUTINE)(LPVOID);
 
 	struct ThreadObject {
@@ -310,6 +338,7 @@ namespace kernel32 {
 		bool finished = false;
 		bool joined = false;
 		bool detached = false;
+		bool synthetic = false;
 		DWORD exitCode = 0;
 		int refCount = 1;
 		pthread_mutex_t mutex;
@@ -332,15 +361,17 @@ namespace kernel32 {
 		delete obj;
 	}
 
+	static ThreadObject *retainThreadObject(ThreadObject *obj);
 	static void releaseThreadObject(ThreadObject *obj);
 	static void *threadTrampoline(void *param);
+	static ThreadObject *ensureCurrentThreadObject();
 	static thread_local ThreadObject *currentThreadObject = nullptr;
-	static constexpr uintptr_t PSEUDO_CURRENT_THREAD_HANDLE_VALUE = 0x100007u;
+	static constexpr uintptr_t PSEUDO_CURRENT_THREAD_HANDLE_VALUE = static_cast<uintptr_t>(-2);
 
 	static ThreadObject *threadObjectFromHandle(HANDLE hThread) {
 		auto raw = reinterpret_cast<uintptr_t>(hThread);
-		if (raw == PSEUDO_CURRENT_THREAD_HANDLE_VALUE || raw == static_cast<uintptr_t>(-2)) {
-			return currentThreadObject;
+		if (raw == PSEUDO_CURRENT_THREAD_HANDLE_VALUE) {
+			return ensureCurrentThreadObject();
 		}
 		if (raw == static_cast<uintptr_t>(-1) || raw == 0) {
 			return nullptr;
@@ -350,6 +381,26 @@ namespace kernel32 {
 			return nullptr;
 		}
 		return reinterpret_cast<ThreadObject *>(data.ptr);
+	}
+
+	static ThreadObject *ensureCurrentThreadObject() {
+		ThreadObject *obj = currentThreadObject;
+		if (obj) {
+			return obj;
+		}
+		obj = new ThreadObject();
+		obj->thread = pthread_self();
+		obj->finished = false;
+		obj->joined = false;
+		obj->detached = true;
+		obj->synthetic = false;
+		obj->exitCode = STILL_ACTIVE;
+		obj->refCount = 0;
+		obj->suspendCount = 0;
+		pthread_mutex_init(&obj->mutex, nullptr);
+		pthread_cond_init(&obj->cond, nullptr);
+		currentThreadObject = obj;
+		return obj;
 	}
 
 	static std::u16string makeMutexName(LPCWSTR name) {
@@ -378,6 +429,16 @@ namespace kernel32 {
 		}
 	}
 
+	static ThreadObject *retainThreadObject(ThreadObject *obj) {
+		if (!obj) {
+			return nullptr;
+		}
+		pthread_mutex_lock(&obj->mutex);
+		obj->refCount++;
+		pthread_mutex_unlock(&obj->mutex);
+		return obj;
+	}
+
 	static void releaseThreadObject(ThreadObject *obj) {
 		if (!obj) {
 			return;
@@ -388,14 +449,16 @@ namespace kernel32 {
 		bool finished = false;
 		bool joined = false;
 		bool detached = false;
+		bool synthetic = false;
 		pthread_mutex_lock(&obj->mutex);
 		obj->refCount--;
 		finished = obj->finished;
 		joined = obj->joined;
 		detached = obj->detached;
+		synthetic = obj->synthetic;
 		thread = obj->thread;
 		if (obj->refCount == 0) {
-			if (finished) {
+			if (finished || synthetic) {
 				shouldDelete = true;
 			} else if (!detached) {
 				obj->detached = true;
@@ -405,13 +468,15 @@ namespace kernel32 {
 		}
 		pthread_mutex_unlock(&obj->mutex);
 
-		if (shouldDetach) {
+		if (shouldDetach && !synthetic) {
 			pthread_detach(thread);
 		}
 
 		if (shouldDelete) {
-			if (!joined && !detached) {
-				pthread_join(thread, nullptr);
+			if (!synthetic) {
+				if (!joined && !detached) {
+					pthread_join(thread, nullptr);
+				}
 			}
 			destroyThreadObject(obj);
 		}
@@ -573,6 +638,32 @@ namespace kernel32 {
 	BOOL WIN_FUNC Wow64RevertWow64FsRedirection(void *OldValue) {
 		DEBUG_LOG("STUB: Wow64RevertWow64FsRedirection(%p)\n", OldValue);
 		(void) OldValue;
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+
+	BOOL WIN_FUNC IsWow64Process(HANDLE hProcess, PBOOL Wow64Process) {
+		DEBUG_LOG("IsWow64Process(%p, %p)\n", hProcess, Wow64Process);
+		if (!Wow64Process) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+
+		uintptr_t rawHandle = reinterpret_cast<uintptr_t>(hProcess);
+		bool isPseudoHandle = rawHandle == static_cast<uintptr_t>(-1);
+		if (!isPseudoHandle) {
+			if (!hProcess) {
+				wibo::lastError = ERROR_INVALID_HANDLE;
+				return FALSE;
+			}
+			auto data = handles::dataFromHandle(hProcess, false);
+			if (data.type != handles::TYPE_PROCESS || data.ptr == nullptr) {
+				wibo::lastError = ERROR_INVALID_HANDLE;
+				return FALSE;
+			}
+		}
+
+		*Wow64Process = FALSE;
 		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
@@ -991,6 +1082,22 @@ namespace kernel32 {
 			wibo::lastError = ERROR_SUCCESS;
 			return 0;
 		}
+		case handles::TYPE_SEMAPHORE: {
+			auto *obj = reinterpret_cast<SemaphoreObject *>(data.ptr);
+			if (dwMilliseconds != 0xffffffff) {
+				DEBUG_LOG("WaitForSingleObject: timeout for semaphore not supported\n");
+				wibo::lastError = ERROR_NOT_SUPPORTED;
+				return 0xFFFFFFFF;
+			}
+			pthread_mutex_lock(&obj->mutex);
+			while (obj->count == 0) {
+				pthread_cond_wait(&obj->cond, &obj->mutex);
+			}
+			obj->count--;
+			pthread_mutex_unlock(&obj->mutex);
+			wibo::lastError = ERROR_SUCCESS;
+			return 0;
+		}
 		case handles::TYPE_MUTEX: {
 			auto *obj = reinterpret_cast<MutexObject *>(data.ptr);
 			if (dwMilliseconds != 0xffffffff) {
@@ -1372,27 +1479,123 @@ namespace kernel32 {
 										  unsigned int bInheritHandle, unsigned int dwOptions) {
 		DEBUG_LOG("DuplicateHandle(%p, %p, %p, %p, %x, %d, %x)\n", hSourceProcessHandle, hSourceHandle,
 				  hTargetProcessHandle, lpTargetHandle, dwDesiredAccess, bInheritHandle, dwOptions);
-		assert(hSourceProcessHandle == (void *)0xFFFFFFFF); // current process
-		assert(hTargetProcessHandle == (void *)0xFFFFFFFF); // current process
 		(void)dwDesiredAccess;
 		(void)bInheritHandle;
 		(void)dwOptions;
+		if (!lpTargetHandle) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return 0;
+		}
+
+		auto validateProcessHandle = [&](void *handle) -> bool {
+			uintptr_t raw = reinterpret_cast<uintptr_t>(handle);
+			if (raw == static_cast<uintptr_t>(-1)) {
+				return true;
+			}
+			auto data = handles::dataFromHandle(handle, false);
+			if (data.type != handles::TYPE_PROCESS || data.ptr == nullptr) {
+				return false;
+			}
+			auto *proc = reinterpret_cast<processes::Process *>(data.ptr);
+			return proc && proc->pid == getpid();
+		};
+
+		if (!validateProcessHandle(hSourceProcessHandle) || !validateProcessHandle(hTargetProcessHandle)) {
+			DEBUG_LOG("DuplicateHandle: unsupported process handle combination (source=%p target=%p)\n",
+				  hSourceProcessHandle, hTargetProcessHandle);
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return 0;
+		}
+
 		auto file = files::fileHandleFromHandle(hSourceHandle);
 		if (file && (file->fp == stdin || file->fp == stdout || file->fp == stderr)) {
-			// we never close standard handles so they are fine to duplicate
 			void *handle = files::duplicateFileHandle(file, false);
-			DEBUG_LOG("-> %p\n", handle);
+			DEBUG_LOG("DuplicateHandle: duplicated std handle -> %p\n", handle);
 			*lpTargetHandle = handle;
+			wibo::lastError = ERROR_SUCCESS;
 			return 1;
 		}
-		// other handles are more problematic; fail for now
-		printf("failed to duplicate handle\n");
-		assert(0);
+
+		uintptr_t sourceHandleRaw = reinterpret_cast<uintptr_t>(hSourceHandle);
+		if (sourceHandleRaw == static_cast<uintptr_t>(-1)) {
+			void *handle = processes::allocProcessHandle(getpid());
+			processes::Process *proc = processes::processFromHandle(handle, false);
+			if (proc) {
+				proc->exitCode = STILL_ACTIVE;
+				proc->forcedExitCode = STILL_ACTIVE;
+				proc->terminationRequested = false;
+			}
+			DEBUG_LOG("DuplicateHandle: created process handle for current process -> %p\n", handle);
+			*lpTargetHandle = handle;
+			wibo::lastError = ERROR_SUCCESS;
+			return 1;
+		}
+		if (sourceHandleRaw == PSEUDO_CURRENT_THREAD_HANDLE_VALUE) {
+			ThreadObject *obj = ensureCurrentThreadObject();
+			if (obj) {
+				retainThreadObject(obj);
+				void *handle = handles::allocDataHandle({handles::TYPE_THREAD, obj, 0});
+				DEBUG_LOG("DuplicateHandle: duplicated pseudo current thread -> %p\n", handle);
+				*lpTargetHandle = handle;
+				wibo::lastError = ERROR_SUCCESS;
+				return 1;
+			}
+			ThreadObject *syntheticObj = new ThreadObject();
+			syntheticObj->thread = pthread_self();
+			syntheticObj->finished = false;
+			syntheticObj->joined = false;
+			syntheticObj->detached = true;
+			syntheticObj->synthetic = true;
+			syntheticObj->exitCode = 0;
+			syntheticObj->refCount = 1;
+			syntheticObj->suspendCount = 0;
+			pthread_mutex_init(&syntheticObj->mutex, nullptr);
+			pthread_cond_init(&syntheticObj->cond, nullptr);
+			void *handle = handles::allocDataHandle({handles::TYPE_THREAD, syntheticObj, 0});
+			DEBUG_LOG("DuplicateHandle: created synthetic thread handle -> %p\n", handle);
+			*lpTargetHandle = handle;
+			wibo::lastError = ERROR_SUCCESS;
+			return 1;
+		}
+
+		handles::Data data = handles::dataFromHandle(hSourceHandle, false);
+		if (data.type == handles::TYPE_PROCESS && data.ptr) {
+			auto *original = reinterpret_cast<processes::Process *>(data.ptr);
+			void *handle = processes::allocProcessHandle(original->pid);
+			auto *copy = processes::processFromHandle(handle, false);
+			if (copy) {
+				*copy = *original;
+			}
+			DEBUG_LOG("DuplicateHandle: duplicated process handle -> %p\n", handle);
+			*lpTargetHandle = handle;
+			wibo::lastError = ERROR_SUCCESS;
+			return 1;
+		}
+		if (data.type == handles::TYPE_THREAD && data.ptr) {
+			auto *threadObj = reinterpret_cast<ThreadObject *>(data.ptr);
+			if (!retainThreadObject(threadObj)) {
+				wibo::lastError = ERROR_INVALID_HANDLE;
+				return 0;
+			}
+			void *handle = handles::allocDataHandle({handles::TYPE_THREAD, threadObj, 0});
+			DEBUG_LOG("DuplicateHandle: duplicated thread handle -> %p\n", handle);
+			*lpTargetHandle = handle;
+			wibo::lastError = ERROR_SUCCESS;
+			return 1;
+		}
+		DEBUG_LOG("DuplicateHandle: unsupported handle type for %p\n", hSourceHandle);
+		wibo::lastError = ERROR_INVALID_HANDLE;
+		return 0;
 	}
 
 	BOOL WIN_FUNC CloseHandle(HANDLE hObject) {
 		DEBUG_LOG("CloseHandle(%p)\n", hObject);
 		auto data = handles::dataFromHandle(hObject, true);
+		if (data.type == handles::TYPE_UNUSED || data.ptr == nullptr) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return FALSE;
+		}
+		bool success = true;
 		if (data.type == handles::TYPE_FILE) {
 			auto file = reinterpret_cast<files::FileHandle *>(data.ptr);
 			if (file) {
@@ -1401,15 +1604,24 @@ namespace kernel32 {
 					fclose(file->fp);
 				}
 				delete file;
+			} else {
+				success = false;
 			}
 		} else if (data.type == handles::TYPE_MAPPED) {
 			auto *mapping = reinterpret_cast<MappingObject *>(data.ptr);
 			if (mapping) {
 				mapping->closed = true;
 				tryReleaseMapping(mapping);
+			} else {
+				success = false;
 			}
 		} else if (data.type == handles::TYPE_PROCESS) {
-			delete (processes::Process *)data.ptr;
+			auto *proc = reinterpret_cast<processes::Process *>(data.ptr);
+			if (proc) {
+				delete proc;
+			} else {
+				success = false;
+			}
 		} else if (data.type == handles::TYPE_TOKEN) {
 			advapi32::releaseToken(data.ptr);
 		} else if (data.type == handles::TYPE_MUTEX) {
@@ -1418,7 +1630,16 @@ namespace kernel32 {
 			releaseEventObject(reinterpret_cast<EventObject *>(data.ptr));
 		} else if (data.type == handles::TYPE_THREAD) {
 			releaseThreadObject(reinterpret_cast<ThreadObject *>(data.ptr));
+		} else if (data.type == handles::TYPE_SEMAPHORE) {
+			releaseSemaphoreObject(reinterpret_cast<SemaphoreObject *>(data.ptr));
+		} else {
+			success = false;
 		}
+		if (!success) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return FALSE;
+		}
+		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 
@@ -4895,8 +5116,11 @@ namespace kernel32 {
 	}
 
 	HANDLE WIN_FUNC GetCurrentThread() {
-		DEBUG_LOG("STUB: GetCurrentThread\n");
-		return reinterpret_cast<HANDLE>(PSEUDO_CURRENT_THREAD_HANDLE_VALUE);
+		ThreadObject *obj = ensureCurrentThreadObject();
+		(void)obj;
+		HANDLE pseudoHandle = reinterpret_cast<HANDLE>(PSEUDO_CURRENT_THREAD_HANDLE_VALUE);
+		DEBUG_LOG("GetCurrentThread() -> %p\n", pseudoHandle);
+		return pseudoHandle;
 	}
 
 	DWORD_PTR WIN_FUNC SetThreadAffinityMask(HANDLE hThread, DWORD_PTR dwThreadAffinityMask) {
@@ -4908,7 +5132,6 @@ namespace kernel32 {
 
 		uintptr_t rawThreadHandle = reinterpret_cast<uintptr_t>(hThread);
 		bool isPseudoHandle = rawThreadHandle == PSEUDO_CURRENT_THREAD_HANDLE_VALUE ||
-							 rawThreadHandle == static_cast<uintptr_t>(-2) ||
 							 rawThreadHandle == 0 ||
 							 rawThreadHandle == static_cast<uintptr_t>(-1);
 		if (!isPseudoHandle) {
@@ -5060,25 +5283,11 @@ namespace kernel32 {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
 			return FALSE;
 		}
-		if (reinterpret_cast<uintptr_t>(hThread) == PSEUDO_CURRENT_THREAD_HANDLE_VALUE) {
-			ThreadObject *obj = currentThreadObject;
-			if (obj) {
-				pthread_mutex_lock(&obj->mutex);
-				DWORD code = obj->finished ? obj->exitCode : STILL_ACTIVE;
-				pthread_mutex_unlock(&obj->mutex);
-				*lpExitCode = code;
-			} else {
-				*lpExitCode = STILL_ACTIVE;
-			}
-			wibo::lastError = ERROR_SUCCESS;
-			return TRUE;
-		}
-		auto data = handles::dataFromHandle(hThread, false);
-		if (data.type != handles::TYPE_THREAD) {
+		ThreadObject *obj = threadObjectFromHandle(hThread);
+		if (!obj) {
 			wibo::lastError = ERROR_INVALID_HANDLE;
 			return FALSE;
 		}
-		ThreadObject *obj = reinterpret_cast<ThreadObject *>(data.ptr);
 		pthread_mutex_lock(&obj->mutex);
 		DWORD code = obj->finished ? obj->exitCode : STILL_ACTIVE;
 		pthread_mutex_unlock(&obj->mutex);
@@ -5222,6 +5431,100 @@ namespace kernel32 {
 		return CreateEventW(lpEventAttributes, bManualReset, bInitialState, lpName ? reinterpret_cast<LPCWSTR>(wideName.data()) : nullptr);
 	}
 
+	HANDLE WIN_FUNC CreateSemaphoreW(void *lpSemaphoreAttributes, LONG lInitialCount, LONG lMaximumCount,
+									 LPCWSTR lpName) {
+		DEBUG_LOG("CreateSemaphoreW(%p, %ld, %ld, %ls)\n", lpSemaphoreAttributes, static_cast<long>(lInitialCount),
+				  static_cast<long>(lMaximumCount), lpName ? reinterpret_cast<const wchar_t *>(lpName) : L"<null>");
+		(void)lpSemaphoreAttributes;
+		SemaphoreObject *obj = nullptr;
+		bool alreadyExists = false;
+		std::u16string name = makeMutexName(lpName);
+		{
+			std::lock_guard<std::mutex> lock(semaphoreRegistryLock);
+			if (!name.empty()) {
+				auto it = namedSemaphores.find(name);
+				if (it != namedSemaphores.end()) {
+					obj = it->second;
+					obj->refCount++;
+					alreadyExists = true;
+				}
+			}
+			if (!obj) {
+				if (lMaximumCount <= 0 || lInitialCount < 0 || lInitialCount > lMaximumCount) {
+					wibo::lastError = ERROR_INVALID_PARAMETER;
+					return nullptr;
+				}
+				obj = new SemaphoreObject();
+				pthread_mutex_init(&obj->mutex, nullptr);
+				pthread_cond_init(&obj->cond, nullptr);
+				obj->count = lInitialCount;
+				obj->maxCount = lMaximumCount;
+				obj->name = name;
+				obj->refCount = 1;
+				if (!name.empty()) {
+					namedSemaphores[name] = obj;
+				}
+			}
+		}
+		void *handle = handles::allocDataHandle({handles::TYPE_SEMAPHORE, obj, 0});
+		wibo::lastError = alreadyExists ? ERROR_ALREADY_EXISTS : ERROR_SUCCESS;
+		return handle;
+	}
+
+	HANDLE WIN_FUNC CreateSemaphoreA(void *lpSemaphoreAttributes, LONG lInitialCount, LONG lMaximumCount,
+									 LPCSTR lpName) {
+		DEBUG_LOG("CreateSemaphoreA -> ");
+		std::vector<uint16_t> wideName;
+		if (lpName) {
+			wideName = stringToWideString(lpName);
+		}
+		return CreateSemaphoreW(lpSemaphoreAttributes, lInitialCount, lMaximumCount,
+								lpName ? reinterpret_cast<LPCWSTR>(wideName.data()) : nullptr);
+	}
+
+	BOOL WIN_FUNC ReleaseSemaphore(HANDLE hSemaphore, LONG lReleaseCount, PLONG lpPreviousCount) {
+		DEBUG_LOG("ReleaseSemaphore(%p, %ld, %p)\n", hSemaphore, static_cast<long>(lReleaseCount), lpPreviousCount);
+		if (lReleaseCount <= 0) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+		auto data = handles::dataFromHandle(hSemaphore, false);
+		if (data.type != handles::TYPE_SEMAPHORE || data.ptr == nullptr) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return FALSE;
+		}
+		auto *obj = reinterpret_cast<SemaphoreObject *>(data.ptr);
+		pthread_mutex_lock(&obj->mutex);
+		if (lpPreviousCount) {
+			*lpPreviousCount = obj->count;
+		}
+		if (lReleaseCount > obj->maxCount - obj->count) {
+			pthread_mutex_unlock(&obj->mutex);
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+		obj->count += lReleaseCount;
+		pthread_mutex_unlock(&obj->mutex);
+		pthread_cond_broadcast(&obj->cond);
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+
+	BOOL WIN_FUNC SetThreadPriority(HANDLE hThread, int nPriority) {
+		DEBUG_LOG("STUB: SetThreadPriority(%p, %d)\n", hThread, nPriority);
+		(void) hThread;
+		(void) nPriority;
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+
+	int WIN_FUNC GetThreadPriority(HANDLE hThread) {
+		DEBUG_LOG("STUB: GetThreadPriority(%p)\n", hThread);
+		(void) hThread;
+		wibo::lastError = ERROR_SUCCESS;
+		return 0; // THREAD_PRIORITY_NORMAL
+	}
+
 	BOOL WIN_FUNC SetEvent(HANDLE hEvent) {
 		DEBUG_LOG("SetEvent(%p)\n", hEvent);
 		auto data = handles::dataFromHandle(hEvent, false);
@@ -5271,8 +5574,7 @@ namespace kernel32 {
 		}
 
 		bool isPseudoCurrentThread = reinterpret_cast<uintptr_t>(hThread) == PSEUDO_CURRENT_THREAD_HANDLE_VALUE ||
-									 hThread == (HANDLE)0xFFFFFFFE || hThread == (HANDLE)0 ||
-									 hThread == (HANDLE)0xFFFFFFFF;
+									 hThread == (HANDLE)0 || hThread == (HANDLE)0xFFFFFFFF;
 		if (!isPseudoCurrentThread) {
 			DEBUG_LOG("GetThreadTimes: unsupported handle %p\n", hThread);
 			wibo::lastError = ERROR_INVALID_HANDLE;
@@ -6340,6 +6642,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "IsBadWritePtr") == 0) return (void *) kernel32::IsBadWritePtr;
 	if (strcmp(name, "Wow64DisableWow64FsRedirection") == 0) return (void *) kernel32::Wow64DisableWow64FsRedirection;
 	if (strcmp(name, "Wow64RevertWow64FsRedirection") == 0) return (void *) kernel32::Wow64RevertWow64FsRedirection;
+	if (strcmp(name, "IsWow64Process") == 0) return (void *) kernel32::IsWow64Process;
 	if (strcmp(name, "RaiseException") == 0) return (void *) kernel32::RaiseException;
 	if (strcmp(name, "AddVectoredExceptionHandler") == 0) return (void *) kernel32::AddVectoredExceptionHandler;
 
@@ -6404,11 +6707,16 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "CreateMutexW") == 0) return (void *) kernel32::CreateMutexW;
 	if (strcmp(name, "CreateEventA") == 0) return (void *) kernel32::CreateEventA;
 	if (strcmp(name, "CreateEventW") == 0) return (void *) kernel32::CreateEventW;
+	if (strcmp(name, "CreateSemaphoreA") == 0) return (void *) kernel32::CreateSemaphoreA;
+	if (strcmp(name, "CreateSemaphoreW") == 0) return (void *) kernel32::CreateSemaphoreW;
 	if (strcmp(name, "SetEvent") == 0) return (void *) kernel32::SetEvent;
 	if (strcmp(name, "ResetEvent") == 0) return (void *) kernel32::ResetEvent;
 	if (strcmp(name, "ReleaseMutex") == 0) return (void *) kernel32::ReleaseMutex;
+	if (strcmp(name, "ReleaseSemaphore") == 0) return (void *) kernel32::ReleaseSemaphore;
 	if (strcmp(name, "SetThreadAffinityMask") == 0) return (void *) kernel32::SetThreadAffinityMask;
 	if (strcmp(name, "ResumeThread") == 0) return (void *) kernel32::ResumeThread;
+	if (strcmp(name, "SetThreadPriority") == 0) return (void *) kernel32::SetThreadPriority;
+	if (strcmp(name, "GetThreadPriority") == 0) return (void *) kernel32::GetThreadPriority;
 
 	// winbase.h
 	if (strcmp(name, "GlobalAlloc") == 0) return (void *) kernel32::GlobalAlloc;

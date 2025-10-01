@@ -4,10 +4,142 @@
 #include "strutil.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cstring>
+#include <mutex>
+#include <string>
 #include <sys/random.h>
+#include <unordered_set>
+#include <unordered_map>
 #include <vector>
 
 namespace {
+	constexpr DWORD REG_OPTION_OPEN_LINK = 0x00000008;
+	constexpr DWORD KEY_WOW64_64KEY = 0x00000100;
+	constexpr DWORD KEY_WOW64_32KEY = 0x00000200;
+
+	struct RegistryKeyHandleData {
+		std::u16string canonicalPath;
+		bool predefined = false;
+	};
+
+	struct PredefinedKeyInfo {
+		uintptr_t value;
+		const char16_t *name;
+	};
+
+	static constexpr PredefinedKeyInfo predefinedKeyInfos[] = {
+		{0x80000000u, u"HKEY_CLASSES_ROOT"},
+		{0x80000001u, u"HKEY_CURRENT_USER"},
+		{0x80000002u, u"HKEY_LOCAL_MACHINE"},
+		{0x80000003u, u"HKEY_USERS"},
+		{0x80000004u, u"HKEY_PERFORMANCE_DATA"},
+		{0x80000005u, u"HKEY_CURRENT_CONFIG"},
+	};
+
+	static constexpr size_t predefinedKeyCount = sizeof(predefinedKeyInfos) / sizeof(predefinedKeyInfos[0]);
+
+	static std::mutex registryMutex;
+	static bool predefinedHandlesInitialized = false;
+	static RegistryKeyHandleData predefinedHandles[predefinedKeyCount];
+	static bool registryInitialized = false;
+	static std::unordered_set<std::u16string> existingKeys;
+	struct Luid;
+	static std::mutex privilegeMapMutex;
+	static std::unordered_map<std::string, Luid> privilegeLuidCache;
+
+	static std::u16string canonicalizeKeySegment(const std::u16string &input) {
+		std::u16string result;
+		result.reserve(input.size());
+		bool lastWasSlash = false;
+		for (char16_t ch : input) {
+			char16_t normalized = (ch == u'/') ? u'\\' : ch;
+			if (normalized == u'\\') {
+				if (!result.empty() && !lastWasSlash) {
+					result.push_back(u'\\');
+				}
+				lastWasSlash = true;
+				continue;
+			}
+			lastWasSlash = false;
+			uint16_t lowered = wcharToLower(static_cast<uint16_t>(normalized));
+			result.push_back(static_cast<char16_t>(lowered));
+		}
+		while (!result.empty() && result.back() == u'\\') {
+			result.pop_back();
+		}
+		auto it = result.begin();
+		while (it != result.end() && *it == u'\\') {
+			it = result.erase(it);
+		}
+		return result;
+	}
+
+	static std::u16string canonicalizeKeySegment(const uint16_t *input) {
+		if (!input) {
+			return {};
+		}
+		std::u16string wide(reinterpret_cast<const char16_t *>(input), wstrlen(input));
+		return canonicalizeKeySegment(wide);
+	}
+
+	static void initializePredefinedHandlesLocked() {
+		if (predefinedHandlesInitialized) {
+			return;
+		}
+		for (size_t i = 0; i < predefinedKeyCount; ++i) {
+			predefinedHandles[i].canonicalPath = canonicalizeKeySegment(std::u16string(predefinedKeyInfos[i].name));
+			predefinedHandles[i].predefined = true;
+		}
+		predefinedHandlesInitialized = true;
+	}
+
+	static RegistryKeyHandleData *predefinedHandleForValue(uintptr_t value) {
+		for (size_t i = 0; i < predefinedKeyCount; ++i) {
+			if (predefinedKeyInfos[i].value == value) {
+				return &predefinedHandles[i];
+			}
+		}
+		return nullptr;
+	}
+
+	static RegistryKeyHandleData *handleDataFromHKeyLocked(HKEY hKey) {
+		uintptr_t raw = reinterpret_cast<uintptr_t>(hKey);
+		if (raw == 0) {
+			return nullptr;
+		}
+		initializePredefinedHandlesLocked();
+		if (auto *predefined = predefinedHandleForValue(raw)) {
+			return predefined;
+		}
+		auto data = handles::dataFromHandle(hKey, false);
+		if (data.type != handles::TYPE_REGISTRY_KEY || data.ptr == nullptr) {
+			return nullptr;
+		}
+		return static_cast<RegistryKeyHandleData *>(data.ptr);
+	}
+
+	static bool isPredefinedKeyHandle(HKEY hKey) {
+		uintptr_t raw = reinterpret_cast<uintptr_t>(hKey);
+		for (size_t i = 0; i < predefinedKeyCount; ++i) {
+			if (predefinedKeyInfos[i].value == raw) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	static void ensureRegistryInitializedLocked() {
+		if (registryInitialized) {
+			return;
+		}
+		initializePredefinedHandlesLocked();
+		for (size_t i = 0; i < predefinedKeyCount; ++i) {
+			existingKeys.insert(predefinedHandles[i].canonicalPath);
+		}
+		registryInitialized = true;
+	}
+
 	using ALG_ID = unsigned int;
 
 	constexpr ALG_ID CALG_MD5 = 0x00008003;
@@ -16,6 +148,20 @@ namespace {
 	constexpr DWORD HP_ALGID = 0x00000001;
 	constexpr DWORD HP_HASHVAL = 0x00000002;
 	constexpr DWORD HP_HASHSIZE = 0x00000004;
+
+	constexpr DWORD SECURITY_DESCRIPTOR_REVISION = 1;
+	constexpr uint16_t SE_DACL_PRESENT = 0x0004;
+	constexpr uint16_t SE_DACL_DEFAULTED = 0x0008;
+
+	struct SecurityDescriptor {
+		uint8_t Revision = 0;
+		uint8_t Sbz1 = 0;
+		uint16_t Control = 0;
+		void *Owner = nullptr;
+		void *Group = nullptr;
+		void *Sacl = nullptr;
+		void *Dacl = nullptr;
+	};
 
 	struct HashObject {
 		ALG_ID algid = 0;
@@ -81,6 +227,11 @@ namespace {
 	struct Luid {
 		uint32_t LowPart = 0;
 		int32_t HighPart = 0;
+	};
+
+	struct LuidAndAttributes {
+		Luid value;
+		DWORD Attributes = 0;
 	};
 
 	struct TokenStatisticsData {
@@ -287,9 +438,93 @@ namespace {
 }
 
 namespace advapi32 {
-	unsigned int WIN_FUNC RegOpenKeyExA(void *hKey, const char *lpSubKey, unsigned int ulOptions, void *samDesired, void **phkResult) {
-		DEBUG_LOG("STUB: RegOpenKeyExA(%p, %s, ...)\n", hKey, lpSubKey);
-		return 1; // screw them for now
+	LSTATUS WIN_FUNC RegOpenKeyExW(HKEY hKey, const uint16_t *lpSubKey, DWORD ulOptions, REGSAM samDesired, PHKEY phkResult) {
+		std::string subKeyString = lpSubKey ? wideStringToString(lpSubKey) : std::string("(null)");
+		DEBUG_LOG("RegOpenKeyExW(%p, %s, %u, 0x%x, %p)\n", hKey, subKeyString.c_str(), ulOptions, samDesired, phkResult);
+		if (!phkResult) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return ERROR_INVALID_PARAMETER;
+		}
+		*phkResult = nullptr;
+		if ((ulOptions & ~REG_OPTION_OPEN_LINK) != 0) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return ERROR_INVALID_PARAMETER;
+		}
+		if (ulOptions & REG_OPTION_OPEN_LINK) {
+			DEBUG_LOG("RegOpenKeyExW: ignoring REG_OPTION_OPEN_LINK\n");
+		}
+		REGSAM sanitizedAccess = samDesired & ~(KEY_WOW64_64KEY | KEY_WOW64_32KEY);
+		if (sanitizedAccess != samDesired) {
+			DEBUG_LOG("RegOpenKeyExW: ignoring WOW64 access mask 0x%x\n", samDesired ^ sanitizedAccess);
+		}
+		(void) sanitizedAccess;
+		std::lock_guard<std::mutex> lock(registryMutex);
+		ensureRegistryInitializedLocked();
+		RegistryKeyHandleData *baseHandle = handleDataFromHKeyLocked(hKey);
+		if (!baseHandle) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return ERROR_INVALID_HANDLE;
+		}
+		std::u16string targetPath = baseHandle->canonicalPath;
+		if (lpSubKey && lpSubKey[0] != 0) {
+			std::u16string subComponent = canonicalizeKeySegment(lpSubKey);
+			if (!subComponent.empty()) {
+				if (!targetPath.empty()) {
+					targetPath.push_back(u'\\');
+				}
+				targetPath.append(subComponent);
+			}
+		}
+		if (targetPath.empty()) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return ERROR_INVALID_HANDLE;
+		}
+		if (existingKeys.find(targetPath) == existingKeys.end()) {
+			wibo::lastError = ERROR_FILE_NOT_FOUND;
+			return ERROR_FILE_NOT_FOUND;
+		}
+		if (!lpSubKey || lpSubKey[0] == 0) {
+			if (baseHandle->predefined) {
+				*phkResult = hKey;
+				wibo::lastError = ERROR_SUCCESS;
+				return ERROR_SUCCESS;
+			}
+		}
+		auto *handleData = new RegistryKeyHandleData;
+		handleData->canonicalPath = targetPath;
+		handleData->predefined = false;
+		auto handle = handles::allocDataHandle({handles::TYPE_REGISTRY_KEY, handleData, sizeof(*handleData)});
+		*phkResult = reinterpret_cast<HKEY>(handle);
+		wibo::lastError = ERROR_SUCCESS;
+		return ERROR_SUCCESS;
+	}
+
+	LSTATUS WIN_FUNC RegOpenKeyExA(HKEY hKey, const char *lpSubKey, DWORD ulOptions, REGSAM samDesired, PHKEY phkResult) {
+		DEBUG_LOG("RegOpenKeyExA(%p, %s, %u, 0x%x, %p)\n", hKey, lpSubKey ? lpSubKey : "(null)", ulOptions, samDesired, phkResult);
+		const uint16_t *widePtr = nullptr;
+		std::vector<uint16_t> wideStorage;
+		if (lpSubKey) {
+			wideStorage = stringToWideString(lpSubKey);
+			widePtr = wideStorage.data();
+		}
+		return RegOpenKeyExW(hKey, widePtr, ulOptions, samDesired, phkResult);
+	}
+
+	LSTATUS WIN_FUNC RegCloseKey(HKEY hKey) {
+		DEBUG_LOG("RegCloseKey(%p)\n", hKey);
+		if (isPredefinedKeyHandle(hKey)) {
+			wibo::lastError = ERROR_SUCCESS;
+			return ERROR_SUCCESS;
+		}
+		auto data = handles::dataFromHandle(hKey, true);
+		if (data.type != handles::TYPE_REGISTRY_KEY || data.ptr == nullptr) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return ERROR_INVALID_HANDLE;
+		}
+		auto *handleData = static_cast<RegistryKeyHandleData *>(data.ptr);
+		delete handleData;
+		wibo::lastError = ERROR_SUCCESS;
+		return ERROR_SUCCESS;
 	}
 
 	BOOL WIN_FUNC CryptReleaseContext(void* hProv, unsigned int dwFlags) {
@@ -496,6 +731,7 @@ namespace advapi32 {
 		constexpr unsigned int TokenUserClass = 1; // TokenUser
 		constexpr unsigned int TokenStatisticsClass = 10; // TokenStatistics
 		constexpr unsigned int TokenElevationClass = 20; // TokenElevation
+		constexpr unsigned int TokenPrimaryGroupClass = 5; // TokenPrimaryGroup
 		if (TokenInformationClass == TokenUserClass) {
 			constexpr size_t sidSize = sizeof(Sid);
 			constexpr size_t tokenUserSize = sizeof(TokenUserData);
@@ -545,6 +781,28 @@ namespace advapi32 {
 			wibo::lastError = ERROR_SUCCESS;
 			return TRUE;
 		}
+		if (TokenInformationClass == TokenPrimaryGroupClass) {
+			struct TokenPrimaryGroupStub {
+				Sid *PrimaryGroup;
+			};
+			constexpr size_t sidSize = sizeof(Sid);
+			constexpr size_t headerSize = sizeof(TokenPrimaryGroupStub);
+			const unsigned int required = static_cast<unsigned int>(headerSize + sidSize);
+			*ReturnLength = required;
+			if (!TokenInformation || TokenInformationLength < required) {
+				wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+				return FALSE;
+			}
+			auto *groupInfo = reinterpret_cast<TokenPrimaryGroupStub *>(TokenInformation);
+			auto *sid = reinterpret_cast<Sid *>(reinterpret_cast<uint8_t *>(TokenInformation) + headerSize);
+			sid->Revision = 1;
+			sid->SubAuthorityCount = 1;
+			sid->IdentifierAuthority = {{0, 0, 0, 0, 0, 5}};
+			sid->SubAuthority[0] = 18; // SECURITY_LOCAL_SYSTEM_RID
+			groupInfo->PrimaryGroup = sid;
+			wibo::lastError = ERROR_SUCCESS;
+			return TRUE;
+		}
 		wibo::lastError = ERROR_NOT_SUPPORTED;
 		return FALSE;
 	}
@@ -583,10 +841,260 @@ namespace advapi32 {
 		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
+
+	static Luid generateDeterministicLuid(const std::string &normalizedName) {
+		uint32_t hash = 2166136261u;
+		for (unsigned char ch : normalizedName) {
+			hash ^= ch;
+			hash *= 16777619u;
+		}
+		if (hash == 0) {
+			hash = 1;
+		}
+		Luid result{};
+		result.LowPart = hash;
+		result.HighPart = 0;
+		return result;
+	}
+
+	static std::string normalizePrivilegeName(const std::string &name) {
+		std::string normalized;
+		normalized.reserve(name.size());
+		for (unsigned char ch : name) {
+			if (ch == '\r' || ch == '\n' || ch == '\t') {
+				continue;
+			}
+			normalized.push_back(static_cast<char>(std::tolower(ch)));
+		}
+		return normalized;
+	}
+
+	static Luid lookupOrGeneratePrivilegeLuid(const std::string &normalizedName) {
+		std::lock_guard<std::mutex> lock(privilegeMapMutex);
+		auto cached = privilegeLuidCache.find(normalizedName);
+		if (cached != privilegeLuidCache.end()) {
+			return cached->second;
+		}
+		static const std::unordered_map<std::string, uint32_t> predefined = {
+			{"secreatepagefileprivilege", 0x00000002},
+			{"seshutdownprivilege", 0x00000003},
+			{"sebackupprivilege", 0x00000004},
+			{"serestoreprivilege", 0x00000005},
+			{"sechangenotifyprivilege", 0x00000006},
+			{"seassignprimarytokenprivilege", 0x00000007},
+			{"seincreasequotaprivilege", 0x00000008},
+			{"seincreasebasepriorityprivilege", 0x00000009},
+			{"seloaddriverprivilege", 0x0000000a},
+			{"setakeownershipprivilege", 0x0000000b},
+			{"sesystemtimeprivilege", 0x0000000c},
+			{"sesystemenvironmentprivilege", 0x0000000d},
+			{"setcbprivilege", 0x0000000e},
+			{"sedebugprivilege", 0x0000000f},
+			{"semanagevolumeprivilege", 0x00000010},
+			{"seimpersonateprivilege", 0x00000011},
+			{"secreateglobalprivilege", 0x00000012},
+			{"sesecurityprivilege", 0x00000013},
+			{"selockmemoryprivilege", 0x00000014},
+			{"seundockprivilege", 0x00000015},
+			{"seremoteshutdownprivilege", 0x00000016}
+		};
+		auto known = predefined.find(normalizedName);
+		Luid luid{};
+		if (known != predefined.end()) {
+			luid.LowPart = known->second;
+			luid.HighPart = 0;
+		} else {
+			luid = generateDeterministicLuid(normalizedName);
+		}
+		privilegeLuidCache.emplace(normalizedName, luid);
+		return luid;
+	}
+
+	BOOL WIN_FUNC LookupPrivilegeValueA(const char *lpSystemName, const char *lpName, Luid *lpLuid) {
+		DEBUG_LOG("LookupPrivilegeValueA(%s, %s, %p)\n",
+			lpSystemName ? lpSystemName : "<null>",
+			lpName ? lpName : "<null>",
+			lpLuid);
+		if (!lpName || !lpLuid) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+		if (lpSystemName && lpSystemName[0] != '\0') {
+			DEBUG_LOG("-> remote system unsupported\n");
+			wibo::lastError = ERROR_NOT_SUPPORTED;
+			return FALSE;
+		}
+		std::string normalized = normalizePrivilegeName(lpName);
+		if (normalized.empty()) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+		Luid luid = lookupOrGeneratePrivilegeLuid(normalized);
+		*lpLuid = luid;
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+
+	BOOL WIN_FUNC LookupPrivilegeValueW(const uint16_t *lpSystemName, const uint16_t *lpName, Luid *lpLuid) {
+		DEBUG_LOG("LookupPrivilegeValueW(%ls, %ls, %p)\n",
+			lpSystemName ? reinterpret_cast<const wchar_t *>(lpSystemName) : L"<null>",
+			lpName ? reinterpret_cast<const wchar_t *>(lpName) : L"<null>",
+			lpLuid);
+		if (!lpName || !lpLuid) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+		if (lpSystemName && lpSystemName[0] != 0) {
+			std::string host = wideStringToString(lpSystemName);
+			if (!host.empty()) {
+				wibo::lastError = ERROR_NOT_SUPPORTED;
+				return FALSE;
+			}
+		}
+		std::string ansiName = wideStringToString(lpName);
+		return LookupPrivilegeValueA(nullptr, ansiName.c_str(), lpLuid);
+	}
+
+	struct TokenPrivilegesHeader {
+		DWORD PrivilegeCount = 0;
+	};
+
+	BOOL WIN_FUNC AdjustTokenPrivileges(HANDLE TokenHandle, BOOL DisableAllPrivileges, void *NewState, DWORD BufferLength,
+										 void *PreviousState, PDWORD ReturnLength) {
+		DEBUG_LOG("AdjustTokenPrivileges(%p, %d, %p, %u, %p, %p)\n", TokenHandle, DisableAllPrivileges,
+				  NewState, BufferLength, PreviousState, ReturnLength);
+		(void) DisableAllPrivileges;
+		(void) NewState;
+		auto data = handles::dataFromHandle(TokenHandle, false);
+		if (data.type != handles::TYPE_TOKEN) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return FALSE;
+		}
+		if (PreviousState) {
+			if (BufferLength < sizeof(TokenPrivilegesHeader)) {
+				if (ReturnLength) {
+					*ReturnLength = sizeof(TokenPrivilegesHeader);
+				}
+				wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+				return FALSE;
+			}
+			auto *header = reinterpret_cast<TokenPrivilegesHeader *>(PreviousState);
+			header->PrivilegeCount = 0;
+			if (ReturnLength) {
+				*ReturnLength = sizeof(TokenPrivilegesHeader);
+			}
+		} else if (ReturnLength) {
+			*ReturnLength = 0;
+		}
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+
+	BOOL WIN_FUNC InitializeSecurityDescriptor(void *pSecurityDescriptor, DWORD dwRevision) {
+		DEBUG_LOG("InitializeSecurityDescriptor(%p, %u)\n", pSecurityDescriptor, dwRevision);
+		if (!pSecurityDescriptor) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+		if (dwRevision != SECURITY_DESCRIPTOR_REVISION) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+		auto *descriptor = static_cast<SecurityDescriptor *>(pSecurityDescriptor);
+		descriptor->Revision = static_cast<uint8_t>(dwRevision);
+		descriptor->Sbz1 = 0;
+		descriptor->Control = 0;
+		descriptor->Owner = nullptr;
+		descriptor->Group = nullptr;
+		descriptor->Sacl = nullptr;
+		descriptor->Dacl = nullptr;
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+
+	BOOL WIN_FUNC SetSecurityDescriptorDacl(void *pSecurityDescriptor, BOOL bDaclPresent, void *pDacl, BOOL bDaclDefaulted) {
+		DEBUG_LOG("SetSecurityDescriptorDacl(%p, %u, %p, %u)\n", pSecurityDescriptor, bDaclPresent, pDacl, bDaclDefaulted);
+		if (!pSecurityDescriptor) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+		auto *descriptor = static_cast<SecurityDescriptor *>(pSecurityDescriptor);
+		if (descriptor->Revision != SECURITY_DESCRIPTOR_REVISION) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+		uint16_t control = static_cast<uint16_t>(descriptor->Control & ~(SE_DACL_PRESENT | SE_DACL_DEFAULTED));
+		if (bDaclPresent) {
+			control = static_cast<uint16_t>(control | SE_DACL_PRESENT);
+			if (bDaclDefaulted) {
+				control = static_cast<uint16_t>(control | SE_DACL_DEFAULTED);
+			}
+			descriptor->Dacl = pDacl;
+		} else {
+			descriptor->Dacl = nullptr;
+		}
+		descriptor->Control = control;
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+
+	BOOL WIN_FUNC GetUserNameA(char *lpBuffer, DWORD *pcbBuffer) {
+		DEBUG_LOG("GetUserNameA(%p, %p)\n", lpBuffer, pcbBuffer);
+		if (!pcbBuffer) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+		const char *name = "SYSTEM";
+		size_t needed = std::strlen(name) + 1;
+		if (!lpBuffer || *pcbBuffer < needed) {
+			*pcbBuffer = static_cast<DWORD>(needed);
+			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			return FALSE;
+		}
+		std::memcpy(lpBuffer, name, needed);
+		*pcbBuffer = static_cast<DWORD>(needed);
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+
+	BOOL WIN_FUNC GetUserNameW(uint16_t *lpBuffer, DWORD *pcbBuffer) {
+		DEBUG_LOG("GetUserNameW(%p, %p)\n", lpBuffer, pcbBuffer);
+		if (!pcbBuffer) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+		const char16_t name[] = {u'S', u'Y', u'S', u'T', u'E', u'M', u'\0'};
+		size_t needed = (std::size(name));
+		if (!lpBuffer || *pcbBuffer < needed) {
+			*pcbBuffer = static_cast<DWORD>(needed);
+			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			return FALSE;
+		}
+		std::memcpy(lpBuffer, name, needed * sizeof(uint16_t));
+		*pcbBuffer = static_cast<DWORD>(needed);
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+
+	BOOL WIN_FUNC SetTokenInformation(HANDLE TokenHandle, unsigned int TokenInformationClass, void *TokenInformation, DWORD TokenInformationLength) {
+		DEBUG_LOG("STUB: SetTokenInformation(%p, %u, %p, %u)\n", TokenHandle, TokenInformationClass, TokenInformation, TokenInformationLength);
+		(void) TokenInformationClass;
+		(void) TokenInformation;
+		(void) TokenInformationLength;
+		auto data = handles::dataFromHandle(TokenHandle, false);
+		if (data.type != handles::TYPE_TOKEN) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return FALSE;
+		}
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
 }
 
 static void *resolveByName(const char *name) {
 	if (strcmp(name, "RegOpenKeyExA") == 0) return (void *) advapi32::RegOpenKeyExA;
+	if (strcmp(name, "RegOpenKeyExW") == 0) return (void *) advapi32::RegOpenKeyExW;
+	if (strcmp(name, "RegCloseKey") == 0) return (void *) advapi32::RegCloseKey;
 	if (strcmp(name, "CryptReleaseContext") == 0) return (void*) advapi32::CryptReleaseContext;
 	if (strcmp(name, "CryptAcquireContextW") == 0) return (void*) advapi32::CryptAcquireContextW;
 	if (strcmp(name, "CryptGenRandom") == 0) return (void*) advapi32::CryptGenRandom;
@@ -597,6 +1105,14 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "OpenProcessToken") == 0) return (void*) advapi32::OpenProcessToken;
 	if (strcmp(name, "GetTokenInformation") == 0) return (void*) advapi32::GetTokenInformation;
 	if (strcmp(name, "LookupAccountSidW") == 0) return (void*) advapi32::LookupAccountSidW;
+	if (strcmp(name, "InitializeSecurityDescriptor") == 0) return (void*) advapi32::InitializeSecurityDescriptor;
+	if (strcmp(name, "SetSecurityDescriptorDacl") == 0) return (void*) advapi32::SetSecurityDescriptorDacl;
+	if (strcmp(name, "LookupPrivilegeValueA") == 0) return (void*) advapi32::LookupPrivilegeValueA;
+	if (strcmp(name, "LookupPrivilegeValueW") == 0) return (void*) advapi32::LookupPrivilegeValueW;
+	if (strcmp(name, "AdjustTokenPrivileges") == 0) return (void*) advapi32::AdjustTokenPrivileges;
+	if (strcmp(name, "GetUserNameA") == 0) return (void*) advapi32::GetUserNameA;
+	if (strcmp(name, "GetUserNameW") == 0) return (void*) advapi32::GetUserNameW;
+	if (strcmp(name, "SetTokenInformation") == 0) return (void*) advapi32::SetTokenInformation;
 	return nullptr;
 }
 

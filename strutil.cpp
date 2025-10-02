@@ -2,20 +2,20 @@
 #include "common.h"
 #include <algorithm>
 #include <cctype>
-#include <cwctype>
 #include <cstdint>
+#include <cwctype>
 #include <sstream>
 #include <string>
 #include <vector>
 
 void toLowerInPlace(std::string &str) {
 	std::transform(str.begin(), str.end(), str.begin(),
-			   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+				   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 }
 
 void toUpperInPlace(std::string &str) {
 	std::transform(str.begin(), str.end(), str.begin(),
-			   [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+				   [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
 }
 
 std::string stringToLower(std::string_view str) {
@@ -205,15 +205,16 @@ std::string wideStringToString(const uint16_t *src, int len) {
 	return result;
 }
 
-std::vector<uint16_t> stringToWideString(const char *src) {
-	if (!src)
+std::vector<uint16_t> stringToWideString(const char *src, size_t length) {
+	if (!src) {
 		return std::vector<uint16_t>{0};
-	size_t len = strlen(src);
-	std::vector<uint16_t> res(len + 1);
-	for (size_t i = 0; i < res.size(); i++) {
-		res[i] = static_cast<uint16_t>(src[i] & 0xFF);
 	}
-	res[len] = 0; // NUL terminate
+	size_t len = length == static_cast<size_t>(-1) ? strlen(src) : length;
+	std::vector<uint16_t> res(len + 1);
+	for (size_t i = 0; i < len; ++i) {
+		res[i] = static_cast<uint16_t>(static_cast<unsigned char>(src[i]));
+	}
+	res[len] = 0; // ensure NUL termination
 	return res;
 }
 

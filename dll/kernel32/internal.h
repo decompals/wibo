@@ -1,7 +1,8 @@
 #pragma once
 
-#include "kernel32.h"
+#include "common.h"
 #include <pthread.h>
+#include <string>
 
 namespace kernel32 {
 
@@ -45,10 +46,19 @@ struct SemaphoreObject {
 	int refCount = 1;
 };
 
+inline constexpr uintptr_t kPseudoCurrentThreadHandleValue = static_cast<uintptr_t>(-2);
+
 void releaseMutexObject(MutexObject *obj);
 void releaseEventObject(EventObject *obj);
 void releaseSemaphoreObject(SemaphoreObject *obj);
 void resetOverlappedEvent(OVERLAPPED *ov);
 void signalOverlappedEvent(OVERLAPPED *ov);
+void tryMarkExecutable(void *mem);
+void setLastErrorFromErrno();
+bool closeFileMappingHandle(void *mappingPtr);
+ThreadObject *ensureCurrentThreadObject();
+ThreadObject *threadObjectFromHandle(HANDLE hThread);
+ThreadObject *retainThreadObject(ThreadObject *obj);
+void releaseThreadObject(ThreadObject *obj);
 
 } // namespace kernel32

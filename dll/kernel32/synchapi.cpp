@@ -1,12 +1,13 @@
+#include "synchapi.h"
 #include "common.h"
 #include "errors.h"
 #include "handles.h"
 #include "internal.h"
-#include "kernel32.h"
 #include "processes.h"
 #include "strutil.h"
 
 #include <cerrno>
+#include <cstring>
 #include <mutex>
 #include <pthread.h>
 #include <string>
@@ -487,6 +488,105 @@ DWORD WIN_FUNC WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return WAIT_FAILED;
 	}
+}
+
+void WIN_FUNC InitializeCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
+	VERBOSE_LOG("STUB: InitializeCriticalSection(%p)\n", lpCriticalSection);
+	if (!lpCriticalSection) {
+		return;
+	}
+	std::memset(lpCriticalSection, 0, sizeof(*lpCriticalSection));
+}
+
+BOOL WIN_FUNC InitializeCriticalSectionEx(LPCRITICAL_SECTION lpCriticalSection, DWORD dwSpinCount, DWORD Flags) {
+	DEBUG_LOG("STUB: InitializeCriticalSectionEx(%p, %u, 0x%x)\n", lpCriticalSection, dwSpinCount, Flags);
+	if (!lpCriticalSection) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return FALSE;
+	}
+	if (Flags & ~CRITICAL_SECTION_NO_DEBUG_INFO) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return FALSE;
+	}
+	std::memset(lpCriticalSection, 0, sizeof(*lpCriticalSection));
+	lpCriticalSection->SpinCount = dwSpinCount;
+	wibo::lastError = ERROR_SUCCESS;
+	return TRUE;
+}
+
+BOOL WIN_FUNC InitializeCriticalSectionAndSpinCount(LPCRITICAL_SECTION lpCriticalSection, DWORD dwSpinCount) {
+	DEBUG_LOG("STUB: InitializeCriticalSectionAndSpinCount(%p, %u)\n", lpCriticalSection, dwSpinCount);
+	if (!lpCriticalSection) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return FALSE;
+	}
+	std::memset(lpCriticalSection, 0, sizeof(*lpCriticalSection));
+	lpCriticalSection->SpinCount = dwSpinCount;
+	wibo::lastError = ERROR_SUCCESS;
+	return TRUE;
+}
+
+void WIN_FUNC DeleteCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
+	VERBOSE_LOG("STUB: DeleteCriticalSection(%p)\n", lpCriticalSection);
+	(void)lpCriticalSection;
+}
+
+void WIN_FUNC EnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
+	VERBOSE_LOG("STUB: EnterCriticalSection(%p)\n", lpCriticalSection);
+	(void)lpCriticalSection;
+}
+
+void WIN_FUNC LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
+	VERBOSE_LOG("STUB: LeaveCriticalSection(%p)\n", lpCriticalSection);
+	(void)lpCriticalSection;
+}
+
+BOOL WIN_FUNC InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBOOL fPending, LPVOID *lpContext) {
+	DEBUG_LOG("STUB: InitOnceBeginInitialize(%p, %u, %p, %p)\n", lpInitOnce, dwFlags, fPending, lpContext);
+	if (!lpInitOnce) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return FALSE;
+	}
+	if (dwFlags & ~(INIT_ONCE_CHECK_ONLY | INIT_ONCE_ASYNC)) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return FALSE;
+	}
+	if (fPending) {
+		*fPending = TRUE;
+	}
+	if (lpContext) {
+		*lpContext = nullptr;
+	}
+	wibo::lastError = ERROR_SUCCESS;
+	return TRUE;
+}
+
+BOOL WIN_FUNC InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpContext) {
+	DEBUG_LOG("STUB: InitOnceComplete(%p, %u, %p)\n", lpInitOnce, dwFlags, lpContext);
+	if (!lpInitOnce) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return FALSE;
+	}
+	if ((dwFlags & INIT_ONCE_INIT_FAILED) && (dwFlags & INIT_ONCE_ASYNC)) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return FALSE;
+	}
+	wibo::lastError = ERROR_SUCCESS;
+	(void)lpContext;
+	return TRUE;
+}
+
+void WIN_FUNC AcquireSRWLockShared(PSRWLOCK SRWLock) { VERBOSE_LOG("STUB: AcquireSRWLockShared(%p)\n", SRWLock); }
+
+void WIN_FUNC ReleaseSRWLockShared(PSRWLOCK SRWLock) { VERBOSE_LOG("STUB: ReleaseSRWLockShared(%p)\n", SRWLock); }
+
+void WIN_FUNC AcquireSRWLockExclusive(PSRWLOCK SRWLock) { VERBOSE_LOG("STUB: AcquireSRWLockExclusive(%p)\n", SRWLock); }
+
+void WIN_FUNC ReleaseSRWLockExclusive(PSRWLOCK SRWLock) { VERBOSE_LOG("STUB: ReleaseSRWLockExclusive(%p)\n", SRWLock); }
+
+BOOLEAN WIN_FUNC TryAcquireSRWLockExclusive(PSRWLOCK SRWLock) {
+	VERBOSE_LOG("STUB: TryAcquireSRWLockExclusive(%p)\n", SRWLock);
+	return TRUE;
 }
 
 void resetOverlappedEvent(OVERLAPPED *ov) {

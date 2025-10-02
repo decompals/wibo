@@ -1,12 +1,17 @@
+#include "errhandlingapi.h"
 #include "common.h"
-#include "kernel32.h"
+#include "errors.h"
 
 namespace {
+
 LPTOP_LEVEL_EXCEPTION_FILTER g_topLevelExceptionFilter = nullptr;
 UINT g_processErrorMode = 0;
+
 } // namespace
 
 namespace kernel32 {
+
+void setLastErrorFromErrno() { wibo::lastError = wibo::winErrorFromErrno(errno); }
 
 DWORD WIN_FUNC GetLastError() {
 	DEBUG_LOG("GetLastError() -> %u\n", wibo::lastError);

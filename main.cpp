@@ -12,10 +12,11 @@
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <system_error>
+#include <threads.h>
 #include <unistd.h>
 #include <vector>
 
-uint32_t wibo::lastError = 0;
+thread_local uint32_t wibo::lastError = 0;
 char **wibo::argv;
 int wibo::argc;
 std::filesystem::path wibo::guestExecutablePath;
@@ -369,7 +370,7 @@ int main(int argc, char **argv) {
 
 	// Build a command line
 	if (cmdLine.empty()) {
-		for (int i = 0; i < guestArgs.size(); ++i) {
+		for (size_t i = 0; i < guestArgs.size(); ++i) {
 			if (i != 0) {
 				cmdLine += ' ';
 			}

@@ -1,7 +1,7 @@
+#include "wow64apiset.h"
 #include "common.h"
 #include "errors.h"
 #include "handles.h"
-#include "kernel32.h"
 
 namespace kernel32 {
 
@@ -28,7 +28,7 @@ BOOL WIN_FUNC IsWow64Process(HANDLE hProcess, PBOOL Wow64Process) {
 		return FALSE;
 	}
 
-	const auto rawHandle = reinterpret_cast<uintptr_t>(hProcess);
+	uintptr_t rawHandle = reinterpret_cast<uintptr_t>(hProcess);
 	bool isPseudoHandle = rawHandle == static_cast<uintptr_t>(-1);
 	if (!isPseudoHandle) {
 		if (!hProcess) {

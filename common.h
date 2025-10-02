@@ -78,6 +78,44 @@ using LPWSTR = uint16_t *;
 using LPCWSTR = const uint16_t *;
 using LPCWCH = const uint16_t *;
 using WCHAR = uint16_t;
+
+// Page protection constants
+constexpr DWORD PAGE_NOACCESS = 0x01;
+constexpr DWORD PAGE_READONLY = 0x02;
+constexpr DWORD PAGE_READWRITE = 0x04;
+constexpr DWORD PAGE_WRITECOPY = 0x08;
+constexpr DWORD PAGE_EXECUTE = 0x10;
+constexpr DWORD PAGE_EXECUTE_READ = 0x20;
+constexpr DWORD PAGE_EXECUTE_READWRITE = 0x40;
+constexpr DWORD PAGE_EXECUTE_WRITECOPY = 0x80;
+constexpr DWORD PAGE_GUARD = 0x100;
+constexpr DWORD PAGE_NOCACHE = 0x200;
+constexpr DWORD PAGE_WRITECOMBINE = 0x400;
+
+// Allocation type and memory state constants
+constexpr DWORD MEM_COMMIT = 0x00001000;
+constexpr DWORD MEM_RESERVE = 0x00002000;
+constexpr DWORD MEM_DECOMMIT = 0x00004000;
+constexpr DWORD MEM_RELEASE = 0x00008000;
+constexpr DWORD MEM_FREE = 0x00010000;
+constexpr DWORD MEM_PRIVATE = 0x00020000;
+constexpr DWORD MEM_MAPPED = 0x00040000;
+constexpr DWORD MEM_RESET = 0x00080000;
+constexpr DWORD MEM_TOP_DOWN = 0x00100000;
+constexpr DWORD MEM_WRITE_WATCH = 0x00200000;
+constexpr DWORD MEM_PHYSICAL = 0x00400000;
+constexpr DWORD MEM_RESET_UNDO = 0x01000000;
+constexpr DWORD MEM_LARGE_PAGES = 0x20000000;
+constexpr DWORD MEM_COALESCE_PLACEHOLDERS = 0x00000001;
+constexpr DWORD MEM_PRESERVE_PLACEHOLDER = 0x00000002;
+constexpr DWORD MEM_IMAGE = 0x01000000;
+
+// File mapping access flags
+constexpr DWORD FILE_MAP_COPY = 0x00000001;
+constexpr DWORD FILE_MAP_WRITE = 0x00000002;
+constexpr DWORD FILE_MAP_READ = 0x00000004;
+constexpr DWORD FILE_MAP_EXECUTE = 0x00000020;
+constexpr DWORD FILE_MAP_ALL_ACCESS = 0x000f001f;
 using LPCH = char *;
 using LPWCH = uint16_t *;
 using BOOL = int;
@@ -241,6 +279,13 @@ struct Executable {
 	bool loadPE(FILE *file, bool exec);
 	bool resolveImports();
 
+	struct SectionInfo {
+		uintptr_t base = 0;
+		size_t size = 0;
+		DWORD protect = PAGE_NOACCESS;
+		DWORD characteristics = 0;
+	};
+
 	void *imageBase = nullptr;
 	size_t imageSize = 0;
 	void *entryPoint = nullptr;
@@ -259,6 +304,7 @@ struct Executable {
 	bool execMapped = false;
 	bool importsResolved = false;
 	bool importsResolving = false;
+	std::vector<SectionInfo> sections;
 
 	bool findResource(const ResourceIdentifier &type, const ResourceIdentifier &name, std::optional<uint16_t> language,
 					  ResourceLocation &out) const;
@@ -296,6 +342,7 @@ struct ModuleInfo {
 ModuleInfo *registerProcessModule(std::unique_ptr<Executable> executable, std::filesystem::path resolvedPath,
 								  std::string originalName);
 Executable *executableFromModule(HMODULE module);
+ModuleInfo *moduleInfoFromAddress(void *addr);
 
 /**
  * HMODULE will be `nullptr` or `mainModule->imageBase` if it's the main module,

@@ -711,6 +711,14 @@ std::optional<std::filesystem::path> dllDirectoryOverride() {
 	return reg->dllDirectory;
 }
 
+ModuleInfo *moduleInfoFromAddress(void *addr) {
+	if (!addr) {
+		return nullptr;
+	}
+	auto reg = registry();
+	return moduleFromAddress(*reg, addr);
+}
+
 void registerOnExitTable(void *table) {
 	if (!table)
 		return;

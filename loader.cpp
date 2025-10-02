@@ -114,6 +114,61 @@ struct PEBaseRelocationBlock {
 constexpr uint16_t IMAGE_REL_BASED_ABSOLUTE = 0;
 constexpr uint16_t IMAGE_REL_BASED_HIGHLOW = 3;
 
+constexpr uint32_t IMAGE_SCN_MEM_EXECUTE = 0x20000000;
+constexpr uint32_t IMAGE_SCN_MEM_READ = 0x40000000;
+constexpr uint32_t IMAGE_SCN_MEM_WRITE = 0x80000000;
+constexpr uint32_t IMAGE_SCN_MEM_NOT_CACHED = 0x04000000;
+
+static uintptr_t alignDown(uintptr_t value, size_t alignment) {
+	if (alignment == 0) {
+		return value;
+	}
+	return value - (value % alignment);
+}
+
+static uintptr_t alignUp(uintptr_t value, size_t alignment) {
+	if (alignment == 0) {
+		return value;
+	}
+	const uintptr_t remainder = value % alignment;
+	if (remainder == 0) {
+		return value;
+	}
+	if (value > std::numeric_limits<uintptr_t>::max() - (alignment - remainder)) {
+		return std::numeric_limits<uintptr_t>::max();
+	}
+	return value + (alignment - remainder);
+}
+
+static DWORD sectionProtectFromCharacteristics(uint32_t characteristics) {
+	const bool executable = (characteristics & IMAGE_SCN_MEM_EXECUTE) != 0;
+	bool readable = (characteristics & IMAGE_SCN_MEM_READ) != 0;
+	const bool writable = (characteristics & IMAGE_SCN_MEM_WRITE) != 0;
+	if (!readable && !writable && !executable) {
+		readable = true;
+	}
+	DWORD protect = PAGE_NOACCESS;
+	if (executable) {
+		if (writable) {
+			protect = PAGE_EXECUTE_READWRITE;
+		} else if (readable) {
+			protect = PAGE_EXECUTE_READ;
+		} else {
+			protect = PAGE_EXECUTE;
+		}
+	} else {
+		if (writable) {
+			protect = PAGE_READWRITE;
+		} else if (readable) {
+			protect = PAGE_READONLY;
+		}
+	}
+	if ((characteristics & IMAGE_SCN_MEM_NOT_CACHED) != 0) {
+		protect |= PAGE_NOCACHE;
+	}
+	return protect;
+}
+
 uint16_t read16(FILE *file) {
 	uint16_t v = 0;
 	fread(&v, 2, 1, file);
@@ -164,6 +219,7 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 
 	long pageSize = sysconf(_SC_PAGE_SIZE);
 	DEBUG_LOG("Page size: %x\n", (unsigned int)pageSize);
+	const size_t pageSizeValue = pageSize > 0 ? static_cast<size_t>(pageSize) : static_cast<size_t>(4096);
 
 	preferredImageBase = header32.imageBase;
 	exportDirectoryRVA = header32.exportTable.virtualAddress;
@@ -195,6 +251,16 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 	}
 	relocationDelta = (intptr_t)((uintptr_t)imageBase - (uintptr_t)header32.imageBase);
 	memset(imageBase, 0, header32.sizeOfImage);
+	sections.clear();
+	uintptr_t imageBaseAddr = reinterpret_cast<uintptr_t>(imageBase);
+	uintptr_t headerSpan = alignUp(static_cast<uintptr_t>(header32.sizeOfHeaders), pageSizeValue);
+	if (headerSpan != 0) {
+		Executable::SectionInfo headerInfo{};
+		headerInfo.base = imageBaseAddr;
+		headerInfo.size = static_cast<size_t>(headerSpan);
+		headerInfo.protect = PAGE_READONLY;
+		sections.push_back(headerInfo);
+	}
 
 	// Read the sections
 	fseek(file, offsetToPE + sizeof header + header.sizeOfOptionalHeader, SEEK_SET);
@@ -222,7 +288,26 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 			rsrcBase = sectionBase;
 			rsrcSize = std::max(section.virtualSize, section.sizeOfRawData);
 		}
+
+		size_t sectionSpan = std::max(section.virtualSize, section.sizeOfRawData);
+		if (sectionSpan != 0) {
+			uintptr_t sectionStart = alignDown(imageBaseAddr + static_cast<uintptr_t>(section.virtualAddress), pageSizeValue);
+			uintptr_t sectionEnd = alignUp(imageBaseAddr + static_cast<uintptr_t>(section.virtualAddress) +
+									 static_cast<uintptr_t>(sectionSpan),
+						pageSizeValue);
+			if (sectionEnd > sectionStart) {
+				Executable::SectionInfo sectionInfo{};
+				sectionInfo.base = sectionStart;
+				sectionInfo.size = static_cast<size_t>(sectionEnd - sectionStart);
+				sectionInfo.protect = sectionProtectFromCharacteristics(section.characteristics);
+				sectionInfo.characteristics = section.characteristics;
+				sections.push_back(sectionInfo);
+			}
+		}
 	}
+	std::sort(sections.begin(), sections.end(), [](const SectionInfo &lhs, const SectionInfo &rhs) {
+		return lhs.base < rhs.base;
+	});
 
 	if (exec && relocationDelta != 0) {
 		if (relocationDirectoryRVA == 0 || relocationDirectorySize == 0) {

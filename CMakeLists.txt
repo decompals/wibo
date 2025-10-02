@@ -252,6 +252,17 @@ if(BUILD_TESTING)
                     ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
 
             add_custom_command(
+                OUTPUT ${WIBO_TEST_BIN_DIR}/test_virtualquery.exe
+                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
+                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
+                        -o test_virtualquery.exe
+                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_virtualquery.c
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_virtualquery.c
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
+
+            add_custom_command(
                 OUTPUT ${WIBO_TEST_BIN_DIR}/test_rtl.exe
                 COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
                         -I${CMAKE_CURRENT_SOURCE_DIR}/test
@@ -299,6 +310,7 @@ if(BUILD_TESTING)
                     ${WIBO_TEST_BIN_DIR}/test_overlapped_io.exe
                     ${WIBO_TEST_BIN_DIR}/test_time.exe
                     ${WIBO_TEST_BIN_DIR}/test_virtualalloc.exe
+                    ${WIBO_TEST_BIN_DIR}/test_virtualquery.exe
                     ${WIBO_TEST_BIN_DIR}/test_rtl.exe
                     ${WIBO_TEST_BIN_DIR}/test_ntquery.exe
                     ${WIBO_TEST_BIN_DIR}/test_sysdir.exe)
@@ -358,6 +370,12 @@ if(BUILD_TESTING)
             add_test(NAME wibo.test_virtualalloc
                 COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_virtualalloc.exe)
             set_tests_properties(wibo.test_virtualalloc PROPERTIES
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS wibo.build_fixtures)
+
+            add_test(NAME wibo.test_virtualquery
+                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_virtualquery.exe)
+            set_tests_properties(wibo.test_virtualquery PROPERTIES
                 WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
                 DEPENDS wibo.build_fixtures)
 

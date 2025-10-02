@@ -178,18 +178,6 @@ NTSTATUS WIN_FUNC NtReadFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE Ap
 	return status;
 }
 
-#define PAGE_NOACCESS 0x1
-#define PAGE_READONLY 0x2
-#define PAGE_READWRITE 0x4
-#define PAGE_WRITECOPY 0x8
-#define PAGE_EXECUTE 0x10
-#define PAGE_EXECUTE_READ 0x20
-#define PAGE_EXECUTE_READWRITE 0x40
-#define PAGE_EXECUTE_WRITECOPY 0x80
-#define PAGE_GUARD 0x100
-#define PAGE_NOCACHE 0x200
-#define PAGE_WRITECOMBINE 0x400
-
 NTSTATUS WIN_FUNC NtAllocateVirtualMemory(HANDLE ProcessHandle, PVOID *BaseAddress, ULONG_PTR ZeroBits,
 										  PSIZE_T RegionSize, ULONG AllocationType, ULONG Protect) {
 	DEBUG_LOG("NtAllocateVirtualMemory(%p, %p, %lu, %p, %lu, %lu) ", ProcessHandle, BaseAddress, ZeroBits, RegionSize,

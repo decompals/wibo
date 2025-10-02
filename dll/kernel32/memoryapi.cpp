@@ -15,13 +15,13 @@
 #include <mutex>
 #include <sys/mman.h>
 #include <unistd.h>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace {
 
 constexpr size_t kVirtualAllocationGranularity = 64 * 1024;
+constexpr uintptr_t kProcessAddressLimit = 0x80000000;
 
 struct MappingObject {
 	int fd = -1;
@@ -33,12 +33,18 @@ struct MappingObject {
 };
 
 struct ViewInfo {
-	void *mapBase = nullptr;
-	size_t mapLength = 0;
+	uintptr_t viewBase = 0;
+	size_t viewLength = 0;
+	uintptr_t allocationBase = 0;
+	size_t allocationLength = 0;
 	MappingObject *owner = nullptr;
+	DWORD protect = PAGE_NOACCESS;
+	DWORD allocationProtect = PAGE_NOACCESS;
+	DWORD type = MEM_PRIVATE;
 };
 
-std::unordered_map<void *, ViewInfo> g_viewInfo;
+std::map<uintptr_t, ViewInfo> g_viewInfo;
+std::mutex g_viewInfoMutex;
 
 void closeMappingIfPossible(MappingObject *mapping) {
 	if (!mapping) {
@@ -157,6 +163,69 @@ bool rangeWithinRegion(const VirtualAllocation &region, uintptr_t start, size_t 
 	return (start + length) <= regionEnd(region);
 }
 
+DWORD desiredAccessToProtect(DWORD desiredAccess, DWORD mappingProtect) {
+	DWORD access = desiredAccess;
+	if ((access & FILE_MAP_ALL_ACCESS) == FILE_MAP_ALL_ACCESS) {
+		access |= FILE_MAP_READ | FILE_MAP_WRITE;
+	}
+	bool wantExecute = (access & FILE_MAP_EXECUTE) != 0;
+	bool wantWrite = (access & FILE_MAP_WRITE) != 0;
+	bool wantCopy = (access & FILE_MAP_COPY) != 0;
+	bool wantRead = (access & (FILE_MAP_READ | FILE_MAP_WRITE | FILE_MAP_COPY)) != 0;
+	if (wantCopy) {
+		wantWrite = true;
+	}
+	const bool supportsWrite =
+		mappingProtect == PAGE_READWRITE || mappingProtect == PAGE_EXECUTE_READWRITE || mappingProtect == PAGE_WRITECOPY ||
+		mappingProtect == PAGE_EXECUTE_WRITECOPY;
+	const bool supportsCopy = mappingProtect == PAGE_WRITECOPY || mappingProtect == PAGE_EXECUTE_WRITECOPY;
+
+	if (wantCopy && !supportsCopy) {
+		wantCopy = false;
+	}
+	if (wantWrite && !supportsWrite) {
+		if (supportsCopy) {
+			wantCopy = true;
+			wantWrite = false;
+		} else {
+			wantWrite = false;
+		}
+	}
+	if (!wantRead && (mappingProtect == PAGE_READONLY || mappingProtect == PAGE_EXECUTE_READ ||
+					   mappingProtect == PAGE_WRITECOPY || mappingProtect == PAGE_EXECUTE_WRITECOPY)) {
+		wantRead = true;
+	}
+
+	DWORD protect = PAGE_NOACCESS;
+	if (wantCopy && supportsCopy) {
+		protect = wantExecute ? PAGE_EXECUTE_WRITECOPY : PAGE_WRITECOPY;
+	} else if (wantExecute) {
+		if (wantWrite) {
+			protect = PAGE_EXECUTE_READWRITE;
+		} else if (wantRead) {
+			protect = PAGE_EXECUTE_READ;
+		} else {
+			protect = PAGE_EXECUTE;
+		}
+	} else {
+		if (wantWrite) {
+			protect = PAGE_READWRITE;
+		} else if (wantRead) {
+			protect = PAGE_READONLY;
+		}
+	}
+	if ((mappingProtect & PAGE_NOCACHE) != 0) {
+		protect |= PAGE_NOCACHE;
+	}
+	if ((mappingProtect & PAGE_GUARD) != 0) {
+		protect |= PAGE_GUARD;
+	}
+	if ((mappingProtect & PAGE_WRITECOMBINE) != 0) {
+		protect |= PAGE_WRITECOMBINE;
+	}
+	return protect;
+}
+
 void markCommitted(VirtualAllocation &region, uintptr_t start, size_t length, DWORD protect) {
 	if (length == 0) {
 		return;
@@ -179,6 +248,174 @@ void markDecommitted(VirtualAllocation &region, uintptr_t start, size_t length) 
 	for (size_t i = 0; i < pageCount; ++i) {
 		region.pageProtect[firstPage + i] = 0;
 	}
+}
+
+bool moduleRegionForAddress(uintptr_t pageBase, MEMORY_BASIC_INFORMATION &info) {
+	if (pageBase == 0) {
+		return false;
+	}
+	wibo::ModuleInfo *module = wibo::moduleInfoFromAddress(reinterpret_cast<void *>(pageBase));
+	if (!module || !module->executable) {
+		return false;
+	}
+	const auto &sections = module->executable->sections;
+	if (sections.empty()) {
+		return false;
+	}
+	size_t matchIndex = sections.size();
+	for (size_t i = 0; i < sections.size(); ++i) {
+		const auto &section = sections[i];
+		if (pageBase >= section.base && pageBase < section.base + section.size) {
+			matchIndex = i;
+			break;
+		}
+	}
+	if (matchIndex == sections.size()) {
+		return false;
+	}
+	uintptr_t blockStart = sections[matchIndex].base;
+	uintptr_t blockEnd = sections[matchIndex].base + sections[matchIndex].size;
+	DWORD blockProtect = sections[matchIndex].protect;
+	for (size_t prev = matchIndex; prev > 0; ) {
+		--prev;
+		const auto &section = sections[prev];
+		if (section.base + section.size != blockStart) {
+			break;
+		}
+		if (section.protect != blockProtect) {
+			break;
+		}
+		blockStart = section.base;
+	}
+	for (size_t next = matchIndex + 1; next < sections.size(); ++next) {
+		const auto &section = sections[next];
+		if (section.base != blockEnd) {
+			break;
+		}
+		if (section.protect != blockProtect) {
+			break;
+		}
+		blockEnd = section.base + section.size;
+	}
+	info.BaseAddress = reinterpret_cast<void *>(blockStart);
+	info.AllocationBase = module->executable->imageBase;
+	info.AllocationProtect = blockProtect;
+	info.RegionSize = blockEnd > blockStart ? blockEnd - blockStart : 0;
+	info.State = MEM_COMMIT;
+	info.Protect = blockProtect;
+	info.Type = MEM_IMAGE;
+	return true;
+}
+
+bool mappedViewRegionForAddress(uintptr_t request, uintptr_t pageBase, MEMORY_BASIC_INFORMATION &info) {
+	std::lock_guard<std::mutex> guard(g_viewInfoMutex);
+	if (g_viewInfo.empty()) {
+		return false;
+	}
+	const size_t pageSize = systemPageSize();
+	for (const auto &entry : g_viewInfo) {
+		const ViewInfo &view = entry.second;
+		if (view.viewLength == 0) {
+			continue;
+		}
+		uintptr_t allocationStart = view.allocationBase;
+		uintptr_t allocationEnd = allocationStart + view.allocationLength;
+		if (pageBase < allocationStart || pageBase >= allocationEnd) {
+			continue;
+		}
+		uintptr_t viewStart = view.viewBase;
+		uintptr_t viewEnd = view.viewBase + view.viewLength;
+		if (request != 0 && (request < viewStart || request >= viewEnd)) {
+			continue;
+		}
+		uintptr_t blockStart = viewStart;
+		uintptr_t blockEnd = alignUp(viewEnd, pageSize);
+		info.BaseAddress = reinterpret_cast<void *>(blockStart);
+		info.AllocationBase = reinterpret_cast<void *>(view.viewBase);
+		info.AllocationProtect = view.allocationProtect;
+		info.RegionSize = blockEnd > blockStart ? blockEnd - blockStart : 0;
+		info.State = MEM_COMMIT;
+		info.Protect = view.protect;
+		info.Type = view.type;
+		return true;
+	}
+	return false;
+}
+
+bool virtualAllocationRegionForAddress(uintptr_t pageBase, MEMORY_BASIC_INFORMATION &info) {
+	const size_t pageSize = systemPageSize();
+	std::unique_lock<std::mutex> lock(g_virtualAllocMutex);
+	VirtualAllocation *region = lookupRegion(pageBase);
+	if (!region) {
+		uintptr_t regionStart = pageBase;
+		uintptr_t regionEnd = regionStart;
+		auto next = g_virtualAllocations.lower_bound(pageBase);
+		if (next != g_virtualAllocations.end()) {
+			regionEnd = next->second.base;
+		} else {
+			regionEnd = kProcessAddressLimit;
+		}
+		if (regionEnd <= regionStart) {
+			regionEnd = regionStart + pageSize;
+		}
+		lock.unlock();
+		info.BaseAddress = reinterpret_cast<void *>(regionStart);
+		info.AllocationBase = nullptr;
+		info.AllocationProtect = 0;
+		info.RegionSize = regionEnd - regionStart;
+		info.State = MEM_FREE;
+		info.Protect = PAGE_NOACCESS;
+		info.Type = 0;
+		return true;
+	}
+	const uintptr_t regionLimit = region->base + region->size;
+	const size_t pageIndex = (pageBase - region->base) / pageSize;
+	if (pageIndex >= region->pageProtect.size()) {
+		return false;
+	}
+	const DWORD pageProtect = region->pageProtect[pageIndex];
+	const bool committed = pageProtect != 0;
+	uintptr_t blockStart = pageBase;
+	uintptr_t blockEnd = pageBase + pageSize;
+	while (blockStart > region->base) {
+		size_t idx = (blockStart - region->base) / pageSize - 1;
+		DWORD protect = region->pageProtect[idx];
+		bool pageCommitted = protect != 0;
+		if (pageCommitted != committed) {
+			break;
+		}
+		if (committed && protect != pageProtect) {
+			break;
+		}
+		blockStart -= pageSize;
+	}
+	while (blockEnd < regionLimit) {
+		size_t idx = (blockEnd - region->base) / pageSize;
+		if (idx >= region->pageProtect.size()) {
+			break;
+		}
+		DWORD protect = region->pageProtect[idx];
+		bool pageCommitted = protect != 0;
+		if (pageCommitted != committed) {
+			break;
+		}
+		if (committed && protect != pageProtect) {
+			break;
+		}
+		blockEnd += pageSize;
+	}
+	uintptr_t allocationBase = region->base;
+	DWORD allocationProtect = region->allocationProtect != 0 ? region->allocationProtect : PAGE_NOACCESS;
+	DWORD finalProtect = committed ? pageProtect : PAGE_NOACCESS;
+	lock.unlock();
+	info.BaseAddress = reinterpret_cast<void *>(blockStart);
+	info.AllocationBase = reinterpret_cast<void *>(allocationBase);
+	info.AllocationProtect = allocationProtect;
+	info.RegionSize = blockEnd - blockStart;
+	info.State = committed ? MEM_COMMIT : MEM_RESERVE;
+	info.Protect = finalProtect;
+	info.Type = MEM_PRIVATE;
+	return true;
 }
 
 void *alignedReserve(size_t length, int prot, int flags) {
@@ -335,11 +572,14 @@ static LPVOID mapViewOfFileInternal(MappingObject *mapping, DWORD dwDesiredAcces
 		return nullptr;
 	}
 
-	int prot = PROT_READ;
 	bool wantWrite = (dwDesiredAccess & FILE_MAP_WRITE) != 0;
 	bool wantExecute = (dwDesiredAccess & FILE_MAP_EXECUTE) != 0;
 	bool wantCopy = (dwDesiredAccess & FILE_MAP_COPY) != 0;
-
+	bool wantAllAccess = (dwDesiredAccess & FILE_MAP_ALL_ACCESS) == FILE_MAP_ALL_ACCESS;
+	if (wantAllAccess) {
+		wantWrite = true;
+	}
+	int prot = PROT_READ;
 	if (mapping->protect == PAGE_READWRITE) {
 		if (wantWrite || wantCopy) {
 			prot |= PROT_WRITE;
@@ -358,7 +598,7 @@ static LPVOID mapViewOfFileInternal(MappingObject *mapping, DWORD dwDesiredAcces
 	}
 
 	int flags = (mapping->anonymous ? MAP_ANONYMOUS : 0) | (wantCopy ? MAP_PRIVATE : MAP_SHARED);
-	const size_t pageSize = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+	const size_t pageSize = systemPageSize();
 	off_t alignedOffset = mapping->anonymous ? 0 : static_cast<off_t>(offset & ~static_cast<uint64_t>(pageSize - 1));
 	size_t offsetDelta = static_cast<size_t>(offset - static_cast<uint64_t>(alignedOffset));
 	uint64_t requestedLength = length + offsetDelta;
@@ -415,7 +655,24 @@ static LPVOID mapViewOfFileInternal(MappingObject *mapping, DWORD dwDesiredAcces
 		wibo::lastError = ERROR_INVALID_ADDRESS;
 		return nullptr;
 	}
-	g_viewInfo[viewPtr] = ViewInfo{mapBase, mapLength, mapping};
+	uintptr_t viewLength = static_cast<uintptr_t>(length);
+	uintptr_t alignedViewLength = alignUp(viewLength, pageSize);
+	if (alignedViewLength == std::numeric_limits<uintptr_t>::max()) {
+		alignedViewLength = viewLength;
+	}
+	ViewInfo view{};
+	view.viewBase = reinterpret_cast<uintptr_t>(viewPtr);
+	view.viewLength = static_cast<size_t>(alignedViewLength);
+	view.allocationBase = reinterpret_cast<uintptr_t>(mapBase);
+	view.allocationLength = mapLength;
+	view.owner = mapping;
+	view.protect = desiredAccessToProtect(dwDesiredAccess, mapping->protect);
+	view.allocationProtect = mapping->protect;
+	view.type = MEM_MAPPED;
+	{
+		std::lock_guard<std::mutex> guard(g_viewInfoMutex);
+		g_viewInfo[view.viewBase] = view;
+	}
 	mapping->refCount++;
 	wibo::lastError = ERROR_SUCCESS;
 	return viewPtr;
@@ -453,15 +710,18 @@ LPVOID WIN_FUNC MapViewOfFileEx(HANDLE hFileMappingObject, DWORD dwDesiredAccess
 
 BOOL WIN_FUNC UnmapViewOfFile(LPCVOID lpBaseAddress) {
 	DEBUG_LOG("UnmapViewOfFile(%p)\n", lpBaseAddress);
-	auto it = g_viewInfo.find(const_cast<void *>(lpBaseAddress));
+	std::unique_lock<std::mutex> lock(g_viewInfoMutex);
+	auto it = g_viewInfo.find(reinterpret_cast<uintptr_t>(lpBaseAddress));
 	if (it == g_viewInfo.end()) {
+		lock.unlock();
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
 	ViewInfo info = it->second;
 	g_viewInfo.erase(it);
-	if (info.mapBase && info.mapLength) {
-		munmap(info.mapBase, info.mapLength);
+	lock.unlock();
+	if (info.allocationLength != 0) {
+		munmap(reinterpret_cast<void *>(info.allocationBase), info.allocationLength);
 	}
 	if (info.owner && info.owner->refCount > 0) {
 		info.owner->refCount--;
@@ -823,7 +1083,7 @@ BOOL WIN_FUNC VirtualProtect(LPVOID lpAddress, SIZE_T dwSize, DWORD flNewProtect
 
 SIZE_T WIN_FUNC VirtualQuery(LPCVOID lpAddress, PMEMORY_BASIC_INFORMATION lpBuffer, SIZE_T dwLength) {
 	DEBUG_LOG("VirtualQuery(%p, %p, %zu)\n", lpAddress, lpBuffer, dwLength);
-	if (!lpBuffer || dwLength < sizeof(MEMORY_BASIC_INFORMATION) || !lpAddress) {
+	if (!lpBuffer || dwLength < sizeof(MEMORY_BASIC_INFORMATION)) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		DEBUG_LOG("-> ERROR_INVALID_PARAMETER\n");
 		return 0;
@@ -831,53 +1091,34 @@ SIZE_T WIN_FUNC VirtualQuery(LPCVOID lpAddress, PMEMORY_BASIC_INFORMATION lpBuff
 
 	std::memset(lpBuffer, 0, sizeof(MEMORY_BASIC_INFORMATION));
 	const size_t pageSize = systemPageSize();
-	uintptr_t request = reinterpret_cast<uintptr_t>(lpAddress);
+	uintptr_t request = lpAddress ? reinterpret_cast<uintptr_t>(lpAddress) : 0;
 	uintptr_t pageBase = alignDown(request, pageSize);
-
-	std::unique_lock<std::mutex> lock(g_virtualAllocMutex);
-	VirtualAllocation *region = lookupRegion(pageBase);
-	if (!region) {
-		wibo::lastError = ERROR_INVALID_ADDRESS;
-		DEBUG_LOG("-> ERROR_INVALID_ADDRESS\n");
+	if (pageBase >= kProcessAddressLimit) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		DEBUG_LOG("-> ERROR_INVALID_PARAMETER (beyond address space)\n");
 		return 0;
 	}
 
-	const size_t pageIndex = (pageBase - region->base) / pageSize;
-	if (pageIndex >= region->pageProtect.size()) {
-		wibo::lastError = ERROR_INVALID_ADDRESS;
-		DEBUG_LOG("-> ERROR_INVALID_ADDRESS\n");
-		return 0;
+	MEMORY_BASIC_INFORMATION info{};
+	if (moduleRegionForAddress(pageBase, info)) {
+		*lpBuffer = info;
+		wibo::lastError = ERROR_SUCCESS;
+		return sizeof(MEMORY_BASIC_INFORMATION);
 	}
-	const bool committed = region->pageProtect[pageIndex] != 0;
-	uintptr_t blockStart = pageBase;
-	uintptr_t blockEnd = pageBase + pageSize;
-	while (blockStart > region->base) {
-		size_t idx = (blockStart - region->base) / pageSize - 1;
-		bool pageCommitted = region->pageProtect[idx] != 0;
-		if (pageCommitted != committed) {
-			break;
-		}
-		blockStart -= pageSize;
+	if (mappedViewRegionForAddress(request, pageBase, info)) {
+		*lpBuffer = info;
+		wibo::lastError = ERROR_SUCCESS;
+		return sizeof(MEMORY_BASIC_INFORMATION);
 	}
-	while (blockEnd < region->base + region->size) {
-		size_t idx = (blockEnd - region->base) / pageSize;
-		bool pageCommitted = region->pageProtect[idx] != 0;
-		if (pageCommitted != committed) {
-			break;
-		}
-		blockEnd += pageSize;
+	if (virtualAllocationRegionForAddress(pageBase, info)) {
+		*lpBuffer = info;
+		wibo::lastError = ERROR_SUCCESS;
+		return sizeof(MEMORY_BASIC_INFORMATION);
 	}
 
-	lpBuffer->BaseAddress = reinterpret_cast<PVOID>(blockStart);
-	lpBuffer->AllocationBase = reinterpret_cast<PVOID>(region->base);
-	lpBuffer->AllocationProtect = region->allocationProtect != 0 ? region->allocationProtect : PAGE_NOACCESS;
-	lpBuffer->RegionSize = blockEnd - blockStart;
-	lpBuffer->State = committed ? MEM_COMMIT : MEM_RESERVE;
-	lpBuffer->Protect = committed ? region->pageProtect[pageIndex] : 0;
-	lpBuffer->Type = MEM_PRIVATE;
-	lock.unlock();
-	wibo::lastError = ERROR_SUCCESS;
-	return sizeof(MEMORY_BASIC_INFORMATION);
+	wibo::lastError = ERROR_INVALID_ADDRESS;
+	DEBUG_LOG("-> ERROR_INVALID_ADDRESS\n");
+	return 0;
 }
 
 BOOL WIN_FUNC GetProcessWorkingSetSize(HANDLE hProcess, PSIZE_T lpMinimumWorkingSetSize,

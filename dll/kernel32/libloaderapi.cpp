@@ -32,7 +32,20 @@ namespace kernel32 {
 
 BOOL WIN_FUNC DisableThreadLibraryCalls(HMODULE hLibModule) {
 	DEBUG_LOG("DisableThreadLibraryCalls(%p)\n", hLibModule);
-	(void)hLibModule;
+	if (!hLibModule) {
+		wibo::lastError = ERROR_INVALID_HANDLE;
+		return FALSE;
+	}
+	wibo::ModuleInfo *info = wibo::moduleInfoFromHandle(hLibModule);
+	if (!info) {
+		wibo::lastError = ERROR_INVALID_HANDLE;
+		return FALSE;
+	}
+	if (!wibo::disableThreadNotifications(info)) {
+		wibo::lastError = ERROR_INVALID_HANDLE;
+		return FALSE;
+	}
+	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -208,6 +221,7 @@ HMODULE WIN_FUNC LoadLibraryA(LPCSTR lpLibFileName) {
 	DEBUG_LOG("LoadLibraryA(%s)\n", lpLibFileName);
 	const auto *info = wibo::loadModule(lpLibFileName);
 	if (!info) {
+		// lastError is set by loadModule
 		return nullptr;
 	}
 	wibo::lastError = ERROR_SUCCESS;

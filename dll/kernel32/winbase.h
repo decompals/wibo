@@ -33,6 +33,9 @@ SIZE_T WIN_FUNC LocalSize(HLOCAL hMem);
 UINT WIN_FUNC LocalFlags(HLOCAL hMem);
 
 UINT WIN_FUNC GetSystemDirectoryA(LPSTR lpBuffer, UINT uSize);
+UINT WIN_FUNC GetSystemDirectoryW(LPWSTR lpBuffer, UINT uSize);
+UINT WIN_FUNC GetSystemWow64DirectoryA(LPSTR lpBuffer, UINT uSize);
+UINT WIN_FUNC GetSystemWow64DirectoryW(LPWSTR lpBuffer, UINT uSize);
 UINT WIN_FUNC GetWindowsDirectoryA(LPSTR lpBuffer, UINT uSize);
 DWORD WIN_FUNC GetCurrentDirectoryA(DWORD nBufferLength, LPSTR lpBuffer);
 DWORD WIN_FUNC GetCurrentDirectoryW(DWORD nBufferLength, LPWSTR lpBuffer);

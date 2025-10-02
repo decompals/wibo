@@ -5,10 +5,13 @@
 #include <asm/ldt.h>
 #include <charconv>
 #include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <filesystem>
 #include <memory>
+#include <pthread.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <system_error>
@@ -27,6 +30,8 @@ wibo::ModuleInfo *wibo::mainModule = nullptr;
 bool wibo::debugEnabled = false;
 unsigned int wibo::debugIndent = 0;
 uint16_t wibo::tibSelector = 0;
+int wibo::tibEntryNumber = -1;
+PEB *wibo::processPeb = nullptr;
 
 void wibo::debug_log(const char *fmt, ...) {
 	va_list args;
@@ -34,56 +39,81 @@ void wibo::debug_log(const char *fmt, ...) {
 	if (wibo::debugEnabled) {
 		for (size_t i = 0; i < wibo::debugIndent; i++)
 			fprintf(stderr, "\t");
-
+		pthread_t threadId = pthread_self();
+		fprintf(stderr, "[thread %lu] ", threadId);
 		vfprintf(stderr, fmt, args);
+		fflush(stderr);
 	}
 
 	va_end(args);
 }
 
-struct UNICODE_STRING {
-	unsigned short Length;
-	unsigned short MaximumLength;
-	uint16_t *Buffer;
-};
+TIB *wibo::allocateTib() {
+	auto *newTib = static_cast<TIB *>(std::calloc(1, sizeof(TIB)));
+	if (!newTib) {
+		return nullptr;
+	}
+	newTib->tib = newTib;
+	newTib->peb = processPeb;
+	return newTib;
+}
 
-// Run Time Library (RTL)
-struct RTL_USER_PROCESS_PARAMETERS {
-	char Reserved1[16];
-	void *Reserved2[10];
-	UNICODE_STRING ImagePathName;
-	UNICODE_STRING CommandLine;
-};
+void wibo::destroyTib(TIB *tibPtr) {
+	if (!tibPtr) {
+		return;
+	}
+	std::free(tibPtr);
+}
 
-// Windows Process Environment Block (PEB)
-struct PEB {
-	char Reserved1[2];
-	char BeingDebugged;
-	char Reserved2[1];
-	void *Reserved3[2];
-	void *Ldr;
-	RTL_USER_PROCESS_PARAMETERS *ProcessParameters;
-	char Reserved4[104];
-	void *Reserved5[52];
-	void *PostProcessInitRoutine;
-	char Reserved6[128];
-	void *Reserved7[1];
-	unsigned int SessionId;
-};
+void wibo::initializeTibStackInfo(TIB *tibPtr) {
+	if (!tibPtr) {
+		return;
+	}
+	pthread_attr_t attr;
+	if (pthread_getattr_np(pthread_self(), &attr) != 0) {
+		perror("Failed to get thread attributes");
+		return;
+	}
+	void *stackAddr = nullptr;
+	size_t stackSize = 0;
+	if (pthread_attr_getstack(&attr, &stackAddr, &stackSize) == 0 && stackAddr && stackSize > 0) {
+		tibPtr->stackLimit = stackAddr;
+		tibPtr->stackBase = static_cast<char *>(stackAddr) + stackSize;
+	} else {
+		perror("Failed to get thread stack info");
+	}
+	DEBUG_LOG("initializeTibStackInfo: stackBase=%p stackLimit=%p\n", tibPtr->stackBase, tibPtr->stackLimit);
+	pthread_attr_destroy(&attr);
+}
 
-// Windows Thread Information Block (TIB)
-struct TIB {
-	/* 0x00 */ void *sehFrame;
-	/* 0x04 */ void *stackBase;
-	/* 0x08 */ void *stackLimit;
-	/* 0x0C */ void *subSystemTib;
-	/* 0x10 */ void *fiberData;
-	/* 0x14 */ void *arbitraryDataSlot;
-	/* 0x18 */ TIB *tib;
-	/*      */ char pad[0x14];
-	/* 0x30 */ PEB *peb;
-	/*      */ char pad2[0x1000];
-};
+bool wibo::installTibForCurrentThread(TIB *tibPtr) {
+	if (!tibPtr) {
+		return false;
+	}
+	struct user_desc desc;
+	std::memset(&desc, 0, sizeof(desc));
+	desc.entry_number = tibEntryNumber;
+	desc.base_addr = reinterpret_cast<unsigned int>(tibPtr);
+	desc.limit = static_cast<unsigned int>(sizeof(TIB) - 1);
+	desc.seg_32bit = 1;
+	desc.contents = 0;
+	desc.read_exec_only = 0;
+	desc.limit_in_pages = 0;
+	desc.seg_not_present = 0;
+	desc.useable = 1;
+	if (syscall(SYS_set_thread_area, &desc) != 0) {
+		perror("set_thread_area failed");
+		return false;
+	}
+	if (tibSelector == 0) {
+		tibEntryNumber = static_cast<int>(desc.entry_number);
+		tibSelector = static_cast<uint16_t>((desc.entry_number << 3) | 3);
+		DEBUG_LOG("set_thread_area: allocated selector=0x%x entry=%d base=%p\n", tibSelector, tibEntryNumber, tibPtr);
+	} else {
+		DEBUG_LOG("set_thread_area: reused selector=0x%x entry=%d base=%p\n", tibSelector, tibEntryNumber, tibPtr);
+	}
+	return true;
+}
 
 // Make this global to ease debugging
 TIB tib;
@@ -309,24 +339,12 @@ int main(int argc, char **argv) {
 	tib.tib = &tib;
 	tib.peb = (PEB *)calloc(sizeof(PEB), 1);
 	tib.peb->ProcessParameters = (RTL_USER_PROCESS_PARAMETERS *)calloc(sizeof(RTL_USER_PROCESS_PARAMETERS), 1);
-
-	struct user_desc tibDesc;
-	memset(&tibDesc, 0, sizeof tibDesc);
-	tibDesc.entry_number = 0;
-	tibDesc.base_addr = (unsigned int)&tib;
-	tibDesc.limit = 0x1000;
-	tibDesc.seg_32bit = 1;
-	tibDesc.contents = 0; // hopefully this is ok
-	tibDesc.read_exec_only = 0;
-	tibDesc.limit_in_pages = 0;
-	tibDesc.seg_not_present = 0;
-	tibDesc.useable = 1;
-	if (syscall(SYS_modify_ldt, 1, &tibDesc, sizeof tibDesc) != 0) {
-		perror("Failed to modify LDT\n");
+	wibo::processPeb = tib.peb;
+	wibo::initializeTibStackInfo(&tib);
+	if (!wibo::installTibForCurrentThread(&tib)) {
+		fprintf(stderr, "Failed to install TIB for main thread\n");
 		return 1;
 	}
-
-	wibo::tibSelector = static_cast<uint16_t>((tibDesc.entry_number << 3) | 7);
 
 	// Determine the guest program name
 	auto guestArgs = processes::splitCommandLine(cmdLine.c_str());
@@ -374,7 +392,7 @@ int main(int argc, char **argv) {
 			if (i != 0) {
 				cmdLine += ' ';
 			}
-			const std::string& arg = guestArgs[i];
+			const std::string &arg = guestArgs[i];
 			bool needQuotes = arg.find_first_of("\" \t\n") != std::string::npos;
 			if (needQuotes)
 				cmdLine += '"';
@@ -458,8 +476,8 @@ int main(int argc, char **argv) {
 			  wibo::mainModule->executable->imageBase);
 
 	if (!wibo::mainModule->executable->resolveImports()) {
-		fprintf(stderr, "Failed to resolve imports for main module\n");
-		return 1;
+		fprintf(stderr, "Failed to resolve imports for main module (DLL initialization failure?)\n");
+		abort();
 	}
 
 	// Invoke the damn thing

@@ -66,6 +66,10 @@ void destroyThreadObject(ThreadObject *obj) {
 	if (!obj) {
 		return;
 	}
+	if (obj->tib) {
+		wibo::destroyTib(obj->tib);
+		obj->tib = nullptr;
+	}
 	pthread_cond_destroy(&obj->cond);
 	pthread_mutex_destroy(&obj->mutex);
 	delete obj;
@@ -211,20 +215,33 @@ static void *threadTrampoline(void *param) {
 	void *userParam = data->parameter;
 	delete data;
 
-	uint16_t previousSegment = 0;
-	bool tibInstalled = false;
-	if (wibo::tibSelector) {
-		asm volatile("mov %%fs, %0" : "=r"(previousSegment));
-		asm volatile("movw %0, %%fs" : : "r"(wibo::tibSelector) : "memory");
-		tibInstalled = true;
-	}
-
 	g_currentThreadObject = obj;
 	pthread_mutex_lock(&obj->mutex);
 	while (obj->suspendCount > 0) {
 		pthread_cond_wait(&obj->cond, &obj->mutex);
 	}
 	pthread_mutex_unlock(&obj->mutex);
+
+	uint16_t previousSegment = 0;
+	bool tibInstalled = false;
+	TIB *threadTib = nullptr;
+	if (wibo::tibSelector) {
+		asm volatile("mov %%fs, %0" : "=r"(previousSegment));
+		threadTib = wibo::allocateTib();
+		if (threadTib) {
+			wibo::initializeTibStackInfo(threadTib);
+			if (wibo::installTibForCurrentThread(threadTib)) {
+				asm volatile("movw %0, %%fs" : : "r"(wibo::tibSelector) : "memory");
+				tibInstalled = true;
+				obj->tib = threadTib;
+			} else {
+				fprintf(stderr, "!!! Failed to install TIB for new thread\n");
+				wibo::destroyTib(threadTib);
+				threadTib = nullptr;
+			}
+		}
+	}
+	wibo::notifyDllThreadAttach();
 	DWORD result = startRoutine ? startRoutine(userParam) : 0;
 	pthread_mutex_lock(&obj->mutex);
 	obj->finished = true;
@@ -233,6 +250,14 @@ static void *threadTrampoline(void *param) {
 	bool shouldDelete = (obj->refCount == 0);
 	bool detached = obj->detached;
 	pthread_mutex_unlock(&obj->mutex);
+	wibo::notifyDllThreadDetach();
+	if (tibInstalled) {
+		asm volatile("movw %0, %%fs" : : "r"(previousSegment) : "memory");
+	}
+	if (threadTib) {
+		obj->tib = nullptr;
+		wibo::destroyTib(threadTib);
+	}
 	g_currentThreadObject = nullptr;
 
 	if (shouldDelete) {
@@ -240,9 +265,6 @@ static void *threadTrampoline(void *param) {
 		destroyThreadObject(obj);
 	}
 
-	if (tibInstalled) {
-		asm volatile("movw %0, %%fs" : : "r"(previousSegment) : "memory");
-	}
 	return nullptr;
 }
 
@@ -564,6 +586,7 @@ HANDLE WIN_FUNC CreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dw
 void WIN_FUNC ExitThread(DWORD dwExitCode) {
 	DEBUG_LOG("ExitThread(%u)\n", dwExitCode);
 	ThreadObject *obj = g_currentThreadObject;
+	TIB *threadTib = obj ? obj->tib : nullptr;
 	uint16_t previousSegment = 0;
 	bool tibInstalled = false;
 	if (wibo::tibSelector) {
@@ -571,22 +594,31 @@ void WIN_FUNC ExitThread(DWORD dwExitCode) {
 		asm volatile("movw %0, %%fs" : : "r"(wibo::tibSelector) : "memory");
 		tibInstalled = true;
 	}
+	bool shouldDelete = false;
+	bool detached = false;
 	if (obj) {
 		pthread_mutex_lock(&obj->mutex);
 		obj->finished = true;
 		obj->exitCode = dwExitCode;
 		pthread_cond_broadcast(&obj->cond);
-		bool shouldDelete = (obj->refCount == 0);
-		bool detached = obj->detached;
+		shouldDelete = (obj->refCount == 0);
+		detached = obj->detached;
 		pthread_mutex_unlock(&obj->mutex);
+	}
+	wibo::notifyDllThreadDetach();
+	if (tibInstalled) {
+		asm volatile("movw %0, %%fs" : : "r"(previousSegment) : "memory");
+	}
+	if (obj && threadTib) {
+		obj->tib = nullptr;
+		wibo::destroyTib(threadTib);
+	}
+	if (obj) {
 		g_currentThreadObject = nullptr;
 		if (shouldDelete) {
 			assert(detached && "ThreadObject must be detached when refCount reaches zero before completion");
 			destroyThreadObject(obj);
 		}
-	}
-	if (tibInstalled) {
-		asm volatile("movw %0, %%fs" : : "r"(previousSegment) : "memory");
 	}
 	pthread_exit(nullptr);
 }

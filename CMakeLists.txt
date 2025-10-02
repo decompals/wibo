@@ -115,6 +115,22 @@ if(BUILD_TESTING)
                 DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/test/external_exports.c)
 
             add_custom_command(
+                OUTPUT ${WIBO_TEST_BIN_DIR}/dll_attach_failure.dll
+                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2 -shared
+                        -o dll_attach_failure.dll
+                        ${CMAKE_CURRENT_SOURCE_DIR}/test/dll_attach_failure.c
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/test/dll_attach_failure.c)
+
+            add_custom_command(
+                OUTPUT ${WIBO_TEST_BIN_DIR}/thread_notifications.dll
+                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2 -shared
+                        -o thread_notifications.dll
+                        ${CMAKE_CURRENT_SOURCE_DIR}/test/thread_notifications.c
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/test/thread_notifications.c)
+
+            add_custom_command(
                 OUTPUT ${WIBO_TEST_BIN_DIR}/test_external_dll.exe
                 COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
                         -I${CMAKE_CURRENT_SOURCE_DIR}/test
@@ -123,6 +139,28 @@ if(BUILD_TESTING)
                 WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
                 DEPENDS
                     ${CMAKE_CURRENT_SOURCE_DIR}/test/test_external_dll.c
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
+
+            add_custom_command(
+                OUTPUT ${WIBO_TEST_BIN_DIR}/test_dll_attach_failure.exe
+                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
+                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
+                        -o test_dll_attach_failure.exe
+                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_dll_attach_failure.c
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_dll_attach_failure.c
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
+
+            add_custom_command(
+                OUTPUT ${WIBO_TEST_BIN_DIR}/test_thread_notifications.exe
+                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
+                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
+                        -o test_thread_notifications.exe
+                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_thread_notifications.c
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_thread_notifications.c
                     ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
 
             add_custom_command(
@@ -213,17 +251,57 @@ if(BUILD_TESTING)
                     ${CMAKE_CURRENT_SOURCE_DIR}/test/test_virtualalloc.c
                     ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
 
+            add_custom_command(
+                OUTPUT ${WIBO_TEST_BIN_DIR}/test_rtl.exe
+                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
+                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
+                        -o test_rtl.exe
+                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_rtl.c
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_rtl.c
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
+
+            add_custom_command(
+                OUTPUT ${WIBO_TEST_BIN_DIR}/test_ntquery.exe
+                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
+                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
+                        -o test_ntquery.exe
+                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_ntquery.c
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_ntquery.c
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
+
+            add_custom_command(
+                OUTPUT ${WIBO_TEST_BIN_DIR}/test_sysdir.exe
+                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
+                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
+                        -o test_sysdir.exe
+                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_sysdir.c
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_sysdir.c
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
+
             add_custom_target(wibo_test_fixtures
                 DEPENDS
                     ${WIBO_TEST_BIN_DIR}/external_exports.dll
+                    ${WIBO_TEST_BIN_DIR}/dll_attach_failure.dll
+                    ${WIBO_TEST_BIN_DIR}/thread_notifications.dll
                     ${WIBO_TEST_BIN_DIR}/test_external_dll.exe
+                    ${WIBO_TEST_BIN_DIR}/test_dll_attach_failure.exe
+                    ${WIBO_TEST_BIN_DIR}/test_thread_notifications.exe
                     ${WIBO_TEST_BIN_DIR}/test_bcrypt.exe
                     ${WIBO_TEST_BIN_DIR}/test_resources.exe
                     ${WIBO_TEST_BIN_DIR}/test_threading.exe
                     ${WIBO_TEST_BIN_DIR}/test_heap.exe
                     ${WIBO_TEST_BIN_DIR}/test_overlapped_io.exe
                     ${WIBO_TEST_BIN_DIR}/test_time.exe
-                    ${WIBO_TEST_BIN_DIR}/test_virtualalloc.exe)
+                    ${WIBO_TEST_BIN_DIR}/test_virtualalloc.exe
+                    ${WIBO_TEST_BIN_DIR}/test_rtl.exe
+                    ${WIBO_TEST_BIN_DIR}/test_ntquery.exe
+                    ${WIBO_TEST_BIN_DIR}/test_sysdir.exe)
 
             if(CMAKE_CONFIGURATION_TYPES)
                 set(_wibo_fixture_build_command
@@ -280,6 +358,36 @@ if(BUILD_TESTING)
             add_test(NAME wibo.test_virtualalloc
                 COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_virtualalloc.exe)
             set_tests_properties(wibo.test_virtualalloc PROPERTIES
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS wibo.build_fixtures)
+
+            add_test(NAME wibo.test_rtl
+                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_rtl.exe)
+            set_tests_properties(wibo.test_rtl PROPERTIES
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS wibo.build_fixtures)
+
+            add_test(NAME wibo.test_ntquery
+                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_ntquery.exe)
+            set_tests_properties(wibo.test_ntquery PROPERTIES
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS wibo.build_fixtures)
+
+            add_test(NAME wibo.test_sysdir
+                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_sysdir.exe)
+            set_tests_properties(wibo.test_sysdir PROPERTIES
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS wibo.build_fixtures)
+
+            add_test(NAME wibo.test_dll_attach_failure
+                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_dll_attach_failure.exe)
+            set_tests_properties(wibo.test_dll_attach_failure PROPERTIES
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS wibo.build_fixtures)
+
+            add_test(NAME wibo.test_thread_notifications
+                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_thread_notifications.exe)
+            set_tests_properties(wibo.test_thread_notifications PROPERTIES
                 WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
                 DEPENDS wibo.build_fixtures)
         endif()

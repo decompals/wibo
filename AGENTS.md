@@ -31,9 +31,10 @@
 - All fixtures must self-assert; use `test_assert.h` helpers so `ctest` fails on mismatched WinAPI behaviour.
 - Update `CMakeLists.txt` to add new fixture sources.
 - Rebuild, then run tests with `ctest --test-dir build --output-on-failure`.
-- Always run tests against `wine` manually to confirm expected behaviour. If `wine` fails, the expected behaviour is likely wrong. (`wine` is not perfect, but we can assume it's closer to Windows than we are.)
+- ALWAYS run tests against `wine` manually to confirm expected behaviour. If `wine` fails, the expected behaviour is likely wrong. (`wine` is not perfect, but we can assume it's closer to Windows than we are.)
 
 ## Debugging Workflow
 - Reproduce crashes under `gdb` (or `lldb`) with `-q -batch` to capture backtraces, register state, and the faulting instruction without interactive prompts.
 - Enable `WIBO_DEBUG=1` and output to a log (i.e. `&>/tmp/wibo.log`) when running the guest binary; loader traces often pinpoint missing imports, resource lookups, or API shims that misbehave. The answer is usually in the last few dozen lines before the crash.
 - Inspect relevant source right away—most issues stem from stubbed shims in `dll/`.
+- Missing stubs generally do _not_ cause a crash; we return valid function pointers for unknown imports. Only when the missing stub is _called_ do we abort with a message. Therefore, don't preemptively add stubs for every missing import; wait until the binary actually calls it.

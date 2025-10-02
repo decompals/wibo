@@ -110,6 +110,47 @@ constexpr DWORD STD_INPUT_HANDLE = ((DWORD)-10);
 constexpr DWORD STD_OUTPUT_HANDLE = ((DWORD)-11);
 constexpr DWORD STD_ERROR_HANDLE = ((DWORD)-12);
 
+struct UNICODE_STRING {
+	unsigned short Length;
+	unsigned short MaximumLength;
+	uint16_t *Buffer;
+};
+
+struct RTL_USER_PROCESS_PARAMETERS {
+	char Reserved1[16];
+	void *Reserved2[10];
+	UNICODE_STRING ImagePathName;
+	UNICODE_STRING CommandLine;
+};
+
+struct PEB {
+	char Reserved1[2];
+	char BeingDebugged;
+	char Reserved2[1];
+	void *Reserved3[2];
+	void *Ldr;
+	RTL_USER_PROCESS_PARAMETERS *ProcessParameters;
+	char Reserved4[104];
+	void *Reserved5[52];
+	void *PostProcessInitRoutine;
+	char Reserved6[128];
+	void *Reserved7[1];
+	unsigned int SessionId;
+};
+
+struct TIB {
+	void *sehFrame;
+	void *stackBase;
+	void *stackLimit;
+	void *subSystemTib;
+	void *fiberData;
+	void *arbitraryDataSlot;
+	TIB *tib;
+	char reserved1[0x14];
+	PEB *peb;
+	char reserved2[0x1000];
+};
+
 namespace wibo {
 extern thread_local uint32_t lastError;
 extern char **argv;
@@ -121,6 +162,13 @@ extern std::vector<uint16_t> commandLineW;
 extern bool debugEnabled;
 extern unsigned int debugIndent;
 extern uint16_t tibSelector;
+extern int tibEntryNumber;
+extern PEB *processPeb;
+
+TIB *allocateTib();
+void initializeTibStackInfo(TIB *tib);
+bool installTibForCurrentThread(TIB *tib);
+void destroyTib(TIB *tib);
 
 void debug_log(const char *fmt, ...);
 
@@ -143,6 +191,9 @@ void registerOnExitTable(void *table);
 void addOnExitFunction(void *table, void (*func)());
 void executeOnExitTable(void *table);
 void runPendingOnExit(ModuleInfo &info);
+void notifyDllThreadAttach();
+void notifyDllThreadDetach();
+BOOL disableThreadNotifications(ModuleInfo *info);
 
 ModuleInfo *loadModule(const char *name);
 void freeModule(ModuleInfo *info);
@@ -234,6 +285,7 @@ struct ModuleInfo {
 	unsigned int refCount = 0;
 	bool processAttachCalled = false;
 	bool processAttachSucceeded = false;
+	bool threadNotificationsEnabled = true;
 	uint32_t exportOrdinalBase = 0;
 	std::vector<void *> exportsByOrdinal;
 	std::unordered_map<std::string, uint16_t> exportNameToOrdinal;

@@ -433,19 +433,51 @@ UINT WIN_FUNC LocalFlags(HLOCAL hMem) {
 	return 0;
 }
 
+static constexpr const char *kSystemDirectoryA = "C:\\Windows\\System32";
+
 UINT WIN_FUNC GetSystemDirectoryA(LPSTR lpBuffer, UINT uSize) {
 	DEBUG_LOG("GetSystemDirectoryA(%p, %u)\n", lpBuffer, uSize);
 	if (!lpBuffer) {
 		return 0;
 	}
 
-	const char *systemDir = "C:\\Windows\\System32";
-	const auto len = std::strlen(systemDir);
+	const auto len = std::strlen(kSystemDirectoryA);
 	if (uSize < len + 1) {
 		return static_cast<UINT>(len + 1);
 	}
-	std::strcpy(lpBuffer, systemDir);
+	std::strcpy(lpBuffer, kSystemDirectoryA);
 	return static_cast<UINT>(len);
+}
+
+UINT WIN_FUNC GetSystemDirectoryW(LPWSTR lpBuffer, UINT uSize) {
+	DEBUG_LOG("GetSystemDirectoryW(%p, %u)\n", lpBuffer, uSize);
+	if (!lpBuffer) {
+		return 0;
+	}
+
+	auto wide = stringToWideString(kSystemDirectoryA);
+	UINT length = static_cast<UINT>(wide.size() - 1);
+	if (uSize < length + 1) {
+		return length + 1;
+	}
+	std::memcpy(lpBuffer, wide.data(), (length + 1) * sizeof(uint16_t));
+	return length;
+}
+
+UINT WIN_FUNC GetSystemWow64DirectoryA(LPSTR lpBuffer, UINT uSize) {
+	DEBUG_LOG("GetSystemWow64DirectoryA(%p, %u)\n", lpBuffer, uSize);
+	(void)lpBuffer;
+	(void)uSize;
+	wibo::lastError = ERROR_CALL_NOT_IMPLEMENTED;
+	return 0;
+}
+
+UINT WIN_FUNC GetSystemWow64DirectoryW(LPWSTR lpBuffer, UINT uSize) {
+	DEBUG_LOG("GetSystemWow64DirectoryW(%p, %u)\n", lpBuffer, uSize);
+	(void)lpBuffer;
+	(void)uSize;
+	wibo::lastError = ERROR_CALL_NOT_IMPLEMENTED;
+	return 0;
 }
 
 UINT WIN_FUNC GetWindowsDirectoryA(LPSTR lpBuffer, UINT uSize) {

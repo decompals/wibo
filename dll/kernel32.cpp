@@ -222,6 +222,14 @@ void *resolveByName(const char *name) {
 		return (void *)kernel32::LocalSize;
 	if (strcmp(name, "LocalFlags") == 0)
 		return (void *)kernel32::LocalFlags;
+	if (strcmp(name, "GetSystemDirectoryA") == 0)
+		return (void *)kernel32::GetSystemDirectoryA;
+	if (strcmp(name, "GetSystemDirectoryW") == 0)
+		return (void *)kernel32::GetSystemDirectoryW;
+	if (strcmp(name, "GetSystemWow64DirectoryA") == 0)
+		return (void *)kernel32::GetSystemWow64DirectoryA;
+	if (strcmp(name, "GetSystemWow64DirectoryW") == 0)
+		return (void *)kernel32::GetSystemWow64DirectoryW;
 	if (strcmp(name, "GetCurrentDirectoryA") == 0)
 		return (void *)kernel32::GetCurrentDirectoryA;
 	if (strcmp(name, "GetCurrentDirectoryW") == 0)

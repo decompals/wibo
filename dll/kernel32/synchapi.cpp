@@ -233,7 +233,7 @@ HANDLE WIN_FUNC CreateEventW(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManu
 	} else {
 		nameLog = "<unnamed>";
 	}
-	DEBUG_LOG("CreateEventW(name=%s, manualReset=%d, initialState=%d)\n", nameLog.c_str(), bManualReset, bInitialState);
+	DEBUG_LOG("CreateEventW(%p, %d, %d, %s)\n", lpEventAttributes, bManualReset, bInitialState, nameLog.c_str());
 	(void)lpEventAttributes;
 
 	std::u16string name = makeMutexName(lpName);

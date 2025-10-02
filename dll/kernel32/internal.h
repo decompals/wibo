@@ -19,6 +19,7 @@ struct ThreadObject {
 	pthread_mutex_t mutex{};
 	pthread_cond_t cond{};
 	unsigned int suspendCount = 0;
+	TIB *tib = nullptr;
 };
 
 struct MutexObject {

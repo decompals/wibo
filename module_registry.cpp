@@ -8,6 +8,7 @@
 #include <climits>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <mutex>
 #include <optional>
@@ -34,6 +35,8 @@ namespace {
 
 constexpr DWORD DLL_PROCESS_DETACH = 0;
 constexpr DWORD DLL_PROCESS_ATTACH = 1;
+constexpr DWORD DLL_THREAD_ATTACH = 2;
+constexpr DWORD DLL_THREAD_DETACH = 3;
 
 struct PEExportDirectory {
 	uint32_t characteristics;
@@ -409,41 +412,83 @@ void registerBuiltinModule(ModuleRegistry &reg, const wibo::Module *module) {
 	}
 }
 
-void callDllMain(wibo::ModuleInfo &info, DWORD reason) {
-	if (!info.executable) {
-		return;
+BOOL callDllMain(wibo::ModuleInfo &info, DWORD reason, LPVOID reserved) {
+	if (&info == wibo::mainModule) {
+		return TRUE;
 	}
-	using DllMainFunc = BOOL(WIN_FUNC *)(HMODULE, DWORD, LPVOID);
-	auto dllMain = reinterpret_cast<DllMainFunc>(info.executable->entryPoint);
-	if (!dllMain) {
-		return;
+	if (!info.executable) {
+		return TRUE;
+	}
+	void *entry = info.executable->entryPoint;
+	if (!entry) {
+		return TRUE;
 	}
 
-	auto invokeWithGuestTIB = [&](DWORD callReason) -> BOOL {
-		if (!wibo::tibSelector) {
-			return dllMain(reinterpret_cast<HMODULE>(info.executable->imageBase), callReason, nullptr);
+	using DllMainFunc = BOOL(WIN_FUNC *)(HMODULE, DWORD, LPVOID);
+	auto dllMain = reinterpret_cast<DllMainFunc>(entry);
+
+	auto invokeWithGuestTIB = [&](DWORD callReason, LPVOID callReserved, bool force) -> BOOL {
+		if (!force) {
+			if (callReason == DLL_PROCESS_DETACH) {
+				if (!info.processAttachCalled || !info.processAttachSucceeded) {
+					return TRUE;
+				}
+			}
+			if (callReason == DLL_THREAD_ATTACH || callReason == DLL_THREAD_DETACH) {
+				if (!info.processAttachCalled || !info.processAttachSucceeded || !info.threadNotificationsEnabled) {
+					return TRUE;
+				}
+			}
 		}
 
-		uint16_t previousSegment = 0;
-		asm volatile("mov %%fs, %0" : "=r"(previousSegment));
-		asm volatile("movw %0, %%fs" : : "r"(wibo::tibSelector) : "memory");
-		BOOL result = dllMain(reinterpret_cast<HMODULE>(info.executable->imageBase), callReason, nullptr);
-		asm volatile("movw %0, %%fs" : : "r"(previousSegment) : "memory");
+		DEBUG_LOG("  callDllMain: invoking DllMain(%p, %u, %p) for %s\n",
+				  reinterpret_cast<HMODULE>(info.executable->imageBase), callReason, callReserved,
+				  info.normalizedName.c_str());
+
+		BOOL result = TRUE;
+		if (!wibo::tibSelector) {
+			result = dllMain(reinterpret_cast<HMODULE>(info.executable->imageBase), callReason, callReserved);
+		} else {
+			uint16_t previousSegment = 0;
+			asm volatile("mov %%fs, %0" : "=r"(previousSegment));
+			asm volatile("movw %0, %%fs" : : "r"(wibo::tibSelector) : "memory");
+			result = dllMain(reinterpret_cast<HMODULE>(info.executable->imageBase), callReason, callReserved);
+			asm volatile("movw %0, %%fs" : : "r"(previousSegment) : "memory");
+		}
+		DEBUG_LOG("  callDllMain: %s DllMain returned %d\n", info.normalizedName.c_str(), result);
 		return result;
 	};
 
-	if (reason == DLL_PROCESS_ATTACH) {
+	switch (reason) {
+	case DLL_PROCESS_ATTACH: {
 		if (info.processAttachCalled) {
-			return;
+			return info.processAttachSucceeded ? TRUE : FALSE;
 		}
 		info.processAttachCalled = true;
-		BOOL result = invokeWithGuestTIB(reason);
-		info.processAttachSucceeded = result != 0;
-	} else if (reason == DLL_PROCESS_DETACH) {
-		if (info.processAttachCalled && info.processAttachSucceeded) {
-			invokeWithGuestTIB(reason);
+		info.processAttachSucceeded = false;
+		BOOL result = invokeWithGuestTIB(DLL_PROCESS_ATTACH, reserved, true);
+		if (!result) {
+			invokeWithGuestTIB(DLL_PROCESS_DETACH, nullptr, true);
+			return FALSE;
 		}
+		info.processAttachSucceeded = true;
+		return TRUE;
 	}
+	case DLL_PROCESS_DETACH: {
+		BOOL result = invokeWithGuestTIB(DLL_PROCESS_DETACH, reserved, false);
+		if (info.processAttachSucceeded) {
+			info.processAttachSucceeded = false;
+		}
+		return result;
+	}
+	case DLL_THREAD_ATTACH:
+	case DLL_THREAD_DETACH:
+		return invokeWithGuestTIB(reason, reserved, false);
+	default:
+		break;
+	}
+
+	return TRUE;
 }
 
 void registerExternalModuleAliases(ModuleRegistry &reg, const std::string &requestedName,
@@ -471,6 +516,25 @@ wibo::ModuleInfo *moduleFromAddress(ModuleRegistry &reg, void *addr) {
 		}
 	}
 	return nullptr;
+}
+
+bool shouldDeliverThreadNotifications(const wibo::ModuleInfo &info) {
+	if (&info == wibo::mainModule) {
+		return false;
+	}
+	if (info.module != nullptr) {
+		return false;
+	}
+	if (!info.executable) {
+		return false;
+	}
+	if (!info.processAttachCalled || !info.processAttachSucceeded) {
+		return false;
+	}
+	if (!info.threadNotificationsEnabled) {
+		return false;
+	}
+	return true;
 }
 
 void ensureExportsInitialized(wibo::ModuleInfo &info) {
@@ -598,7 +662,7 @@ void shutdownModuleRegistry() {
 		}
 		runPendingOnExit(*info);
 		if (info->processAttachCalled && info->processAttachSucceeded) {
-			callDllMain(*info, DLL_PROCESS_DETACH);
+			callDllMain(*info, DLL_PROCESS_DETACH, reinterpret_cast<LPVOID>(1));
 		}
 	}
 	reg->modulesByKey.clear();
@@ -612,7 +676,23 @@ ModuleInfo *moduleInfoFromHandle(HMODULE module) {
 	if (isMainModule(module)) {
 		return wibo::mainModule;
 	}
-	return static_cast<ModuleInfo *>(module);
+	if (!module) {
+		return nullptr;
+	}
+	auto reg = registry();
+	for (auto &pair : reg->modulesByKey) {
+		wibo::ModuleInfo *info = pair.second.get();
+		if (!info) {
+			continue;
+		}
+		if (info->handle == module) {
+			return info;
+		}
+		if (info->executable && info->executable->imageBase == module) {
+			return info;
+		}
+	}
+	return nullptr;
 }
 
 void setDllDirectoryOverride(const std::filesystem::path &path) {
@@ -687,6 +767,46 @@ void executeOnExitTable(void *table) {
 	}
 }
 
+void notifyDllThreadAttach() {
+	auto reg = registry();
+	std::vector<wibo::ModuleInfo *> targets;
+	targets.reserve(reg->modulesByKey.size());
+	for (auto &pair : reg->modulesByKey) {
+		wibo::ModuleInfo *info = pair.second.get();
+		if (info && shouldDeliverThreadNotifications(*info)) {
+			targets.push_back(info);
+		}
+	}
+	for (wibo::ModuleInfo *info : targets) {
+		callDllMain(*info, DLL_THREAD_ATTACH, nullptr);
+	}
+}
+
+void notifyDllThreadDetach() {
+	auto reg = registry();
+	std::vector<wibo::ModuleInfo *> targets;
+	targets.reserve(reg->modulesByKey.size());
+	for (auto &pair : reg->modulesByKey) {
+		wibo::ModuleInfo *info = pair.second.get();
+		if (info && shouldDeliverThreadNotifications(*info)) {
+			targets.push_back(info);
+		}
+	}
+	for (auto it = targets.rbegin(); it != targets.rend(); ++it) {
+		callDllMain(**it, DLL_THREAD_DETACH, nullptr);
+	}
+}
+
+BOOL disableThreadNotifications(ModuleInfo *info) {
+	if (!info) {
+		return FALSE;
+	}
+	auto reg = registry();
+	(void)reg;
+	info->threadNotificationsEnabled = false;
+	return TRUE;
+}
+
 ModuleInfo *findLoadedModule(const char *name) {
 	if (!name || *name == '\0') {
 		return wibo::mainModule;
@@ -727,6 +847,7 @@ ModuleInfo *loadModule(const char *dllName) {
 			return info;
 		}
 
+		DEBUG_LOG("  loading external module from %s\n", path.c_str());
 		FILE *file = fopen(path.c_str(), "rb");
 		if (!file) {
 			perror("loadModule");
@@ -756,8 +877,35 @@ ModuleInfo *loadModule(const char *dllName) {
 		reg->modulesByKey[key] = std::move(info);
 		registerExternalModuleAliases(*reg, requested, raw->resolvedPath, raw);
 		ensureExportsInitialized(*raw);
-		raw->executable->resolveImports();
-		callDllMain(*raw, DLL_PROCESS_ATTACH);
+		if (!raw->executable->resolveImports()) {
+			DEBUG_LOG("  resolveImports failed for %s\n", raw->originalName.c_str());
+			reg->modulesByKey.erase(key);
+			diskError = wibo::lastError;
+			return nullptr;
+		}
+		if (!callDllMain(*raw, DLL_PROCESS_ATTACH, nullptr)) {
+			DEBUG_LOG("  DllMain failed for %s\n", raw->originalName.c_str());
+			runPendingOnExit(*raw);
+			for (auto it = reg->onExitTables.begin(); it != reg->onExitTables.end();) {
+				if (it->second == raw) {
+					it = reg->onExitTables.erase(it);
+				} else {
+					++it;
+				}
+			}
+			for (auto it = reg->modulesByAlias.begin(); it != reg->modulesByAlias.end();) {
+				if (it->second == raw) {
+					it = reg->modulesByAlias.erase(it);
+				} else {
+					++it;
+				}
+			}
+			reg->pinnedModules.erase(raw);
+			reg->modulesByKey.erase(key);
+			diskError = ERROR_DLL_INIT_FAILED;
+			wibo::lastError = ERROR_DLL_INIT_FAILED;
+			return nullptr;
+		}
 		return raw;
 	};
 
@@ -765,6 +913,7 @@ ModuleInfo *loadModule(const char *dllName) {
 		auto resolvedPath = resolveModuleOnDisk(*reg, requested, false);
 		if (!resolvedPath) {
 			DEBUG_LOG("  module not found on disk\n");
+			diskError = ERROR_MOD_NOT_FOUND;
 			return nullptr;
 		}
 		return tryLoadExternal(*resolvedPath);
@@ -791,6 +940,9 @@ ModuleInfo *loadModule(const char *dllName) {
 				DEBUG_LOG("  replaced builtin module %s with external copy\n", requested.c_str());
 				lastError = ERROR_SUCCESS;
 				return external;
+			} else if (diskError != ERROR_MOD_NOT_FOUND) {
+				lastError = diskError;
+				return nullptr;
 			}
 		}
 		lastError = ERROR_SUCCESS;
@@ -802,6 +954,9 @@ ModuleInfo *loadModule(const char *dllName) {
 		DEBUG_LOG("  loaded external module %s\n", requested.c_str());
 		lastError = ERROR_SUCCESS;
 		return external;
+	} else if (diskError != ERROR_MOD_NOT_FOUND) {
+		lastError = diskError;
+		return nullptr;
 	}
 
 	auto fallbackAlias = normalizedBaseKey(parsed);
@@ -844,7 +999,7 @@ void freeModule(ModuleInfo *info) {
 			}
 		}
 		runPendingOnExit(*info);
-		callDllMain(*info, DLL_PROCESS_DETACH);
+		callDllMain(*info, DLL_PROCESS_DETACH, nullptr);
 		std::string key = info->resolvedPath.empty() ? storageKeyForBuiltin(info->normalizedName)
 													 : storageKeyForPath(info->resolvedPath);
 		reg->modulesByKey.erase(key);

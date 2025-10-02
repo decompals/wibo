@@ -1,8 +1,13 @@
 #include "common.h"
 #include "errors.h"
 #include "files.h"
+#include "handles.h"
+#include "kernel32/processthreadsapi.h"
+#include "processes.h"
+#include "strutil.h"
 
 #include <sys/mman.h>
+#include <unistd.h>
 
 #include <optional>
 
@@ -15,6 +20,98 @@ typedef struct _IO_STATUS_BLOCK {
 	};
 	ULONG_PTR Information;
 } IO_STATUS_BLOCK, *PIO_STATUS_BLOCK;
+
+namespace {
+
+enum PROCESSINFOCLASS {
+	ProcessBasicInformation = 0,
+	ProcessWow64Information = 26,
+	ProcessImageFileName = 27,
+};
+
+struct PROCESS_BASIC_INFORMATION {
+	NTSTATUS ExitStatus;
+	PEB *PebBaseAddress;
+	ULONG_PTR AffinityMask;
+	LONG BasePriority;
+	ULONG_PTR UniqueProcessId;
+	ULONG_PTR InheritedFromUniqueProcessId;
+};
+
+struct ProcessHandleDetails {
+	pid_t pid = -1;
+	DWORD exitCode = STILL_ACTIVE;
+	PEB *peb = nullptr;
+	bool isCurrentProcess = false;
+};
+
+constexpr LONG kDefaultBasePriority = 8;
+
+struct RTL_OSVERSIONINFOW {
+	ULONG dwOSVersionInfoSize;
+	ULONG dwMajorVersion;
+	ULONG dwMinorVersion;
+	ULONG dwBuildNumber;
+	ULONG dwPlatformId;
+	WCHAR szCSDVersion[128];
+};
+
+using PRTL_OSVERSIONINFOW = RTL_OSVERSIONINFOW *;
+
+struct RTL_OSVERSIONINFOEXW : RTL_OSVERSIONINFOW {
+	WORD wServicePackMajor;
+	WORD wServicePackMinor;
+	WORD wSuiteMask;
+	BYTE wProductType;
+	BYTE wReserved;
+};
+
+using PRTL_OSVERSIONINFOEXW = RTL_OSVERSIONINFOEXW *;
+
+constexpr ULONG kOsMajorVersion = 6;
+constexpr ULONG kOsMinorVersion = 2;
+constexpr ULONG kOsBuildNumber = 0;
+constexpr ULONG kOsPlatformId = 2; // VER_PLATFORM_WIN32_NT
+constexpr BYTE kProductTypeWorkstation = 1; // VER_NT_WORKSTATION
+
+static bool resolveProcessDetails(HANDLE processHandle, ProcessHandleDetails &details) {
+	uintptr_t rawHandle = reinterpret_cast<uintptr_t>(processHandle);
+	if (rawHandle == static_cast<uintptr_t>(-1)) {
+		details.pid = getpid();
+		details.exitCode = STILL_ACTIVE;
+		details.peb = wibo::processPeb;
+		details.isCurrentProcess = true;
+		return true;
+	}
+
+	auto data = handles::dataFromHandle(processHandle, false);
+	if (data.type != handles::TYPE_PROCESS || data.ptr == nullptr) {
+		return false;
+	}
+
+	auto *process = reinterpret_cast<processes::Process *>(data.ptr);
+	details.pid = process->pid;
+	details.exitCode = process->exitCode;
+	details.isCurrentProcess = (process->pid == getpid());
+	details.peb = details.isCurrentProcess ? wibo::processPeb : nullptr;
+	return true;
+}
+
+static std::string windowsImagePathFor(const ProcessHandleDetails &details) {
+	if (details.isCurrentProcess && !wibo::guestExecutablePath.empty()) {
+		return files::pathToWindows(files::canonicalPath(wibo::guestExecutablePath));
+	}
+
+	std::error_code ec;
+	std::filesystem::path link = std::filesystem::path("/proc") / std::to_string(details.pid) / "exe";
+	std::filesystem::path resolved = std::filesystem::read_symlink(link, ec);
+	if (!ec) {
+		return files::pathToWindows(files::canonicalPath(resolved));
+	}
+	return std::string();
+}
+
+} // namespace
 
 namespace kernel32 {
 BOOL WIN_FUNC SetEvent(HANDLE hEvent);
@@ -171,6 +268,136 @@ NTSTATUS WIN_FUNC NtProtectVirtualMemory(HANDLE ProcessHandle, PVOID *BaseAddres
 	return STATUS_SUCCESS;
 }
 
+NTSTATUS WIN_FUNC RtlGetVersion(PRTL_OSVERSIONINFOW lpVersionInformation) {
+	DEBUG_LOG("RtlGetVersion(%p) ", lpVersionInformation);
+	if (!lpVersionInformation) {
+		DEBUG_LOG("-> 0x%x\n", STATUS_INVALID_PARAMETER);
+		return STATUS_INVALID_PARAMETER;
+	}
+
+	ULONG size = lpVersionInformation->dwOSVersionInfoSize;
+	if (size < sizeof(RTL_OSVERSIONINFOW)) {
+		DEBUG_LOG("-> 0x%x\n", STATUS_INVALID_PARAMETER);
+		return STATUS_INVALID_PARAMETER;
+	}
+
+	std::memset(lpVersionInformation, 0, static_cast<size_t>(size));
+	lpVersionInformation->dwOSVersionInfoSize = size;
+	lpVersionInformation->dwMajorVersion = kOsMajorVersion;
+	lpVersionInformation->dwMinorVersion = kOsMinorVersion;
+	lpVersionInformation->dwBuildNumber = kOsBuildNumber;
+	lpVersionInformation->dwPlatformId = kOsPlatformId;
+
+	if (size >= sizeof(RTL_OSVERSIONINFOEXW)) {
+		auto extended = reinterpret_cast<PRTL_OSVERSIONINFOEXW>(lpVersionInformation);
+		extended->wProductType = kProductTypeWorkstation;
+	}
+
+	DEBUG_LOG("-> 0x%x\n", STATUS_SUCCESS);
+	return STATUS_SUCCESS;
+}
+
+NTSTATUS WIN_FUNC NtQueryInformationProcess(HANDLE ProcessHandle, PROCESSINFOCLASS ProcessInformationClass,
+										  PVOID ProcessInformation, ULONG ProcessInformationLength,
+										  PULONG ReturnLength) {
+	DEBUG_LOG("NtQueryInformationProcess(%p, %u, %p, %u, %p) ", ProcessHandle, ProcessInformationClass,
+		  ProcessInformation, ProcessInformationLength, ReturnLength);
+	if (!ProcessInformation) {
+		DEBUG_LOG("-> 0x%x\n", STATUS_INVALID_PARAMETER);
+		return STATUS_INVALID_PARAMETER;
+	}
+
+	ProcessHandleDetails details{};
+	if (!resolveProcessDetails(ProcessHandle, details)) {
+		DEBUG_LOG("-> 0x%x\n", STATUS_INVALID_HANDLE);
+		return STATUS_INVALID_HANDLE;
+	}
+
+	switch (ProcessInformationClass) {
+	case ProcessBasicInformation: {
+		size_t required = sizeof(PROCESS_BASIC_INFORMATION);
+		if (ReturnLength) {
+			*ReturnLength = static_cast<ULONG>(required);
+		}
+		if (ProcessInformationLength < required) {
+			DEBUG_LOG("-> 0x%x\n", STATUS_INFO_LENGTH_MISMATCH);
+			return STATUS_INFO_LENGTH_MISMATCH;
+		}
+
+		auto *info = reinterpret_cast<PROCESS_BASIC_INFORMATION *>(ProcessInformation);
+		std::memset(info, 0, sizeof(*info));
+		info->ExitStatus = static_cast<NTSTATUS>(details.exitCode);
+		info->PebBaseAddress = details.peb;
+		DWORD_PTR processMask = 0;
+		DWORD_PTR systemMask = 0;
+		if (kernel32::GetProcessAffinityMask(ProcessHandle, &processMask, &systemMask)) {
+			info->AffinityMask = static_cast<ULONG_PTR>(processMask == 0 ? 1 : processMask);
+		} else {
+			info->AffinityMask = 1;
+		}
+		info->BasePriority = kDefaultBasePriority;
+		info->UniqueProcessId = static_cast<ULONG_PTR>(details.pid);
+		if (details.isCurrentProcess) {
+			info->InheritedFromUniqueProcessId = static_cast<ULONG_PTR>(getppid());
+		} else {
+			info->InheritedFromUniqueProcessId = static_cast<ULONG_PTR>(getpid());
+		}
+		DEBUG_LOG("-> 0x%x\n", STATUS_SUCCESS);
+		return STATUS_SUCCESS;
+	}
+	case ProcessWow64Information: {
+		size_t required = sizeof(ULONG_PTR);
+		if (ReturnLength) {
+			*ReturnLength = static_cast<ULONG>(required);
+		}
+		if (ProcessInformationLength < required) {
+			DEBUG_LOG("-> 0x%x\n", STATUS_INFO_LENGTH_MISMATCH);
+			return STATUS_INFO_LENGTH_MISMATCH;
+		}
+		auto *value = reinterpret_cast<ULONG_PTR *>(ProcessInformation);
+		*value = 0;
+		DEBUG_LOG("-> 0x%x\n", STATUS_SUCCESS);
+		return STATUS_SUCCESS;
+	}
+	case ProcessImageFileName: {
+		size_t minimum = sizeof(UNICODE_STRING);
+		if (ProcessInformationLength < minimum) {
+			if (ReturnLength) {
+				*ReturnLength = static_cast<ULONG>(minimum);
+			}
+			DEBUG_LOG("-> 0x%x\n", STATUS_INFO_LENGTH_MISMATCH);
+			return STATUS_INFO_LENGTH_MISMATCH;
+		}
+
+		std::string imagePath = windowsImagePathFor(details);
+		DEBUG_LOG("  NtQueryInformationProcess image path: %s\n", imagePath.c_str());
+		auto widePath = stringToWideString(imagePath.c_str());
+		size_t stringBytes = widePath.size() * sizeof(uint16_t);
+		size_t required = sizeof(UNICODE_STRING) + stringBytes;
+		if (ReturnLength) {
+			*ReturnLength = static_cast<ULONG>(required);
+		}
+		if (ProcessInformationLength < required) {
+			DEBUG_LOG("-> 0x%x\n", STATUS_INFO_LENGTH_MISMATCH);
+			return STATUS_INFO_LENGTH_MISMATCH;
+		}
+
+		auto *unicode = reinterpret_cast<UNICODE_STRING *>(ProcessInformation);
+		auto *buffer = reinterpret_cast<uint16_t *>(reinterpret_cast<uint8_t *>(ProcessInformation) + sizeof(UNICODE_STRING));
+		std::memcpy(buffer, widePath.data(), stringBytes);
+		size_t characterCount = widePath.empty() ? 0 : widePath.size() - 1;
+		unicode->Length = static_cast<unsigned short>(characterCount * sizeof(uint16_t));
+		unicode->MaximumLength = static_cast<unsigned short>(widePath.size() * sizeof(uint16_t));
+		unicode->Buffer = buffer;
+		DEBUG_LOG("-> 0x%x\n", STATUS_SUCCESS);
+		return STATUS_SUCCESS;
+	}
+	default:
+		DEBUG_LOG("-> 0x%x\n", STATUS_INVALID_INFO_CLASS);
+		return STATUS_INVALID_INFO_CLASS;
+	}
+}
+
 } // namespace ntdll
 
 static void *resolveByName(const char *name) {
@@ -180,6 +407,10 @@ static void *resolveByName(const char *name) {
 		return (void *)ntdll::NtAllocateVirtualMemory;
 	if (strcmp(name, "NtProtectVirtualMemory") == 0)
 		return (void *)ntdll::NtProtectVirtualMemory;
+	if (strcmp(name, "RtlGetVersion") == 0)
+		return (void *)ntdll::RtlGetVersion;
+	if (strcmp(name, "NtQueryInformationProcess") == 0)
+		return (void *)ntdll::NtQueryInformationProcess;
 	return nullptr;
 }
 

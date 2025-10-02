@@ -1,7 +1,10 @@
 #include "common.h"
+#include "errors.h"
 #include <algorithm>
+#include <cstring>
 #include <errno.h>
 #include <memory>
+#include <strings.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -300,6 +303,14 @@ bool wibo::Executable::resolveImports() {
 		uint32_t *addressTable = fromRVA(dir->importAddressTable);
 
 		ModuleInfo *module = loadModule(dllName);
+		if (!module && wibo::lastError != ERROR_MOD_NOT_FOUND) {
+			DEBUG_LOG("Failed to load import module %s\n", dllName);
+			// lastError is set by loadModule
+			importsResolved = false;
+			importsResolving = false;
+			return false;
+		}
+
 		while (*lookupTable) {
 			uint32_t lookup = *lookupTable;
 			if (lookup & 0x80000000) {

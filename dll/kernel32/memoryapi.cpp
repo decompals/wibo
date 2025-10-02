@@ -825,6 +825,7 @@ SIZE_T WIN_FUNC VirtualQuery(LPCVOID lpAddress, PMEMORY_BASIC_INFORMATION lpBuff
 	DEBUG_LOG("VirtualQuery(%p, %p, %zu)\n", lpAddress, lpBuffer, dwLength);
 	if (!lpBuffer || dwLength < sizeof(MEMORY_BASIC_INFORMATION) || !lpAddress) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
+		DEBUG_LOG("-> ERROR_INVALID_PARAMETER\n");
 		return 0;
 	}
 
@@ -837,12 +838,14 @@ SIZE_T WIN_FUNC VirtualQuery(LPCVOID lpAddress, PMEMORY_BASIC_INFORMATION lpBuff
 	VirtualAllocation *region = lookupRegion(pageBase);
 	if (!region) {
 		wibo::lastError = ERROR_INVALID_ADDRESS;
+		DEBUG_LOG("-> ERROR_INVALID_ADDRESS\n");
 		return 0;
 	}
 
 	const size_t pageIndex = (pageBase - region->base) / pageSize;
 	if (pageIndex >= region->pageProtect.size()) {
 		wibo::lastError = ERROR_INVALID_ADDRESS;
+		DEBUG_LOG("-> ERROR_INVALID_ADDRESS\n");
 		return 0;
 	}
 	const bool committed = region->pageProtect[pageIndex] != 0;

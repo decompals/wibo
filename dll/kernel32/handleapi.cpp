@@ -1,5 +1,6 @@
 #include "handleapi.h"
 
+#include "dll/advapi32/internal.h"
 #include "errors.h"
 #include "files.h"
 #include "handles.h"
@@ -8,10 +9,6 @@
 
 #include <pthread.h>
 #include <unistd.h>
-
-namespace advapi32 {
-void releaseToken(void *tokenPtr);
-}
 
 namespace kernel32 {
 
@@ -151,12 +148,7 @@ BOOL WIN_FUNC CloseHandle(HANDLE hObject) {
 			success = false;
 		}
 	} else if (data.type == handles::TYPE_PROCESS) {
-		auto *proc = reinterpret_cast<processes::Process *>(data.ptr);
-		if (proc) {
-			delete proc;
-		} else {
-			success = false;
-		}
+		delete reinterpret_cast<processes::Process *>(data.ptr);
 	} else if (data.type == handles::TYPE_TOKEN) {
 		advapi32::releaseToken(data.ptr);
 	} else if (data.type == handles::TYPE_MUTEX) {

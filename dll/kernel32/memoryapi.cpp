@@ -303,17 +303,8 @@ HANDLE WIN_FUNC CreateFileMappingW(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMap
 							  lpName ? name.c_str() : nullptr);
 }
 
-LPVOID WIN_FUNC MapViewOfFile(HANDLE hFileMappingObject, DWORD dwDesiredAccess, DWORD dwFileOffsetHigh,
-							  DWORD dwFileOffsetLow, SIZE_T dwNumberOfBytesToMap) {
-	DEBUG_LOG("MapViewOfFile(%p, 0x%x, %u, %u, %zu)\n", hFileMappingObject, dwDesiredAccess, dwFileOffsetHigh,
-			  dwFileOffsetLow, dwNumberOfBytesToMap);
-
-	handles::Data data = handles::dataFromHandle(hFileMappingObject, false);
-	if (data.type != handles::TYPE_MAPPED) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
-		return nullptr;
-	}
-	auto *mapping = reinterpret_cast<MappingObject *>(data.ptr);
+static LPVOID mapViewOfFileInternal(MappingObject *mapping, DWORD dwDesiredAccess, uint64_t offset,
+									SIZE_T dwNumberOfBytesToMap, LPVOID baseAddress) {
 	if (!mapping) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return nullptr;
@@ -322,8 +313,6 @@ LPVOID WIN_FUNC MapViewOfFile(HANDLE hFileMappingObject, DWORD dwDesiredAccess, 
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return nullptr;
 	}
-
-	uint64_t offset = (static_cast<uint64_t>(dwFileOffsetHigh) << 32) | dwFileOffsetLow;
 	if (mapping->anonymous && offset != 0) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return nullptr;
@@ -331,11 +320,7 @@ LPVOID WIN_FUNC MapViewOfFile(HANDLE hFileMappingObject, DWORD dwDesiredAccess, 
 	size_t maxSize = mapping->maxSize;
 	uint64_t length = static_cast<uint64_t>(dwNumberOfBytesToMap);
 	if (length == 0) {
-		if (maxSize == 0) {
-			wibo::lastError = ERROR_INVALID_PARAMETER;
-			return nullptr;
-		}
-		if (offset > maxSize) {
+		if (maxSize == 0 || offset > maxSize) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
 			return nullptr;
 		}
@@ -353,28 +338,27 @@ LPVOID WIN_FUNC MapViewOfFile(HANDLE hFileMappingObject, DWORD dwDesiredAccess, 
 	int prot = PROT_READ;
 	bool wantWrite = (dwDesiredAccess & FILE_MAP_WRITE) != 0;
 	bool wantExecute = (dwDesiredAccess & FILE_MAP_EXECUTE) != 0;
+	bool wantCopy = (dwDesiredAccess & FILE_MAP_COPY) != 0;
 
 	if (mapping->protect == PAGE_READWRITE) {
-		if (wantWrite) {
+		if (wantWrite || wantCopy) {
 			prot |= PROT_WRITE;
 		}
 	} else {
-		if (wantWrite && (dwDesiredAccess & FILE_MAP_COPY) == 0) {
+		if (wantWrite && !wantCopy) {
 			wibo::lastError = ERROR_ACCESS_DENIED;
 			return nullptr;
+		}
+		if (wantCopy) {
+			prot |= PROT_WRITE;
 		}
 	}
 	if (wantExecute) {
 		prot |= PROT_EXEC;
 	}
 
-	int flags = 0;
-	if (mapping->anonymous) {
-		flags |= MAP_ANONYMOUS;
-	}
-	flags |= (dwDesiredAccess & FILE_MAP_COPY) ? MAP_PRIVATE : MAP_SHARED;
-
-	size_t pageSize = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+	int flags = (mapping->anonymous ? MAP_ANONYMOUS : 0) | (wantCopy ? MAP_PRIVATE : MAP_SHARED);
+	const size_t pageSize = static_cast<size_t>(sysconf(_SC_PAGESIZE));
 	off_t alignedOffset = mapping->anonymous ? 0 : static_cast<off_t>(offset & ~static_cast<uint64_t>(pageSize - 1));
 	size_t offsetDelta = static_cast<size_t>(offset - static_cast<uint64_t>(alignedOffset));
 	uint64_t requestedLength = length + offsetDelta;
@@ -389,16 +373,82 @@ LPVOID WIN_FUNC MapViewOfFile(HANDLE hFileMappingObject, DWORD dwDesiredAccess, 
 	}
 
 	int mmapFd = mapping->anonymous ? -1 : mapping->fd;
-	void *mapBase = mmap(nullptr, mapLength, prot, flags, mmapFd, alignedOffset);
+	void *requestedBase = nullptr;
+	int mapFlags = flags;
+	if (baseAddress) {
+		uintptr_t baseAddr = reinterpret_cast<uintptr_t>(baseAddress);
+		if (baseAddr == 0 || (baseAddr % kVirtualAllocationGranularity) != 0) {
+			wibo::lastError = ERROR_INVALID_ADDRESS;
+			return nullptr;
+		}
+		if (offsetDelta > baseAddr) {
+			wibo::lastError = ERROR_INVALID_ADDRESS;
+			return nullptr;
+		}
+		uintptr_t mapBaseAddr = baseAddr - offsetDelta;
+		if ((mapBaseAddr & (pageSize - 1)) != 0) {
+			wibo::lastError = ERROR_INVALID_ADDRESS;
+			return nullptr;
+		}
+		requestedBase = reinterpret_cast<void *>(mapBaseAddr);
+#ifdef MAP_FIXED_NOREPLACE
+		mapFlags |= MAP_FIXED_NOREPLACE;
+#else
+		mapFlags |= MAP_FIXED;
+#endif
+	}
+
+	errno = 0;
+	void *mapBase = mmap(requestedBase, mapLength, prot, mapFlags, mmapFd, alignedOffset);
 	if (mapBase == MAP_FAILED) {
-		setLastErrorFromErrno();
+		int err = errno;
+		if (baseAddress && (err == ENOMEM || err == EEXIST || err == EINVAL || err == EPERM)) {
+			wibo::lastError = ERROR_INVALID_ADDRESS;
+		} else {
+			wibo::lastError = wibo::winErrorFromErrno(err);
+		}
 		return nullptr;
 	}
 	void *viewPtr = static_cast<uint8_t *>(mapBase) + offsetDelta;
+	if (baseAddress && viewPtr != baseAddress) {
+		munmap(mapBase, mapLength);
+		wibo::lastError = ERROR_INVALID_ADDRESS;
+		return nullptr;
+	}
 	g_viewInfo[viewPtr] = ViewInfo{mapBase, mapLength, mapping};
 	mapping->refCount++;
 	wibo::lastError = ERROR_SUCCESS;
 	return viewPtr;
+}
+
+LPVOID WIN_FUNC MapViewOfFile(HANDLE hFileMappingObject, DWORD dwDesiredAccess, DWORD dwFileOffsetHigh,
+							  DWORD dwFileOffsetLow, SIZE_T dwNumberOfBytesToMap) {
+	DEBUG_LOG("MapViewOfFile(%p, 0x%x, %u, %u, %zu)\n", hFileMappingObject, dwDesiredAccess, dwFileOffsetHigh,
+			  dwFileOffsetLow, dwNumberOfBytesToMap);
+
+	handles::Data data = handles::dataFromHandle(hFileMappingObject, false);
+	if (data.type != handles::TYPE_MAPPED) {
+		wibo::lastError = ERROR_INVALID_HANDLE;
+		return nullptr;
+	}
+	auto *mapping = reinterpret_cast<MappingObject *>(data.ptr);
+	uint64_t offset = (static_cast<uint64_t>(dwFileOffsetHigh) << 32) | dwFileOffsetLow;
+	return mapViewOfFileInternal(mapping, dwDesiredAccess, offset, dwNumberOfBytesToMap, nullptr);
+}
+
+LPVOID WIN_FUNC MapViewOfFileEx(HANDLE hFileMappingObject, DWORD dwDesiredAccess, DWORD dwFileOffsetHigh,
+								DWORD dwFileOffsetLow, SIZE_T dwNumberOfBytesToMap, LPVOID lpBaseAddress) {
+	DEBUG_LOG("MapViewOfFileEx(%p, 0x%x, %u, %u, %zu, %p)\n", hFileMappingObject, dwDesiredAccess, dwFileOffsetHigh,
+			  dwFileOffsetLow, dwNumberOfBytesToMap, lpBaseAddress);
+
+	handles::Data data = handles::dataFromHandle(hFileMappingObject, false);
+	if (data.type != handles::TYPE_MAPPED) {
+		wibo::lastError = ERROR_INVALID_HANDLE;
+		return nullptr;
+	}
+	auto *mapping = reinterpret_cast<MappingObject *>(data.ptr);
+	uint64_t offset = (static_cast<uint64_t>(dwFileOffsetHigh) << 32) | dwFileOffsetLow;
+	return mapViewOfFileInternal(mapping, dwDesiredAccess, offset, dwNumberOfBytesToMap, lpBaseAddress);
 }
 
 BOOL WIN_FUNC UnmapViewOfFile(LPCVOID lpBaseAddress) {

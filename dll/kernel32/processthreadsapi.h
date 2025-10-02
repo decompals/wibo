@@ -61,6 +61,7 @@ struct STARTUPINFOW {
 using LPSTARTUPINFOW = STARTUPINFOW *;
 
 constexpr DWORD TLS_OUT_OF_INDEXES = 0xFFFFFFFFu;
+constexpr DWORD NORMAL_PRIORITY_CLASS = 0x00000020;
 
 typedef DWORD(WIN_FUNC *LPTHREAD_START_ROUTINE)(LPVOID);
 
@@ -91,6 +92,7 @@ void WIN_FUNC ExitThread(DWORD dwExitCode);
 BOOL WIN_FUNC GetExitCodeThread(HANDLE hThread, LPDWORD lpExitCode);
 BOOL WIN_FUNC SetThreadPriority(HANDLE hThread, int nPriority);
 int WIN_FUNC GetThreadPriority(HANDLE hThread);
+DWORD WIN_FUNC GetPriorityClass(HANDLE hProcess);
 BOOL WIN_FUNC GetThreadTimes(HANDLE hThread, FILETIME *lpCreationTime, FILETIME *lpExitTime, FILETIME *lpKernelTime,
 							 FILETIME *lpUserTime);
 BOOL WIN_FUNC CreateProcessA(LPCSTR lpApplicationName, LPSTR lpCommandLine, LPSECURITY_ATTRIBUTES lpProcessAttributes,

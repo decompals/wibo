@@ -47,6 +47,14 @@ constexpr DWORD FILE_ATTRIBUTE_OFFLINE = 0x00001000;
 constexpr DWORD FILE_ATTRIBUTE_NOT_CONTENT_INDEXED = 0x00002000;
 constexpr DWORD FILE_ATTRIBUTE_ENCRYPTED = 0x00004000;
 
+constexpr UINT DRIVE_UNKNOWN = 0;
+constexpr UINT DRIVE_NO_ROOT_DIR = 1;
+constexpr UINT DRIVE_REMOVABLE = 2;
+constexpr UINT DRIVE_FIXED = 3;
+constexpr UINT DRIVE_REMOTE = 4;
+constexpr UINT DRIVE_CDROM = 5;
+constexpr UINT DRIVE_RAMDISK = 6;
+
 constexpr DWORD FILE_TYPE_UNKNOWN = 0x0000;
 constexpr DWORD FILE_TYPE_DISK = 0x0001;
 constexpr DWORD FILE_TYPE_CHAR = 0x0002;
@@ -72,6 +80,8 @@ BOOL WIN_FUNC FindNextFileW(HANDLE hFindFile, LPWIN32_FIND_DATAW lpFindFileData)
 BOOL WIN_FUNC FindClose(HANDLE hFindFile);
 DWORD WIN_FUNC GetFileAttributesA(LPCSTR lpFileName);
 DWORD WIN_FUNC GetFileAttributesW(LPCWSTR lpFileName);
+UINT WIN_FUNC GetDriveTypeA(LPCSTR lpRootPathName);
+UINT WIN_FUNC GetDriveTypeW(LPCWSTR lpRootPathName);
 BOOL WIN_FUNC WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten,
 						LPOVERLAPPED lpOverlapped);
 BOOL WIN_FUNC ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead,
@@ -101,5 +111,13 @@ BOOL WIN_FUNC SetFileTime(HANDLE hFile, const FILETIME *lpCreationTime, const FI
 						  const FILETIME *lpLastWriteTime);
 BOOL WIN_FUNC GetFileInformationByHandle(HANDLE hFile, LPBY_HANDLE_FILE_INFORMATION lpFileInformation);
 DWORD WIN_FUNC GetFileType(HANDLE hFile);
+LONG WIN_FUNC CompareFileTime(const FILETIME *lpFileTime1, const FILETIME *lpFileTime2);
+BOOL WIN_FUNC GetVolumeInformationA(LPCSTR lpRootPathName, LPSTR lpVolumeNameBuffer, DWORD nVolumeNameSize,
+									LPDWORD lpVolumeSerialNumber, LPDWORD lpMaximumComponentLength,
+									LPDWORD lpFileSystemFlags, LPSTR lpFileSystemNameBuffer, DWORD nFileSystemNameSize);
+BOOL WIN_FUNC GetVolumeInformationW(LPCWSTR lpRootPathName, LPWSTR lpVolumeNameBuffer, DWORD nVolumeNameSize,
+									LPDWORD lpVolumeSerialNumber, LPDWORD lpMaximumComponentLength,
+									LPDWORD lpFileSystemFlags, LPWSTR lpFileSystemNameBuffer,
+									DWORD nFileSystemNameSize);
 
 } // namespace kernel32

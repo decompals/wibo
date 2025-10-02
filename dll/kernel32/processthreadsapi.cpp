@@ -625,6 +625,13 @@ int WIN_FUNC GetThreadPriority(HANDLE hThread) {
 	return 0;
 }
 
+DWORD WIN_FUNC GetPriorityClass(HANDLE hProcess) {
+	DEBUG_LOG("GetPriorityClass(%p)\n", hProcess);
+	(void)hProcess;
+	wibo::lastError = ERROR_SUCCESS;
+	return NORMAL_PRIORITY_CLASS;
+}
+
 BOOL WIN_FUNC GetThreadTimes(HANDLE hThread, FILETIME *lpCreationTime, FILETIME *lpExitTime, FILETIME *lpKernelTime,
 							 FILETIME *lpUserTime) {
 	DEBUG_LOG("GetThreadTimes(%p, %p, %p, %p, %p)\n", hThread, lpCreationTime, lpExitTime, lpKernelTime, lpUserTime);

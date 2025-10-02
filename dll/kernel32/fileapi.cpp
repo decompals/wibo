@@ -288,6 +288,100 @@ DWORD WIN_FUNC GetFileAttributesW(LPCWSTR lpFileName) {
 	return GetFileAttributesA(str.c_str());
 }
 
+UINT WIN_FUNC GetDriveTypeA(LPCSTR lpRootPathName) {
+	DEBUG_LOG("STUB: GetDriveTypeA(%s)\n", lpRootPathName ? lpRootPathName : "(null)");
+	(void)lpRootPathName;
+	wibo::lastError = ERROR_SUCCESS;
+	return DRIVE_FIXED;
+}
+
+UINT WIN_FUNC GetDriveTypeW(LPCWSTR lpRootPathName) {
+	DEBUG_LOG("STUB: GetDriveTypeW(%p)\n", lpRootPathName);
+	(void)lpRootPathName;
+	wibo::lastError = ERROR_SUCCESS;
+	return DRIVE_FIXED;
+}
+
+BOOL WIN_FUNC GetVolumeInformationA(LPCSTR lpRootPathName, LPSTR lpVolumeNameBuffer, DWORD nVolumeNameSize,
+									LPDWORD lpVolumeSerialNumber, LPDWORD lpMaximumComponentLength,
+									LPDWORD lpFileSystemFlags, LPSTR lpFileSystemNameBuffer,
+									DWORD nFileSystemNameSize) {
+	DEBUG_LOG("STUB: GetVolumeInformationA(%s)\n", lpRootPathName ? lpRootPathName : "(null)");
+	if (lpVolumeNameBuffer && nVolumeNameSize > 0) {
+		lpVolumeNameBuffer[0] = '\0';
+	}
+	if (lpVolumeSerialNumber) {
+		*lpVolumeSerialNumber = 0x12345678;
+	}
+	if (lpMaximumComponentLength) {
+		*lpMaximumComponentLength = 255;
+	}
+	if (lpFileSystemFlags) {
+		*lpFileSystemFlags = 0;
+	}
+	if (lpFileSystemNameBuffer) {
+		if (nFileSystemNameSize > 0) {
+			const char *fsName = "NTFS";
+			size_t copyLen = std::min<size_t>(std::strlen(fsName), nFileSystemNameSize - 1);
+			std::memcpy(lpFileSystemNameBuffer, fsName, copyLen);
+			lpFileSystemNameBuffer[copyLen] = '\0';
+		}
+	}
+	wibo::lastError = ERROR_SUCCESS;
+	return TRUE;
+}
+
+BOOL WIN_FUNC GetVolumeInformationW(LPCWSTR lpRootPathName, LPWSTR lpVolumeNameBuffer, DWORD nVolumeNameSize,
+									LPDWORD lpVolumeSerialNumber, LPDWORD lpMaximumComponentLength,
+									LPDWORD lpFileSystemFlags, LPWSTR lpFileSystemNameBuffer,
+									DWORD nFileSystemNameSize) {
+	DEBUG_LOG("STUB: GetVolumeInformationW(%p)\n", lpRootPathName);
+	if (lpVolumeNameBuffer && nVolumeNameSize > 0) {
+		lpVolumeNameBuffer[0] = 0;
+	}
+	if (lpVolumeSerialNumber) {
+		*lpVolumeSerialNumber = 0x12345678;
+	}
+	if (lpMaximumComponentLength) {
+		*lpMaximumComponentLength = 255;
+	}
+	if (lpFileSystemFlags) {
+		*lpFileSystemFlags = 0;
+	}
+	if (lpFileSystemNameBuffer) {
+		if (nFileSystemNameSize > 0) {
+			std::vector<uint16_t> fsWide = stringToWideString("NTFS");
+			size_t copyLen = std::min<size_t>(fsWide.size() > 0 ? fsWide.size() - 1 : 0, nFileSystemNameSize - 1);
+			for (size_t i = 0; i < copyLen; ++i) {
+				lpFileSystemNameBuffer[i] = static_cast<uint16_t>(fsWide[i]);
+			}
+			lpFileSystemNameBuffer[copyLen] = 0;
+		}
+	}
+	wibo::lastError = ERROR_SUCCESS;
+	return TRUE;
+}
+
+LONG WIN_FUNC CompareFileTime(const FILETIME *lpFileTime1, const FILETIME *lpFileTime2) {
+	DEBUG_LOG("CompareFileTime(%p, %p)\n", lpFileTime1, lpFileTime2);
+	auto toInt64 = [](const FILETIME *ft) -> int64_t {
+		if (!ft) {
+			return 0;
+		}
+		uint64_t combined = (static_cast<uint64_t>(ft->dwHighDateTime) << 32) | ft->dwLowDateTime;
+		return static_cast<int64_t>(combined);
+	};
+	int64_t value1 = toInt64(lpFileTime1);
+	int64_t value2 = toInt64(lpFileTime2);
+	if (value1 < value2) {
+		return -1;
+	}
+	if (value1 > value2) {
+		return 1;
+	}
+	return 0;
+}
+
 BOOL WIN_FUNC WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten,
 						LPOVERLAPPED lpOverlapped) {
 	DEBUG_LOG("WriteFile(%p, %u)\n", hFile, nNumberOfBytesToWrite);

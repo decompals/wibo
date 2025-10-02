@@ -23,7 +23,9 @@
 #include "kernel32/winnt.h"
 #include "kernel32/wow64apiset.h"
 
-static void *resolveByName(const char *name) {
+namespace {
+
+void *resolveByName(const char *name) {
 	// errhandlingapi.h
 	if (strcmp(name, "GetLastError") == 0)
 		return (void *)kernel32::GetLastError;
@@ -97,6 +99,8 @@ static void *resolveByName(const char *name) {
 		return (void *)kernel32::SetThreadPriority;
 	if (strcmp(name, "GetThreadPriority") == 0)
 		return (void *)kernel32::GetThreadPriority;
+	if (strcmp(name, "GetPriorityClass") == 0)
+		return (void *)kernel32::GetPriorityClass;
 	if (strcmp(name, "GetProcessAffinityMask") == 0)
 		return (void *)kernel32::GetProcessAffinityMask;
 	if (strcmp(name, "SetProcessAffinityMask") == 0)
@@ -293,6 +297,10 @@ static void *resolveByName(const char *name) {
 		return (void *)kernel32::WriteConsoleW;
 	if (strcmp(name, "GetConsoleOutputCP") == 0)
 		return (void *)kernel32::GetConsoleOutputCP;
+	if (strcmp(name, "GetConsoleTitleA") == 0)
+		return (void *)kernel32::GetConsoleTitleA;
+	if (strcmp(name, "GetConsoleTitleW") == 0)
+		return (void *)kernel32::GetConsoleTitleW;
 	if (strcmp(name, "PeekConsoleInputA") == 0)
 		return (void *)kernel32::PeekConsoleInputA;
 	if (strcmp(name, "ReadConsoleInputA") == 0)
@@ -323,6 +331,18 @@ static void *resolveByName(const char *name) {
 		return (void *)kernel32::GetFileAttributesA;
 	if (strcmp(name, "GetFileAttributesW") == 0)
 		return (void *)kernel32::GetFileAttributesW;
+	if (strcmp(name, "GetDriveTypeA") == 0)
+		return (void *)kernel32::GetDriveTypeA;
+	if (strcmp(name, "GetDriveTypeW") == 0)
+		return (void *)kernel32::GetDriveTypeW;
+	if (strcmp(name, "GetVolumeInformationA") == 0)
+		return (void *)kernel32::GetVolumeInformationA;
+	if (strcmp(name, "GetVolumeInformationW") == 0)
+		return (void *)kernel32::GetVolumeInformationW;
+	if (strcmp(name, "CompareFileTime") == 0)
+		return (void *)kernel32::CompareFileTime;
+	if (strcmp(name, "GetFileAttributesW") == 0)
+		return (void *)kernel32::GetFileAttributesW;
 	if (strcmp(name, "WriteFile") == 0)
 		return (void *)kernel32::WriteFile;
 	if (strcmp(name, "FlushFileBuffers") == 0)
@@ -339,6 +359,8 @@ static void *resolveByName(const char *name) {
 		return (void *)kernel32::CreateFileMappingW;
 	if (strcmp(name, "MapViewOfFile") == 0)
 		return (void *)kernel32::MapViewOfFile;
+	if (strcmp(name, "MapViewOfFileEx") == 0)
+		return (void *)kernel32::MapViewOfFileEx;
 	if (strcmp(name, "UnmapViewOfFile") == 0)
 		return (void *)kernel32::UnmapViewOfFile;
 	if (strcmp(name, "DeleteFileA") == 0)
@@ -540,6 +562,8 @@ static void *resolveByName(const char *name) {
 
 	return 0;
 }
+
+} // namespace
 
 wibo::Module lib_kernel32 = {
 	(const char *[]){

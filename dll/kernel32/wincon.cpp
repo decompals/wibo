@@ -83,6 +83,24 @@ BOOL WIN_FUNC WriteConsoleW(HANDLE hConsoleOutput, LPCVOID lpBuffer, DWORD nNumb
 	return FALSE;
 }
 
+DWORD WIN_FUNC GetConsoleTitleA(LPSTR lpConsoleTitle, DWORD nSize) {
+	DEBUG_LOG("GetConsoleTitleA(%p, %u)\n", lpConsoleTitle, nSize);
+	if (lpConsoleTitle && nSize > 0) {
+		lpConsoleTitle[0] = '\0';
+	}
+	wibo::lastError = ERROR_SUCCESS;
+	return 0;
+}
+
+DWORD WIN_FUNC GetConsoleTitleW(LPWSTR lpConsoleTitle, DWORD nSize) {
+	DEBUG_LOG("GetConsoleTitleW(%p, %u)\n", lpConsoleTitle, nSize);
+	if (lpConsoleTitle && nSize > 0) {
+		lpConsoleTitle[0] = 0;
+	}
+	wibo::lastError = ERROR_SUCCESS;
+	return 0;
+}
+
 BOOL WIN_FUNC PeekConsoleInputA(HANDLE hConsoleInput, INPUT_RECORD *lpBuffer, DWORD nLength,
 								LPDWORD lpNumberOfEventsRead) {
 	DEBUG_LOG("STUB: PeekConsoleInputA(%p, %p, %u)\n", hConsoleInput, lpBuffer, nLength);

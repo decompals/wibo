@@ -33,8 +33,12 @@ FetchContent_MakeAvailable(mimalloc)
 include_directories(.)
 add_executable(wibo
     dll/advapi32.cpp
-    dll/advapi32/winreg.cpp
+    dll/advapi32/internal.cpp
+    dll/advapi32/processthreadsapi.cpp
+    dll/advapi32/securitybaseapi.cpp
+    dll/advapi32/winbase.cpp
     dll/advapi32/wincrypt.cpp
+    dll/advapi32/winreg.cpp
     dll/bcrypt.cpp
     dll/crt.cpp
     dll/kernel32.cpp

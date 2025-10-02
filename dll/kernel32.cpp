@@ -4,6 +4,8 @@
 #include "processes.h"
 #include "handles.h"
 #include "resources.h"
+#include "kernel32/kernel32.h"
+#include "kernel32/internal.h"
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
@@ -67,22 +69,6 @@ namespace {
 
 	using DWORD_PTR = uintptr_t;
 
-	static DWORD_PTR computeSystemAffinityMask() {
-		long reported = sysconf(_SC_NPROCESSORS_ONLN);
-		if (reported <= 0) {
-			reported = 1;
-		}
-		const auto bitCount = static_cast<unsigned int>(std::numeric_limits<DWORD_PTR>::digits);
-		const auto usable = static_cast<unsigned int>(reported);
-		if (usable >= bitCount) {
-			return static_cast<DWORD_PTR>(~static_cast<DWORD_PTR>(0));
-		}
-		return (static_cast<DWORD_PTR>(1) << usable) - 1;
-	}
-
-	static DWORD_PTR g_processAffinityMask = 0;
-	static bool g_processAffinityMaskInitialized = false;
-
 	void closeMappingIfPossible(MappingObject *mapping) {
 		if (!mapping) {
 			return;
@@ -103,59 +89,13 @@ namespace {
 		}
 	}
 
-	constexpr WORD PROCESSOR_ARCHITECTURE_INTEL = 0;
-	constexpr WORD PROCESSOR_ARCHITECTURE_ARM = 5;
-	constexpr WORD PROCESSOR_ARCHITECTURE_IA64 = 6;
-	constexpr WORD PROCESSOR_ARCHITECTURE_AMD64 = 9;
-	constexpr WORD PROCESSOR_ARCHITECTURE_ARM64 = 12;
-	constexpr WORD PROCESSOR_ARCHITECTURE_UNKNOWN = 0xFFFF;
 
-	constexpr DWORD PROCESSOR_INTEL_386 = 386;
-	constexpr DWORD PROCESSOR_INTEL_486 = 486;
-	constexpr DWORD PROCESSOR_INTEL_PENTIUM = 586;
-	constexpr DWORD PROCESSOR_INTEL_IA64 = 2200;
-	constexpr DWORD PROCESSOR_AMD_X8664 = 8664;
-
-	struct SYSTEM_INFO {
-		union {
-			DWORD dwOemId;
-			struct {
-				WORD wProcessorArchitecture;
-				WORD wReserved;
-			};
-		};
-		DWORD dwPageSize;
-		LPVOID lpMinimumApplicationAddress;
-		LPVOID lpMaximumApplicationAddress;
-		DWORD_PTR dwActiveProcessorMask;
-		DWORD dwNumberOfProcessors;
-		DWORD dwProcessorType;
-		DWORD dwAllocationGranularity;
-		WORD wProcessorLevel;
-		WORD wProcessorRevision;
-	};
 }
 
 typedef union _RTL_RUN_ONCE {
 	PVOID Ptr;
 } RTL_RUN_ONCE, *PRTL_RUN_ONCE;
 typedef PRTL_RUN_ONCE LPINIT_ONCE;
-
-#define EXCEPTION_MAXIMUM_PARAMETERS 15
-typedef struct _EXCEPTION_RECORD {
-	DWORD ExceptionCode;
-	DWORD ExceptionFlags;
-	struct _EXCEPTION_RECORD *ExceptionRecord;
-	PVOID ExceptionAddress;
-	DWORD NumberParameters;
-	ULONG_PTR ExceptionInformation[EXCEPTION_MAXIMUM_PARAMETERS];
-} EXCEPTION_RECORD, *PEXCEPTION_RECORD;
-typedef void *PCONTEXT;
-typedef struct _EXCEPTION_POINTERS {
-	PEXCEPTION_RECORD ExceptionRecord;
-	PCONTEXT ContextRecord;
-} EXCEPTION_POINTERS, *PEXCEPTION_POINTERS;
-typedef LONG (*PVECTORED_EXCEPTION_HANDLER)(PEXCEPTION_POINTERS ExceptionInfo);
 
 namespace kernel32 {
 	constexpr DWORD HEAP_NO_SERIALIZE = 0x00000001;
@@ -263,88 +203,8 @@ namespace kernel32 {
 		mprotect(reinterpret_cast<void *>(alignedStart), length, PROT_READ | PROT_WRITE | PROT_EXEC);
 	}
 
-	struct MutexObject {
-		pthread_mutex_t mutex;
-		bool ownerValid = false;
-		pthread_t owner = 0;
-		unsigned int recursionCount = 0;
-		std::u16string name;
-		int refCount = 1;
-	};
-
-	static std::mutex mutexRegistryLock;
-	static std::unordered_map<std::u16string, MutexObject *> namedMutexes;
-
-	struct EventObject {
-		pthread_mutex_t mutex;
-		pthread_cond_t cond;
-		bool manualReset = false;
-		bool signaled = false;
-		std::u16string name;
-		int refCount = 1;
-	};
-
-	static std::mutex eventRegistryLock;
-	static std::unordered_map<std::u16string, EventObject *> namedEvents;
-
-	static void releaseEventObject(EventObject *obj) {
-		if (!obj) {
-			return;
-		}
-		std::lock_guard<std::mutex> lock(eventRegistryLock);
-		obj->refCount--;
-		if (obj->refCount == 0) {
-			if (!obj->name.empty()) {
-				namedEvents.erase(obj->name);
-			}
-			pthread_cond_destroy(&obj->cond);
-			pthread_mutex_destroy(&obj->mutex);
-			delete obj;
-		}
-	}
-
-	struct SemaphoreObject {
-		pthread_mutex_t mutex;
-		pthread_cond_t cond;
-		LONG count = 0;
-		LONG maxCount = 0;
-		std::u16string name;
-		int refCount = 1;
-	};
-
-	static std::mutex semaphoreRegistryLock;
-	static std::unordered_map<std::u16string, SemaphoreObject *> namedSemaphores;
-
-	static void releaseSemaphoreObject(SemaphoreObject *obj) {
-		if (!obj) {
-			return;
-		}
-		std::lock_guard<std::mutex> lock(semaphoreRegistryLock);
-		obj->refCount--;
-		if (obj->refCount == 0) {
-			if (!obj->name.empty()) {
-				namedSemaphores.erase(obj->name);
-			}
-			pthread_cond_destroy(&obj->cond);
-			pthread_mutex_destroy(&obj->mutex);
-			delete obj;
-		}
-	}
-
 	typedef DWORD (WIN_FUNC *LPTHREAD_START_ROUTINE)(LPVOID);
 
-	struct ThreadObject {
-		pthread_t thread;
-		bool finished = false;
-		bool joined = false;
-		bool detached = false;
-		bool synthetic = false;
-		DWORD exitCode = 0;
-		int refCount = 1;
-		pthread_mutex_t mutex;
-		pthread_cond_t cond;
-		unsigned int suspendCount = 0;
-	};
 
 	struct ThreadStartData {
 		LPTHREAD_START_ROUTINE startRoutine;
@@ -401,32 +261,6 @@ namespace kernel32 {
 		pthread_cond_init(&obj->cond, nullptr);
 		currentThreadObject = obj;
 		return obj;
-	}
-
-	static std::u16string makeMutexName(LPCWSTR name) {
-		if (!name) {
-			return std::u16string();
-		}
-		size_t len = wstrlen(reinterpret_cast<const uint16_t *>(name));
-		return std::u16string(reinterpret_cast<const char16_t *>(name), len);
-	}
-
-	static void releaseMutexObject(MutexObject *obj) {
-		if (!obj) {
-			return;
-		}
-		std::lock_guard<std::mutex> lock(mutexRegistryLock);
-		obj->refCount--;
-		if (obj->refCount == 0) {
-			if (!obj->name.empty()) {
-				auto it = namedMutexes.find(obj->name);
-				if (it != namedMutexes.end() && it->second == obj) {
-					namedMutexes.erase(it);
-				}
-			}
-			pthread_mutex_destroy(&obj->mutex);
-			delete obj;
-		}
 	}
 
 	static ThreadObject *retainThreadObject(ThreadObject *obj) {
@@ -565,51 +399,6 @@ namespace kernel32 {
 		return st.st_size;
 	}
 
-	static void setEventSignaledState(HANDLE hEvent, bool signaled) {
-		if (!hEvent) {
-			return;
-		}
-		auto data = handles::dataFromHandle(hEvent, false);
-		if (data.type != handles::TYPE_EVENT || data.ptr == nullptr) {
-			return;
-		}
-		EventObject *obj = reinterpret_cast<EventObject *>(data.ptr);
-		pthread_mutex_lock(&obj->mutex);
-		obj->signaled = signaled;
-		if (signaled) {
-			if (obj->manualReset) {
-				pthread_cond_broadcast(&obj->cond);
-			} else {
-				pthread_cond_signal(&obj->cond);
-			}
-		}
-		pthread_mutex_unlock(&obj->mutex);
-	}
-
-	static void resetOverlappedEvent(OVERLAPPED *ov) {
-		if (!ov || !ov->hEvent) {
-			return;
-		}
-		setEventSignaledState(ov->hEvent, false);
-	}
-
-	static void signalOverlappedEvent(OVERLAPPED *ov) {
-		if (!ov || !ov->hEvent) {
-			return;
-		}
-		setEventSignaledState(ov->hEvent, true);
-	}
-
-	uint32_t WIN_FUNC GetLastError() {
-		DEBUG_LOG("GetLastError() -> %u\n", wibo::lastError);
-		return wibo::lastError;
-	}
-
-	void WIN_FUNC SetLastError(unsigned int dwErrCode) {
-		DEBUG_LOG("SetLastError(%u)\n", dwErrCode);
-		wibo::lastError = dwErrCode;
-	}
-
 	BOOL WIN_FUNC IsBadReadPtr(const void *lp, uintptr_t ucb) {
 		DEBUG_LOG("STUB: IsBadReadPtr(ptr=%p, size=%zu)\n", lp, static_cast<size_t>(ucb));
 		if (!lp) {
@@ -626,503 +415,12 @@ namespace kernel32 {
 		return FALSE;
 	}
 
-	BOOL WIN_FUNC Wow64DisableWow64FsRedirection(void **OldValue) {
-		DEBUG_LOG("STUB: Wow64DisableWow64FsRedirection(%p)\n", OldValue);
-		if (OldValue) {
-			*OldValue = nullptr;
-		}
-		wibo::lastError = ERROR_SUCCESS;
-		return TRUE;
-	}
-
-	BOOL WIN_FUNC Wow64RevertWow64FsRedirection(void *OldValue) {
-		DEBUG_LOG("STUB: Wow64RevertWow64FsRedirection(%p)\n", OldValue);
-		(void) OldValue;
-		wibo::lastError = ERROR_SUCCESS;
-		return TRUE;
-	}
-
-	BOOL WIN_FUNC IsWow64Process(HANDLE hProcess, PBOOL Wow64Process) {
-		DEBUG_LOG("IsWow64Process(%p, %p)\n", hProcess, Wow64Process);
-		if (!Wow64Process) {
-			wibo::lastError = ERROR_INVALID_PARAMETER;
-			return FALSE;
-		}
-
-		uintptr_t rawHandle = reinterpret_cast<uintptr_t>(hProcess);
-		bool isPseudoHandle = rawHandle == static_cast<uintptr_t>(-1);
-		if (!isPseudoHandle) {
-			if (!hProcess) {
-				wibo::lastError = ERROR_INVALID_HANDLE;
-				return FALSE;
-			}
-			auto data = handles::dataFromHandle(hProcess, false);
-			if (data.type != handles::TYPE_PROCESS || data.ptr == nullptr) {
-				wibo::lastError = ERROR_INVALID_HANDLE;
-				return FALSE;
-			}
-		}
-
-		*Wow64Process = FALSE;
-		wibo::lastError = ERROR_SUCCESS;
-		return TRUE;
-	}
-
-	void WIN_FUNC RaiseException(DWORD dwExceptionCode, DWORD dwExceptionFlags, DWORD nNumberOfArguments, const ULONG_PTR *lpArguments) {
-		DEBUG_LOG("RaiseException(0x%x, 0x%x, %u, %p)\n", dwExceptionCode, dwExceptionFlags, nNumberOfArguments, lpArguments);
-		(void)lpArguments;
-		exit(static_cast<int>(dwExceptionCode));
-	}
-
-	PVOID WIN_FUNC AddVectoredExceptionHandler(ULONG first, PVECTORED_EXCEPTION_HANDLER handler) {
-		DEBUG_LOG("STUB: AddVectoredExceptionHandler(%u, %p)\n", first, handler);
-		return (PVOID)handler;
-	}
-
-	// @brief returns a pseudo handle to the current process
-	void *WIN_FUNC GetCurrentProcess() {
-		DEBUG_LOG("STUB: GetCurrentProcess() -> %p\n", (void *) 0xFFFFFFFF);
-		// pseudo handle is always returned, and is -1 (a special constant)
-		return (void *) 0xFFFFFFFF;
-	}
-
-	// @brief DWORD (unsigned int) returns a process identifier of the calling process.
-	unsigned int WIN_FUNC GetCurrentProcessId() {
-		uint32_t pid = getpid();
-		DEBUG_LOG("GetCurrentProcessId() -> %d\n", pid);
-		return pid;
-	}
-
-	unsigned int WIN_FUNC GetCurrentThreadId() {
-		pthread_t thread_id;
-		thread_id = pthread_self();
-		DEBUG_LOG("GetCurrentThreadId() -> %lu\n", thread_id);
-
-		// Cast thread_id to unsigned int to fit a DWORD
-		unsigned int u_thread_id = (unsigned int) thread_id;
-
-		return u_thread_id;
-	}
-
-	BOOL WIN_FUNC GetProcessAffinityMask(HANDLE hProcess, DWORD_PTR *lpProcessAffinityMask, DWORD_PTR *lpSystemAffinityMask) {
-		DEBUG_LOG("GetProcessAffinityMask(%p, %p, %p)\n", hProcess, lpProcessAffinityMask, lpSystemAffinityMask);
-		if (!lpProcessAffinityMask || !lpSystemAffinityMask) {
-			wibo::lastError = ERROR_INVALID_PARAMETER;
-			return FALSE;
-		}
-
-		uintptr_t rawProcessHandle = reinterpret_cast<uintptr_t>(hProcess);
-		bool isPseudoHandle = rawProcessHandle == static_cast<uintptr_t>(-1);
-		if (!isPseudoHandle) {
-			auto data = handles::dataFromHandle(hProcess, false);
-			if (data.type != handles::TYPE_PROCESS) {
-				wibo::lastError = ERROR_INVALID_HANDLE;
-				return FALSE;
-			}
-		}
-
-		DWORD_PTR systemMask = computeSystemAffinityMask();
-		if (!g_processAffinityMaskInitialized) {
-			g_processAffinityMask = systemMask;
-			g_processAffinityMaskInitialized = true;
-		}
-		DWORD_PTR processMask = g_processAffinityMask & systemMask;
-		if (processMask == 0) {
-			processMask = systemMask;
-		}
-		if (processMask == 0) {
-			processMask = 1;
-		}
-
-		*lpProcessAffinityMask = processMask;
-		*lpSystemAffinityMask = systemMask;
-		wibo::lastError = ERROR_SUCCESS;
-		return TRUE;
-	}
-
-	BOOL WIN_FUNC SetProcessAffinityMask(HANDLE hProcess, DWORD_PTR dwProcessAffinityMask) {
-		DEBUG_LOG("SetProcessAffinityMask(%p, 0x%lx)\n", hProcess, (unsigned long)dwProcessAffinityMask);
-		if (dwProcessAffinityMask == 0) {
-			wibo::lastError = ERROR_INVALID_PARAMETER;
-			return FALSE;
-		}
-
-		uintptr_t rawProcessHandle = reinterpret_cast<uintptr_t>(hProcess);
-		bool isPseudoHandle = rawProcessHandle == static_cast<uintptr_t>(-1);
-		if (!isPseudoHandle) {
-			auto data = handles::dataFromHandle(hProcess, false);
-			if (data.type != handles::TYPE_PROCESS) {
-				wibo::lastError = ERROR_INVALID_HANDLE;
-				return FALSE;
-			}
-		}
-
-		DWORD_PTR systemMask = computeSystemAffinityMask();
-		if ((dwProcessAffinityMask & systemMask) == 0 || (dwProcessAffinityMask & ~systemMask) != 0) {
-			wibo::lastError = ERROR_INVALID_PARAMETER;
-			return FALSE;
-		}
-
-		g_processAffinityMask = dwProcessAffinityMask & systemMask;
-		g_processAffinityMaskInitialized = true;
-		wibo::lastError = ERROR_SUCCESS;
-		return TRUE;
-	}
-
-	void WIN_FUNC ExitProcess(unsigned int uExitCode) {
-		DEBUG_LOG("ExitProcess(%u)\n", uExitCode);
-		exit(uExitCode);
-	}
-
-	BOOL WIN_FUNC TerminateProcess(HANDLE hProcess, unsigned int uExitCode) {
-		DEBUG_LOG("TerminateProcess(%p, %u)\n", hProcess, uExitCode);
-		if (hProcess == (HANDLE)0xFFFFFFFF) {
-			ExitProcess(uExitCode);
-		}
-		auto data = handles::dataFromHandle(hProcess, false);
-		if (data.type != handles::TYPE_PROCESS || data.ptr == nullptr) {
-			wibo::lastError = ERROR_INVALID_HANDLE;
-			return FALSE;
-		}
-		auto *process = reinterpret_cast<processes::Process *>(data.ptr);
-		if (kill(process->pid, SIGKILL) != 0) {
-			int err = errno;
-			DEBUG_LOG("TerminateProcess: kill(%d) failed: %s\n", process->pid, strerror(err));
-			switch (err) {
-			case ESRCH:
-			case EPERM:
-				wibo::lastError = ERROR_ACCESS_DENIED;
-				break;
-			default:
-				wibo::lastError = ERROR_INVALID_PARAMETER;
-				break;
-			}
-			return FALSE;
-		}
-		process->forcedExitCode = uExitCode;
-		process->terminationRequested = true;
-		process->exitCode = uExitCode;
-		wibo::lastError = ERROR_SUCCESS;
-		return TRUE;
-	}
-
-	BOOL WIN_FUNC GetExitCodeProcess(HANDLE hProcess, LPDWORD lpExitCode) {
-		DEBUG_LOG("GetExitCodeProcess(%p, %p)\n", hProcess, lpExitCode);
-
-		processes::Process* process = processes::processFromHandle(hProcess, false);
-		*lpExitCode = process->exitCode;
-		return 1; // success in retrieval
-	}
-
 	BOOL WIN_FUNC DisableThreadLibraryCalls(HMODULE hLibModule) {
 		DEBUG_LOG("DisableThreadLibraryCalls(%p)\n", hLibModule);
 		(void)hLibModule;
 		return TRUE;
 	}
 
-	void WIN_FUNC GetSystemInfo(SYSTEM_INFO *lpSystemInfo) {
-		DEBUG_LOG("GetSystemInfo(%p)\n", lpSystemInfo);
-		if (!lpSystemInfo) {
-			return;
-		}
-
-		std::memset(lpSystemInfo, 0, sizeof(*lpSystemInfo));
-
-		lpSystemInfo->wProcessorArchitecture = PROCESSOR_ARCHITECTURE_INTEL;
-		lpSystemInfo->wReserved = 0;
-		lpSystemInfo->dwOemId = lpSystemInfo->wProcessorArchitecture;
-		lpSystemInfo->dwProcessorType = PROCESSOR_INTEL_PENTIUM;
-		lpSystemInfo->wProcessorLevel = 6; // Pentium
-		lpSystemInfo->wProcessorRevision = 0;
-
-		long pageSize = sysconf(_SC_PAGESIZE);
-		if (pageSize <= 0) {
-			pageSize = 4096;
-		}
-		lpSystemInfo->dwPageSize = static_cast<DWORD>(pageSize);
-
-		lpSystemInfo->lpMinimumApplicationAddress = reinterpret_cast<LPVOID>(0x00010000);
-		if (sizeof(void *) == 4) {
-			lpSystemInfo->lpMaximumApplicationAddress = reinterpret_cast<LPVOID>(0x7FFEFFFF);
-		} else {
-			lpSystemInfo->lpMaximumApplicationAddress = reinterpret_cast<LPVOID>(0x00007FFFFFFEFFFFull);
-		}
-
-		unsigned int cpuCount = 1;
-		long reported = sysconf(_SC_NPROCESSORS_ONLN);
-		if (reported > 0) {
-			cpuCount = static_cast<unsigned int>(reported);
-		}
-		lpSystemInfo->dwNumberOfProcessors = cpuCount;
-
-		unsigned int maskWidth = static_cast<unsigned int>(sizeof(DWORD_PTR) * 8);
-		DWORD_PTR mask;
-		if (cpuCount >= maskWidth) {
-			mask = static_cast<DWORD_PTR>(~static_cast<DWORD_PTR>(0));
-		} else {
-			mask = (static_cast<DWORD_PTR>(1) << cpuCount) - 1;
-		}
-		if (mask == 0) {
-			mask = 1;
-		}
-		lpSystemInfo->dwActiveProcessorMask = mask;
-
-		lpSystemInfo->dwAllocationGranularity = 0x10000;
-	}
-
-	struct PROCESS_INFORMATION {
-		HANDLE hProcess;
-		HANDLE hThread;
-		DWORD  dwProcessId;
-		DWORD  dwThreadId;
-	};
-
-
-	BOOL WIN_FUNC CreateProcessA(
-		LPCSTR lpApplicationName,
-		LPSTR lpCommandLine,
-		void *lpProcessAttributes,
-		void *lpThreadAttributes,
-		BOOL bInheritHandles,
-		DWORD dwCreationFlags,
-		LPVOID lpEnvironment,
-		LPCSTR lpCurrentDirectory,
-		void *lpStartupInfo,
-		PROCESS_INFORMATION *lpProcessInformation
-	) {
-		DEBUG_LOG("CreateProcessA %s \"%s\" %p %p %d 0x%x %p %s %p %p\n",
-			lpApplicationName ? lpApplicationName : "<null>",
-			lpCommandLine ? lpCommandLine : "<null>",
-			lpProcessAttributes,
-			lpThreadAttributes,
-			bInheritHandles,
-			dwCreationFlags,
-			lpEnvironment,
-			lpCurrentDirectory ? lpCurrentDirectory : "<none>",
-			lpStartupInfo,
-			lpProcessInformation
-		);
-
-		bool useSearchPath = lpApplicationName == nullptr;
-		std::string application;
-		std::string commandLine = lpCommandLine ? lpCommandLine : "";
-		if (lpApplicationName) {
-			application = lpApplicationName;
-		} else {
-			std::vector<std::string> arguments = processes::splitCommandLine(commandLine.c_str());
-			if (arguments.empty()) {
-				wibo::lastError = ERROR_FILE_NOT_FOUND;
-				return 0;
-			}
-			application = arguments.front();
-		}
-
-		auto resolved = processes::resolveExecutable(application, useSearchPath);
-		if (!resolved) {
-			wibo::lastError = ERROR_FILE_NOT_FOUND;
-			return 0;
-		}
-
-		pid_t pid = -1;
-		int spawnResult = processes::spawnWithCommandLine(*resolved, commandLine, &pid);
-		if (spawnResult != 0) {
-			wibo::lastError = (spawnResult == ENOENT) ? ERROR_FILE_NOT_FOUND : ERROR_ACCESS_DENIED;
-			return 0;
-		}
-
-		if (lpProcessInformation) {
-			lpProcessInformation->hProcess = processes::allocProcessHandle(pid);
-			lpProcessInformation->hThread = nullptr;
-			lpProcessInformation->dwProcessId = static_cast<DWORD>(pid);
-			lpProcessInformation->dwThreadId = 0;
-		}
-		wibo::lastError = ERROR_SUCCESS;
-		(void)lpProcessAttributes;
-		(void)lpThreadAttributes;
-		(void)bInheritHandles;
-		(void)dwCreationFlags;
-		(void)lpEnvironment;
-		(void)lpCurrentDirectory;
-		(void)lpStartupInfo;
-		return 1;
-	}
-
-	BOOL WIN_FUNC CreateProcessW(
-		LPCWSTR lpApplicationName,
-		LPWSTR lpCommandLine,
-		void *lpProcessAttributes,
-		void *lpThreadAttributes,
-		BOOL bInheritHandles,
-		DWORD dwCreationFlags,
-		LPVOID lpEnvironment,
-		LPCWSTR lpCurrentDirectory,
-		void *lpStartupInfo,
-		PROCESS_INFORMATION *lpProcessInformation
-	) {
-		std::string applicationUtf8;
-		if (lpApplicationName) {
-			applicationUtf8 = wideStringToString(lpApplicationName);
-		}
-		std::string commandUtf8;
-		if (lpCommandLine) {
-			commandUtf8 = wideStringToString(lpCommandLine);
-		}
-		std::string directoryUtf8;
-		if (lpCurrentDirectory) {
-			directoryUtf8 = wideStringToString(lpCurrentDirectory);
-		}
-		DEBUG_LOG("CreateProcessW %s \"%s\" %p %p %d 0x%x %p %s %p %p\n",
-			applicationUtf8.empty() ? "<null>" : applicationUtf8.c_str(),
-			commandUtf8.empty() ? "<null>" : commandUtf8.c_str(),
-			lpProcessAttributes,
-			lpThreadAttributes,
-			bInheritHandles,
-			dwCreationFlags,
-			lpEnvironment,
-			directoryUtf8.empty() ? "<none>" : directoryUtf8.c_str(),
-			lpStartupInfo,
-			lpProcessInformation
-		);
-		std::vector<char> commandBuffer;
-		if (!commandUtf8.empty()) {
-			commandBuffer.assign(commandUtf8.begin(), commandUtf8.end());
-			commandBuffer.push_back('\0');
-		}
-		LPSTR commandPtr = commandBuffer.empty() ? nullptr : commandBuffer.data();
-		LPCSTR applicationPtr = applicationUtf8.empty() ? nullptr : applicationUtf8.c_str();
-		LPCSTR directoryPtr = directoryUtf8.empty() ? nullptr : directoryUtf8.c_str();
-		return CreateProcessA(
-			applicationPtr,
-			commandPtr,
-			lpProcessAttributes,
-			lpThreadAttributes,
-			bInheritHandles,
-			dwCreationFlags,
-			lpEnvironment,
-			directoryPtr,
-			lpStartupInfo,
-			lpProcessInformation
-		);
-	}
-
-	unsigned int WIN_FUNC WaitForSingleObject(void *hHandle, unsigned int dwMilliseconds) {
-		DEBUG_LOG("WaitForSingleObject(%p, %u)\n", hHandle, dwMilliseconds);
-		handles::Data data = handles::dataFromHandle(hHandle, false);
-		switch (data.type) {
-		case handles::TYPE_PROCESS: {
-			// TODO: wait for less than forever
-			assert(dwMilliseconds == 0xffffffff);
-			auto *process = reinterpret_cast<processes::Process *>(data.ptr);
-			int status = 0;
-			for (;;) {
-				if (waitpid(process->pid, &status, 0) == -1) {
-					if (errno == EINTR) {
-						continue;
-					}
-					if (errno == ECHILD && process->terminationRequested) {
-						process->exitCode = process->forcedExitCode;
-						break;
-					}
-					DEBUG_LOG("WaitForSingleObject: waitpid(%d) failed: %s\n", process->pid, strerror(errno));
-					wibo::lastError = ERROR_INVALID_HANDLE;
-					return 0xFFFFFFFF;
-				}
-				break;
-			}
-			if (process->terminationRequested) {
-				process->exitCode = process->forcedExitCode;
-			} else if (WIFEXITED(status)) {
-				process->exitCode = static_cast<DWORD>(WEXITSTATUS(status));
-			} else {
-				DEBUG_LOG("WaitForSingleObject: Child process exited abnormally - returning exit code 1.\n");
-				process->exitCode = 1;
-			}
-			process->terminationRequested = false;
-			wibo::lastError = ERROR_SUCCESS;
-			return 0;
-		}
-		case handles::TYPE_EVENT: {
-			auto *obj = reinterpret_cast<EventObject *>(data.ptr);
-			if (dwMilliseconds != 0xffffffff) {
-				DEBUG_LOG("WaitForSingleObject: timeout for event not supported\n");
-				wibo::lastError = ERROR_NOT_SUPPORTED;
-				return 0xFFFFFFFF;
-			}
-			pthread_mutex_lock(&obj->mutex);
-			while (!obj->signaled) {
-				pthread_cond_wait(&obj->cond, &obj->mutex);
-			}
-			if (!obj->manualReset) {
-				obj->signaled = false;
-			}
-			pthread_mutex_unlock(&obj->mutex);
-			wibo::lastError = ERROR_SUCCESS;
-			return 0;
-		}
-		case handles::TYPE_THREAD: {
-			auto *obj = reinterpret_cast<ThreadObject *>(data.ptr);
-			if (dwMilliseconds != 0xffffffff) {
-				DEBUG_LOG("WaitForSingleObject: timeout for thread not supported\n");
-				wibo::lastError = ERROR_NOT_SUPPORTED;
-				return 0xFFFFFFFF;
-			}
-			pthread_mutex_lock(&obj->mutex);
-			while (!obj->finished) {
-				pthread_cond_wait(&obj->cond, &obj->mutex);
-			}
-			bool needJoin = !obj->joined && !obj->detached;
-			pthread_t thread = obj->thread;
-			if (needJoin) {
-				obj->joined = true;
-			}
-			pthread_mutex_unlock(&obj->mutex);
-			if (needJoin) {
-				pthread_join(thread, nullptr);
-			}
-			wibo::lastError = ERROR_SUCCESS;
-			return 0;
-		}
-		case handles::TYPE_SEMAPHORE: {
-			auto *obj = reinterpret_cast<SemaphoreObject *>(data.ptr);
-			if (dwMilliseconds != 0xffffffff) {
-				DEBUG_LOG("WaitForSingleObject: timeout for semaphore not supported\n");
-				wibo::lastError = ERROR_NOT_SUPPORTED;
-				return 0xFFFFFFFF;
-			}
-			pthread_mutex_lock(&obj->mutex);
-			while (obj->count == 0) {
-				pthread_cond_wait(&obj->cond, &obj->mutex);
-			}
-			obj->count--;
-			pthread_mutex_unlock(&obj->mutex);
-			wibo::lastError = ERROR_SUCCESS;
-			return 0;
-		}
-		case handles::TYPE_MUTEX: {
-			auto *obj = reinterpret_cast<MutexObject *>(data.ptr);
-			if (dwMilliseconds != 0xffffffff) {
-				DEBUG_LOG("WaitForSingleObject: timeout for mutex not supported\n");
-				wibo::lastError = ERROR_NOT_SUPPORTED;
-				return 0xFFFFFFFF;
-			}
-			pthread_mutex_lock(&obj->mutex);
-			pthread_t self = pthread_self();
-			if (obj->ownerValid && pthread_equal(obj->owner, self)) {
-				obj->recursionCount++;
-			} else {
-				obj->owner = self;
-				obj->ownerValid = true;
-				obj->recursionCount = 1;
-			}
-			wibo::lastError = ERROR_SUCCESS;
-			return 0;
-		}
-		default:
-			DEBUG_LOG("WaitForSingleObject: unsupported handle type %d\n", data.type);
-			wibo::lastError = ERROR_INVALID_HANDLE;
-			return 0xFFFFFFFF;
-		}
-	}
 
 	int WIN_FUNC GetSystemDefaultLangID() {
 		DEBUG_LOG("STUB: GetSystemDefaultLangID()\n");
@@ -5043,48 +4341,6 @@ namespace kernel32 {
 	constexpr DWORD STARTF_USESTDHANDLES = 0x00000100;
 	constexpr WORD SW_SHOWNORMAL = 1;
 
-	typedef struct _STARTUPINFOA {
-		unsigned int   cb;
-		char		  *lpReserved;
-		char		  *lpDesktop;
-		char		  *lpTitle;
-		unsigned int   dwX;
-		unsigned int   dwY;
-		unsigned int   dwXSize;
-		unsigned int   dwYSize;
-		unsigned int   dwXCountChars;
-		unsigned int   dwYCountChars;
-		unsigned int   dwFillAttribute;
-		unsigned int   dwFlags;
-		unsigned short wShowWindow;
-		unsigned short cbReserved2;
-		unsigned char  lpReserved2;
-		void		  *hStdInput;
-		void		  *hStdOutput;
-		void		  *hStdError;
-	} STARTUPINFOA, *LPSTARTUPINFOA;
-
-	typedef struct _STARTUPINFOW {
-		unsigned int  cb;
-		unsigned short *lpReserved;
-		unsigned short *lpDesktop;
-		unsigned short *lpTitle;
-		unsigned int  dwX;
-		unsigned int  dwY;
-		unsigned int  dwXSize;
-		unsigned int  dwYSize;
-		unsigned int  dwXCountChars;
-		unsigned int  dwYCountChars;
-		unsigned int  dwFillAttribute;
-		unsigned int  dwFlags;
-		unsigned short wShowWindow;
-		unsigned short cbReserved2;
-		unsigned char lpReserved2;
-		void *hStdInput;
-		void *hStdOutput;
-		void *hStdError;
-	} STARTUPINFOW, *LPSTARTUPINFOW;
-
 	template <typename StartupInfo>
 	static void populateStartupInfo(StartupInfo *info) {
 		if (!info) {
@@ -5095,6 +4351,7 @@ namespace kernel32 {
 		info->dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
 		info->wShowWindow = SW_SHOWNORMAL;
 		info->cbReserved2 = 0;
+		info->lpReserved2 = nullptr;
 		info->hStdInput = files::getStdHandle(STD_INPUT_HANDLE);
 		info->hStdOutput = files::getStdHandle(STD_OUTPUT_HANDLE);
 		info->hStdError = files::getStdHandle(STD_ERROR_HANDLE);
@@ -5105,7 +4362,7 @@ namespace kernel32 {
 		populateStartupInfo(lpStartupInfo);
 	}
 
-	void WIN_FUNC GetStartupInfoW(_STARTUPINFOW *lpStartupInfo) {
+	void WIN_FUNC GetStartupInfoW(STARTUPINFOW *lpStartupInfo) {
 		DEBUG_LOG("GetStartupInfoW(%p)\n", lpStartupInfo);
 		populateStartupInfo(lpStartupInfo);
 	}
@@ -5142,12 +4399,11 @@ namespace kernel32 {
 			}
 		}
 
-		DWORD_PTR systemMask = computeSystemAffinityMask();
-		DWORD_PTR processMask = g_processAffinityMaskInitialized ? (g_processAffinityMask & systemMask) : systemMask;
-		if (processMask == 0) {
-			processMask = systemMask ? systemMask : 1;
+		DWORD_PTR processMask = 0;
+		DWORD_PTR systemMask = 0;
+		if (!GetProcessAffinityMask(GetCurrentProcess(), &processMask, &systemMask)) {
+			return 0;
 		}
-
 		if ((dwThreadAffinityMask & ~systemMask) != 0 || (dwThreadAffinityMask & processMask) == 0) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
 			return 0;
@@ -5296,219 +4552,6 @@ namespace kernel32 {
 		return TRUE;
 	}
 
-	HANDLE WIN_FUNC CreateMutexW(void *lpMutexAttributes, BOOL bInitialOwner, LPCWSTR lpName) {
-		std::string nameLog;
-		if (lpName) {
-			nameLog = wideStringToString(reinterpret_cast<const uint16_t *>(lpName));
-		} else {
-			nameLog = "<unnamed>";
-		}
-		DEBUG_LOG("CreateMutexW(%p, %d, %s)\n", lpMutexAttributes, bInitialOwner, nameLog.c_str());
-		(void)lpMutexAttributes;
-
-		std::u16string name = makeMutexName(lpName);
-		MutexObject *obj = nullptr;
-		bool alreadyExists = false;
-		{
-			std::lock_guard<std::mutex> lock(mutexRegistryLock);
-			if (!name.empty()) {
-				auto it = namedMutexes.find(name);
-				if (it != namedMutexes.end()) {
-					obj = it->second;
-					obj->refCount++;
-					alreadyExists = true;
-				}
-			}
-			if (!obj) {
-				obj = new MutexObject();
-				pthread_mutexattr_t attr;
-				pthread_mutexattr_init(&attr);
-				pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
-				pthread_mutex_init(&obj->mutex, &attr);
-				pthread_mutexattr_destroy(&attr);
-				obj->ownerValid = false;
-				obj->recursionCount = 0;
-				obj->name = name;
-				obj->refCount = 1;
-				if (!name.empty()) {
-					namedMutexes[name] = obj;
-				}
-			}
-		}
-
-		if (!alreadyExists && bInitialOwner) {
-			pthread_mutex_lock(&obj->mutex);
-			obj->owner = pthread_self();
-			obj->ownerValid = true;
-			obj->recursionCount = 1;
-		}
-
-		HANDLE handle = handles::allocDataHandle({handles::TYPE_MUTEX, obj, 0});
-		wibo::lastError = alreadyExists ? ERROR_ALREADY_EXISTS : ERROR_SUCCESS;
-		return handle;
-	}
-
-	HANDLE WIN_FUNC CreateMutexA(void *lpMutexAttributes, BOOL bInitialOwner, LPCSTR lpName) {
-		DEBUG_LOG("CreateMutexA -> ");
-		std::vector<uint16_t> wideName;
-		if (lpName) {
-			wideName = stringToWideString(lpName);
-		}
-		return CreateMutexW(lpMutexAttributes, bInitialOwner, lpName ? reinterpret_cast<LPCWSTR>(wideName.data()) : nullptr);
-	}
-
-	BOOL WIN_FUNC ReleaseMutex(HANDLE hMutex) {
-		DEBUG_LOG("ReleaseMutex(%p)\n", hMutex);
-		auto data = handles::dataFromHandle(hMutex, false);
-		if (data.type != handles::TYPE_MUTEX) {
-			wibo::lastError = ERROR_INVALID_HANDLE;
-			return FALSE;
-		}
-		auto *obj = reinterpret_cast<MutexObject *>(data.ptr);
-		pthread_t self = pthread_self();
-		if (!obj->ownerValid || !pthread_equal(obj->owner, self)) {
-			wibo::lastError = ERROR_NOT_OWNER;
-			return FALSE;
-		}
-		if (obj->recursionCount > 0) {
-			obj->recursionCount--;
-		}
-		if (obj->recursionCount == 0) {
-			obj->ownerValid = false;
-		}
-		pthread_mutex_unlock(&obj->mutex);
-		wibo::lastError = ERROR_SUCCESS;
-		return TRUE;
-	}
-
-	HANDLE WIN_FUNC CreateEventW(void *lpEventAttributes, BOOL bManualReset, BOOL bInitialState, LPCWSTR lpName) {
-		std::string nameLog;
-		if (lpName) {
-			nameLog = wideStringToString(reinterpret_cast<const uint16_t *>(lpName));
-		} else {
-			nameLog = "<unnamed>";
-		}
-		DEBUG_LOG("CreateEventW(name=%s, manualReset=%d, initialState=%d)\n", nameLog.c_str(), bManualReset, bInitialState);
-		(void)lpEventAttributes;
-
-		std::u16string name = makeMutexName(lpName);
-		EventObject *obj = nullptr;
-		bool alreadyExists = false;
-		{
-			std::lock_guard<std::mutex> lock(eventRegistryLock);
-			if (!name.empty()) {
-				auto it = namedEvents.find(name);
-				if (it != namedEvents.end()) {
-					obj = it->second;
-					obj->refCount++;
-					alreadyExists = true;
-				}
-			}
-			if (!obj) {
-				obj = new EventObject();
-				pthread_mutex_init(&obj->mutex, nullptr);
-				pthread_cond_init(&obj->cond, nullptr);
-				obj->manualReset = bManualReset;
-				obj->signaled = bInitialState;
-				obj->name = name;
-				obj->refCount = 1;
-				if (!name.empty()) {
-					namedEvents[name] = obj;
-				}
-			}
-		}
-		HANDLE handle = handles::allocDataHandle({handles::TYPE_EVENT, obj, 0});
-		wibo::lastError = alreadyExists ? ERROR_ALREADY_EXISTS : ERROR_SUCCESS;
-		return handle;
-	}
-
-	HANDLE WIN_FUNC CreateEventA(void *lpEventAttributes, BOOL bManualReset, BOOL bInitialState, LPCSTR lpName) {
-		DEBUG_LOG("CreateEventA -> ");
-		std::vector<uint16_t> wideName;
-		if (lpName) {
-			wideName = stringToWideString(lpName);
-		}
-		return CreateEventW(lpEventAttributes, bManualReset, bInitialState, lpName ? reinterpret_cast<LPCWSTR>(wideName.data()) : nullptr);
-	}
-
-	HANDLE WIN_FUNC CreateSemaphoreW(void *lpSemaphoreAttributes, LONG lInitialCount, LONG lMaximumCount,
-									 LPCWSTR lpName) {
-		DEBUG_LOG("CreateSemaphoreW(%p, %ld, %ld, %ls)\n", lpSemaphoreAttributes, static_cast<long>(lInitialCount),
-				  static_cast<long>(lMaximumCount), lpName ? reinterpret_cast<const wchar_t *>(lpName) : L"<null>");
-		(void)lpSemaphoreAttributes;
-		SemaphoreObject *obj = nullptr;
-		bool alreadyExists = false;
-		std::u16string name = makeMutexName(lpName);
-		{
-			std::lock_guard<std::mutex> lock(semaphoreRegistryLock);
-			if (!name.empty()) {
-				auto it = namedSemaphores.find(name);
-				if (it != namedSemaphores.end()) {
-					obj = it->second;
-					obj->refCount++;
-					alreadyExists = true;
-				}
-			}
-			if (!obj) {
-				if (lMaximumCount <= 0 || lInitialCount < 0 || lInitialCount > lMaximumCount) {
-					wibo::lastError = ERROR_INVALID_PARAMETER;
-					return nullptr;
-				}
-				obj = new SemaphoreObject();
-				pthread_mutex_init(&obj->mutex, nullptr);
-				pthread_cond_init(&obj->cond, nullptr);
-				obj->count = lInitialCount;
-				obj->maxCount = lMaximumCount;
-				obj->name = name;
-				obj->refCount = 1;
-				if (!name.empty()) {
-					namedSemaphores[name] = obj;
-				}
-			}
-		}
-		void *handle = handles::allocDataHandle({handles::TYPE_SEMAPHORE, obj, 0});
-		wibo::lastError = alreadyExists ? ERROR_ALREADY_EXISTS : ERROR_SUCCESS;
-		return handle;
-	}
-
-	HANDLE WIN_FUNC CreateSemaphoreA(void *lpSemaphoreAttributes, LONG lInitialCount, LONG lMaximumCount,
-									 LPCSTR lpName) {
-		DEBUG_LOG("CreateSemaphoreA -> ");
-		std::vector<uint16_t> wideName;
-		if (lpName) {
-			wideName = stringToWideString(lpName);
-		}
-		return CreateSemaphoreW(lpSemaphoreAttributes, lInitialCount, lMaximumCount,
-								lpName ? reinterpret_cast<LPCWSTR>(wideName.data()) : nullptr);
-	}
-
-	BOOL WIN_FUNC ReleaseSemaphore(HANDLE hSemaphore, LONG lReleaseCount, PLONG lpPreviousCount) {
-		DEBUG_LOG("ReleaseSemaphore(%p, %ld, %p)\n", hSemaphore, static_cast<long>(lReleaseCount), lpPreviousCount);
-		if (lReleaseCount <= 0) {
-			wibo::lastError = ERROR_INVALID_PARAMETER;
-			return FALSE;
-		}
-		auto data = handles::dataFromHandle(hSemaphore, false);
-		if (data.type != handles::TYPE_SEMAPHORE || data.ptr == nullptr) {
-			wibo::lastError = ERROR_INVALID_HANDLE;
-			return FALSE;
-		}
-		auto *obj = reinterpret_cast<SemaphoreObject *>(data.ptr);
-		pthread_mutex_lock(&obj->mutex);
-		if (lpPreviousCount) {
-			*lpPreviousCount = obj->count;
-		}
-		if (lReleaseCount > obj->maxCount - obj->count) {
-			pthread_mutex_unlock(&obj->mutex);
-			wibo::lastError = ERROR_INVALID_PARAMETER;
-			return FALSE;
-		}
-		obj->count += lReleaseCount;
-		pthread_mutex_unlock(&obj->mutex);
-		pthread_cond_broadcast(&obj->cond);
-		wibo::lastError = ERROR_SUCCESS;
-		return TRUE;
-	}
 
 	BOOL WIN_FUNC SetThreadPriority(HANDLE hThread, int nPriority) {
 		DEBUG_LOG("STUB: SetThreadPriority(%p, %d)\n", hThread, nPriority);
@@ -5525,40 +4568,6 @@ namespace kernel32 {
 		return 0; // THREAD_PRIORITY_NORMAL
 	}
 
-	BOOL WIN_FUNC SetEvent(HANDLE hEvent) {
-		DEBUG_LOG("SetEvent(%p)\n", hEvent);
-		auto data = handles::dataFromHandle(hEvent, false);
-		if (data.type != handles::TYPE_EVENT) {
-			wibo::lastError = ERROR_INVALID_HANDLE;
-			return FALSE;
-		}
-		EventObject *obj = reinterpret_cast<EventObject *>(data.ptr);
-		pthread_mutex_lock(&obj->mutex);
-		obj->signaled = true;
-		if (obj->manualReset) {
-			pthread_cond_broadcast(&obj->cond);
-		} else {
-			pthread_cond_signal(&obj->cond);
-		}
-		pthread_mutex_unlock(&obj->mutex);
-		wibo::lastError = ERROR_SUCCESS;
-		return TRUE;
-	}
-
-	BOOL WIN_FUNC ResetEvent(HANDLE hEvent) {
-		DEBUG_LOG("ResetEvent(%p)\n", hEvent);
-		auto data = handles::dataFromHandle(hEvent, false);
-		if (data.type != handles::TYPE_EVENT) {
-			wibo::lastError = ERROR_INVALID_HANDLE;
-			return FALSE;
-		}
-		EventObject *obj = reinterpret_cast<EventObject *>(data.ptr);
-		pthread_mutex_lock(&obj->mutex);
-		obj->signaled = false;
-		pthread_mutex_unlock(&obj->mutex);
-		wibo::lastError = ERROR_SUCCESS;
-		return TRUE;
-	}
 
 	BOOL WIN_FUNC GetThreadTimes(HANDLE hThread,
 				     FILETIME *lpCreationTime,
@@ -6455,21 +5464,6 @@ namespace kernel32 {
 		return FALSE;
 	}
 
-	void *WIN_FUNC SetUnhandledExceptionFilter(void *lpTopLevelExceptionFilter) {
-		DEBUG_LOG("STUB: SetUnhandledExceptionFilter(%p)\n", lpTopLevelExceptionFilter);
-		return nullptr;
-	}
-
-	LONG WIN_FUNC UnhandledExceptionFilter(void *ExceptionInfo) {
-		DEBUG_LOG("STUB: UnhandledExceptionFilter(%p)\n", ExceptionInfo);
-		return 1; // EXCEPTION_EXECUTE_HANDLER
-	}
-
-	UINT WIN_FUNC SetErrorMode(UINT mode){
-		DEBUG_LOG("STUB: SetErrorMode(%d)\n", mode);
-		return 0;
-	}
-
 	struct SINGLE_LIST_ENTRY
 	{
 		SINGLE_LIST_ENTRY *Next;
@@ -6495,15 +5489,6 @@ namespace kernel32 {
 		posix_memalign((void**)&ListHead, 16, sizeof(SLIST_HEADER));
 		memset(ListHead, 0, sizeof(SLIST_HEADER));
 	}
-
-	typedef struct _EXCEPTION_RECORD {
-		unsigned int                    ExceptionCode;
-		unsigned int                    ExceptionFlags;
-		struct _EXCEPTION_RECORD *ExceptionRecord;
-		void*                    ExceptionAddress;
-		unsigned int                    NumberParameters;
-		void*                ExceptionInformation[15];
-	} EXCEPTION_RECORD;
 
 	void WIN_FUNC RtlUnwind(void *TargetFrame, void *TargetIp, EXCEPTION_RECORD *ExceptionRecord, void *ReturnValue) {
 		DEBUG_LOG("RtlUnwind(%p, %p, %p, %p)\n", TargetFrame, TargetIp, ExceptionRecord, ReturnValue);
@@ -6535,62 +5520,6 @@ namespace kernel32 {
 		}
 		return original;
 		// return __sync_val_compare_and_swap(destination, comperand, exchange); if we want to maintain the atomic behavior
-	}
-
-	// These are effectively a copy/paste of the Tls* functions
-	enum { MAX_FLS_VALUES = 100 };
-	static bool flsValuesUsed[MAX_FLS_VALUES] = { false };
-	static void *flsValues[MAX_FLS_VALUES];
-	DWORD WIN_FUNC FlsAlloc(void *lpCallback) {
-		DEBUG_LOG("FlsAlloc(%p)", lpCallback);
-		// If the function succeeds, the return value is an FLS index initialized to zero.
-		for (size_t i = 0; i < MAX_FLS_VALUES; i++) {
-			if (flsValuesUsed[i] == false) {
-				flsValuesUsed[i] = true;
-				flsValues[i] = nullptr;
-				DEBUG_LOG(" -> %d\n", i);
-				return i;
-			}
-		}
-		DEBUG_LOG(" -> -1\n");
-		wibo::lastError = 1;
-		return 0xFFFFFFFF; // FLS_OUT_OF_INDEXES
-	}
-
-	unsigned int WIN_FUNC FlsFree(unsigned int dwFlsIndex) {
-		DEBUG_LOG("FlsFree(%u)\n", dwFlsIndex);
-		if (dwFlsIndex >= 0 && dwFlsIndex < MAX_FLS_VALUES && flsValuesUsed[dwFlsIndex]) {
-			flsValuesUsed[dwFlsIndex] = false;
-			return 1;
-		} else {
-			wibo::lastError = 1;
-			return 0;
-		}
-	}
-
-	void *WIN_FUNC FlsGetValue(unsigned int dwFlsIndex) {
-		VERBOSE_LOG("FlsGetValue(%u)\n", dwFlsIndex);
-		void *result = nullptr;
-		if (dwFlsIndex >= 0 && dwFlsIndex < MAX_FLS_VALUES && flsValuesUsed[dwFlsIndex]) {
-			result = flsValues[dwFlsIndex];
-			// See https://learn.microsoft.com/en-us/windows/win32/api/fibersapi/nf-fibersapi-flsgetvalue
-			wibo::lastError = ERROR_SUCCESS;
-		} else {
-			wibo::lastError = 1;
-		}
-		// DEBUG_LOG(" -> %p\n", result);
-		return result;
-	}
-
-	unsigned int WIN_FUNC FlsSetValue(unsigned int dwFlsIndex, void *lpFlsData) {
-		VERBOSE_LOG("FlsSetValue(%u, %p)\n", dwFlsIndex, lpFlsData);
-		if (dwFlsIndex >= 0 && dwFlsIndex < MAX_FLS_VALUES && flsValuesUsed[dwFlsIndex]) {
-			flsValues[dwFlsIndex] = lpFlsData;
-			return 1;
-		} else {
-			wibo::lastError = 1;
-			return 0;
-		}
 	}
 
 	BOOL WIN_FUNC GetOverlappedResult(HANDLE hFile, LPOVERLAPPED lpOverlapped, LPDWORD lpNumberOfBytesTransferred,

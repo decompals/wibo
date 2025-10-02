@@ -48,6 +48,8 @@ typedef ULONG *PULONG;
 typedef int64_t LARGE_INTEGER;
 typedef LARGE_INTEGER *PLARGE_INTEGER;
 typedef uintptr_t ULONG_PTR;
+typedef ULONG_PTR DWORD_PTR;
+typedef DWORD_PTR *PDWORD_PTR;
 typedef char *LPSTR;
 typedef const char *LPCSTR;
 typedef uint16_t *LPWSTR;

@@ -36,6 +36,12 @@ add_executable(wibo
     dll/bcrypt.cpp
     dll/crt.cpp
     dll/kernel32.cpp
+    dll/kernel32/errhandlingapi.cpp
+    dll/kernel32/fibersapi.cpp
+    dll/kernel32/processthreadsapi.cpp
+    dll/kernel32/sysinfoapi.cpp
+    dll/kernel32/synchapi.cpp
+    dll/kernel32/wow64apiset.cpp
     dll/lmgr.cpp
     dll/mscoree.cpp
     dll/msvcrt.cpp

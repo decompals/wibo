@@ -10,14 +10,38 @@
 
 namespace {
 
-using advapi32::Sid;
-
 constexpr size_t kAceAlignment = 4;
 constexpr DWORD ERROR_REVISION_MISMATCH = 1306;
 constexpr DWORD ERROR_INVALID_ACL = 1336;
 constexpr DWORD ERROR_INVALID_SID = 1337;
 constexpr DWORD ERROR_ALLOTTED_SPACE_EXCEEDED = 1344;
 constexpr DWORD ERROR_INVALID_SECURITY_DESCR = 1338;
+
+struct SidAndAttributes {
+	Sid *SidPtr;
+	DWORD Attributes;
+};
+
+struct TokenUserData {
+	SidAndAttributes User;
+};
+
+struct TokenStatisticsData {
+	LUID tokenId{};
+	LUID authenticationId{};
+	LARGE_INTEGER expirationTime{};
+	DWORD tokenType = 0;
+	DWORD impersonationLevel = 0;
+	DWORD dynamicCharged = 0;
+	DWORD dynamicAvailable = 0;
+	DWORD groupCount = 0;
+	DWORD privilegeCount = 0;
+	LUID modifiedId{};
+};
+
+struct TokenPrimaryGroupStub {
+	Sid *PrimaryGroup;
+};
 
 size_t alignToDword(size_t value) { return (value + (kAceAlignment - 1)) & ~(kAceAlignment - 1); }
 
@@ -57,31 +81,20 @@ bool computeAclUsedSize(const ACL *acl, size_t capacity, size_t &used) {
 	return true;
 }
 
-struct SidAndAttributes {
-	Sid *SidPtr;
-	DWORD Attributes;
-};
-
-struct TokenUserData {
-	SidAndAttributes User;
-};
-
-struct TokenStatisticsData {
-	LUID tokenId{};
-	LUID authenticationId{};
-	LARGE_INTEGER expirationTime{};
-	DWORD tokenType = 0;
-	DWORD impersonationLevel = 0;
-	DWORD dynamicCharged = 0;
-	DWORD dynamicAvailable = 0;
-	DWORD groupCount = 0;
-	DWORD privilegeCount = 0;
-	LUID modifiedId{};
-};
-
-struct TokenPrimaryGroupStub {
-	Sid *PrimaryGroup;
-};
+bool writeLocalSystemSid(Sid *sid) {
+	if (!sid) {
+		return false;
+	}
+	sid->Revision = 1;
+	sid->SubAuthorityCount = 1;
+	SidIdentifierAuthority authority{};
+	for (size_t i = 0; i < std::size(kNtAuthority); ++i) {
+		authority.Value[i] = kNtAuthority[i];
+	}
+	sid->IdentifierAuthority = authority;
+	sid->SubAuthority[0] = SECURITY_LOCAL_SYSTEM_RID;
+	return true;
+}
 
 } // namespace
 

@@ -9,20 +9,20 @@
 namespace kernel32 {
 
 struct ThreadObject {
-	pthread_t thread;
+	pthread_t thread{};
 	bool finished = false;
 	bool joined = false;
 	bool detached = false;
 	bool synthetic = false;
 	DWORD exitCode = 0;
 	int refCount = 1;
-	pthread_mutex_t mutex;
-	pthread_cond_t cond;
+	pthread_mutex_t mutex{};
+	pthread_cond_t cond{};
 	unsigned int suspendCount = 0;
 };
 
 struct MutexObject {
-	pthread_mutex_t mutex;
+	pthread_mutex_t mutex{};
 	bool ownerValid = false;
 	pthread_t owner = 0;
 	unsigned int recursionCount = 0;
@@ -31,8 +31,8 @@ struct MutexObject {
 };
 
 struct EventObject {
-	pthread_mutex_t mutex;
-	pthread_cond_t cond;
+	pthread_mutex_t mutex{};
+	pthread_cond_t cond{};
 	bool manualReset = false;
 	bool signaled = false;
 	std::u16string name;
@@ -40,8 +40,8 @@ struct EventObject {
 };
 
 struct SemaphoreObject {
-	pthread_mutex_t mutex;
-	pthread_cond_t cond;
+	pthread_mutex_t mutex{};
+	pthread_cond_t cond{};
 	LONG count = 0;
 	LONG maxCount = 0;
 	std::u16string name;

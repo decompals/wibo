@@ -3,9 +3,9 @@
 #include "common.h"
 #include "securitybaseapi.h"
 
-#include <string>
+constexpr DWORD SECURITY_LOCAL_SYSTEM_RID = 18;
 
-namespace advapi32 {
+constexpr BYTE kNtAuthority[6] = {0, 0, 0, 0, 0, 5};
 
 struct TokenObject {
 	HANDLE processHandle;
@@ -20,11 +20,3 @@ struct Sid {
 	SidIdentifierAuthority IdentifierAuthority;
 	DWORD SubAuthority[1];
 };
-
-bool isLocalSystemSid(const Sid *sid);
-bool writeLocalSystemSid(Sid *sid);
-std::string normalizePrivilegeName(const std::string &name);
-LUID lookupOrGeneratePrivilegeLuid(const std::string &normalizedName);
-void releaseToken(void *tokenPtr);
-
-} // namespace advapi32

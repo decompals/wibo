@@ -150,7 +150,7 @@ BOOL WIN_FUNC CloseHandle(HANDLE hObject) {
 	} else if (data.type == handles::TYPE_PROCESS) {
 		delete reinterpret_cast<processes::Process *>(data.ptr);
 	} else if (data.type == handles::TYPE_TOKEN) {
-		advapi32::releaseToken(data.ptr);
+		delete reinterpret_cast<TokenObject *>(data.ptr);
 	} else if (data.type == handles::TYPE_MUTEX) {
 		releaseMutexObject(reinterpret_cast<MutexObject *>(data.ptr));
 	} else if (data.type == handles::TYPE_EVENT) {

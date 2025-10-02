@@ -14,7 +14,6 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <fnmatch.h>
-#include <limits>
 #include <optional>
 #include <random>
 #include <string>

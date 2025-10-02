@@ -3,6 +3,58 @@
 #include "common.h"
 #include "minwinbase.h"
 
+struct BY_HANDLE_FILE_INFORMATION {
+	DWORD dwFileAttributes;
+	FILETIME ftCreationTime;
+	FILETIME ftLastAccessTime;
+	FILETIME ftLastWriteTime;
+	DWORD dwVolumeSerialNumber;
+	DWORD nFileSizeHigh;
+	DWORD nFileSizeLow;
+	DWORD nNumberOfLinks;
+	DWORD nFileIndexHigh;
+	DWORD nFileIndexLow;
+};
+
+using PBY_HANDLE_FILE_INFORMATION = BY_HANDLE_FILE_INFORMATION *;
+using LPBY_HANDLE_FILE_INFORMATION = BY_HANDLE_FILE_INFORMATION *;
+
+constexpr DWORD GENERIC_READ = 0x80000000;
+constexpr DWORD GENERIC_WRITE = 0x40000000;
+constexpr DWORD GENERIC_EXECUTE = 0x20000000;
+constexpr DWORD GENERIC_ALL = 0x10000000;
+
+constexpr DWORD FILE_SHARE_READ = 0x00000001;
+constexpr DWORD FILE_SHARE_WRITE = 0x00000002;
+constexpr DWORD FILE_SHARE_DELETE = 0x00000004;
+
+constexpr DWORD CREATE_NEW = 1;
+constexpr DWORD CREATE_ALWAYS = 2;
+constexpr DWORD OPEN_EXISTING = 3;
+constexpr DWORD OPEN_ALWAYS = 4;
+constexpr DWORD TRUNCATE_EXISTING = 5;
+
+constexpr DWORD FILE_BEGIN = 0;
+constexpr DWORD FILE_CURRENT = 1;
+constexpr DWORD FILE_END = 2;
+
+constexpr DWORD FILE_ATTRIBUTE_READONLY = 0x00000001;
+constexpr DWORD FILE_ATTRIBUTE_HIDDEN = 0x00000002;
+constexpr DWORD FILE_ATTRIBUTE_SYSTEM = 0x00000004;
+constexpr DWORD FILE_ATTRIBUTE_ARCHIVE = 0x00000020;
+constexpr DWORD FILE_ATTRIBUTE_TEMPORARY = 0x00000100;
+constexpr DWORD FILE_ATTRIBUTE_OFFLINE = 0x00001000;
+constexpr DWORD FILE_ATTRIBUTE_NOT_CONTENT_INDEXED = 0x00002000;
+constexpr DWORD FILE_ATTRIBUTE_ENCRYPTED = 0x00004000;
+
+constexpr DWORD FILE_TYPE_UNKNOWN = 0x0000;
+constexpr DWORD FILE_TYPE_DISK = 0x0001;
+constexpr DWORD FILE_TYPE_CHAR = 0x0002;
+constexpr DWORD FILE_TYPE_PIPE = 0x0003;
+
+constexpr DWORD INVALID_FILE_ATTRIBUTES = 0xFFFFFFFF;
+constexpr DWORD INVALID_FILE_SIZE = 0xFFFFFFFF;
+
 namespace kernel32 {
 
 DWORD WIN_FUNC GetFullPathNameA(LPCSTR lpFileName, DWORD nBufferLength, LPSTR lpBuffer, LPSTR *lpFilePart);
@@ -18,5 +70,36 @@ HANDLE WIN_FUNC FindFirstFileExA(LPCSTR lpFileName, FINDEX_INFO_LEVELS fInfoLeve
 BOOL WIN_FUNC FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileData);
 BOOL WIN_FUNC FindNextFileW(HANDLE hFindFile, LPWIN32_FIND_DATAW lpFindFileData);
 BOOL WIN_FUNC FindClose(HANDLE hFindFile);
+DWORD WIN_FUNC GetFileAttributesA(LPCSTR lpFileName);
+DWORD WIN_FUNC GetFileAttributesW(LPCWSTR lpFileName);
+BOOL WIN_FUNC WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten,
+						LPOVERLAPPED lpOverlapped);
+BOOL WIN_FUNC ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead,
+					   LPOVERLAPPED lpOverlapped);
+BOOL WIN_FUNC FlushFileBuffers(HANDLE hFile);
+HANDLE WIN_FUNC CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
+							LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition,
+							DWORD dwFlagsAndAttributes, HANDLE hTemplateFile);
+HANDLE WIN_FUNC CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
+							LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition,
+							DWORD dwFlagsAndAttributes, HANDLE hTemplateFile);
+BOOL WIN_FUNC DeleteFileA(LPCSTR lpFileName);
+BOOL WIN_FUNC DeleteFileW(LPCWSTR lpFileName);
+BOOL WIN_FUNC MoveFileA(LPCSTR lpExistingFileName, LPCSTR lpNewFileName);
+BOOL WIN_FUNC MoveFileW(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName);
+DWORD WIN_FUNC SetFilePointer(HANDLE hFile, LONG lDistanceToMove, PLONG lpDistanceToMoveHigh, DWORD dwMoveMethod);
+BOOL WIN_FUNC SetFilePointerEx(HANDLE hFile, LARGE_INTEGER liDistanceToMove, PLARGE_INTEGER lpNewFilePointer,
+							   DWORD dwMoveMethod);
+BOOL WIN_FUNC SetEndOfFile(HANDLE hFile);
+BOOL WIN_FUNC CreateDirectoryA(LPCSTR lpPathName, LPSECURITY_ATTRIBUTES lpSecurityAttributes);
+BOOL WIN_FUNC RemoveDirectoryA(LPCSTR lpPathName);
+BOOL WIN_FUNC SetFileAttributesA(LPCSTR lpFileName, DWORD dwFileAttributes);
+DWORD WIN_FUNC GetFileSize(HANDLE hFile, LPDWORD lpFileSizeHigh);
+BOOL WIN_FUNC GetFileTime(HANDLE hFile, LPFILETIME lpCreationTime, LPFILETIME lpLastAccessTime,
+						  LPFILETIME lpLastWriteTime);
+BOOL WIN_FUNC SetFileTime(HANDLE hFile, const FILETIME *lpCreationTime, const FILETIME *lpLastAccessTime,
+						  const FILETIME *lpLastWriteTime);
+BOOL WIN_FUNC GetFileInformationByHandle(HANDLE hFile, LPBY_HANDLE_FILE_INFORMATION lpFileInformation);
+DWORD WIN_FUNC GetFileType(HANDLE hFile);
 
 } // namespace kernel32

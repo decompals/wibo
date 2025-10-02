@@ -9,6 +9,7 @@
 #define ERROR_INVALID_HANDLE 6
 #define ERROR_NOT_ENOUGH_MEMORY 8
 #define ERROR_NO_MORE_FILES 18
+#define ERROR_FILE_EXISTS 80
 #define ERROR_READ_FAULT 30
 #define ERROR_HANDLE_EOF 38
 #define ERROR_INVALID_ADDRESS 487
@@ -35,8 +36,8 @@
 #define ERROR_ALREADY_EXISTS 183
 #define ERROR_NOT_OWNER 288
 
-#define INVALID_SET_FILE_POINTER ((DWORD)-1)
-#define INVALID_HANDLE_VALUE ((HANDLE)-1)
+#define INVALID_SET_FILE_POINTER ((DWORD) - 1)
+#define INVALID_HANDLE_VALUE ((HANDLE) - 1)
 
 typedef int NTSTATUS;
 #define STATUS_SUCCESS ((NTSTATUS)0x00000000)
@@ -54,4 +55,4 @@ typedef int HRESULT;
 namespace wibo {
 DWORD winErrorFromErrno(int err);
 NTSTATUS statusFromWinError(DWORD error);
-}
+} // namespace wibo

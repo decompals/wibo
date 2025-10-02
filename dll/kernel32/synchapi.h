@@ -73,6 +73,7 @@ constexpr SRWLOCK SRWLOCK_INIT{nullptr};
 
 namespace kernel32 {
 
+void WIN_FUNC Sleep(DWORD dwMilliseconds);
 HANDLE WIN_FUNC CreateMutexA(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInitialOwner, LPCSTR lpName);
 HANDLE WIN_FUNC CreateMutexW(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInitialOwner, LPCWSTR lpName);
 BOOL WIN_FUNC ReleaseMutex(HANDLE hMutex);

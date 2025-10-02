@@ -36,25 +36,27 @@ add_executable(wibo
     dll/bcrypt.cpp
     dll/crt.cpp
     dll/kernel32.cpp
+    dll/kernel32/debugapi.cpp
     dll/kernel32/errhandlingapi.cpp
     dll/kernel32/fibersapi.cpp
-    dll/kernel32/heapapi.cpp
-    dll/kernel32/memoryapi.cpp
-    dll/kernel32/handleapi.cpp
     dll/kernel32/fileapi.cpp
-    dll/kernel32/debugapi.cpp
+    dll/kernel32/handleapi.cpp
+    dll/kernel32/heapapi.cpp
     dll/kernel32/interlockedapi.cpp
+    dll/kernel32/ioapiset.cpp
     dll/kernel32/libloaderapi.cpp
-    dll/kernel32/winbase.cpp
-    dll/kernel32/wincon.cpp
+    dll/kernel32/memoryapi.cpp
     dll/kernel32/processenv.cpp
-    dll/kernel32/profileapi.cpp
     dll/kernel32/processthreadsapi.cpp
+    dll/kernel32/profileapi.cpp
     dll/kernel32/stringapiset.cpp
+    dll/kernel32/synchapi.cpp
     dll/kernel32/sysinfoapi.cpp
     dll/kernel32/timezoneapi.cpp
-    dll/kernel32/synchapi.cpp
+    dll/kernel32/winbase.cpp
+    dll/kernel32/wincon.cpp
     dll/kernel32/winnls.cpp
+    dll/kernel32/winnt.cpp
     dll/kernel32/wow64apiset.cpp
     dll/lmgr.cpp
     dll/mscoree.cpp

@@ -2,6 +2,7 @@
 
 #include "errors.h"
 #include "files.h"
+#include "handles.h"
 #include "internal.h"
 #include "strutil.h"
 
@@ -9,6 +10,7 @@
 #include <cassert>
 #include <cerrno>
 #include <cstdlib>
+#include <cstdarg>
 #include <cstring>
 #include <filesystem>
 #include <limits>
@@ -154,9 +156,94 @@ bool resolveDiskFreeSpaceStat(const char *rootPathName, struct statvfs &outBuf, 
 	}
 }
 
+constexpr DWORD kComputerNameLength = 8;
+constexpr DWORD kComputerNameRequiredSize = kComputerNameLength + 1;
+constexpr const char kComputerNameAnsi[] = "COMPNAME";
+const uint16_t kComputerNameWide[] = {u'C', u'O', u'M', u'P', u'N', u'A', u'M', u'E', 0};
+
 } // namespace
 
 namespace kernel32 {
+
+UINT WIN_FUNC SetHandleCount(UINT uNumber) {
+	DEBUG_LOG("SetHandleCount(%u)\n", uNumber);
+	(void)uNumber;
+	return handles::MAX_HANDLES;
+}
+
+DWORD WIN_FUNC FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId, DWORD dwLanguageId,
+							   LPSTR lpBuffer, DWORD nSize, va_list *Arguments) {
+	DEBUG_LOG("FormatMessageA(%u, %p, %u, %u, %p, %u, %p)\n", dwFlags, lpSource, dwMessageId, dwLanguageId,
+			  lpBuffer, nSize, Arguments);
+
+	if (dwFlags & 0x00000100) {
+		// FORMAT_MESSAGE_ALLOCATE_BUFFER
+	} else if (dwFlags & 0x00002000) {
+		// FORMAT_MESSAGE_ARGUMENT_ARRAY
+	} else if (dwFlags & 0x00000800) {
+		// FORMAT_MESSAGE_FROM_HMODULE
+	} else if (dwFlags & 0x00000400) {
+		// FORMAT_MESSAGE_FROM_STRING
+	} else if (dwFlags & 0x00001000) {
+		// FORMAT_MESSAGE_FROM_SYSTEM
+		std::string message = std::system_category().message(static_cast<int>(dwMessageId));
+		size_t length = message.length();
+		if (!lpBuffer || nSize == 0) {
+			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			return 0;
+		}
+		std::strncpy(lpBuffer, message.c_str(), static_cast<size_t>(nSize));
+		if (static_cast<size_t>(nSize) <= length) {
+			if (static_cast<size_t>(nSize) > 0) {
+				lpBuffer[nSize - 1] = '\0';
+			}
+			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			return 0;
+		}
+		lpBuffer[length] = '\0';
+		wibo::lastError = ERROR_SUCCESS;
+		return static_cast<DWORD>(length);
+	} else if (dwFlags & 0x00000200) {
+		// FORMAT_MESSAGE_IGNORE_INSERTS
+	} else {
+		// unhandled?
+	}
+
+	if (lpBuffer && nSize > 0) {
+		lpBuffer[0] = '\0';
+	}
+	wibo::lastError = ERROR_CALL_NOT_IMPLEMENTED;
+	return 0;
+}
+
+PVOID WIN_FUNC EncodePointer(PVOID Ptr) {
+	DEBUG_LOG("EncodePointer(%p)\n", Ptr);
+	return Ptr;
+}
+
+PVOID WIN_FUNC DecodePointer(PVOID Ptr) {
+	DEBUG_LOG("DecodePointer(%p)\n", Ptr);
+	return Ptr;
+}
+
+BOOL WIN_FUNC SetDllDirectoryA(LPCSTR lpPathName) {
+	DEBUG_LOG("SetDllDirectoryA(%s)\n", lpPathName);
+	if (!lpPathName || lpPathName[0] == '\0') {
+		wibo::clearDllDirectoryOverride();
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+
+	std::filesystem::path hostPath = files::pathFromWindows(lpPathName);
+	if (hostPath.empty() || !std::filesystem::exists(hostPath)) {
+		wibo::lastError = ERROR_PATH_NOT_FOUND;
+		return FALSE;
+	}
+
+	wibo::setDllDirectoryOverride(std::filesystem::absolute(hostPath));
+	wibo::lastError = ERROR_SUCCESS;
+	return TRUE;
+}
 
 void tryMarkExecutable(void *mem) {
 	if (!mem) {
@@ -194,6 +281,50 @@ BOOL WIN_FUNC IsBadWritePtr(LPVOID lp, UINT_PTR ucb) {
 		return TRUE;
 	}
 	return FALSE;
+}
+
+BOOL WIN_FUNC GetComputerNameA(LPSTR lpBuffer, LPDWORD nSize) {
+	DEBUG_LOG("GetComputerNameA(%p, %p)\n", lpBuffer, nSize);
+	if (!nSize || !lpBuffer) {
+		if (nSize) {
+			*nSize = 0;
+		}
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return FALSE;
+	}
+
+	if (*nSize < kComputerNameRequiredSize) {
+		*nSize = kComputerNameRequiredSize;
+		wibo::lastError = ERROR_BUFFER_OVERFLOW;
+		return FALSE;
+	}
+
+	std::strcpy(lpBuffer, kComputerNameAnsi);
+	*nSize = kComputerNameLength;
+	wibo::lastError = ERROR_SUCCESS;
+	return TRUE;
+}
+
+BOOL WIN_FUNC GetComputerNameW(LPWSTR lpBuffer, LPDWORD nSize) {
+	DEBUG_LOG("GetComputerNameW(%p, %p)\n", lpBuffer, nSize);
+	if (!nSize || !lpBuffer) {
+		if (nSize) {
+			*nSize = 0;
+		}
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return FALSE;
+	}
+
+	if (*nSize < kComputerNameRequiredSize) {
+		*nSize = kComputerNameRequiredSize;
+		wibo::lastError = ERROR_BUFFER_OVERFLOW;
+		return FALSE;
+	}
+
+	wstrncpy(lpBuffer, kComputerNameWide, static_cast<size_t>(kComputerNameRequiredSize));
+	*nSize = kComputerNameLength;
+	wibo::lastError = ERROR_SUCCESS;
+	return TRUE;
 }
 
 HGLOBAL WIN_FUNC GlobalAlloc(UINT uFlags, SIZE_T dwBytes) {

@@ -38,6 +38,11 @@ void makeWideNameFromAnsi(LPCSTR ansiName, std::vector<uint16_t> &outWide) {
 
 namespace kernel32 {
 
+void WIN_FUNC Sleep(DWORD dwMilliseconds) {
+	DEBUG_LOG("Sleep(%u)\n", dwMilliseconds);
+	usleep(static_cast<useconds_t>(dwMilliseconds) * 1000);
+}
+
 namespace {
 
 std::mutex mutexRegistryLock;

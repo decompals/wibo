@@ -70,6 +70,7 @@ HANDLE WIN_FUNC GetCurrentProcess();
 DWORD WIN_FUNC GetCurrentProcessId();
 DWORD WIN_FUNC GetCurrentThreadId();
 HANDLE WIN_FUNC GetCurrentThread();
+BOOL WIN_FUNC IsProcessorFeaturePresent(DWORD ProcessorFeature);
 BOOL WIN_FUNC GetProcessAffinityMask(HANDLE hProcess, PDWORD_PTR lpProcessAffinityMask,
 									 PDWORD_PTR lpSystemAffinityMask);
 BOOL WIN_FUNC SetProcessAffinityMask(HANDLE hProcess, DWORD_PTR dwProcessAffinityMask);

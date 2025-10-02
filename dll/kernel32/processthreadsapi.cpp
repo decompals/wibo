@@ -103,6 +103,21 @@ template <typename StartupInfo> void populateStartupInfo(StartupInfo *info) {
 
 namespace kernel32 {
 
+BOOL WIN_FUNC IsProcessorFeaturePresent(DWORD ProcessorFeature) {
+	DEBUG_LOG("IsProcessorFeaturePresent(%u)\n", ProcessorFeature);
+	if (ProcessorFeature == 0) { // PF_FLOATING_POINT_PRECISION_ERRATA
+		return TRUE;
+	}
+	if (ProcessorFeature == 10) { // PF_XMMI64_INSTRUCTIONS_AVAILABLE (SSE2)
+		return TRUE;
+	}
+	if (ProcessorFeature == 23) { // PF_FASTFAIL_AVAILABLE (__fastfail() supported)
+		return TRUE;
+	}
+	DEBUG_LOG("  IsProcessorFeaturePresent: unknown feature %u, returning TRUE\n", ProcessorFeature);
+	return TRUE;
+}
+
 thread_local ThreadObject *g_currentThreadObject = nullptr;
 
 ThreadObject *ensureCurrentThreadObject() {

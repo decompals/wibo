@@ -17,6 +17,7 @@
 - Formatting follows `.clang-format` (LLVM base, tabbed indentation width 4, 120 column limit); never hand-wrap differently.
 - Use PascalCase for Win32 entry points, camelCase for internal helpers, SCREAMING_SNAKE_CASE for Win32 constants, kCamelCase for internal constants, and g_camelCase for globals.
 - Put static functions and variables in anonymous namespaces at the top of the file.
+- Prefer scoping types to the header or source file that uses them; avoid polluting `common.h` unless widely shared.
 
 ## Shim Implementation Guidelines
 - Target pre-XP behavior; our binaries are old and don't expect modern WinAPI behavior.

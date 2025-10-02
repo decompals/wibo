@@ -19,10 +19,6 @@
 #include <utility>
 #include <vector>
 
-namespace kernel32 {
-int64_t getFileSize(HANDLE hFile);
-}
-
 namespace {
 
 constexpr size_t kVirtualAllocationGranularity = 64 * 1024;
@@ -285,7 +281,7 @@ HANDLE WIN_FUNC CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMap
 		}
 		mapping->fd = dupFd;
 		if (size == 0) {
-			int64_t fileSize = getFileSize(hFile);
+			int64_t fileSize = getFileSizeFromHandle(hFile);
 			if (fileSize < 0) {
 				closeMappingIfPossible(mapping);
 				return nullptr;

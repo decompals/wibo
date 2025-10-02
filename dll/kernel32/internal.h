@@ -1,6 +1,8 @@
 #pragma once
 
 #include "common.h"
+#include "minwinbase.h"
+
 #include <pthread.h>
 #include <string>
 
@@ -56,6 +58,7 @@ void signalOverlappedEvent(OVERLAPPED *ov);
 void tryMarkExecutable(void *mem);
 void setLastErrorFromErrno();
 bool closeFileMappingHandle(void *mappingPtr);
+int64_t getFileSizeFromHandle(HANDLE hFile);
 ThreadObject *ensureCurrentThreadObject();
 ThreadObject *threadObjectFromHandle(HANDLE hThread);
 ThreadObject *retainThreadObject(ThreadObject *obj);

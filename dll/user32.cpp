@@ -1,8 +1,10 @@
 #include "common.h"
+#include "errors.h"
 #include "strutil.h"
 
 namespace user32 {
 	constexpr uint32_t RT_STRING_ID = 6;
+	constexpr uintptr_t kDefaultKeyboardLayout = 0x04090409;
 
 	int WIN_FUNC LoadStringA(void* hInstance, unsigned int uID, char* lpBuffer, int cchBufferMax) {
 		DEBUG_LOG("LoadStringA(%p, %u, %p, %d)\n", hInstance, uID, lpBuffer, cchBufferMax);
@@ -109,6 +111,13 @@ namespace user32 {
 		fflush(stdout);
 		return 1;
 	}
+
+	HKL WIN_FUNC GetKeyboardLayout(DWORD idThread) {
+		DEBUG_LOG("GetKeyboardLayout(%u)\n", idThread);
+		(void)idThread;
+		wibo::lastError = ERROR_SUCCESS;
+		return reinterpret_cast<HKL>(kDefaultKeyboardLayout);
+	}
 }
 
 
@@ -116,6 +125,7 @@ static void *resolveByName(const char *name) {
 	if (strcmp(name, "LoadStringA") == 0) return (void *) user32::LoadStringA;
 	if (strcmp(name, "LoadStringW") == 0) return (void *) user32::LoadStringW;
 	if (strcmp(name, "MessageBoxA") == 0) return (void *) user32::MessageBoxA;
+	if (strcmp(name, "GetKeyboardLayout") == 0) return (void *) user32::GetKeyboardLayout;
 	return nullptr;
 }
 

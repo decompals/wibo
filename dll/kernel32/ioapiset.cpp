@@ -6,7 +6,7 @@
 namespace kernel32 {
 
 BOOL WIN_FUNC GetOverlappedResult(HANDLE hFile, LPOVERLAPPED lpOverlapped, LPDWORD lpNumberOfBytesTransferred,
-								 BOOL bWait) {
+								  BOOL bWait) {
 	DEBUG_LOG("GetOverlappedResult(%p, %p, %p, %d)\n", hFile, lpOverlapped, lpNumberOfBytesTransferred, bWait);
 	(void)hFile;
 	if (!lpOverlapped) {
@@ -46,4 +46,3 @@ BOOL WIN_FUNC GetOverlappedResult(HANDLE hFile, LPOVERLAPPED lpOverlapped, LPDWO
 }
 
 } // namespace kernel32
-

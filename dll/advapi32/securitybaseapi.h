@@ -53,6 +53,7 @@ constexpr BYTE ACL_REVISION = ACL_REVISION2;
 constexpr BYTE ACL_REVISION_DS = ACL_REVISION4;
 constexpr BYTE ACCESS_ALLOWED_ACE_TYPE = 0x00;
 constexpr BYTE SID_MAX_SUB_AUTHORITIES = 15;
+constexpr BYTE SID_REVISION = 1;
 
 struct TOKEN_PRIVILEGES;
 using PTOKEN_PRIVILEGES = TOKEN_PRIVILEGES *;
@@ -92,6 +93,8 @@ BOOL WIN_FUNC ImpersonateLoggedOnUser(HANDLE hToken);
 BOOL WIN_FUNC DuplicateTokenEx(HANDLE hExistingToken, DWORD dwDesiredAccess, void *lpTokenAttributes,
 							   DWORD ImpersonationLevel, DWORD TokenType, PHANDLE phNewToken);
 BOOL WIN_FUNC CopySid(DWORD nDestinationSidLength, PSID pDestinationSid, PSID pSourceSid);
+BOOL WIN_FUNC InitializeSid(PSID sid, PSID_IDENTIFIER_AUTHORITY pIdentifierAuthority, BYTE nSubAuthorityCount);
+BOOL WIN_FUNC EqualSid(PSID pSid1, PSID pSid2);
 BOOL WIN_FUNC GetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR pSecurityDescriptor, LPBOOL lpbDaclPresent, PACL *pDacl,
 										LPBOOL lpbDaclDefaulted);
 BOOL WIN_FUNC SetKernelObjectSecurity(HANDLE Handle, SECURITY_INFORMATION SecurityInformation,

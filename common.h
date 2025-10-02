@@ -43,6 +43,7 @@ using HLOCAL = HANDLE;
 using HRSRC = HANDLE;
 using LPHANDLE = HANDLE *;
 using PHANDLE = HANDLE *;
+using HKL = HANDLE;
 using PVOID = void *;
 using LPVOID = void *;
 using LPCVOID = const void *;

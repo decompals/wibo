@@ -9,8 +9,8 @@
 #include <algorithm>
 #include <cassert>
 #include <cerrno>
-#include <cstdlib>
 #include <cstdarg>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <limits>
@@ -171,10 +171,10 @@ UINT WIN_FUNC SetHandleCount(UINT uNumber) {
 	return handles::MAX_HANDLES;
 }
 
-DWORD WIN_FUNC FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId, DWORD dwLanguageId,
-							   LPSTR lpBuffer, DWORD nSize, va_list *Arguments) {
-	DEBUG_LOG("FormatMessageA(%u, %p, %u, %u, %p, %u, %p)\n", dwFlags, lpSource, dwMessageId, dwLanguageId,
-			  lpBuffer, nSize, Arguments);
+DWORD WIN_FUNC FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId, DWORD dwLanguageId, LPSTR lpBuffer,
+							  DWORD nSize, va_list *Arguments) {
+	DEBUG_LOG("FormatMessageA(%u, %p, %u, %u, %p, %u, %p)\n", dwFlags, lpSource, dwMessageId, dwLanguageId, lpBuffer,
+			  nSize, Arguments);
 
 	if (dwFlags & 0x00000100) {
 		// FORMAT_MESSAGE_ALLOCATE_BUFFER

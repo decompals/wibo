@@ -9,8 +9,8 @@ namespace kernel32 {
 BOOL WIN_FUNC IsBadReadPtr(LPCVOID lp, UINT_PTR ucb);
 BOOL WIN_FUNC IsBadWritePtr(LPVOID lp, UINT_PTR ucb);
 UINT WIN_FUNC SetHandleCount(UINT uNumber);
-DWORD WIN_FUNC FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId, DWORD dwLanguageId,
-							   LPSTR lpBuffer, DWORD nSize, va_list *Arguments);
+DWORD WIN_FUNC FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId, DWORD dwLanguageId, LPSTR lpBuffer,
+							  DWORD nSize, va_list *Arguments);
 PVOID WIN_FUNC EncodePointer(PVOID Ptr);
 PVOID WIN_FUNC DecodePointer(PVOID Ptr);
 BOOL WIN_FUNC SetDllDirectoryA(LPCSTR lpPathName);

@@ -53,12 +53,12 @@ LPWSTR WIN_FUNC GetCommandLineW() {
 }
 
 HANDLE WIN_FUNC GetStdHandle(DWORD nStdHandle) {
-	DEBUG_LOG("GetStdHandle(%u)\n", nStdHandle);
+	DEBUG_LOG("GetStdHandle(%d)\n", nStdHandle);
 	return files::getStdHandle(nStdHandle);
 }
 
 BOOL WIN_FUNC SetStdHandle(DWORD nStdHandle, HANDLE hHandle) {
-	DEBUG_LOG("SetStdHandle(%u, %p)\n", nStdHandle, hHandle);
+	DEBUG_LOG("SetStdHandle(%d, %p)\n", nStdHandle, hHandle);
 	return files::setStdHandle(nStdHandle, hHandle);
 }
 

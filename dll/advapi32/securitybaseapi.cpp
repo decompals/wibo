@@ -359,6 +359,50 @@ BOOL WIN_FUNC CopySid(DWORD nDestinationSidLength, PSID pDestinationSid, PSID pS
 	return TRUE;
 }
 
+BOOL WIN_FUNC InitializeSid(PSID sid, PSID_IDENTIFIER_AUTHORITY pIdentifierAuthority, BYTE nSubAuthorityCount) {
+	DEBUG_LOG("InitializeSid(%p, %p, %u)\n", sid, pIdentifierAuthority, nSubAuthorityCount);
+	if (!sid || !pIdentifierAuthority) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return FALSE;
+	}
+	if (nSubAuthorityCount > SID_MAX_SUB_AUTHORITIES) {
+		wibo::lastError = ERROR_INVALID_SID;
+		return FALSE;
+	}
+	auto *sidStruct = reinterpret_cast<Sid *>(sid);
+	sidStruct->Revision = SID_REVISION;
+	sidStruct->SubAuthorityCount = nSubAuthorityCount;
+	sidStruct->IdentifierAuthority = *pIdentifierAuthority;
+	if (nSubAuthorityCount > 0) {
+		std::memset(sidStruct->SubAuthority, 0, sizeof(DWORD) * nSubAuthorityCount);
+	}
+	wibo::lastError = ERROR_SUCCESS;
+	return TRUE;
+}
+
+BOOL WIN_FUNC EqualSid(PSID pSid1, PSID pSid2) {
+	DEBUG_LOG("EqualSid(%p, %p)\n", pSid1, pSid2);
+	if (!pSid1 || !pSid2) {
+		wibo::lastError = ERROR_INVALID_SID;
+		return FALSE;
+	}
+	const auto *sid1 = reinterpret_cast<const Sid *>(pSid1);
+	const auto *sid2 = reinterpret_cast<const Sid *>(pSid2);
+	if (sid1->SubAuthorityCount > SID_MAX_SUB_AUTHORITIES || sid2->SubAuthorityCount > SID_MAX_SUB_AUTHORITIES) {
+		wibo::lastError = ERROR_INVALID_SID;
+		return FALSE;
+	}
+	bool equal =
+		sid1->Revision == sid2->Revision &&
+		std::memcmp(&sid1->IdentifierAuthority, &sid2->IdentifierAuthority, sizeof(SidIdentifierAuthority)) == 0 &&
+		sid1->SubAuthorityCount == sid2->SubAuthorityCount;
+	if (equal && sid1->SubAuthorityCount > 0) {
+		equal = std::memcmp(sid1->SubAuthority, sid2->SubAuthority, sizeof(DWORD) * sid1->SubAuthorityCount) == 0;
+	}
+	wibo::lastError = ERROR_SUCCESS;
+	return equal ? TRUE : FALSE;
+}
+
 BOOL WIN_FUNC SetKernelObjectSecurity(HANDLE Handle, SECURITY_INFORMATION SecurityInformation,
 									  PSECURITY_DESCRIPTOR SecurityDescriptor) {
 	DEBUG_LOG("STUB: SetKernelObjectSecurity(%p, 0x%x, %p)\n", Handle, SecurityInformation, SecurityDescriptor);

@@ -220,6 +220,53 @@ bool initializeEnumeration(const std::filesystem::path &parent, const std::strin
 	return nextMatch(handle, firstMatch);
 }
 
+std::optional<DWORD> stdHandleForConsoleDevice(const std::string &name, DWORD desiredAccess) {
+	std::string lowered = stringToLower(name);
+	if (lowered == "conin$") {
+		return STD_INPUT_HANDLE;
+	}
+	if (lowered == "conout$") {
+		return STD_OUTPUT_HANDLE;
+	}
+	if (lowered == "conerr$") {
+		return STD_ERROR_HANDLE;
+	}
+	if (lowered == "con") {
+		if ((desiredAccess & GENERIC_WRITE) != 0) {
+			return STD_OUTPUT_HANDLE;
+		}
+		return STD_INPUT_HANDLE;
+	}
+	return std::nullopt;
+}
+
+bool tryOpenConsoleDevice(DWORD dwDesiredAccess, DWORD dwShareMode, DWORD dwCreationDisposition,
+						  DWORD dwFlagsAndAttributes, HANDLE &outHandle, const std::string &originalName) {
+	(void)dwShareMode;
+	(void)dwCreationDisposition;
+	(void)dwFlagsAndAttributes;
+	auto stdHandleKind = stdHandleForConsoleDevice(originalName, dwDesiredAccess);
+	if (!stdHandleKind) {
+		return false;
+	}
+	HANDLE baseHandle = files::getStdHandle(*stdHandleKind);
+	auto *baseFile = files::fileHandleFromHandle(baseHandle);
+	if (!baseFile) {
+		wibo::lastError = ERROR_INVALID_HANDLE;
+		outHandle = INVALID_HANDLE_VALUE;
+		return true;
+	}
+	HANDLE duplicated = files::duplicateFileHandle(baseFile, false);
+	if (!duplicated) {
+		wibo::lastError = ERROR_INVALID_HANDLE;
+		outHandle = INVALID_HANDLE_VALUE;
+		return true;
+	}
+	wibo::lastError = ERROR_SUCCESS;
+	outHandle = duplicated;
+	return true;
+}
+
 } // namespace
 
 namespace kernel32 {
@@ -548,6 +595,13 @@ HANDLE WIN_FUNC CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwSh
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return INVALID_HANDLE_VALUE;
 	}
+	HANDLE consoleHandle = INVALID_HANDLE_VALUE;
+	if (tryOpenConsoleDevice(dwDesiredAccess, dwShareMode, dwCreationDisposition, dwFlagsAndAttributes, consoleHandle,
+							 std::string(lpFileName))) {
+		DEBUG_LOG("CreateFileA(console=%s, desiredAccess=0x%x, shareMode=%u, flags=0x%x) -> %p\n", lpFileName,
+				  dwDesiredAccess, dwShareMode, dwFlagsAndAttributes, consoleHandle);
+		return consoleHandle;
+	}
 	std::string path = files::pathFromWindows(lpFileName);
 	DEBUG_LOG("CreateFileA(filename=%s (%s), desiredAccess=0x%x, shareMode=%u, securityAttributes=%p, "
 			  "creationDisposition=%u, flagsAndAttributes=%u)\n",
@@ -629,6 +683,13 @@ HANDLE WIN_FUNC CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwS
 		return INVALID_HANDLE_VALUE;
 	}
 	std::string lpFileNameA = wideStringToString(lpFileName);
+	HANDLE consoleHandle = INVALID_HANDLE_VALUE;
+	if (tryOpenConsoleDevice(dwDesiredAccess, dwShareMode, dwCreationDisposition, dwFlagsAndAttributes, consoleHandle,
+							 lpFileNameA)) {
+		DEBUG_LOG("CreateFileW(console=%s, desiredAccess=0x%x, shareMode=%u, flags=0x%x) -> %p\n", lpFileNameA.c_str(),
+				  dwDesiredAccess, dwShareMode, dwFlagsAndAttributes, consoleHandle);
+		return consoleHandle;
+	}
 	return CreateFileA(lpFileNameA.c_str(), dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition,
 					   dwFlagsAndAttributes, hTemplateFile);
 }

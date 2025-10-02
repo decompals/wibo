@@ -25,6 +25,12 @@ BOOL WIN_FUNC SetConsoleMode(HANDLE hConsoleHandle, DWORD dwMode) {
 	return TRUE;
 }
 
+UINT WIN_FUNC GetConsoleCP() {
+	DEBUG_LOG("STUB: GetConsoleCP() -> 65001\n");
+	wibo::lastError = ERROR_SUCCESS;
+	return 65001; // UTF-8
+}
+
 UINT WIN_FUNC GetConsoleOutputCP() {
 	DEBUG_LOG("STUB: GetConsoleOutputCP() -> 65001\n");
 	wibo::lastError = ERROR_SUCCESS;

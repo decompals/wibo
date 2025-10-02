@@ -13,4 +13,3 @@ PVOID WIN_FUNC FlsGetValue(DWORD dwFlsIndex);
 BOOL WIN_FUNC FlsSetValue(DWORD dwFlsIndex, PVOID lpFlsData);
 
 } // namespace kernel32
-

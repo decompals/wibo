@@ -10,4 +10,3 @@ void WIN_FUNC RtlUnwind(PVOID TargetFrame, PVOID TargetIp, PEXCEPTION_RECORD Exc
 }
 
 } // namespace kernel32
-

@@ -30,6 +30,7 @@ namespace kernel32 {
 
 BOOL WIN_FUNC GetConsoleMode(HANDLE hConsoleHandle, LPDWORD lpMode);
 BOOL WIN_FUNC SetConsoleMode(HANDLE hConsoleHandle, DWORD dwMode);
+UINT WIN_FUNC GetConsoleCP();
 UINT WIN_FUNC GetConsoleOutputCP();
 BOOL WIN_FUNC SetConsoleCtrlHandler(PHANDLER_ROUTINE HandlerRoutine, BOOL Add);
 BOOL WIN_FUNC GetConsoleScreenBufferInfo(HANDLE hConsoleOutput, CONSOLE_SCREEN_BUFFER_INFO *lpConsoleScreenBufferInfo);

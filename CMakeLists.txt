@@ -50,6 +50,7 @@ add_executable(wibo
     dll/kernel32/interlockedapi.cpp
     dll/kernel32/ioapiset.cpp
     dll/kernel32/libloaderapi.cpp
+    dll/kernel32/namedpipeapi.cpp
     dll/kernel32/memoryapi.cpp
     dll/kernel32/processenv.cpp
     dll/kernel32/processthreadsapi.cpp

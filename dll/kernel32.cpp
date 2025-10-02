@@ -9,6 +9,7 @@
 #include "kernel32/interlockedapi.h"
 #include "kernel32/ioapiset.h"
 #include "kernel32/libloaderapi.h"
+#include "kernel32/namedpipeapi.h"
 #include "kernel32/memoryapi.h"
 #include "kernel32/processenv.h"
 #include "kernel32/processthreadsapi.h"
@@ -192,6 +193,10 @@ void *resolveByName(const char *name) {
 	if (strcmp(name, "Sleep") == 0)
 		return (void *)kernel32::Sleep;
 
+	// namedpipeapi.h
+	if (strcmp(name, "CreatePipe") == 0)
+		return (void *)kernel32::CreatePipe;
+
 	// winbase.h
 	if (strcmp(name, "GlobalAlloc") == 0)
 		return (void *)kernel32::GlobalAlloc;
@@ -289,6 +294,8 @@ void *resolveByName(const char *name) {
 		return (void *)kernel32::GetConsoleMode;
 	if (strcmp(name, "SetConsoleMode") == 0)
 		return (void *)kernel32::SetConsoleMode;
+	if (strcmp(name, "GetConsoleCP") == 0)
+		return (void *)kernel32::GetConsoleCP;
 	if (strcmp(name, "SetConsoleCtrlHandler") == 0)
 		return (void *)kernel32::SetConsoleCtrlHandler;
 	if (strcmp(name, "GetConsoleScreenBufferInfo") == 0)

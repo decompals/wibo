@@ -33,6 +33,10 @@ void *resolveByName(const char *name) {
 		return (void *)advapi32::DuplicateTokenEx;
 	if (strcmp(name, "CopySid") == 0)
 		return (void *)advapi32::CopySid;
+	if (strcmp(name, "InitializeSid") == 0)
+		return (void *)advapi32::InitializeSid;
+	if (strcmp(name, "EqualSid") == 0)
+		return (void *)advapi32::EqualSid;
 	if (strcmp(name, "GetSecurityDescriptorDacl") == 0)
 		return (void *)advapi32::GetSecurityDescriptorDacl;
 	if (strcmp(name, "SetKernelObjectSecurity") == 0)

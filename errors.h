@@ -59,4 +59,5 @@ typedef int HRESULT;
 namespace wibo {
 DWORD winErrorFromErrno(int err);
 NTSTATUS statusFromWinError(DWORD error);
+NTSTATUS statusFromErrno(int err);
 } // namespace wibo

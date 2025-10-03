@@ -50,4 +50,8 @@ NTSTATUS statusFromWinError(DWORD error) {
 	}
 }
 
+NTSTATUS statusFromErrno(int err) {
+	return statusFromWinError(winErrorFromErrno(err));
+}
+
 } // namespace wibo

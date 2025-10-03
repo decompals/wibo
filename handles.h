@@ -1,10 +1,10 @@
 #pragma once
 
 #include "common.h"
+
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
-#include <cstdlib>
 #include <shared_mutex>
 #include <utility>
 #include <vector>
@@ -67,8 +67,8 @@ template <class T> struct Pin {
 		}
 	}
 
-	static Pin acquire(ObjectHeader *o) { return Pin{o, Tag::Acquire}; }
-	static Pin adopt(ObjectHeader *o) { return Pin{o, Tag::Adopt}; }
+	static Pin acquire(ObjectHeader *o) { return {o, Tag::Acquire}; }
+	static Pin adopt(ObjectHeader *o) { return {o, Tag::Adopt}; }
 
 	Pin(const Pin &) = delete;
 	Pin &operator=(const Pin &) = delete;
@@ -94,9 +94,10 @@ template <class T> struct Pin {
 
 	T *operator->() const { return obj; }
 	T &operator*() const { return *obj; }
+	[[nodiscard]] T *get() const { return obj; }
 	explicit operator bool() const { return obj != nullptr; }
 
-	template <class U> Pin<U> downcast() && {
+	template <typename U> Pin<U> downcast() && {
 		if (obj && obj->type == U::kType) {
 			auto *u = static_cast<U *>(obj);
 			obj = nullptr;
@@ -106,77 +107,69 @@ template <class T> struct Pin {
 	}
 };
 
-using Handle = uint32_t;
-
 constexpr DWORD HANDLE_FLAG_INHERIT = 0x1;
 constexpr DWORD HANDLE_FLAG_PROTECT_FROM_CLOSE = 0x2;
 
 constexpr DWORD DUPLICATE_CLOSE_SOURCE = 0x1;
 constexpr DWORD DUPLICATE_SAME_ACCESS = 0x2;
 
-struct HandleEntry {
-	struct ObjectHeader *obj; // intrusive ref (pointerCount++)
+struct HandleMeta {
 	uint32_t grantedAccess;	  // effective access mask for this handle
 	uint32_t flags;			  // inherit/protect/etc
 	ObjectType typeCache;	  // cached ObjectType for fast getAs
 	uint16_t generation;	  // must match handle’s generation
 };
 
+// template <typename T>
+// struct HandleRef {
+// 	Pin<T> obj;
+// 	HandleMeta meta;
+
+// 	HandleRef() = default;
+// 	HandleRef(Pin<T> o, HandleMeta m) : obj(std::move(o)), meta(m) {}
+
+// 	explicit operator bool() const { return obj.operator bool(); }
+// };
+
 class HandleTable {
   public:
-	Handle create(ObjectHeader *obj, uint32_t grantedAccess, uint32_t flags);
-	bool close(Handle h);
-	bool get(Handle h, HandleEntry &out, Pin<ObjectHeader> &pinOut);
-	template <typename T> Pin<T> getAs(Handle h) {
+	HANDLE create(ObjectHeader *obj, uint32_t grantedAccess, uint32_t flags);
+	bool close(HANDLE h);
+	bool get(HANDLE h, Pin<ObjectHeader> &pinOut, HandleMeta *metaOut = nullptr);
+	template <typename T> Pin<T> getAs(HANDLE h, HandleMeta *metaOut = nullptr) {
 		static_assert(std::is_base_of_v<ObjectHeader, T>, "T must derive from ObjectHeader");
-		HandleEntry meta{};
 		Pin<ObjectHeader> pin;
-		if (!get(h, meta, pin)) {
+		HandleMeta metaOutLocal{};
+		if (!metaOut) {
+			metaOut = &metaOutLocal;
+		}
+		if (!get(h, pin, metaOut)) {
 			return {};
 		}
 		if constexpr (std::is_same_v<T, ObjectHeader>) {
 			return std::move(pin);
-		} else if (meta.typeCache != T::kType || pin->type != T::kType) {
+		} else if (metaOut->typeCache != T::kType || pin->type != T::kType) {
 			return {};
 		} else {
 			// Cast directly to T* and transfer ownership to Pin<T>
 			return Pin<T>::adopt(static_cast<T *>(pin.release()));
 		}
 	}
-	bool setInformation(Handle h, uint32_t mask, uint32_t value);
-	bool getInformation(Handle h, uint32_t *outFlags) const;
-	bool duplicateTo(Handle src, HandleTable &dst, Handle *out, uint32_t desiredAccess, bool inherit, uint32_t options);
+	bool setInformation(HANDLE h, uint32_t mask, uint32_t value);
+	bool getInformation(HANDLE h, uint32_t *outFlags) const;
+	bool duplicateTo(HANDLE src, HandleTable &dst, HANDLE *out, uint32_t desiredAccess, bool inherit, uint32_t options);
 
   private:
+	struct HandleEntry {
+		struct ObjectHeader *obj;
+		HandleMeta meta;
+	};
+
 	std::vector<HandleEntry> slots_;
 	std::vector<uint32_t> freeList_;
 	mutable std::shared_mutex mu_;
 };
 
-namespace handles {
-
-constexpr size_t MAX_HANDLES = 0x10000;
-
-enum Type {
-	TYPE_UNUSED,
-	TYPE_FILE,
-	TYPE_MAPPED,
-	TYPE_PROCESS,
-	TYPE_TOKEN,
-	TYPE_MUTEX,
-	TYPE_EVENT,
-	TYPE_SEMAPHORE,
-	TYPE_THREAD,
-	TYPE_HEAP,
-	TYPE_REGISTRY_KEY
-};
-
-struct Data {
-	Type type = TYPE_UNUSED;
-	void *ptr;
-	size_t size;
-};
-
-Data dataFromHandle(void *handle, bool pop);
-void *allocDataHandle(Data data);
-} // namespace handles
+namespace wibo {
+extern HandleTable &handles();
+}

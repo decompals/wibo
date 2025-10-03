@@ -1,5 +1,7 @@
 #include "fileapi.h"
 
+#include "access_mask.h"
+#include "common.h"
 #include "errors.h"
 #include "files.h"
 #include "handles.h"
@@ -250,20 +252,12 @@ bool tryOpenConsoleDevice(DWORD dwDesiredAccess, DWORD dwShareMode, DWORD dwCrea
 		return false;
 	}
 	HANDLE baseHandle = files::getStdHandle(*stdHandleKind);
-	auto *baseFile = files::fileHandleFromHandle(baseHandle);
-	if (!baseFile) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
-		outHandle = INVALID_HANDLE_VALUE;
-		return true;
-	}
-	HANDLE duplicated = files::duplicateFileHandle(baseFile, false);
-	if (!duplicated) {
+	if (!wibo::handles().duplicateTo(baseHandle, wibo::handles(), &outHandle, dwDesiredAccess, false, 0)) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		outHandle = INVALID_HANDLE_VALUE;
 		return true;
 	}
 	wibo::lastError = ERROR_SUCCESS;
-	outHandle = duplicated;
 	return true;
 }
 
@@ -433,85 +427,72 @@ BOOL WIN_FUNC WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWr
 	DEBUG_LOG("WriteFile(%p, %u)\n", hFile, nNumberOfBytesToWrite);
 	wibo::lastError = ERROR_SUCCESS;
 
-	auto file = files::fileHandleFromHandle(hFile);
-	if (!file || !file->fp) {
+	HandleMeta meta{};
+	auto file = wibo::handles().getAs<files::FileObject>(hFile, &meta);
+	if (!file || !file->valid()) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
+	if ((meta.grantedAccess & FILE_WRITE_DATA) == 0) {
+		wibo::lastError = ERROR_ACCESS_DENIED;
+		DEBUG_LOG("!!! DENIED: 0x%x\n", meta.grantedAccess);
+		return FALSE;
+	}
 
-	bool handleOverlapped = (file->flags & FILE_FLAG_OVERLAPPED) != 0;
-	auto *overlapped = reinterpret_cast<OVERLAPPED *>(lpOverlapped);
-	bool usingOverlapped = overlapped != nullptr;
-	if (!usingOverlapped && lpNumberOfBytesWritten == nullptr) {
+	if (lpOverlapped == nullptr && lpNumberOfBytesWritten == nullptr) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
 
-	std::optional<uint64_t> offset;
+	std::optional<off64_t> offset;
 	bool updateFilePointer = true;
-	if (usingOverlapped) {
-		offset = (static_cast<uint64_t>(overlapped->Offset) | (static_cast<uint64_t>(overlapped->OffsetHigh) << 32));
-		overlapped->Internal = STATUS_PENDING;
-		overlapped->InternalHigh = 0;
-		updateFilePointer = !handleOverlapped;
-		resetOverlappedEvent(overlapped);
+	if (lpOverlapped != nullptr) {
+		offset = static_cast<off64_t>((static_cast<uint64_t>(lpOverlapped->Offset)) |
+									  (static_cast<uint64_t>(lpOverlapped->OffsetHigh) << 32));
+		lpOverlapped->Internal = STATUS_PENDING;
+		lpOverlapped->InternalHigh = 0;
+		updateFilePointer = !file->overlapped;
+		resetOverlappedEvent(lpOverlapped);
 	}
 
-	auto io = files::write(file, lpBuffer, nNumberOfBytesToWrite, offset, updateFilePointer);
+	auto io = files::write(file.get(), lpBuffer, nNumberOfBytesToWrite, offset, updateFilePointer);
 	DWORD completionStatus = STATUS_SUCCESS;
 	if (io.unixError != 0) {
-		completionStatus = wibo::winErrorFromErrno(io.unixError);
-		wibo::lastError = completionStatus;
+		completionStatus = wibo::statusFromErrno(io.unixError);
+		wibo::lastError = wibo::winErrorFromErrno(io.unixError);
 		if (lpNumberOfBytesWritten) {
-			*lpNumberOfBytesWritten = static_cast<DWORD>(io.bytesTransferred);
+			*lpNumberOfBytesWritten = io.bytesTransferred;
 		}
-		if (usingOverlapped) {
-			overlapped->Internal = completionStatus;
-			overlapped->InternalHigh = io.bytesTransferred;
-			signalOverlappedEvent(overlapped);
+		if (lpOverlapped != nullptr) {
+			lpOverlapped->Internal = completionStatus;
+			lpOverlapped->InternalHigh = io.bytesTransferred;
+			signalOverlappedEvent(lpOverlapped);
 		}
 		return FALSE;
 	}
 
-	if (lpNumberOfBytesWritten && (!handleOverlapped || !usingOverlapped)) {
+	if (lpNumberOfBytesWritten && (!file->overlapped || lpOverlapped == nullptr)) {
 		*lpNumberOfBytesWritten = static_cast<DWORD>(io.bytesTransferred);
 	}
 
-	if (usingOverlapped) {
-		overlapped->Internal = completionStatus;
-		overlapped->InternalHigh = io.bytesTransferred;
-		if (!handleOverlapped) {
-			uint64_t baseOffset = offset.value_or(0);
-			uint64_t newOffset = baseOffset + io.bytesTransferred;
-			overlapped->Offset = static_cast<DWORD>(newOffset & 0xFFFFFFFFu);
-			overlapped->OffsetHigh = static_cast<DWORD>(newOffset >> 32);
-		}
-		signalOverlappedEvent(overlapped);
+	if (lpOverlapped != nullptr) {
+		lpOverlapped->Internal = completionStatus;
+		lpOverlapped->InternalHigh = io.bytesTransferred;
+		signalOverlappedEvent(lpOverlapped);
 	}
 
-	return (io.bytesTransferred == nNumberOfBytesToWrite) ? TRUE : FALSE;
+	return TRUE;
 }
 
 BOOL WIN_FUNC FlushFileBuffers(HANDLE hFile) {
 	DEBUG_LOG("FlushFileBuffers(%p)\n", hFile);
-	auto data = handles::dataFromHandle(hFile, false);
-	if (data.type != handles::TYPE_FILE || data.ptr == nullptr) {
+	auto file = wibo::handles().getAs<files::FileObject>(hFile);
+	if (!file || !file->valid()) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
-	auto file = reinterpret_cast<files::FileHandle *>(data.ptr);
-	if (!file || !file->fp) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
-		return FALSE;
-	}
-	FILE *fp = file->fp;
-	if (fflush(fp) != 0) {
-		wibo::lastError = ERROR_ACCESS_DENIED;
-		return FALSE;
-	}
-	int fd = file->fd;
-	if (fd >= 0 && fsync(fd) != 0) {
-		wibo::lastError = ERROR_ACCESS_DENIED;
+	if (fsync(file->host_fd) != 0) {
+		setLastErrorFromErrno();
 		return FALSE;
 	}
 	wibo::lastError = ERROR_SUCCESS;
@@ -523,64 +504,58 @@ BOOL WIN_FUNC ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead
 	DEBUG_LOG("ReadFile(%p, %u)\n", hFile, nNumberOfBytesToRead);
 	wibo::lastError = ERROR_SUCCESS;
 
-	auto file = files::fileHandleFromHandle(hFile);
-	if (!file || !file->fp) {
+	HandleMeta meta{};
+	auto file = wibo::handles().getAs<files::FileObject>(hFile, &meta);
+	if (!file || !file->valid()) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
+	if ((meta.grantedAccess & FILE_READ_DATA) == 0) {
+		wibo::lastError = ERROR_ACCESS_DENIED;
+		DEBUG_LOG("!!! DENIED: 0x%x\n", meta.grantedAccess);
+		return FALSE;
+	}
 
-	bool handleOverlapped = (file->flags & FILE_FLAG_OVERLAPPED) != 0;
-	auto *overlapped = reinterpret_cast<OVERLAPPED *>(lpOverlapped);
-	bool usingOverlapped = overlapped != nullptr;
-	if (!usingOverlapped && lpNumberOfBytesRead == nullptr) {
+	if (lpOverlapped == nullptr && lpNumberOfBytesRead == nullptr) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
 
-	std::optional<uint64_t> offset;
+	std::optional<off64_t> offset;
 	bool updateFilePointer = true;
-	if (usingOverlapped) {
-		offset = (static_cast<uint64_t>(overlapped->Offset) | (static_cast<uint64_t>(overlapped->OffsetHigh) << 32));
-		overlapped->Internal = STATUS_PENDING;
-		overlapped->InternalHigh = 0;
-		updateFilePointer = !handleOverlapped;
-		resetOverlappedEvent(overlapped);
+	if (lpOverlapped != nullptr) {
+		offset = static_cast<off64_t>((static_cast<uint64_t>(lpOverlapped->Offset)) |
+									  (static_cast<uint64_t>(lpOverlapped->OffsetHigh) << 32));
+		lpOverlapped->Internal = STATUS_PENDING;
+		lpOverlapped->InternalHigh = 0;
+		updateFilePointer = !file->overlapped;
+		resetOverlappedEvent(lpOverlapped);
 	}
 
-	auto io = files::read(file, lpBuffer, nNumberOfBytesToRead, offset, updateFilePointer);
+	auto io = files::read(file.get(), lpBuffer, nNumberOfBytesToRead, offset, updateFilePointer);
 	DWORD completionStatus = STATUS_SUCCESS;
 	if (io.unixError != 0) {
-		completionStatus = wibo::winErrorFromErrno(io.unixError);
-		wibo::lastError = completionStatus;
+		completionStatus = wibo::statusFromErrno(io.unixError);
+		wibo::lastError = wibo::winErrorFromErrno(io.unixError);
 		if (lpNumberOfBytesRead) {
 			*lpNumberOfBytesRead = static_cast<DWORD>(io.bytesTransferred);
 		}
-		if (usingOverlapped) {
-			overlapped->Internal = completionStatus;
-			overlapped->InternalHigh = io.bytesTransferred;
-			signalOverlappedEvent(overlapped);
+		if (lpOverlapped != nullptr) {
+			lpOverlapped->Internal = completionStatus;
+			lpOverlapped->InternalHigh = io.bytesTransferred;
+			signalOverlappedEvent(lpOverlapped);
 		}
 		return FALSE;
 	}
 
-	if (io.reachedEnd && io.bytesTransferred == 0 && handleOverlapped) {
-		completionStatus = ERROR_HANDLE_EOF;
-	}
-
-	if (lpNumberOfBytesRead && (!handleOverlapped || !usingOverlapped)) {
+	if (lpNumberOfBytesRead && (!file->overlapped || lpOverlapped == nullptr)) {
 		*lpNumberOfBytesRead = static_cast<DWORD>(io.bytesTransferred);
 	}
 
-	if (usingOverlapped) {
-		overlapped->Internal = completionStatus;
-		overlapped->InternalHigh = io.bytesTransferred;
-		if (!handleOverlapped) {
-			uint64_t baseOffset = offset.value_or(0);
-			uint64_t newOffset = baseOffset + io.bytesTransferred;
-			overlapped->Offset = static_cast<DWORD>(newOffset & 0xFFFFFFFFu);
-			overlapped->OffsetHigh = static_cast<DWORD>(newOffset >> 32);
-		}
-		signalOverlappedEvent(overlapped);
+	if (lpOverlapped != nullptr) {
+		lpOverlapped->Internal = completionStatus;
+		lpOverlapped->InternalHigh = io.bytesTransferred;
+		signalOverlappedEvent(lpOverlapped);
 	}
 
 	return TRUE;
@@ -589,6 +564,7 @@ BOOL WIN_FUNC ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead
 HANDLE WIN_FUNC CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
 							LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition,
 							DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
+	(void)dwShareMode;
 	(void)lpSecurityAttributes;
 	(void)hTemplateFile;
 	if (!lpFileName) {
@@ -646,27 +622,28 @@ HANDLE WIN_FUNC CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwSh
 		assert(false);
 	}
 
-	FILE *fp = nullptr;
+	int fd = -1;
 	if (dwDesiredAccess == GENERIC_READ) {
-		fp = fopen(path.c_str(), "rb");
+		fd = open(path.c_str(), O_RDONLY);
 	} else if (dwDesiredAccess == GENERIC_WRITE) {
 		if (shouldTruncate || !fileExists) {
-			fp = fopen(path.c_str(), "wb");
+			fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
 		} else {
-			fp = fopen(path.c_str(), "rb+");
+			fd = open(path.c_str(), O_RDWR);
 		}
 	} else if (dwDesiredAccess == (GENERIC_READ | GENERIC_WRITE)) {
 		if (shouldTruncate || !fileExists) {
-			fp = fopen(path.c_str(), "wb+");
+			fd = open(path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0666);
 		} else {
-			fp = fopen(path.c_str(), "rb+");
+			fd = open(path.c_str(), O_RDWR);
 		}
 	} else {
 		assert(false);
 	}
 
-	if (fp) {
-		void *handle = files::allocFpHandle(fp, dwDesiredAccess, dwShareMode, dwFlagsAndAttributes, true);
+	if (fd >= 0) {
+		bool overlapped = (dwFlagsAndAttributes & FILE_FLAG_OVERLAPPED) != 0;
+		auto handle = wibo::handles().create(new files::FileObject(fd, overlapped), dwDesiredAccess, 0);
 		DEBUG_LOG("-> %p\n", handle);
 		return handle;
 	}
@@ -683,13 +660,6 @@ HANDLE WIN_FUNC CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwS
 		return INVALID_HANDLE_VALUE;
 	}
 	std::string lpFileNameA = wideStringToString(lpFileName);
-	HANDLE consoleHandle = INVALID_HANDLE_VALUE;
-	if (tryOpenConsoleDevice(dwDesiredAccess, dwShareMode, dwCreationDisposition, dwFlagsAndAttributes, consoleHandle,
-							 lpFileNameA)) {
-		DEBUG_LOG("CreateFileW(console=%s, desiredAccess=0x%x, shareMode=%u, flags=0x%x) -> %p\n", lpFileNameA.c_str(),
-				  dwDesiredAccess, dwShareMode, dwFlagsAndAttributes, consoleHandle);
-		return consoleHandle;
-	}
 	return CreateFileA(lpFileNameA.c_str(), dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition,
 					   dwFlagsAndAttributes, hTemplateFile);
 }
@@ -912,13 +882,19 @@ DWORD WIN_FUNC GetFileSize(HANDLE hFile, LPDWORD lpFileSizeHigh) {
 BOOL WIN_FUNC GetFileTime(HANDLE hFile, LPFILETIME lpCreationTime, LPFILETIME lpLastAccessTime,
 						  LPFILETIME lpLastWriteTime) {
 	DEBUG_LOG("GetFileTime(%p, %p, %p, %p)\n", hFile, lpCreationTime, lpLastAccessTime, lpLastWriteTime);
-	auto file = files::fileHandleFromHandle(hFile);
-	if (!file || !file->fp) {
+	HandleMeta meta{};
+	auto file = wibo::handles().getAs<files::FileObject>(hFile, &meta);
+	if (!file || !file->valid()) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
+	if ((meta.grantedAccess & FILE_READ_ATTRIBUTES) == 0) {
+		wibo::lastError = ERROR_ACCESS_DENIED;
+		return FALSE;
+	}
+
 	struct stat st{};
-	if (fstat(fileno(file->fp), &st) != 0) {
+	if (fstat(file->host_fd, &st) != 0) {
 		setLastErrorFromErrno();
 		return FALSE;
 	}
@@ -946,16 +922,17 @@ BOOL WIN_FUNC GetFileTime(HANDLE hFile, LPFILETIME lpCreationTime, LPFILETIME lp
 BOOL WIN_FUNC SetFileTime(HANDLE hFile, const FILETIME *lpCreationTime, const FILETIME *lpLastAccessTime,
 						  const FILETIME *lpLastWriteTime) {
 	DEBUG_LOG("SetFileTime(%p, %p, %p, %p)\n", hFile, lpCreationTime, lpLastAccessTime, lpLastWriteTime);
-	FILE *fp = files::fpFromHandle(hFile);
-	if (!fp) {
+	HandleMeta meta{};
+	auto file = wibo::handles().getAs<files::FileObject>(hFile, &meta);
+	if (!file || !file->valid()) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
-	int fd = fileno(fp);
-	if (fd < 0) {
-		setLastErrorFromErrno();
+	if ((meta.grantedAccess & FILE_WRITE_ATTRIBUTES) == 0) {
+		wibo::lastError = ERROR_ACCESS_DENIED;
 		return FALSE;
 	}
+
 	bool changeAccess = !shouldIgnoreFileTimeParam(lpLastAccessTime);
 	bool changeWrite = !shouldIgnoreFileTimeParam(lpLastWriteTime);
 	if (!changeAccess && !changeWrite) {
@@ -963,7 +940,7 @@ BOOL WIN_FUNC SetFileTime(HANDLE hFile, const FILETIME *lpCreationTime, const FI
 		return TRUE;
 	}
 	struct stat st{};
-	if (fstat(fd, &st) != 0) {
+	if (fstat(file->host_fd, &st) != 0) {
 		setLastErrorFromErrno();
 		return FALSE;
 	}
@@ -999,7 +976,7 @@ BOOL WIN_FUNC SetFileTime(HANDLE hFile, const FILETIME *lpCreationTime, const FI
 	}
 #else
 	struct timespec times[2] = {accessSpec, writeSpec};
-	if (futimens(fd, times) != 0) {
+	if (futimens(file->host_fd, times) != 0) {
 		setLastErrorFromErrno();
 		return FALSE;
 	}
@@ -1047,14 +1024,14 @@ BOOL WIN_FUNC GetFileInformationByHandle(HANDLE hFile, LPBY_HANDLE_FILE_INFORMAT
 
 DWORD WIN_FUNC GetFileType(HANDLE hFile) {
 	DEBUG_LOG("GetFileType(%p) ", hFile);
-	auto *file = files::fileHandleFromHandle(hFile);
-	if (!file || file->fd < 0) {
+	auto file = wibo::handles().getAs<files::FileObject>(hFile);
+	if (!file || !file->valid()) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		DEBUG_LOG("-> ERROR_INVALID_HANDLE\n");
 		return FILE_TYPE_UNKNOWN;
 	}
 	struct stat st{};
-	if (fstat(file->fd, &st) != 0) {
+	if (fstat(file->host_fd, &st) != 0) {
 		setLastErrorFromErrno();
 		DEBUG_LOG("-> fstat error\n");
 		return FILE_TYPE_UNKNOWN;

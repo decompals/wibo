@@ -1,9 +1,8 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- Core launcher logic lives in `main.cpp`, `loader.cpp`, `files.cpp`, `handles.cpp` and `module_registry.cpp`; shared interfaces in headers near them.
-- Windows API shims reside in `dll/`, grouped by emulated DLL name; keep new APIs in the matching file instead of creating ad-hoc helpers.
-- Reusable utilities sit in `strutil.*`, `processes.*` and `resources.*`; prefer extending these before introducing new singleton modules.
+- Core loader logic and headers live in `src/`.
+- Windows API shims reside in `dll/`; source files grouped by DLL (e.g. `dll/kernel32/`).
 - Sample fixtures for exercising the loader live in `test/`.
 
 ## Build, Test, and Development Commands
@@ -14,8 +13,8 @@
 - `clang-format -i path/to/file.cpp` and `clang-tidy path/to/file.cpp -p build` keep contributions aligned with the repo's tooling.
 
 ## Coding Style & Naming Conventions
-- Formatting follows `.clang-format` (LLVM base, tabbed indentation width 4, 120 column limit); never hand-wrap differently.
-- Use PascalCase for Win32 entry points, camelCase for internal helpers, SCREAMING_SNAKE_CASE for Win32 constants, kCamelCase for internal constants, and g_camelCase for globals.
+- Formatting follows `.clang-format` (LLVM base, tabbed indentation width 4, 120 column limit).
+- Use PascalCase for Win32 entry points, camelCase for internal helpers, SCREAMING_SNAKE_CASE for Win32 constants, kCamelCase for internal constants, g_camelCase for globals, and mPascalCase for member variables.
 - Put static functions and variables in anonymous namespaces at the top of the file.
 - Prefer scoping types to the header or source file that uses them; avoid polluting `common.h` unless widely shared.
 
@@ -31,10 +30,10 @@
 - All fixtures must self-assert; use `test_assert.h` helpers so `ctest` fails on mismatched WinAPI behaviour.
 - Update `CMakeLists.txt` to add new fixture sources.
 - Rebuild, then run tests with `ctest --test-dir build --output-on-failure`.
-- ALWAYS run tests against `wine` manually to confirm expected behaviour. If `wine` fails, the expected behaviour is likely wrong. (`wine` is not perfect, but we can assume it's closer to Windows than we are.)
+- ALWAYS run tests against `wine` manually to confirm expected behaviour. If `wine` fails, the expected behaviour is VERY LIKELY wrong. (`wine` is not perfect, but we can assume it's closer to Windows than we are.)
 
 ## Debugging Workflow
 - Reproduce crashes under `gdb` (or `lldb`) with `-q -batch` to capture backtraces, register state, and the faulting instruction without interactive prompts.
-- Enable `WIBO_DEBUG=1` and output to a log (i.e. `&>/tmp/wibo.log`) when running the guest binary; loader traces often pinpoint missing imports, resource lookups, or API shims that misbehave. The answer is usually in the last few dozen lines before the crash.
+- Enable `WIBO_DEBUG=1` or `-D` and output to a log (i.e. `&>/tmp/wibo.log`) when running the guest binary; loader traces often pinpoint missing imports, resource lookups, or API shims that misbehave. The answer is usually in the last few dozen lines before the crash.
 - Inspect relevant source right away—most issues stem from stubbed shims in `dll/`.
 - Missing stubs generally do _not_ cause a crash; we return valid function pointers for unknown imports. Only when the missing stub is _called_ do we abort with a message. Therefore, don't preemptively add stubs for every missing import; wait until the binary actually calls it.

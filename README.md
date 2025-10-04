@@ -1,14 +1,12 @@
 # wibo
 
-A minimal, low-fuss wrapper that can run really simple command-line 32-bit Windows binaries on Linux - with less faff and fewer dependencies than WINE.
-
-Don't run this on any untrusted executables, I implore you. (Or probably just don't run it at all... :p)
+A minimal, low-fuss wrapper that can run simple command-line 32-bit Windows binaries on 32-bit Linux - developed to run Windows compilers faster than Wine.
 
 ## Building
 
 ```sh
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
-cmake --build build --target wibo
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBUILD_TESTING=ON
+cmake --build build
 ```
 
 Set `-DCMAKE_BUILD_TYPE=Release` to produce an optimized binary instead.
@@ -31,11 +29,7 @@ Supported command line options:
 
 Self-checking Windows fixtures run through CTest. They require a 32-bit MinGW cross toolchain (`i686-w64-mingw32-gcc` and `i686-w64-mingw32-windres`).
 
-With the toolchain installed:
-
 ```sh
-cmake -B build -DBUILD_TESTING=ON
-cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
@@ -43,12 +37,7 @@ This will cross-compile the fixture executables, run them through `wibo`, and fa
 
 ---
 
-Rough to-do list:
-
-- Implement more APIs
-
----
-
-Related projects:
-* [taviso/loadlibrary](https://github.com/taviso/loadlibrary)
-* [evmar/retrowin32](https://github.com/evmar/retrowin32)
+See also:
+* [taviso/loadlibrary](https://github.com/taviso/loadlibrary) - Initial inspiration for this project.
+* [evmar/retrowin32](https://github.com/evmar/retrowin32) - A similar project with different goals and architecture.
+* [decomp.me](https://decomp.me) - Collaborative decompilation website; uses wibo to run Windows compilers.

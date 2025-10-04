@@ -1,8 +1,8 @@
 #include "processes.h"
 #include "common.h"
-#include "kernel32/internal.h"
 #include "files.h"
 #include "handles.h"
+#include "kernel32/internal.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
@@ -123,6 +123,7 @@ bool ProcessManager::addProcess(Pin<ProcessObject> po) {
 		std::lock_guard lk(m);
 		mReg.emplace(pidfd, std::move(po));
 	}
+	DEBUG_LOG("ProcessManager: tracking pidfd %d\n", pidfd);
 	wake();
 	return true;
 }
@@ -162,6 +163,8 @@ void ProcessManager::wake() const {
 }
 
 void ProcessManager::checkPidfd(int pidfd) {
+	DEBUG_LOG("ProcessManager: checking pidfd %d\n", pidfd);
+
 	siginfo_t si{};
 	si.si_code = CLD_DUMPED;
 	if (pidfd >= 0) {
@@ -175,6 +178,8 @@ void ProcessManager::checkPidfd(int pidfd) {
 		epoll_ctl(mEpollFd, EPOLL_CTL_DEL, pidfd, nullptr);
 		close(pidfd);
 	}
+
+	DEBUG_LOG("ProcessManager: pidfd %d exited: code=%d status=%d\n", pidfd, si.si_code, si.si_status);
 
 	Pin<ProcessObject> po;
 	{
@@ -395,7 +400,9 @@ static int spawnInternal(const std::vector<std::string> &args, Pin<kernel32::Pro
 		return false;
 	}
 
-	pinOut = make_pin<kernel32::ProcessObject>(pid, pidfd);
+	auto obj = make_pin<kernel32::ProcessObject>(pid, pidfd);
+	pinOut = obj.clone();
+	processes().addProcess(std::move(obj));
 	return 0;
 }
 

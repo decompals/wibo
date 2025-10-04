@@ -1,6 +1,6 @@
 #include "wow64apiset.h"
 #include "common.h"
-#include "dll/kernel32/internal.h"
+#include "kernel32/internal.h"
 #include "errors.h"
 #include "handles.h"
 

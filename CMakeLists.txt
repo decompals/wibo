@@ -73,17 +73,18 @@ add_executable(wibo
     dll/user32.cpp
     dll/vcruntime.cpp
     dll/version.cpp
-    access.cpp
-    errors.cpp
-    files.cpp
-    handles.cpp
-    loader.cpp
-    resources.cpp
-    module_registry.cpp
-    main.cpp
-    processes.cpp
-    strutil.cpp
+    src/access.cpp
+    src/errors.cpp
+    src/files.cpp
+    src/handles.cpp
+    src/loader.cpp
+    src/resources.cpp
+    src/module_registry.cpp
+    src/main.cpp
+    src/processes.cpp
+    src/strutil.cpp
 )
+target_include_directories(wibo PRIVATE dll src)
 target_link_libraries(wibo PRIVATE std::filesystem mimalloc-static)
 install(TARGETS wibo DESTINATION bin)
 

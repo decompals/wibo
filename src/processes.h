@@ -1,6 +1,6 @@
 #pragma once
 
-#include "dll/kernel32/internal.h"
+#include "kernel32/internal.h"
 
 #include <filesystem>
 #include <optional>

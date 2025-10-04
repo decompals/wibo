@@ -1,5 +1,5 @@
 #include "common.h"
-#include "dll/kernel32/internal.h"
+#include "kernel32/internal.h"
 #include "errors.h"
 #include "files.h"
 #include "handles.h"

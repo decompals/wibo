@@ -1,6 +1,6 @@
 #include "processes.h"
 #include "common.h"
-#include "dll/kernel32/internal.h"
+#include "kernel32/internal.h"
 #include "files.h"
 #include "handles.h"
 #include <algorithm>

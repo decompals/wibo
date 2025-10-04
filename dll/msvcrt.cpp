@@ -1,5 +1,5 @@
 #include "common.h"
-#include "dll/kernel32/internal.h"
+#include "kernel32/internal.h"
 #include <algorithm>
 #include <array>
 #include <cerrno>

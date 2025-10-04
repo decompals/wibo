@@ -73,6 +73,7 @@ add_executable(wibo
     dll/user32.cpp
     dll/vcruntime.cpp
     dll/version.cpp
+    access.cpp
     errors.cpp
     files.cpp
     handles.cpp

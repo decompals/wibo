@@ -12,9 +12,16 @@
 
 namespace {
 
-struct RegistryKeyHandleData {
+struct RegistryKeyObject : ObjectBase {
+	static constexpr ObjectType kType = ObjectType::RegistryKey;
+
+	std::mutex m;
 	std::u16string canonicalPath;
+	bool closed = false;
 	bool predefined = false;
+
+	RegistryKeyObject() : ObjectBase(kType) {}
+	explicit RegistryKeyObject(std::u16string path) : ObjectBase(kType), canonicalPath(std::move(path)) {}
 };
 
 struct PredefinedKeyInfo {
@@ -34,9 +41,6 @@ constexpr PredefinedKeyInfo kPredefinedKeyInfos[] = {
 constexpr size_t kPredefinedKeyCount = std::size(kPredefinedKeyInfos);
 
 std::mutex g_registryMutex;
-bool g_predefinedHandlesInitialized = false;
-RegistryKeyHandleData g_predefinedHandles[kPredefinedKeyCount];
-bool g_registryInitialized = false;
 std::unordered_set<std::u16string> g_existingKeys;
 
 std::u16string canonicalizeKeySegment(const std::u16string &input) {
@@ -74,61 +78,47 @@ std::u16string canonicalizeKeySegment(LPCWSTR input) {
 	return canonicalizeKeySegment(wide);
 }
 
-void initializePredefinedHandlesLocked() {
-	if (g_predefinedHandlesInitialized) {
-		return;
-	}
-	for (size_t i = 0; i < kPredefinedKeyCount; ++i) {
-		g_predefinedHandles[i].canonicalPath = canonicalizeKeySegment(std::u16string(kPredefinedKeyInfos[i].name));
-		g_predefinedHandles[i].predefined = true;
-	}
-	g_predefinedHandlesInitialized = true;
-}
-
-RegistryKeyHandleData *predefinedHandleForValue(uintptr_t value) {
+Pin<RegistryKeyObject> predefinedHandleForValue(uintptr_t value) {
+	static std::array<Pin<RegistryKeyObject>, kPredefinedKeyCount> g_predefinedHandles = [] {
+		std::array<Pin<RegistryKeyObject>, kPredefinedKeyCount> arr;
+		for (size_t i = 0; i < kPredefinedKeyCount; ++i) {
+			arr[i] = make_pin<RegistryKeyObject>();
+			arr[i]->canonicalPath = canonicalizeKeySegment(std::u16string(kPredefinedKeyInfos[i].name));
+			arr[i]->predefined = true;
+		}
+		return arr;
+	}();
 	for (size_t i = 0; i < kPredefinedKeyCount; ++i) {
 		if (kPredefinedKeyInfos[i].value == value) {
-			return &g_predefinedHandles[i];
+			return g_predefinedHandles[i].clone();
 		}
 	}
-	return nullptr;
+	return {};
 }
 
-RegistryKeyHandleData *handleDataFromHKeyLocked(HKEY hKey) {
+Pin<RegistryKeyObject> handleDataFromHKeyLocked(HKEY hKey) {
 	uintptr_t raw = reinterpret_cast<uintptr_t>(hKey);
 	if (raw == 0) {
-		return nullptr;
+		return {};
 	}
-	initializePredefinedHandlesLocked();
-	if (auto *predefined = predefinedHandleForValue(raw)) {
+	if (auto predefined = predefinedHandleForValue(raw)) {
 		return predefined;
 	}
-	auto data = handles::dataFromHandle(hKey, false);
-	if (data.type != handles::TYPE_REGISTRY_KEY || data.ptr == nullptr) {
-		return nullptr;
+	auto obj = wibo::handles().getAs<RegistryKeyObject>(hKey);
+	if (!obj || obj->closed) {
+		return {};
 	}
-	return static_cast<RegistryKeyHandleData *>(data.ptr);
+	return obj;
 }
 
 bool isPredefinedKeyHandle(HKEY hKey) {
 	uintptr_t raw = reinterpret_cast<uintptr_t>(hKey);
-	for (size_t i = 0; i < kPredefinedKeyCount; ++i) {
-		if (kPredefinedKeyInfos[i].value == raw) {
+	for (const auto &kPredefinedKeyInfo : kPredefinedKeyInfos) {
+		if (kPredefinedKeyInfo.value == raw) {
 			return true;
 		}
 	}
 	return false;
-}
-
-void ensureRegistryInitializedLocked() {
-	if (g_registryInitialized) {
-		return;
-	}
-	initializePredefinedHandlesLocked();
-	for (auto &g_predefinedHandle : g_predefinedHandles) {
-		g_existingKeys.insert(g_predefinedHandle.canonicalPath);
-	}
-	g_registryInitialized = true;
 }
 
 } // namespace
@@ -163,8 +153,7 @@ LSTATUS WIN_FUNC RegCreateKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD Reserved, LP
 		DEBUG_LOG("RegCreateKeyExW: ignoring WOW64 access mask 0x%x\n", samDesired ^ sanitizedAccess);
 	}
 	std::lock_guard<std::mutex> lock(g_registryMutex);
-	ensureRegistryInitializedLocked();
-	RegistryKeyHandleData *baseHandle = handleDataFromHKeyLocked(hKey);
+	Pin<RegistryKeyObject> baseHandle = handleDataFromHKeyLocked(hKey);
 	if (!baseHandle) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return ERROR_INVALID_HANDLE;
@@ -197,10 +186,8 @@ LSTATUS WIN_FUNC RegCreateKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD Reserved, LP
 		wibo::lastError = ERROR_SUCCESS;
 		return ERROR_SUCCESS;
 	}
-	auto *handleData = new RegistryKeyHandleData;
-	handleData->canonicalPath = targetPath;
-	handleData->predefined = false;
-	auto handle = handles::allocDataHandle({handles::TYPE_REGISTRY_KEY, handleData, sizeof(*handleData)});
+	auto obj = make_pin<RegistryKeyObject>(std::move(targetPath));
+	auto handle = wibo::handles().alloc(std::move(obj), 0, 0);
 	*phkResult = reinterpret_cast<HKEY>(handle);
 	wibo::lastError = ERROR_SUCCESS;
 	return ERROR_SUCCESS;
@@ -246,8 +233,7 @@ LSTATUS WIN_FUNC RegOpenKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD ulOptions, REG
 	}
 	(void)sanitizedAccess;
 	std::lock_guard<std::mutex> lock(g_registryMutex);
-	ensureRegistryInitializedLocked();
-	RegistryKeyHandleData *baseHandle = handleDataFromHKeyLocked(hKey);
+	Pin<RegistryKeyObject> baseHandle = handleDataFromHKeyLocked(hKey);
 	if (!baseHandle) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return ERROR_INVALID_HANDLE;
@@ -277,10 +263,8 @@ LSTATUS WIN_FUNC RegOpenKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD ulOptions, REG
 			return ERROR_SUCCESS;
 		}
 	}
-	auto *handleData = new RegistryKeyHandleData;
-	handleData->canonicalPath = targetPath;
-	handleData->predefined = false;
-	auto handle = handles::allocDataHandle({handles::TYPE_REGISTRY_KEY, handleData, sizeof(*handleData)});
+	auto obj = make_pin<RegistryKeyObject>(std::move(targetPath));
+	auto handle = wibo::handles().alloc(std::move(obj), 0, 0);
 	*phkResult = reinterpret_cast<HKEY>(handle);
 	wibo::lastError = ERROR_SUCCESS;
 	return ERROR_SUCCESS;
@@ -391,13 +375,11 @@ LSTATUS WIN_FUNC RegCloseKey(HKEY hKey) {
 		wibo::lastError = ERROR_SUCCESS;
 		return ERROR_SUCCESS;
 	}
-	auto data = handles::dataFromHandle(hKey, true);
-	if (data.type != handles::TYPE_REGISTRY_KEY || data.ptr == nullptr) {
+	auto obj = wibo::handles().getAs<RegistryKeyObject>(hKey);
+	if (!obj || obj->closed) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return ERROR_INVALID_HANDLE;
 	}
-	auto *handleData = static_cast<RegistryKeyHandleData *>(data.ptr);
-	delete handleData;
 	wibo::lastError = ERROR_SUCCESS;
 	return ERROR_SUCCESS;
 }

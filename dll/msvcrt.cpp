@@ -1,4 +1,5 @@
 #include "common.h"
+#include "dll/kernel32/internal.h"
 #include <algorithm>
 #include <array>
 #include <cerrno>
@@ -2687,7 +2688,7 @@ namespace msvcrt {
 			argStorage.emplace_back(wideStringToString(*cursor));
 		}
 
-		auto resolved = processes::resolveExecutable(command, false);
+		auto resolved = wibo::resolveExecutable(command, false);
 		if (!resolved) {
 			errno = ENOENT;
 			DEBUG_LOG("-> failed to resolve executable for %s\n", command.c_str());
@@ -2695,31 +2696,22 @@ namespace msvcrt {
 		}
 		DEBUG_LOG("-> resolved to %s\n", resolved->c_str());
 
-		pid_t pid = -1;
-		int spawnResult = processes::spawnWithArgv(*resolved, argStorage, &pid);
+		Pin<ProcessObject> po;
+		int spawnResult = wibo::spawnWithArgv(*resolved, argStorage, po);
 		if (spawnResult != 0) {
 			errno = spawnResult;
 			DEBUG_LOG("-> spawnWithArgv failed: %d\n", spawnResult);
 			return -1;
 		}
-		DEBUG_LOG("-> spawned pid %d\n", pid);
+		DEBUG_LOG("-> spawned pid %d\n", po->pid);
 
 		constexpr int P_WAIT = 0;
 		constexpr int P_DETACH = 2;
 
 		if (mode == P_WAIT) {
-			int status = 0;
-			if (waitpid(pid, &status, 0) == -1) {
-				DEBUG_LOG("\twaitpid failed: %d\n", errno);
-				return -1;
-			}
-			if (WIFEXITED(status)) {
-				return static_cast<intptr_t>(WEXITSTATUS(status));
-			}
-			if (WIFSIGNALED(status)) {
-				errno = EINTR;
-			}
-			return -1;
+			std::unique_lock lk(po->m);
+			po->cv.wait(lk, [&] { return po->signaled.load(); });
+			return static_cast<intptr_t>(po->exitCode);
 		}
 
 		if (mode == P_DETACH) {
@@ -2727,7 +2719,7 @@ namespace msvcrt {
 		}
 
 		// _P_NOWAIT and unknown flags: return process id
-		return static_cast<intptr_t>(pid);
+		return static_cast<intptr_t>(po->pid);
 	}
 
 	intptr_t WIN_ENTRY _spawnvp(int mode, const char *cmdname, const char * const *argv) {
@@ -2744,7 +2736,7 @@ namespace msvcrt {
 			argStorage.emplace_back(*cursor);
 		}
 
-		auto resolved = processes::resolveExecutable(command, false);
+		auto resolved = wibo::resolveExecutable(command, false);
 		if (!resolved) {
 			errno = ENOENT;
 			DEBUG_LOG("-> failed to resolve executable for %s\n", command.c_str());
@@ -2752,37 +2744,29 @@ namespace msvcrt {
 		}
 		DEBUG_LOG("-> resolved to %s\n", resolved->c_str());
 
-		pid_t pid = -1;
-		int spawnResult = processes::spawnWithArgv(*resolved, argStorage, &pid);
+		Pin<ProcessObject> po;
+		int spawnResult = wibo::spawnWithArgv(*resolved, argStorage, po);
 		if (spawnResult != 0) {
 			errno = spawnResult;
 			DEBUG_LOG("-> spawnWithArgv failed: %d\n", spawnResult);
 			return -1;
 		}
-		DEBUG_LOG("-> spawned pid %d\n", pid);
+		DEBUG_LOG("-> spawned pid %d\n", po->pid);
 
 		constexpr int P_WAIT = 0;
 		constexpr int P_DETACH = 2;
 
 		if (mode == P_WAIT) {
-			int status = 0;
-			if (waitpid(pid, &status, 0) == -1) {
-				return -1;
-			}
-			if (WIFEXITED(status)) {
-				return static_cast<intptr_t>(WEXITSTATUS(status));
-			}
-			if (WIFSIGNALED(status)) {
-				errno = EINTR;
-			}
-			return -1;
+			std::unique_lock lk(po->m);
+			po->cv.wait(lk, [&] { return po->signaled.load(); });
+			return static_cast<intptr_t>(po->exitCode);
 		}
 
 		if (mode == P_DETACH) {
 			return 0;
 		}
 
-		return static_cast<intptr_t>(pid);
+		return static_cast<intptr_t>(po->pid);
 	}
 
 	int WIN_ENTRY _wunlink(const uint16_t *filename){

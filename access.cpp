@@ -1,4 +1,4 @@
-#include "access_mask.h"
+#include "access.h"
 
 namespace wibo::access {
 
@@ -41,10 +41,5 @@ NormalizedAccess normalizeDesiredAccess(uint32_t desiredMask, const GenericMappi
 	out.deniedMask = requested & ~supportedMask;
 	return out;
 }
-
-// handles.cpp: normalizeDesiredAccess(...) can feed HandleTable::create so duplicates never exceed original rights.
-// files.cpp: store the NormalizedAccess::grantedMask in FileObject::maxAccessMask (or similar) for later enforcement.
-// dll/kernel32/fileapi.cpp: replace meta.grantedAccess & GENERIC_* checks with FileAccessView helpers once rights are
-// canonical.
 
 } // namespace wibo::access

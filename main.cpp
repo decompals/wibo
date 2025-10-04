@@ -333,6 +333,7 @@ int main(int argc, char **argv) {
 
 	blockUpper2GB();
 	files::init();
+	wibo::processes().init();
 
 	// Create TIB
 	memset(&tib, 0, sizeof(tib));
@@ -347,7 +348,7 @@ int main(int argc, char **argv) {
 	}
 
 	// Determine the guest program name
-	auto guestArgs = processes::splitCommandLine(cmdLine.c_str());
+	auto guestArgs = wibo::splitCommandLine(cmdLine.c_str());
 	std::string programName;
 	if (programIndex != -1) {
 		programName = argv[programIndex];
@@ -360,7 +361,7 @@ int main(int argc, char **argv) {
 	}
 
 	// Resolve the guest program path
-	std::filesystem::path resolvedGuestPath = processes::resolveExecutable(programName, true).value_or({});
+	std::filesystem::path resolvedGuestPath = wibo::resolveExecutable(programName, true).value_or({});
 	if (resolvedGuestPath.empty()) {
 		fprintf(stderr, "Failed to resolve path to guest program %s\n", programName.c_str());
 		return 1;

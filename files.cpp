@@ -6,12 +6,28 @@
 #include <algorithm>
 #include <cerrno>
 #include <climits>
+#include <cstddef>
 #include <cstdio>
-#include <map>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <strings.h>
+#include <system_error>
 #include <unistd.h>
+#include <utility>
+
+kernel32::FsObject::~FsObject() {
+	std::lock_guard lk(m);
+	int fd = std::exchange(this->fd, -1);
+	if (fd >= 0 && closeOnDestroy) {
+		close(fd);
+	}
+	if (deletePending && !canonicalPath.empty()) {
+		if (unlink(canonicalPath.c_str()) != 0) {
+			perror("Failed to delete file on close");
+		}
+	}
+}
 
 namespace files {
 
@@ -59,9 +75,9 @@ static std::string toHostPathEntry(const std::string &entry) {
 	return normalized;
 }
 
-static void *stdinHandle;
-static void *stdoutHandle;
-static void *stderrHandle;
+static HANDLE stdinHandle;
+static HANDLE stdoutHandle;
+static HANDLE stderrHandle;
 
 std::filesystem::path pathFromWindows(const char *inStr) {
 	// Convert to forward slashes
@@ -126,36 +142,6 @@ std::string pathToWindows(const std::filesystem::path &path) {
 	return str;
 }
 
-// FileHandle *fileHandleFromHandle(void *handle) {
-// 	handles::Data data = handles::dataFromHandle(handle, false);
-// 	if (data.type == handles::TYPE_FILE) {
-// 		return reinterpret_cast<FileHandle *>(data.ptr);
-// 	}
-// 	return nullptr;
-// }
-
-// FILE *fpFromHandle(void *handle, bool pop) {
-// 	handles::Data data = handles::dataFromHandle(handle, pop);
-// 	if (data.type == handles::TYPE_FILE) {
-// 		return reinterpret_cast<FileHandle *>(data.ptr)->fp;
-// 	}
-// 	return nullptr;
-// }
-
-// void *duplicateFileHandle(FileHandle *source, bool closeOnDestroy) {
-// 	if (!source) {
-// 		return nullptr;
-// 	}
-// 	auto *clone = new FileHandle();
-// 	clone->fp = source->fp;
-// 	clone->fd = source->fd;
-// 	clone->desiredAccess = source->desiredAccess;
-// 	clone->shareMode = source->shareMode;
-// 	clone->flags = source->flags;
-// 	clone->closeOnDestroy = closeOnDestroy;
-// 	return handles::allocDataHandle({handles::TYPE_FILE, clone, 0});
-// }
-
 IOResult read(FileObject *file, void *buffer, size_t bytesToRead, const std::optional<off64_t> &offset,
 			  bool updateFilePointer) {
 	IOResult result{};
@@ -176,7 +162,7 @@ IOResult read(FileObject *file, void *buffer, size_t bytesToRead, const std::opt
 		uint8_t *in = static_cast<uint8_t *>(buffer);
 		while (remaining > 0) {
 			size_t chunk = remaining > SSIZE_MAX ? SSIZE_MAX : remaining;
-			ssize_t rc = pread64(file->host_fd, in + total, chunk, pos);
+			ssize_t rc = pread64(file->fd, in + total, chunk, pos);
 			if (rc == -1) {
 				if (errno == EINTR) {
 					continue;
@@ -198,11 +184,11 @@ IOResult read(FileObject *file, void *buffer, size_t bytesToRead, const std::opt
 	};
 
 	if (updateFilePointer || !offset.has_value()) {
-		std::unique_lock<std::mutex> lock(file->pos_mu);
-		off64_t pos = offset.value_or(file->file_pos);
+		std::lock_guard lk(file->m);
+		off64_t pos = offset.value_or(file->filePos);
 		doRead(pos);
 		if (updateFilePointer) {
-			file->file_pos = pos + static_cast<off64_t>(result.bytesTransferred);
+			file->filePos = pos + static_cast<off64_t>(result.bytesTransferred);
 		}
 	} else {
 		doRead(*offset);
@@ -211,10 +197,10 @@ IOResult read(FileObject *file, void *buffer, size_t bytesToRead, const std::opt
 	return result;
 }
 
-IOResult write(FileObject *handle, const void *buffer, size_t bytesToWrite, const std::optional<off64_t> &offset,
+IOResult write(FileObject *file, const void *buffer, size_t bytesToWrite, const std::optional<off64_t> &offset,
 			   bool updateFilePointer) {
 	IOResult result{};
-	if (!handle || handle->host_fd < 0) {
+	if (!file || !file->valid()) {
 		result.unixError = EBADF;
 		return result;
 	}
@@ -225,24 +211,55 @@ IOResult write(FileObject *handle, const void *buffer, size_t bytesToWrite, cons
 	// Sanity check: if no offset is given, we must update the file pointer
 	assert(offset.has_value() || updateFilePointer);
 
+	if (file->appendOnly || !file->seekable) {
+		std::lock_guard lk(file->m);
+		size_t total = 0;
+		size_t remaining = bytesToWrite;
+		const uint8_t *in = static_cast<const uint8_t *>(buffer);
+		while (remaining > 0) {
+			size_t chunk = remaining > SSIZE_MAX ? SSIZE_MAX : remaining;
+			ssize_t rc = ::write(file->fd, in + total, chunk);
+			if (rc == -1) {
+				if (errno == EINTR) {
+					continue;
+				}
+				result.unixError = errno ? errno : EIO;
+				break;
+			}
+			if (rc == 0) {
+				break;
+			}
+			total += static_cast<size_t>(rc);
+			remaining -= static_cast<size_t>(rc);
+		}
+		result.bytesTransferred = total;
+		if (updateFilePointer) {
+			off64_t pos = file->seekable ? lseek64(file->fd, 0, SEEK_CUR) : 0;
+			if (pos >= 0) {
+				file->filePos = pos;
+			} else if (result.unixError == 0) {
+				result.unixError = errno ? errno : EIO;
+			}
+		}
+		return result;
+	}
+
 	auto doWrite = [&](off64_t pos) {
 		size_t total = 0;
 		size_t remaining = bytesToWrite;
 		const uint8_t *in = static_cast<const uint8_t *>(buffer);
 		while (remaining > 0) {
 			size_t chunk = remaining > SSIZE_MAX ? SSIZE_MAX : remaining;
-			ssize_t rc = pwrite64(handle->host_fd, in + total, chunk, pos);
+			ssize_t rc = pwrite64(file->fd, in + total, chunk, pos);
 			if (rc == -1) {
 				if (errno == EINTR) {
 					continue;
 				}
-				result.bytesTransferred = total;
 				result.unixError = errno ? errno : EIO;
-				return;
+				break;
 			}
 			if (rc == 0) {
-				result.bytesTransferred = total;
-				return;
+				break;
 			}
 			total += static_cast<size_t>(rc);
 			remaining -= static_cast<size_t>(rc);
@@ -252,11 +269,11 @@ IOResult write(FileObject *handle, const void *buffer, size_t bytesToWrite, cons
 	};
 
 	if (updateFilePointer || !offset.has_value()) {
-		std::unique_lock<std::mutex> lock(handle->pos_mu);
-		const off64_t pos = handle->file_pos;
+		std::lock_guard lk(file->m);
+		const off64_t pos = offset.value_or(file->filePos);
 		doWrite(pos);
 		if (updateFilePointer) {
-			handle->file_pos = pos + static_cast<off64_t>(result.bytesTransferred);
+			file->filePos = pos + static_cast<off64_t>(result.bytesTransferred);
 		}
 	} else {
 		doWrite(*offset);
@@ -297,9 +314,15 @@ BOOL setStdHandle(DWORD nStdHandle, HANDLE hHandle) {
 
 void init() {
 	auto &handles = wibo::handles();
-	stdinHandle = handles.create(new FileObject(STDIN_FILENO, false), FILE_GENERIC_READ, 0);
-	stdoutHandle = handles.create(new FileObject(STDOUT_FILENO, false), FILE_GENERIC_WRITE, 0);
-	stderrHandle = handles.create(new FileObject(STDERR_FILENO, false), FILE_GENERIC_WRITE, 0);
+	auto stdinObject = make_pin<FileObject>(STDIN_FILENO);
+	stdinObject->closeOnDestroy = false;
+	stdinHandle = handles.alloc(std::move(stdinObject), FILE_GENERIC_READ, 0);
+	auto stdoutObject = make_pin<FileObject>(STDOUT_FILENO);
+	stdoutObject->closeOnDestroy = false;
+	stdoutHandle = handles.alloc(std::move(stdoutObject), FILE_GENERIC_WRITE, 0);
+	auto stderrObject = make_pin<FileObject>(STDERR_FILENO);
+	stderrObject->closeOnDestroy = false;
+	stderrHandle = handles.alloc(std::move(stderrObject), FILE_GENERIC_WRITE, 0);
 }
 
 std::optional<std::filesystem::path> findCaseInsensitiveFile(const std::filesystem::path &directory,

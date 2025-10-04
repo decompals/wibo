@@ -93,6 +93,7 @@ static void test_file_mapping(void) {
     TEST_CHECK(UnmapViewOfFile(view));
     TEST_CHECK(CloseHandle(mapping));
     TEST_CHECK(CloseHandle(file));
+    TEST_CHECK(GetFileAttributesA("test_virtualquery.tmp") == INVALID_FILE_ATTRIBUTES);
 }
 
 int main(void) {

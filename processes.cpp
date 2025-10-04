@@ -1,5 +1,6 @@
 #include "processes.h"
 #include "common.h"
+#include "dll/kernel32/internal.h"
 #include "files.h"
 #include "handles.h"
 #include <algorithm>
@@ -7,300 +8,484 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <spawn.h>
-#include <strings.h>
 #include <string>
+#include <strings.h>
+#include <sys/epoll.h>
+#include <sys/eventfd.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
 
-extern "C" char **environ;
+namespace {
 
-namespace processes {
-    void *allocProcessHandle(pid_t pid) {
-		auto* process = new Process;
-		process->pid = pid;
-		process->exitCode = STILL_ACTIVE;
-		process->forcedExitCode = STILL_ACTIVE;
-		process->terminationRequested = false;
+inline DWORD decodeExitCode(const siginfo_t &si) {
+	switch (si.si_code) {
+	case CLD_EXITED:
+		return static_cast<DWORD>(si.si_status);
+	case CLD_KILLED:
+	case CLD_DUMPED:
+		return 0xC0000000u | static_cast<DWORD>(si.si_status);
+	default:
+		return 0;
+	}
+}
 
-		return handles::allocDataHandle(handles::Data{handles::TYPE_PROCESS, (void*)process, 0});
+} // namespace
+
+namespace wibo {
+
+ProcessManager::~ProcessManager() { shutdown(); }
+
+bool ProcessManager::init() {
+	if (mRunning.load(std::memory_order_acquire)) {
+		return true;
 	}
 
-	Process* processFromHandle(void *handle, bool pop) {
-		handles::Data data = handles::dataFromHandle(handle, pop);
-		if (data.type == handles::TYPE_PROCESS) {
-			return (Process*)data.ptr;
-		} else {
-			printf("Invalid file handle %p\n", handle);
-			assert(0);
+	mEpollFd = epoll_create1(EPOLL_CLOEXEC);
+	if (mEpollFd < 0) {
+		perror("epoll_create1");
+		return false;
+	}
+
+	mWakeFd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+	if (mWakeFd < 0) {
+		perror("eventfd");
+		close(mEpollFd);
+		mEpollFd = -1;
+		return false;
+	}
+
+	epoll_event ev{};
+	ev.events = EPOLLIN;
+	ev.data.fd = mWakeFd;
+	if (epoll_ctl(mEpollFd, EPOLL_CTL_ADD, mWakeFd, &ev) < 0) {
+		perror("epoll_ctl");
+		close(mWakeFd);
+		mWakeFd = -1;
+		close(mEpollFd);
+		mEpollFd = -1;
+		return false;
+	}
+
+	mRunning.store(true, std::memory_order_release);
+	mThread = std::thread(&ProcessManager::runLoop, this);
+	return true;
+}
+
+void ProcessManager::shutdown() {
+	if (!mRunning.exchange(false, std::memory_order_acq_rel)) {
+		return;
+	}
+	wake();
+	if (mThread.joinable()) {
+		mThread.join();
+	}
+	std::lock_guard lk(m);
+	mReg.clear();
+	if (mWakeFd >= 0) {
+		close(mWakeFd);
+		mWakeFd = -1;
+	}
+	if (mEpollFd >= 0) {
+		close(mEpollFd);
+		mEpollFd = -1;
+	}
+}
+
+bool ProcessManager::addProcess(Pin<ProcessObject> po) {
+	if (!po) {
+		return false;
+	}
+	int pidfd;
+	{
+		std::lock_guard lk(po->m);
+		pidfd = po->pidfd;
+		if (pidfd < 0) {
+			return false;
+		}
+
+		epoll_event ev{};
+		ev.events = EPOLLIN;
+		ev.data.fd = pidfd;
+		if (epoll_ctl(mEpollFd, EPOLL_CTL_ADD, pidfd, &ev) < 0) {
+			perror("epoll_ctl");
+			close(pidfd);
+			po->pidfd = -1;
+			return false;
 		}
 	}
-
-	static bool hasDirectoryComponent(const std::string &command) {
-		return command.find('/') != std::string::npos || command.find('\\') != std::string::npos ||
-		       command.find(':') != std::string::npos;
+	{
+		std::lock_guard lk(m);
+		mReg.emplace(pidfd, std::move(po));
 	}
+	wake();
+	return true;
+}
 
-	static bool hasExtension(const std::string &command) {
-		auto pos = command.find_last_of('.');
-		auto slash = command.find_last_of("/\\");
-		return pos != std::string::npos && (slash == std::string::npos || pos > slash + 1);
-	}
-
-	static std::vector<std::string> pathextValues() {
-		const char *envValue = std::getenv("PATHEXT");
-		std::string raw = envValue ? envValue : ".COM;.EXE;.BAT;.CMD";
-		std::vector<std::string> exts;
-		size_t start = 0;
-		while (start <= raw.size()) {
-			size_t end = raw.find(';', start);
-			if (end == std::string::npos) {
-				end = raw.size();
+void ProcessManager::runLoop() {
+	constexpr int kMaxEvents = 64;
+	std::array<epoll_event, kMaxEvents> events{};
+	while (mRunning.load(std::memory_order_acquire)) {
+		int n = epoll_wait(mEpollFd, events.data(), kMaxEvents, -1);
+		if (n < 0) {
+			if (errno == EINTR) {
+				continue;
 			}
-			std::string part = raw.substr(start, end - start);
-			if (!part.empty()) {
-				if (part[0] != '.') {
-					part.insert(part.begin(), '.');
+			perror("epoll_wait");
+			break;
+		}
+		for (int i = 0; i < n; ++i) {
+			const auto &ev = events[i];
+			if (ev.data.fd == mWakeFd) {
+				// Drain eventfd
+				uint64_t n;
+				while (read(mWakeFd, &n, sizeof(n)) == sizeof(n)) {
 				}
-				exts.push_back(part);
+				continue;
 			}
-			if (end == raw.size()) {
-				break;
-			}
-			start = end + 1;
+			checkPidfd(ev.data.fd);
 		}
-		if (exts.empty()) {
-			exts = {".COM", ".EXE", ".BAT", ".CMD"};
+	}
+}
+
+void ProcessManager::wake() const {
+	if (mWakeFd < 0) {
+		return;
+	}
+	uint64_t n = 1;
+	write(mWakeFd, &n, sizeof(n));
+}
+
+void ProcessManager::checkPidfd(int pidfd) {
+	siginfo_t si{};
+	si.si_code = CLD_DUMPED;
+	if (pidfd >= 0) {
+		int rc = waitid(P_PIDFD, pidfd, &si, WEXITED | WNOHANG);
+		if (rc < 0) {
+			// TODO: what to do here?
+			perror("waitid");
+		} else if (rc == 0 && si.si_pid == 0) {
+			return;
 		}
-		return exts;
+		epoll_ctl(mEpollFd, EPOLL_CTL_DEL, pidfd, nullptr);
+		close(pidfd);
 	}
 
-	static std::vector<std::filesystem::path> parseHostPath(const std::string &value) {
-		std::vector<std::filesystem::path> paths;
-		const char *delims = strchr(value.c_str(), ';') ? ";" : ":";
-		size_t start = 0;
-		while (start <= value.size()) {
-			size_t end = value.find_first_of(delims, start);
-			if (end == std::string::npos) {
-				end = value.size();
-			}
-			std::string entry = value.substr(start, end - start);
-			if (!entry.empty()) {
-				bool looksWindows = entry.find('\\') != std::string::npos ||
-					(entry.size() >= 2 && entry[1] == ':' && entry[0] != '/');
-				std::filesystem::path candidate;
-				if (looksWindows) {
-					auto converted = files::pathFromWindows(entry.c_str());
-					if (!converted.empty()) {
-						candidate = converted;
-					}
-				}
-				if (candidate.empty()) {
-					candidate = std::filesystem::path(entry);
-				}
-				paths.push_back(std::move(candidate));
-			}
-			if (end == value.size()) {
-				break;
-			}
-			start = end + 1;
+	Pin<ProcessObject> po;
+	{
+		std::shared_lock lk(m);
+		auto it = mReg.find(pidfd);
+		if (it == mReg.end()) {
+			return;
 		}
-		return paths;
+		po = it->second.clone();
 	}
-
-	static std::vector<std::filesystem::path> buildSearchDirectories() {
-		std::vector<std::filesystem::path> dirs;
-		if (wibo::guestExecutablePath.has_parent_path()) {
-			dirs.push_back(wibo::guestExecutablePath.parent_path());
+	{
+		std::lock_guard lk(po->m);
+		po->signaled.store(true, std::memory_order_release);
+		po->pidfd = -1;
+		if (!po->forcedExitCode) {
+			po->exitCode = decodeExitCode(si);
 		}
-		dirs.push_back(std::filesystem::current_path());
-		if (const char *envPath = std::getenv("PATH")) {
-			auto parsed = parseHostPath(envPath);
-			dirs.insert(dirs.end(), parsed.begin(), parsed.end());
-		}
-		return dirs;
 	}
+	po->cv.notify_all();
 
-	std::optional<std::filesystem::path> resolveExecutable(const std::string &command, bool searchPath) {
-		if (command.empty()) {
-			return std::nullopt;
+	{
+		std::lock_guard lk(m);
+		auto it = mReg.find(pidfd);
+		if (it != mReg.end()) {
+			mReg.erase(it);
 		}
+	}
+}
 
-		std::vector<std::string> candidates;
-		candidates.push_back(command);
-		if (!hasExtension(command)) {
-			for (const auto &ext : pathextValues()) {
-				candidates.push_back(command + ext);
-			}
+ProcessManager &processes() {
+	static ProcessManager mgr;
+	return mgr;
+}
+
+static bool hasDirectoryComponent(const std::string &command) {
+	return command.find('/') != std::string::npos || command.find('\\') != std::string::npos ||
+		   command.find(':') != std::string::npos;
+}
+
+static bool hasExtension(const std::string &command) {
+	auto pos = command.find_last_of('.');
+	auto slash = command.find_last_of("/\\");
+	return pos != std::string::npos && (slash == std::string::npos || pos > slash + 1);
+}
+
+static std::vector<std::string> pathextValues() {
+	const char *envValue = std::getenv("PATHEXT");
+	std::string raw = envValue ? envValue : ".COM;.EXE;.BAT;.CMD";
+	std::vector<std::string> exts;
+	size_t start = 0;
+	while (start <= raw.size()) {
+		size_t end = raw.find(';', start);
+		if (end == std::string::npos) {
+			end = raw.size();
 		}
+		std::string part = raw.substr(start, end - start);
+		if (!part.empty()) {
+			if (part[0] != '.') {
+				part.insert(part.begin(), '.');
+			}
+			exts.push_back(part);
+		}
+		if (end == raw.size()) {
+			break;
+		}
+		start = end + 1;
+	}
+	if (exts.empty()) {
+		exts = {".COM", ".EXE", ".BAT", ".CMD"};
+	}
+	return exts;
+}
 
-		auto tryResolveDirect = [&](const std::string &name) -> std::optional<std::filesystem::path> {
-			auto host = files::pathFromWindows(name.c_str());
-			if (host.empty()) {
-				std::string normalized = name;
-				std::replace(normalized.begin(), normalized.end(), '\\', '/');
-				host = std::filesystem::path(normalized);
-			}
-			std::filesystem::path parent = host.parent_path().empty() ? std::filesystem::current_path() : host.parent_path();
-			std::string filename = host.filename().string();
-			auto resolved = files::findCaseInsensitiveFile(parent, filename);
-			if (resolved) {
-				return files::canonicalPath(*resolved);
-			}
-			std::error_code ec;
-			if (!filename.empty() && std::filesystem::exists(host, ec)) {
-				return files::canonicalPath(host);
-			}
-			return std::nullopt;
-		};
-
-		if (hasDirectoryComponent(command)) {
-			for (const auto &name : candidates) {
-				auto resolved = tryResolveDirect(name);
-				if (resolved) {
-					return resolved;
+static std::vector<std::filesystem::path> parseHostPath(const std::string &value) {
+	std::vector<std::filesystem::path> paths;
+	const char *delims = strchr(value.c_str(), ';') ? ";" : ":";
+	size_t start = 0;
+	while (start <= value.size()) {
+		size_t end = value.find_first_of(delims, start);
+		if (end == std::string::npos) {
+			end = value.size();
+		}
+		std::string entry = value.substr(start, end - start);
+		if (!entry.empty()) {
+			bool looksWindows =
+				entry.find('\\') != std::string::npos || (entry.size() >= 2 && entry[1] == ':' && entry[0] != '/');
+			std::filesystem::path candidate;
+			if (looksWindows) {
+				auto converted = files::pathFromWindows(entry.c_str());
+				if (!converted.empty()) {
+					candidate = converted;
 				}
 			}
-			return std::nullopt;
-		}
-
-		if (searchPath) {
-			auto dirs = buildSearchDirectories();
-			for (const auto &dir : dirs) {
-				for (const auto &name : candidates) {
-					auto resolved = files::findCaseInsensitiveFile(dir, name);
-					if (resolved) {
-						return files::canonicalPath(*resolved);
-					}
-				}
+			if (candidate.empty()) {
+				candidate = std::filesystem::path(entry);
 			}
+			paths.push_back(std::move(candidate));
 		}
+		if (end == value.size()) {
+			break;
+		}
+		start = end + 1;
+	}
+	return paths;
+}
 
+static std::vector<std::filesystem::path> buildSearchDirectories() {
+	std::vector<std::filesystem::path> dirs;
+	if (wibo::guestExecutablePath.has_parent_path()) {
+		dirs.push_back(wibo::guestExecutablePath.parent_path());
+	}
+	dirs.push_back(std::filesystem::current_path());
+	if (const char *envPath = std::getenv("PATH")) {
+		auto parsed = parseHostPath(envPath);
+		dirs.insert(dirs.end(), parsed.begin(), parsed.end());
+	}
+	return dirs;
+}
+
+std::optional<std::filesystem::path> resolveExecutable(const std::string &command, bool searchPath) {
+	if (command.empty()) {
 		return std::nullopt;
 	}
 
-	static int spawnInternal(const std::vector<std::string> &args, pid_t *pidOut) {
-		std::vector<char *> argv;
-		argv.reserve(args.size() + 2);
-		argv.push_back(const_cast<char *>(wibo::executableName.c_str()));
-		for (auto &arg : args) {
-			argv.push_back(const_cast<char *>(arg.c_str()));
+	std::vector<std::string> candidates;
+	candidates.push_back(command);
+	if (!hasExtension(command)) {
+		for (const auto &ext : pathextValues()) {
+			candidates.push_back(command + ext);
 		}
-		argv.push_back(nullptr);
-
-		DEBUG_LOG("Spawning process: %s, args: [", wibo::executableName.c_str());
-		for (size_t i = 0; i < args.size(); ++i) {
-			if (i != 0) {
-				DEBUG_LOG(", ");
-			}
-			DEBUG_LOG("'%s'", args[i].c_str());
-		}
-		DEBUG_LOG("]\n");
-
-		posix_spawn_file_actions_t actions;
-		posix_spawn_file_actions_init(&actions);
-
-		std::string indent = std::to_string(wibo::debugIndent + 1);
-		setenv("WIBO_DEBUG_INDENT", indent.c_str(), 1);
-
-		pid_t pid = -1;
-		int spawnResult = posix_spawn(&pid, wibo::executableName.c_str(), &actions, nullptr, argv.data(), environ);
-		posix_spawn_file_actions_destroy(&actions);
-		if (spawnResult != 0) {
-			return spawnResult;
-		}
-		if (pidOut) {
-			*pidOut = pid;
-		}
-		return 0;
 	}
 
-	int spawnWithCommandLine(const std::string &applicationName, const std::string &commandLine, pid_t *pidOut) {
-		if (wibo::executableName.empty() || (applicationName.empty() && commandLine.empty())) {
-			return ENOENT;
+	auto tryResolveDirect = [&](const std::string &name) -> std::optional<std::filesystem::path> {
+		auto host = files::pathFromWindows(name.c_str());
+		if (host.empty()) {
+			std::string normalized = name;
+			std::replace(normalized.begin(), normalized.end(), '\\', '/');
+			host = std::filesystem::path(normalized);
 		}
+		std::filesystem::path parent =
+			host.parent_path().empty() ? std::filesystem::current_path() : host.parent_path();
+		std::string filename = host.filename().string();
+		auto resolved = files::findCaseInsensitiveFile(parent, filename);
+		if (resolved) {
+			return files::canonicalPath(*resolved);
+		}
+		std::error_code ec;
+		if (!filename.empty() && std::filesystem::exists(host, ec)) {
+			return files::canonicalPath(host);
+		}
+		return std::nullopt;
+	};
 
-		std::vector<std::string> args;
-		args.reserve(3);
-		if (!commandLine.empty()) {
-			args.emplace_back("--cmdline");
-			args.push_back(commandLine);
+	if (hasDirectoryComponent(command)) {
+		for (const auto &name : candidates) {
+			auto resolved = tryResolveDirect(name);
+			if (resolved) {
+				return resolved;
+			}
 		}
-		if (!applicationName.empty()) {
-			args.push_back(applicationName);
-		}
-
-		return spawnInternal(args, pidOut);
+		return std::nullopt;
 	}
 
-	int spawnWithArgv(const std::string &applicationName, const std::vector<std::string> &argv, pid_t *pidOut) {
-		if (wibo::executableName.empty() || (applicationName.empty() && argv.empty())) {
-			return ENOENT;
+	if (searchPath) {
+		auto dirs = buildSearchDirectories();
+		for (const auto &dir : dirs) {
+			for (const auto &name : candidates) {
+				auto resolved = files::findCaseInsensitiveFile(dir, name);
+				if (resolved) {
+					return files::canonicalPath(*resolved);
+				}
+			}
 		}
-
-		std::vector<std::string> args;
-		args.reserve(argv.size() + 1);
-		if (!applicationName.empty()) {
-			args.push_back(applicationName);
-		}
-		args.emplace_back("--");
-		for (const auto &arg : argv) {
-			args.push_back(arg);
-		}
-
-		return spawnInternal(args, pidOut);
 	}
 
-	std::vector<std::string> splitCommandLine(const char *commandLine) {
-		std::vector<std::string> result;
-		if (!commandLine) {
-			return result;
+	return std::nullopt;
+}
+
+static int spawnInternal(const std::vector<std::string> &args, Pin<kernel32::ProcessObject> &pinOut) {
+	std::vector<char *> argv;
+	argv.reserve(args.size() + 2);
+	argv.push_back(const_cast<char *>(wibo::executableName.c_str()));
+	for (auto &arg : args) {
+		argv.push_back(const_cast<char *>(arg.c_str()));
+	}
+	argv.push_back(nullptr);
+
+	DEBUG_LOG("Spawning process: %s, args: [", wibo::executableName.c_str());
+	for (size_t i = 0; i < args.size(); ++i) {
+		if (i != 0) {
+			DEBUG_LOG(", ");
 		}
-		std::string input(commandLine);
-		size_t i = 0;
-		size_t len = input.size();
-		while (i < len) {
-			while (i < len && (input[i] == ' ' || input[i] == '\t')) {
-				++i;
-			}
-			if (i >= len) {
-				break;
-			}
-			std::string arg;
-			bool inQuotes = false;
-			int backslashes = 0;
-			for (; i < len; ++i) {
-				char c = input[i];
-				if (c == '\\') {
-					++backslashes;
-					continue;
-				}
-				if (c == '"') {
-					if ((backslashes % 2) == 0) {
-						arg.append(backslashes / 2, '\\');
-						inQuotes = !inQuotes;
-					} else {
-						arg.append(backslashes / 2, '\\');
-						arg.push_back('"');
-					}
-					backslashes = 0;
-					continue;
-				}
-				arg.append(backslashes, '\\');
-				backslashes = 0;
-				if (!inQuotes && (c == ' ' || c == '\t')) {
-					break;
-				}
-				arg.push_back(c);
-			}
-			arg.append(backslashes, '\\');
-			result.push_back(std::move(arg));
-			while (i < len && (input[i] == ' ' || input[i] == '\t')) {
-				++i;
-			}
+		DEBUG_LOG("'%s'", args[i].c_str());
+	}
+	DEBUG_LOG("]\n");
+
+	std::vector<char *> childEnv;
+	for (char **e = environ; *e != nullptr; ++e) {
+		if (strncmp(*e, "WIBO_DEBUG_INDENT=", 18) != 0) {
+			childEnv.push_back(*e);
 		}
+	}
+	std::string indent = "WIBO_DEBUG_INDENT=" + std::to_string(wibo::debugIndent + 1);
+	childEnv.push_back(strdup(indent.c_str()));
+	childEnv.push_back(nullptr);
+
+	pid_t pid = -1;
+	int spawnResult = posix_spawn(&pid, wibo::executableName.c_str(), nullptr, nullptr, argv.data(), childEnv.data());
+	if (spawnResult != 0) {
+		return spawnResult;
+	}
+
+	DEBUG_LOG("Spawned process with PID %d\n", pid);
+
+	int pidfd = static_cast<int>(syscall(SYS_pidfd_open, pid, 0));
+	if (pidfd < 0) {
+		perror("pidfd_open");
+		return false;
+	}
+
+	pinOut = make_pin<kernel32::ProcessObject>(pid, pidfd);
+	return 0;
+}
+
+int spawnWithCommandLine(const std::string &applicationName, const std::string &commandLine,
+						 Pin<kernel32::ProcessObject> &pinOut) {
+	if (wibo::executableName.empty() || (applicationName.empty() && commandLine.empty())) {
+		return ENOENT;
+	}
+
+	std::vector<std::string> args;
+	args.reserve(3);
+	if (!commandLine.empty()) {
+		args.emplace_back("--cmdline");
+		args.push_back(commandLine);
+	}
+	if (!applicationName.empty()) {
+		args.push_back(applicationName);
+	}
+
+	return spawnInternal(args, pinOut);
+}
+
+int spawnWithArgv(const std::string &applicationName, const std::vector<std::string> &argv,
+				  Pin<kernel32::ProcessObject> &pinOut) {
+	if (wibo::executableName.empty() || (applicationName.empty() && argv.empty())) {
+		return ENOENT;
+	}
+
+	std::vector<std::string> args;
+	args.reserve(argv.size() + 1);
+	if (!applicationName.empty()) {
+		args.push_back(applicationName);
+	}
+	args.emplace_back("--");
+	for (const auto &arg : argv) {
+		args.push_back(arg);
+	}
+
+	return spawnInternal(args, pinOut);
+}
+
+std::vector<std::string> splitCommandLine(const char *commandLine) {
+	std::vector<std::string> result;
+	if (!commandLine) {
 		return result;
 	}
+	std::string input(commandLine);
+	size_t i = 0;
+	size_t len = input.size();
+	while (i < len) {
+		while (i < len && (input[i] == ' ' || input[i] == '\t')) {
+			++i;
+		}
+		if (i >= len) {
+			break;
+		}
+		std::string arg;
+		bool inQuotes = false;
+		int backslashes = 0;
+		for (; i < len; ++i) {
+			char c = input[i];
+			if (c == '\\') {
+				++backslashes;
+				continue;
+			}
+			if (c == '"') {
+				if ((backslashes % 2) == 0) {
+					arg.append(backslashes / 2, '\\');
+					inQuotes = !inQuotes;
+				} else {
+					arg.append(backslashes / 2, '\\');
+					arg.push_back('"');
+				}
+				backslashes = 0;
+				continue;
+			}
+			arg.append(backslashes, '\\');
+			backslashes = 0;
+			if (!inQuotes && (c == ' ' || c == '\t')) {
+				break;
+			}
+			arg.push_back(c);
+		}
+		arg.append(backslashes, '\\');
+		result.push_back(std::move(arg));
+		while (i < len && (input[i] == ' ' || input[i] == '\t')) {
+			++i;
+		}
+	}
+	return result;
 }
+
+} // namespace wibo

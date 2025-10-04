@@ -3,6 +3,7 @@
 #include "errors.h"
 #include "handles.h"
 #include "internal.h"
+#include "processes.h"
 
 namespace advapi32 {
 
@@ -12,14 +13,13 @@ BOOL WIN_FUNC OpenProcessToken(HANDLE ProcessHandle, DWORD DesiredAccess, PHANDL
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
-	auto *token = new TokenObject;
-	token->processHandle = ProcessHandle;
-	token->desiredAccess = DesiredAccess;
-	handles::Data data;
-	data.type = handles::TYPE_TOKEN;
-	data.ptr = token;
-	data.size = sizeof(TokenObject);
-	*TokenHandle = handles::allocDataHandle(data);
+	auto obj = wibo::handles().getAs<ProcessObject>(ProcessHandle);
+	if (!obj) {
+		wibo::lastError = ERROR_INVALID_HANDLE;
+		return FALSE;
+	}
+	auto token = make_pin<TokenObject>(std::move(obj), DesiredAccess);
+	*TokenHandle = wibo::handles().alloc(std::move(token), 0, 0);
 	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }

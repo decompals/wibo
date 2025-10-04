@@ -1,24 +1,23 @@
 #include "synchapi.h"
+
 #include "common.h"
 #include "errors.h"
 #include "handles.h"
 #include "internal.h"
-#include "processes.h"
 #include "strutil.h"
 
-#include <cerrno>
+#include <chrono>
 #include <cstring>
 #include <mutex>
 #include <pthread.h>
 #include <string>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <unordered_map>
 #include <vector>
 
 namespace {
 
-std::u16string makeMutexName(LPCWSTR name) {
+std::u16string makeU16String(LPCWSTR name) {
 	if (!name) {
 		return {};
 	}
@@ -43,155 +42,34 @@ void WIN_FUNC Sleep(DWORD dwMilliseconds) {
 	usleep(static_cast<useconds_t>(dwMilliseconds) * 1000);
 }
 
-namespace {
-
-std::mutex mutexRegistryLock;
-std::unordered_map<std::u16string, MutexObject *> namedMutexes;
-
-std::mutex eventRegistryLock;
-std::unordered_map<std::u16string, EventObject *> namedEvents;
-
-std::mutex semaphoreRegistryLock;
-std::unordered_map<std::u16string, SemaphoreObject *> namedSemaphores;
-
-EventObject *eventObjectFromHandle(HANDLE hEvent) {
-	auto data = handles::dataFromHandle(hEvent, false);
-	if (data.type != handles::TYPE_EVENT || data.ptr == nullptr) {
-		return nullptr;
-	}
-	return reinterpret_cast<EventObject *>(data.ptr);
-}
-
-SemaphoreObject *semaphoreObjectFromHandle(HANDLE hSemaphore) {
-	auto data = handles::dataFromHandle(hSemaphore, false);
-	if (data.type != handles::TYPE_SEMAPHORE || data.ptr == nullptr) {
-		return nullptr;
-	}
-	return reinterpret_cast<SemaphoreObject *>(data.ptr);
-}
-
-MutexObject *mutexObjectFromHandle(HANDLE hMutex) {
-	auto data = handles::dataFromHandle(hMutex, false);
-	if (data.type != handles::TYPE_MUTEX || data.ptr == nullptr) {
-		return nullptr;
-	}
-	return reinterpret_cast<MutexObject *>(data.ptr);
-}
-
-bool setEventSignaledState(HANDLE hEvent, bool signaled) {
-	EventObject *obj = eventObjectFromHandle(hEvent);
-	if (!obj) {
-		return false;
-	}
-	pthread_mutex_lock(&obj->mutex);
-	obj->signaled = signaled;
-	if (signaled) {
-		if (obj->manualReset) {
-			pthread_cond_broadcast(&obj->cond);
-		} else {
-			pthread_cond_signal(&obj->cond);
-		}
-	}
-	pthread_mutex_unlock(&obj->mutex);
-	return true;
-}
-
-} // namespace
-
-void releaseMutexObject(MutexObject *obj) {
-	if (!obj) {
-		return;
-	}
-	std::lock_guard<std::mutex> lock(mutexRegistryLock);
-	obj->refCount--;
-	if (obj->refCount == 0) {
-		if (!obj->name.empty()) {
-			namedMutexes.erase(obj->name);
-		}
-		pthread_mutex_destroy(&obj->mutex);
-		delete obj;
-	}
-}
-
-void releaseEventObject(EventObject *obj) {
-	if (!obj) {
-		return;
-	}
-	std::lock_guard<std::mutex> lock(eventRegistryLock);
-	obj->refCount--;
-	if (obj->refCount == 0) {
-		if (!obj->name.empty()) {
-			namedEvents.erase(obj->name);
-		}
-		pthread_cond_destroy(&obj->cond);
-		pthread_mutex_destroy(&obj->mutex);
-		delete obj;
-	}
-}
-
-void releaseSemaphoreObject(SemaphoreObject *obj) {
-	if (!obj) {
-		return;
-	}
-	std::lock_guard<std::mutex> lock(semaphoreRegistryLock);
-	obj->refCount--;
-	if (obj->refCount == 0) {
-		if (!obj->name.empty()) {
-			namedSemaphores.erase(obj->name);
-		}
-		pthread_cond_destroy(&obj->cond);
-		pthread_mutex_destroy(&obj->mutex);
-		delete obj;
-	}
-}
-
 HANDLE WIN_FUNC CreateMutexW(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInitialOwner, LPCWSTR lpName) {
-	std::string nameLog;
-	if (lpName) {
-		nameLog = wideStringToString(reinterpret_cast<const uint16_t *>(lpName));
-	} else {
-		nameLog = "<unnamed>";
+	DEBUG_LOG("CreateMutexW(%p, %d, %ls)\n", lpMutexAttributes, static_cast<int>(bInitialOwner),
+			  wideStringToString(lpName).c_str());
+	std::u16string name = makeU16String(lpName);
+	const uint32_t grantedAccess = MUTEX_ALL_ACCESS;
+	uint32_t handleFlags = 0;
+	if (lpMutexAttributes && lpMutexAttributes->bInheritHandle) {
+		handleFlags |= HANDLE_FLAG_INHERIT;
 	}
-	DEBUG_LOG("CreateMutexW(%p, %d, %s)\n", lpMutexAttributes, bInitialOwner, nameLog.c_str());
-	(void)lpMutexAttributes;
-
-	std::u16string name = makeMutexName(lpName);
-	MutexObject *obj = nullptr;
-	bool alreadyExists = false;
-	{
-		std::lock_guard<std::mutex> lock(mutexRegistryLock);
-		if (!name.empty()) {
-			auto it = namedMutexes.find(name);
-			if (it != namedMutexes.end()) {
-				obj = it->second;
-				obj->refCount++;
-				alreadyExists = true;
-			}
+	auto [mu, created] = wibo::g_namespace.getOrCreate(name, [&]() {
+		auto *mu = new MutexObject();
+		if (bInitialOwner) {
+			std::lock_guard lk(mu->m);
+			mu->owner = pthread_self();
+			mu->ownerValid = true;
+			mu->recursionCount = 1;
+			mu->signaled.store(false, std::memory_order_release);
 		}
-		if (!obj) {
-			obj = new MutexObject();
-			pthread_mutexattr_t attr;
-			pthread_mutexattr_init(&attr);
-			pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
-			pthread_mutex_init(&obj->mutex, &attr);
-			pthread_mutexattr_destroy(&attr);
-			obj->name = name;
-			if (!name.empty()) {
-				namedMutexes[name] = obj;
-			}
-		}
+		return mu;
+	});
+	if (!mu) {
+		// Name exists but isn't a mutex
+		wibo::lastError = ERROR_INVALID_HANDLE;
+		return nullptr;
 	}
-
-	if (!alreadyExists && bInitialOwner) {
-		pthread_mutex_lock(&obj->mutex);
-		obj->owner = pthread_self();
-		obj->ownerValid = true;
-		obj->recursionCount = 1;
-	}
-
-	HANDLE handle = handles::allocDataHandle({handles::TYPE_MUTEX, obj, 0});
-	wibo::lastError = alreadyExists ? ERROR_ALREADY_EXISTS : ERROR_SUCCESS;
-	return handle;
+	HANDLE h = wibo::handles().alloc(std::move(mu), grantedAccess, handleFlags);
+	wibo::lastError = created ? ERROR_SUCCESS : ERROR_ALREADY_EXISTS;
+	return h;
 }
 
 HANDLE WIN_FUNC CreateMutexA(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInitialOwner, LPCSTR lpName) {
@@ -204,67 +82,58 @@ HANDLE WIN_FUNC CreateMutexA(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInit
 
 BOOL WIN_FUNC ReleaseMutex(HANDLE hMutex) {
 	DEBUG_LOG("ReleaseMutex(%p)\n", hMutex);
-	MutexObject *obj = mutexObjectFromHandle(hMutex);
-	if (!obj) {
+	auto mu = wibo::handles().getAs<MutexObject>(hMutex);
+	if (!mu) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
-	pthread_t self = pthread_self();
-	pthread_mutex_lock(&obj->mutex);
-	if (!obj->ownerValid || !pthread_equal(obj->owner, self) || obj->recursionCount == 0) {
-		pthread_mutex_unlock(&obj->mutex);
-		wibo::lastError = ERROR_NOT_OWNER;
-		return FALSE;
+	const pthread_t self = pthread_self();
+	bool notify = false;
+	{
+		std::lock_guard lk(mu->m);
+		if (!mu->ownerValid || !pthread_equal(mu->owner, self) || mu->recursionCount == 0) {
+			wibo::lastError = ERROR_NOT_OWNER;
+			return FALSE;
+		}
+		if (--mu->recursionCount == 0) {
+			mu->ownerValid = false;
+			mu->signaled.store(true, std::memory_order_release);
+			notify = true;
+		}
 	}
-	obj->recursionCount--;
-	if (obj->recursionCount == 0) {
-		obj->ownerValid = false;
+	if (notify) {
+		mu->cv.notify_one();
 	}
-	pthread_mutex_unlock(&obj->mutex);
 	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
 HANDLE WIN_FUNC CreateEventW(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManualReset, BOOL bInitialState,
 							 LPCWSTR lpName) {
-	std::string nameLog;
-	if (lpName) {
-		nameLog = wideStringToString(reinterpret_cast<const uint16_t *>(lpName));
-	} else {
-		nameLog = "<unnamed>";
+	DEBUG_LOG("CreateEventW(%p, %d, %d, %ls)\n", lpEventAttributes, static_cast<int>(bManualReset),
+			  static_cast<int>(bInitialState), wideStringToString(lpName).c_str());
+	std::u16string name = makeU16String(lpName);
+	const uint32_t grantedAccess = EVENT_ALL_ACCESS;
+	uint32_t handleFlags = 0;
+	if (lpEventAttributes && lpEventAttributes->bInheritHandle) {
+		handleFlags |= HANDLE_FLAG_INHERIT;
 	}
-	DEBUG_LOG("CreateEventW(%p, %d, %d, %s)\n", lpEventAttributes, bManualReset, bInitialState, nameLog.c_str());
-	(void)lpEventAttributes;
-
-	std::u16string name = makeMutexName(lpName);
-	EventObject *obj = nullptr;
-	bool alreadyExists = false;
-	{
-		std::lock_guard<std::mutex> lock(eventRegistryLock);
-		if (!name.empty()) {
-			auto it = namedEvents.find(name);
-			if (it != namedEvents.end()) {
-				obj = it->second;
-				obj->refCount++;
-				alreadyExists = true;
-			}
+	auto [ev, alreadyExists] = wibo::g_namespace.getOrCreate(name, [&]() {
+		auto e = new EventObject(!!bManualReset);
+		if (bInitialState) {
+			std::lock_guard lk(e->m);
+			e->signaled.store(true, std::memory_order_relaxed);
 		}
-		if (!obj) {
-			obj = new EventObject();
-			pthread_mutex_init(&obj->mutex, nullptr);
-			pthread_cond_init(&obj->cond, nullptr);
-			obj->manualReset = bManualReset;
-			obj->signaled = bInitialState;
-			obj->name = name;
-			if (!name.empty()) {
-				namedEvents[name] = obj;
-			}
-		}
+		return e;
+	});
+	if (!ev) {
+		// Name exists but isn't an event
+		wibo::lastError = ERROR_INVALID_HANDLE;
+		return nullptr;
 	}
-
-	HANDLE handle = handles::allocDataHandle({handles::TYPE_EVENT, obj, 0});
+	HANDLE h = wibo::handles().alloc(std::move(ev), grantedAccess, handleFlags);
 	wibo::lastError = alreadyExists ? ERROR_ALREADY_EXISTS : ERROR_SUCCESS;
-	return handle;
+	return h;
 }
 
 HANDLE WIN_FUNC CreateEventA(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManualReset, BOOL bInitialState,
@@ -278,43 +147,28 @@ HANDLE WIN_FUNC CreateEventA(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManu
 
 HANDLE WIN_FUNC CreateSemaphoreW(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LONG lInitialCount, LONG lMaximumCount,
 								 LPCWSTR lpName) {
-	DEBUG_LOG("CreateSemaphoreW(%p, %ld, %ld, %ls)\n", lpSemaphoreAttributes, static_cast<long>(lInitialCount),
-			  static_cast<long>(lMaximumCount), lpName ? reinterpret_cast<const wchar_t *>(lpName) : L"<null>");
-	(void)lpSemaphoreAttributes;
-
-	std::u16string name = makeMutexName(lpName);
-	SemaphoreObject *obj = nullptr;
-	bool alreadyExists = false;
-	{
-		std::lock_guard<std::mutex> lock(semaphoreRegistryLock);
-		if (!name.empty()) {
-			auto it = namedSemaphores.find(name);
-			if (it != namedSemaphores.end()) {
-				obj = it->second;
-				obj->refCount++;
-				alreadyExists = true;
-			}
-		}
-		if (!obj) {
-			if (lMaximumCount <= 0 || lInitialCount < 0 || lInitialCount > lMaximumCount) {
-				wibo::lastError = ERROR_INVALID_PARAMETER;
-				return nullptr;
-			}
-			obj = new SemaphoreObject();
-			pthread_mutex_init(&obj->mutex, nullptr);
-			pthread_cond_init(&obj->cond, nullptr);
-			obj->count = lInitialCount;
-			obj->maxCount = lMaximumCount;
-			obj->name = name;
-			if (!name.empty()) {
-				namedSemaphores[name] = obj;
-			}
-		}
+	DEBUG_LOG("CreateSemaphoreW(%p, %ld, %ld, %ls)\n", lpSemaphoreAttributes, lInitialCount, lMaximumCount,
+			  wideStringToString(lpName).c_str());
+	auto name = makeU16String(lpName);
+	const uint32_t granted = SEMAPHORE_ALL_ACCESS;
+	uint32_t hflags = 0;
+	if (lpSemaphoreAttributes && lpSemaphoreAttributes->bInheritHandle) {
+		hflags |= HANDLE_FLAG_INHERIT;
 	}
-
-	HANDLE handle = handles::allocDataHandle({handles::TYPE_SEMAPHORE, obj, 0});
-	wibo::lastError = alreadyExists ? ERROR_ALREADY_EXISTS : ERROR_SUCCESS;
-	return handle;
+	auto [sem, created] = wibo::g_namespace.getOrCreate(name, [&]() -> SemaphoreObject * {
+		if (lMaximumCount <= 0 || lInitialCount < 0 || lInitialCount > lMaximumCount) {
+			return nullptr;
+		}
+		return new SemaphoreObject(lInitialCount, lMaximumCount);
+	});
+	if (!sem) {
+		// Name exists but isn't an event
+		wibo::lastError = ERROR_INVALID_HANDLE;
+		return nullptr;
+	}
+	HANDLE h = wibo::handles().alloc(std::move(sem), granted, hflags);
+	wibo::lastError = created ? ERROR_SUCCESS : ERROR_ALREADY_EXISTS;
+	return h;
 }
 
 HANDLE WIN_FUNC CreateSemaphoreA(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LONG lInitialCount, LONG lMaximumCount,
@@ -327,169 +181,165 @@ HANDLE WIN_FUNC CreateSemaphoreA(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LO
 }
 
 BOOL WIN_FUNC ReleaseSemaphore(HANDLE hSemaphore, LONG lReleaseCount, PLONG lpPreviousCount) {
-	DEBUG_LOG("ReleaseSemaphore(%p, %ld, %p)\n", hSemaphore, static_cast<long>(lReleaseCount), lpPreviousCount);
+	DEBUG_LOG("ReleaseSemaphore(%p, %ld, %p)\n", hSemaphore, lReleaseCount, lpPreviousCount);
 	if (lReleaseCount <= 0) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
-	SemaphoreObject *obj = semaphoreObjectFromHandle(hSemaphore);
-	if (!obj) {
+	auto sem = wibo::handles().getAs<SemaphoreObject>(hSemaphore);
+	if (!sem) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
-	pthread_mutex_lock(&obj->mutex);
+
+	LONG prev = 0;
+	{
+		std::lock_guard lk(sem->m);
+		if (lpPreviousCount) {
+			prev = sem->count;
+		}
+		if (sem->count > sem->maxCount - lReleaseCount) {
+			wibo::lastError = ERROR_TOO_MANY_POSTS;
+			return FALSE;
+		}
+		sem->count += lReleaseCount;
+		sem->signaled.store(sem->count > 0, std::memory_order_release);
+	}
+	for (LONG i = 0; i < lReleaseCount; ++i) {
+		sem->cv.notify_one();
+	}
+
 	if (lpPreviousCount) {
-		*lpPreviousCount = obj->count;
+		*lpPreviousCount = prev;
 	}
-	if (lReleaseCount > obj->maxCount - obj->count) {
-		pthread_mutex_unlock(&obj->mutex);
-		wibo::lastError = ERROR_INVALID_PARAMETER;
-		return FALSE;
-	}
-	obj->count += lReleaseCount;
-	pthread_mutex_unlock(&obj->mutex);
-	pthread_cond_broadcast(&obj->cond);
 	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
 BOOL WIN_FUNC SetEvent(HANDLE hEvent) {
 	DEBUG_LOG("SetEvent(%p)\n", hEvent);
-	if (!setEventSignaledState(hEvent, true)) {
+	auto ev = wibo::handles().getAs<EventObject>(hEvent);
+	if (!ev) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
+	ev->set();
 	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
 BOOL WIN_FUNC ResetEvent(HANDLE hEvent) {
 	DEBUG_LOG("ResetEvent(%p)\n", hEvent);
-	if (!setEventSignaledState(hEvent, false)) {
+	auto ev = wibo::handles().getAs<EventObject>(hEvent);
+	if (!ev) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
+	ev->reset();
 	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
 DWORD WIN_FUNC WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds) {
 	DEBUG_LOG("WaitForSingleObject(%p, %u)\n", hHandle, dwMilliseconds);
-	handles::Data data = handles::dataFromHandle(hHandle, false);
-	switch (data.type) {
-	case handles::TYPE_PROCESS: {
-		if (dwMilliseconds != INFINITE) {
-			DEBUG_LOG("WaitForSingleObject: timeout for process not supported\n");
-			wibo::lastError = ERROR_NOT_SUPPORTED;
-			return WAIT_FAILED;
-		}
-		auto *process = reinterpret_cast<processes::Process *>(data.ptr);
-		int status = 0;
-		for (;;) {
-			if (waitpid(process->pid, &status, 0) == -1) {
-				if (errno == EINTR) {
-					continue;
-				}
-				if (errno == ECHILD && process->terminationRequested) {
-					process->exitCode = process->forcedExitCode;
-					break;
-				}
-				DEBUG_LOG("WaitForSingleObject: waitpid(%d) failed: %s\n", process->pid, strerror(errno));
-				wibo::lastError = ERROR_INVALID_HANDLE;
-				return WAIT_FAILED;
-			}
-			break;
-		}
-		if (process->terminationRequested) {
-			process->exitCode = process->forcedExitCode;
-		} else if (WIFEXITED(status)) {
-			process->exitCode = static_cast<DWORD>(WEXITSTATUS(status));
+	HandleMeta meta{};
+	Pin<> obj = wibo::handles().get(hHandle, &meta);
+	if (!obj) {
+		wibo::lastError = ERROR_INVALID_HANDLE;
+		DEBUG_LOG("-> ERROR_INVALID_HANDLE\n");
+		return WAIT_FAILED;
+	}
+#ifdef CHECK_ACCESS
+	if ((meta.grantedAccess & SYNCHRONIZE) == 0) {
+		wibo::lastError = ERROR_ACCESS_DENIED;
+		DEBUG_LOG("!!! DENIED: 0x%x\n", meta.grantedAccess);
+		return WAIT_FAILED;
+	}
+#endif
+
+	auto doWait = [&](auto &lk, auto &cv, auto pred) -> bool {
+		if (dwMilliseconds == INFINITE) {
+			cv.wait(lk, pred);
+			return true;
 		} else {
-			DEBUG_LOG("WaitForSingleObject: child process exited abnormally - returning exit code 1\n");
-			process->exitCode = 1;
+			return cv.wait_for(lk, std::chrono::milliseconds(dwMilliseconds), pred);
 		}
-		process->terminationRequested = false;
-		wibo::lastError = ERROR_SUCCESS;
+	};
+
+	switch (obj->type) {
+	case ObjectType::Event: {
+		auto ev = std::move(obj).downcast<EventObject>();
+		std::unique_lock lk(ev->m);
+		bool ok = doWait(lk, ev->cv, [&] { return ev->signaled.load(std::memory_order_acquire); });
+		if (!ok) {
+			return WAIT_TIMEOUT;
+		}
+		if (!ev->manualReset) {
+			ev->signaled.store(false, std::memory_order_release);
+		}
 		return WAIT_OBJECT_0;
 	}
-	case handles::TYPE_EVENT: {
-		EventObject *obj = reinterpret_cast<EventObject *>(data.ptr);
-		if (dwMilliseconds != INFINITE) {
-			DEBUG_LOG("WaitForSingleObject: timeout for event not supported\n");
-			wibo::lastError = ERROR_NOT_SUPPORTED;
-			return WAIT_FAILED;
+	case ObjectType::Semaphore: {
+		auto sem = std::move(obj).downcast<SemaphoreObject>();
+		std::unique_lock lk(sem->m);
+		bool ok = doWait(lk, sem->cv, [&] { return sem->count > 0; });
+		if (!ok) {
+			return WAIT_TIMEOUT;
 		}
-		pthread_mutex_lock(&obj->mutex);
-		while (!obj->signaled) {
-			pthread_cond_wait(&obj->cond, &obj->mutex);
+		--sem->count;
+		if (sem->count == 0) {
+			sem->signaled.store(false, std::memory_order_release);
 		}
-		if (!obj->manualReset) {
-			obj->signaled = false;
-		}
-		pthread_mutex_unlock(&obj->mutex);
-		wibo::lastError = ERROR_SUCCESS;
 		return WAIT_OBJECT_0;
 	}
-	case handles::TYPE_THREAD: {
-		ThreadObject *obj = reinterpret_cast<ThreadObject *>(data.ptr);
-		if (dwMilliseconds != INFINITE) {
-			DEBUG_LOG("WaitForSingleObject: timeout for thread not supported\n");
-			wibo::lastError = ERROR_NOT_SUPPORTED;
-			return WAIT_FAILED;
-		}
-		pthread_mutex_lock(&obj->mutex);
-		while (!obj->finished) {
-			pthread_cond_wait(&obj->cond, &obj->mutex);
-		}
-		bool needJoin = !obj->joined && !obj->detached;
-		pthread_t thread = obj->thread;
-		if (needJoin) {
-			obj->joined = true;
-		}
-		pthread_mutex_unlock(&obj->mutex);
-		if (needJoin) {
-			pthread_join(thread, nullptr);
-		}
-		wibo::lastError = ERROR_SUCCESS;
-		return WAIT_OBJECT_0;
-	}
-	case handles::TYPE_SEMAPHORE: {
-		SemaphoreObject *obj = reinterpret_cast<SemaphoreObject *>(data.ptr);
-		if (dwMilliseconds != INFINITE) {
-			DEBUG_LOG("WaitForSingleObject: timeout for semaphore not supported\n");
-			wibo::lastError = ERROR_NOT_SUPPORTED;
-			return WAIT_FAILED;
-		}
-		pthread_mutex_lock(&obj->mutex);
-		while (obj->count == 0) {
-			pthread_cond_wait(&obj->cond, &obj->mutex);
-		}
-		obj->count--;
-		pthread_mutex_unlock(&obj->mutex);
-		wibo::lastError = ERROR_SUCCESS;
-		return WAIT_OBJECT_0;
-	}
-	case handles::TYPE_MUTEX: {
-		MutexObject *obj = reinterpret_cast<MutexObject *>(data.ptr);
-		if (dwMilliseconds != INFINITE) {
-			DEBUG_LOG("WaitForSingleObject: timeout for mutex not supported\n");
-			wibo::lastError = ERROR_NOT_SUPPORTED;
-			return WAIT_FAILED;
-		}
-		pthread_mutex_lock(&obj->mutex);
+	case ObjectType::Mutex: {
+		auto mu = std::move(obj).downcast<MutexObject>();
 		pthread_t self = pthread_self();
-		if (obj->ownerValid && pthread_equal(obj->owner, self)) {
-			obj->recursionCount++;
-		} else {
-			obj->owner = self;
-			obj->ownerValid = true;
-			obj->recursionCount = 1;
+		std::unique_lock lk(mu->m);
+		// Recursive acquisition
+		if (mu->ownerValid && pthread_equal(mu->owner, self)) {
+			++mu->recursionCount;
+			return WAIT_OBJECT_0;
 		}
-		wibo::lastError = ERROR_SUCCESS;
-		return WAIT_OBJECT_0;
+		bool ok = doWait(lk, mu->cv, [&] { return !mu->ownerValid || mu->abandoned; });
+		if (!ok) {
+			return WAIT_TIMEOUT;
+		}
+		DWORD ret = WAIT_OBJECT_0;
+		if (std::exchange(mu->abandoned, false)) {
+			// Acquire and report abandoned
+			ret = WAIT_ABANDONED;
+		}
+		mu->owner = self;
+		mu->ownerValid = true;
+		mu->recursionCount = 1;
+		mu->signaled.store(false, std::memory_order_release);
+		return ret;
+	}
+	case ObjectType::Thread: {
+		auto th = std::move(obj).downcast<ThreadObject>();
+		pthread_t self = pthread_self();
+		std::unique_lock lk(th->m);
+		if (pthread_equal(th->thread, self)) {
+			// Cannot wait on self
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return WAIT_FAILED;
+		}
+		bool ok = doWait(lk, th->cv, [&] { return th->signaled.load(std::memory_order_acquire); });
+		return ok ? WAIT_OBJECT_0 : WAIT_TIMEOUT;
+	}
+	case ObjectType::Process: {
+		auto po = std::move(obj).downcast<ProcessObject>();
+		std::unique_lock lk(po->m);
+		if (po->pidfd == -1) {
+			// Cannot wait on self
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return WAIT_FAILED;
+		}
+		bool ok = doWait(lk, po->cv, [&] { return po->signaled.load(std::memory_order_acquire); });
+		return ok ? WAIT_OBJECT_0 : WAIT_TIMEOUT;
 	}
 	default:
-		DEBUG_LOG("WaitForSingleObject: unsupported handle type %d\n", data.type);
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return WAIT_FAILED;
 	}
@@ -592,20 +442,6 @@ void WIN_FUNC ReleaseSRWLockExclusive(PSRWLOCK SRWLock) { VERBOSE_LOG("STUB: Rel
 BOOLEAN WIN_FUNC TryAcquireSRWLockExclusive(PSRWLOCK SRWLock) {
 	VERBOSE_LOG("STUB: TryAcquireSRWLockExclusive(%p)\n", SRWLock);
 	return TRUE;
-}
-
-void resetOverlappedEvent(OVERLAPPED *ov) {
-	if (!ov || !ov->hEvent) {
-		return;
-	}
-	setEventSignaledState(ov->hEvent, false);
-}
-
-void signalOverlappedEvent(OVERLAPPED *ov) {
-	if (!ov || !ov->hEvent) {
-		return;
-	}
-	setEventSignaledState(ov->hEvent, true);
 }
 
 } // namespace kernel32

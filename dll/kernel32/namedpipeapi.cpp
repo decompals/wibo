@@ -1,5 +1,6 @@
 #include "namedpipeapi.h"
 
+#include "common.h"
 #include "errors.h"
 #include "fileapi.h"
 #include "files.h"
@@ -58,39 +59,12 @@ BOOL WIN_FUNC CreatePipe(PHANDLE hReadPipe, PHANDLE hWritePipe, LPSECURITY_ATTRI
 		fcntl(pipeFds[1], F_SETPIPE_SZ, static_cast<int>(nSize));
 	}
 
-	FILE *readStream = fdopen(pipeFds[0], "rb");
-	if (!readStream) {
-		int savedErrno = errno ? errno : EINVAL;
-		close(pipeFds[0]);
-		close(pipeFds[1]);
-		errno = savedErrno;
-		setLastErrorFromErrno();
-		return FALSE;
-	}
-	FILE *writeStream = fdopen(pipeFds[1], "wb");
-	if (!writeStream) {
-		int savedErrno = errno ? errno : EINVAL;
-		fclose(readStream);
-		close(pipeFds[1]);
-		errno = savedErrno;
-		setLastErrorFromErrno();
-		return FALSE;
-	}
-
-	setvbuf(readStream, nullptr, _IONBF, 0);
-	setvbuf(writeStream, nullptr, _IONBF, 0);
-
-	HANDLE readHandle = files::allocFpHandle(readStream, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, true);
-	HANDLE writeHandle = files::allocFpHandle(writeStream, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, true);
-	if (!readHandle || !writeHandle) {
-		fclose(readStream);
-		fclose(writeStream);
-		wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
-		return FALSE;
-	}
-
-	*hReadPipe = readHandle;
-	*hWritePipe = writeHandle;
+	auto readObj = make_pin<FileObject>(pipeFds[0]);
+	readObj->shareAccess = FILE_SHARE_READ | FILE_SHARE_WRITE;
+	auto writeObj = make_pin<FileObject>(pipeFds[1]);
+	writeObj->shareAccess = FILE_SHARE_READ | FILE_SHARE_WRITE;
+	*hReadPipe = wibo::handles().alloc(std::move(readObj), FILE_GENERIC_READ, 0);
+	*hWritePipe = wibo::handles().alloc(std::move(writeObj), FILE_GENERIC_WRITE, 0);
 	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }

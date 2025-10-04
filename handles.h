@@ -3,15 +3,20 @@
 #include "common.h"
 
 #include <atomic>
+#include <cassert>
 #include <condition_variable>
 #include <cstdint>
+#include <cstdio>
+#include <deque>
+#include <functional>
 #include <shared_mutex>
 #include <utility>
 #include <vector>
 
 enum class ObjectType : uint16_t {
 	File,
-	Mapped,
+	Directory,
+	Mapping,
 	Process,
 	Token,
 	Mutex,
@@ -22,58 +27,60 @@ enum class ObjectType : uint16_t {
 	RegistryKey,
 };
 
-struct ObjectHeader {
+struct ObjectBase {
 	const ObjectType type;
-	std::atomic<uint32_t> pointerCount{1};
+	std::atomic<uint32_t> pointerCount{0};
 	std::atomic<uint32_t> handleCount{0};
 
-	explicit ObjectHeader(ObjectType t) : type(t) {}
-	virtual ~ObjectHeader() = default;
+	explicit ObjectBase(ObjectType t) : type(t) {}
+	virtual ~ObjectBase() = default;
 
 	[[nodiscard]] virtual bool isWaitable() const { return false; }
-	virtual void onDestroy() {}
 };
 
 namespace detail {
 
-inline void ref(ObjectHeader *o) { o->pointerCount.fetch_add(1, std::memory_order_acq_rel); }
-inline void deref(ObjectHeader *o) {
+inline void ref(ObjectBase *o) { o->pointerCount.fetch_add(1, std::memory_order_acq_rel); }
+inline void deref(ObjectBase *o) {
 	if (o->pointerCount.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-		o->onDestroy();
 		delete o;
 	}
 }
 
 } // namespace detail
 
-struct WaitableObject : ObjectHeader {
+struct WaitableObject : ObjectBase {
 	std::atomic<bool> signaled{false};
 	std::mutex m;
 	std::condition_variable_any cv;
 
-	using ObjectHeader::ObjectHeader;
+	using ObjectBase::ObjectBase;
 	[[nodiscard]] bool isWaitable() const override { return true; }
 };
 
-template <class T> struct Pin {
-	enum class Tag { Acquire, Adopt };
+template <class T = ObjectBase> struct Pin {
+	static_assert(std::is_base_of_v<ObjectBase, T> || std::is_same_v<ObjectBase, T>,
+				  "Pin<T>: T must be ObjectBase or derive from it");
 
 	T *obj = nullptr;
 
 	Pin() = default;
-	Pin(T *o, Tag t) : obj(o) {
+	enum class Tag { Acquire, Adopt };
+	template <class U, class = std::enable_if_t<std::is_convertible<U *, T *>::value>>
+	explicit Pin(U *p, Tag t) : obj(static_cast<T *>(p)) {
 		if (obj && t == Tag::Acquire) {
 			detail::ref(obj);
 		}
 	}
-
-	static Pin acquire(ObjectHeader *o) { return {o, Tag::Acquire}; }
-	static Pin adopt(ObjectHeader *o) { return {o, Tag::Adopt}; }
-
 	Pin(const Pin &) = delete;
-	Pin &operator=(const Pin &) = delete;
-
 	Pin(Pin &&other) noexcept : obj(std::exchange(other.obj, nullptr)) {}
+	template <class U, class = std::enable_if_t<std::is_base_of<T, U>::value>> Pin &operator=(Pin<U> &&other) noexcept {
+		reset();
+		obj = std::exchange(other.obj, nullptr);
+		return *this;
+	}
+	template <class U, class = std::enable_if_t<std::is_base_of<T, U>::value>>
+	Pin(Pin<U> &&other) noexcept : obj(std::exchange(other.obj, nullptr)) {} // NOLINT(google-explicit-constructor)
 	Pin &operator=(Pin &&other) noexcept {
 		if (this != &other) {
 			reset();
@@ -84,7 +91,10 @@ template <class T> struct Pin {
 
 	~Pin() { reset(); }
 
-	ObjectHeader *release() { return std::exchange(obj, nullptr); }
+	static Pin acquire(T *o) { return Pin{o, Tag::Acquire}; }
+	static Pin adopt(T *o) { return Pin{o, Tag::Adopt}; }
+
+	[[nodiscard]] T *release() { return std::exchange(obj, nullptr); }
 	void reset() {
 		if (obj) {
 			detail::deref(obj);
@@ -92,12 +102,23 @@ template <class T> struct Pin {
 		}
 	}
 
-	T *operator->() const { return obj; }
-	T &operator*() const { return *obj; }
+	T *operator->() const {
+		assert(obj);
+		return obj;
+	}
+	T &operator*() const {
+		assert(obj);
+		return *obj;
+	}
 	[[nodiscard]] T *get() const { return obj; }
+	[[nodiscard]] Pin<T> clone() const { return Pin<T>::acquire(obj); }
 	explicit operator bool() const { return obj != nullptr; }
 
 	template <typename U> Pin<U> downcast() && {
+		static_assert(std::is_base_of_v<ObjectBase, U>, "U must derive from ObjectBase");
+		if constexpr (std::is_same_v<T, U>) {
+			return std::move(*this);
+		}
 		if (obj && obj->type == U::kType) {
 			auto *u = static_cast<U *>(obj);
 			obj = nullptr;
@@ -107,6 +128,12 @@ template <class T> struct Pin {
 	}
 };
 
+template <class T, class... Args>
+Pin<T> make_pin(Args &&...args) noexcept(std::is_nothrow_constructible_v<T, Args...>) {
+	T *p = new T(std::forward<Args>(args)...);
+	return Pin<T>::acquire(p);
+}
+
 constexpr DWORD HANDLE_FLAG_INHERIT = 0x1;
 constexpr DWORD HANDLE_FLAG_PROTECT_FROM_CLOSE = 0x2;
 
@@ -114,62 +141,113 @@ constexpr DWORD DUPLICATE_CLOSE_SOURCE = 0x1;
 constexpr DWORD DUPLICATE_SAME_ACCESS = 0x2;
 
 struct HandleMeta {
-	uint32_t grantedAccess;	  // effective access mask for this handle
-	uint32_t flags;			  // inherit/protect/etc
-	ObjectType typeCache;	  // cached ObjectType for fast getAs
-	uint16_t generation;	  // must match handle’s generation
+	uint32_t grantedAccess;
+	uint32_t flags;
+	ObjectType typeCache;
+	uint16_t generation;
 };
 
-// template <typename T>
-// struct HandleRef {
-// 	Pin<T> obj;
-// 	HandleMeta meta;
+// We have to stay under a HANDLE value of 0xFFFF for legacy applications,
+// and handles values are aligned to 4.
+constexpr DWORD MAX_HANDLES = 0x4000;
 
-// 	HandleRef() = default;
-// 	HandleRef(Pin<T> o, HandleMeta m) : obj(std::move(o)), meta(m) {}
-
-// 	explicit operator bool() const { return obj.operator bool(); }
-// };
-
-class HandleTable {
+class Handles {
   public:
-	HANDLE create(ObjectHeader *obj, uint32_t grantedAccess, uint32_t flags);
-	bool close(HANDLE h);
-	bool get(HANDLE h, Pin<ObjectHeader> &pinOut, HandleMeta *metaOut = nullptr);
+	using OnHandleZeroFn = void (*)(ObjectBase *);
+	explicit Handles(OnHandleZeroFn cb) : mOnHandleZero(cb) {}
+
+	HANDLE alloc(Pin<> obj, uint32_t grantedAccess, uint32_t flags);
+	bool release(HANDLE h);
+	Pin<> get(HANDLE h, HandleMeta *metaOut = nullptr);
 	template <typename T> Pin<T> getAs(HANDLE h, HandleMeta *metaOut = nullptr) {
-		static_assert(std::is_base_of_v<ObjectHeader, T>, "T must derive from ObjectHeader");
-		Pin<ObjectHeader> pin;
+		static_assert(std::is_base_of_v<ObjectBase, T>, "T must derive from ObjectBase");
 		HandleMeta metaOutLocal{};
 		if (!metaOut) {
 			metaOut = &metaOutLocal;
 		}
-		if (!get(h, pin, metaOut)) {
+		auto obj = get(h, metaOut);
+		if (!obj) {
 			return {};
 		}
-		if constexpr (std::is_same_v<T, ObjectHeader>) {
-			return std::move(pin);
-		} else if (metaOut->typeCache != T::kType || pin->type != T::kType) {
+		if constexpr (std::is_same_v<T, ObjectBase>) {
+			return std::move(obj);
+		} else if (metaOut->typeCache != T::kType || obj->type != T::kType) {
 			return {};
 		} else {
-			// Cast directly to T* and transfer ownership to Pin<T>
-			return Pin<T>::adopt(static_cast<T *>(pin.release()));
+			return Pin<T>::adopt(static_cast<T *>(obj.release()));
 		}
 	}
 	bool setInformation(HANDLE h, uint32_t mask, uint32_t value);
 	bool getInformation(HANDLE h, uint32_t *outFlags) const;
-	bool duplicateTo(HANDLE src, HandleTable &dst, HANDLE *out, uint32_t desiredAccess, bool inherit, uint32_t options);
+	bool duplicateTo(HANDLE src, Handles &dst, HANDLE &out, uint32_t desiredAccess, bool inherit, uint32_t options);
 
   private:
-	struct HandleEntry {
-		struct ObjectHeader *obj;
+	struct Entry {
+		ObjectBase *obj;
 		HandleMeta meta;
 	};
 
-	std::vector<HandleEntry> slots_;
-	std::vector<uint32_t> freeList_;
-	mutable std::shared_mutex mu_;
+	mutable std::shared_mutex m;
+	std::vector<Entry> mSlots;
+	OnHandleZeroFn mOnHandleZero = nullptr;
+	std::vector<uint32_t> mFreeBelow;
+	std::vector<uint32_t> mFreeAbove;
+	std::deque<uint32_t> mQuarantine;
+	uint32_t nextIndex = 0;
+};
+
+class Namespace {
+  public:
+	bool insert(const std::u16string &name, ObjectBase *obj, bool permanent = false);
+	void remove(ObjectBase *obj);
+	Pin<> get(const std::u16string &name);
+
+	template <typename T> Pin<T> getAs(const std::u16string &name) {
+		if (auto pin = get(name)) {
+			return std::move(pin).downcast<T>();
+		}
+		return {};
+	}
+
+	template <typename F, typename Ptr = std::invoke_result_t<F &>,
+			  typename T = std::remove_pointer_t<std::decay_t<Ptr>>,
+			  std::enable_if_t<std::is_pointer<std::decay_t<Ptr>>::value, int> = 0>
+	std::pair<Pin<T>, bool> getOrCreate(const std::u16string &name, F &&make) {
+		if (name.empty()) {
+			// No name: create unconditionally
+			T *raw = std::invoke(std::forward<F>(make));
+			return {Pin<T>::acquire(raw), true};
+		}
+		if (auto existing = get(name)) {
+			// Return even if downcast fails (don't use getAs<T>)
+			return {std::move(existing).downcast<T>(), false};
+		}
+		T *raw = std::invoke(std::forward<F>(make));
+		Pin<T> newObj = Pin<T>::acquire(raw);
+		if (!newObj) {
+			return {Pin<T>{}, false};
+		}
+		if (!insert(name, newObj.get())) {
+			// Race: someone else inserted it first
+			return {getAs<T>(name), false};
+		}
+		return {std::move(newObj), true};
+	}
+
+  private:
+	struct Entry {
+		ObjectBase *obj;
+		bool permanent;
+		Entry(ObjectBase *o, bool p) : obj(o), permanent(p) {}
+	};
+
+	mutable std::shared_mutex m;
+	std::unordered_map<std::u16string, Entry> mTable;
 };
 
 namespace wibo {
-extern HandleTable &handles();
-}
+
+extern Namespace g_namespace;
+extern Handles &handles();
+
+} // namespace wibo

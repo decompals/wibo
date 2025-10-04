@@ -1,4 +1,5 @@
 #include "common.h"
+#include "dll/kernel32/internal.h"
 #include "errors.h"
 #include "files.h"
 #include "handles.h"
@@ -71,10 +72,10 @@ using PRTL_OSVERSIONINFOEXW = RTL_OSVERSIONINFOEXW *;
 constexpr ULONG kOsMajorVersion = 6;
 constexpr ULONG kOsMinorVersion = 2;
 constexpr ULONG kOsBuildNumber = 0;
-constexpr ULONG kOsPlatformId = 2; // VER_PLATFORM_WIN32_NT
+constexpr ULONG kOsPlatformId = 2;			// VER_PLATFORM_WIN32_NT
 constexpr BYTE kProductTypeWorkstation = 1; // VER_NT_WORKSTATION
 
-static bool resolveProcessDetails(HANDLE processHandle, ProcessHandleDetails &details) {
+bool resolveProcessDetails(HANDLE processHandle, ProcessHandleDetails &details) {
 	uintptr_t rawHandle = reinterpret_cast<uintptr_t>(processHandle);
 	if (rawHandle == static_cast<uintptr_t>(-1)) {
 		details.pid = getpid();
@@ -84,20 +85,19 @@ static bool resolveProcessDetails(HANDLE processHandle, ProcessHandleDetails &de
 		return true;
 	}
 
-	auto data = handles::dataFromHandle(processHandle, false);
-	if (data.type != handles::TYPE_PROCESS || data.ptr == nullptr) {
+	auto po = wibo::handles().getAs<ProcessObject>(processHandle);
+	if (!po) {
 		return false;
 	}
 
-	auto *process = reinterpret_cast<processes::Process *>(data.ptr);
-	details.pid = process->pid;
-	details.exitCode = process->exitCode;
-	details.isCurrentProcess = (process->pid == getpid());
+	details.pid = po->pid;
+	details.exitCode = po->exitCode;
+	details.isCurrentProcess = po->pid == getpid();
 	details.peb = details.isCurrentProcess ? wibo::processPeb : nullptr;
 	return true;
 }
 
-static std::string windowsImagePathFor(const ProcessHandleDetails &details) {
+std::string windowsImagePathFor(const ProcessHandleDetails &details) {
 	if (details.isCurrentProcess && !wibo::guestExecutablePath.empty()) {
 		return files::pathToWindows(files::canonicalPath(wibo::guestExecutablePath));
 	}
@@ -134,15 +134,15 @@ NTSTATUS WIN_FUNC NtReadFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE Ap
 		return STATUS_INVALID_PARAMETER;
 	}
 
-	auto file = files::fileHandleFromHandle(FileHandle);
-	if (!file || !file->fp) {
+	auto file = wibo::handles().getAs<FileObject>(FileHandle);
+	if (!file || !file->valid()) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		IoStatusBlock->Status = STATUS_INVALID_HANDLE;
 		IoStatusBlock->Information = 0;
 		return STATUS_INVALID_HANDLE;
 	}
 
-	bool handleOverlapped = (file->flags & FILE_FLAG_OVERLAPPED) != 0;
+	bool handleOverlapped = file->overlapped;
 	std::optional<uint64_t> offset;
 	bool updateFilePointer = !handleOverlapped;
 	if (ByteOffset) {
@@ -155,7 +155,7 @@ NTSTATUS WIN_FUNC NtReadFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE Ap
 		kernel32::ResetEvent(Event);
 	}
 
-	auto io = files::read(file, Buffer, Length, offset, updateFilePointer);
+	auto io = files::read(file.get(), Buffer, Length, offset, updateFilePointer);
 	DWORD winError = ERROR_SUCCESS;
 	NTSTATUS status = STATUS_SUCCESS;
 	if (io.unixError != 0) {
@@ -286,10 +286,10 @@ NTSTATUS WIN_FUNC RtlGetVersion(PRTL_OSVERSIONINFOW lpVersionInformation) {
 }
 
 NTSTATUS WIN_FUNC NtQueryInformationProcess(HANDLE ProcessHandle, PROCESSINFOCLASS ProcessInformationClass,
-										  PVOID ProcessInformation, ULONG ProcessInformationLength,
-										  PULONG ReturnLength) {
+											PVOID ProcessInformation, ULONG ProcessInformationLength,
+											PULONG ReturnLength) {
 	DEBUG_LOG("NtQueryInformationProcess(%p, %u, %p, %u, %p) ", ProcessHandle, ProcessInformationClass,
-		  ProcessInformation, ProcessInformationLength, ReturnLength);
+			  ProcessInformation, ProcessInformationLength, ReturnLength);
 	if (!ProcessInformation) {
 		DEBUG_LOG("-> 0x%x\n", STATUS_INVALID_PARAMETER);
 		return STATUS_INVALID_PARAMETER;
@@ -371,7 +371,8 @@ NTSTATUS WIN_FUNC NtQueryInformationProcess(HANDLE ProcessHandle, PROCESSINFOCLA
 		}
 
 		auto *unicode = reinterpret_cast<UNICODE_STRING *>(ProcessInformation);
-		auto *buffer = reinterpret_cast<uint16_t *>(reinterpret_cast<uint8_t *>(ProcessInformation) + sizeof(UNICODE_STRING));
+		auto *buffer =
+			reinterpret_cast<uint16_t *>(reinterpret_cast<uint8_t *>(ProcessInformation) + sizeof(UNICODE_STRING));
 		std::memcpy(buffer, widePath.data(), stringBytes);
 		size_t characterCount = widePath.empty() ? 0 : widePath.size() - 1;
 		unicode->Length = static_cast<unsigned short>(characterCount * sizeof(uint16_t));

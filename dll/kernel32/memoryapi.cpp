@@ -1,12 +1,10 @@
 #include "memoryapi.h"
 #include "common.h"
 #include "errors.h"
-#include "files.h"
 #include "handles.h"
 #include "internal.h"
 #include "strutil.h"
 
-#include <algorithm>
 #include <cerrno>
 #include <fcntl.h>
 #include <iterator>
@@ -23,21 +21,34 @@ namespace {
 constexpr size_t kVirtualAllocationGranularity = 64 * 1024;
 constexpr uintptr_t kProcessAddressLimit = 0x80000000;
 
-struct MappingObject {
+struct MappingObject : ObjectBase {
+	static constexpr ObjectType kType = ObjectType::Mapping;
+
+	std::mutex m;
 	int fd = -1;
 	size_t maxSize = 0;
 	DWORD protect = 0;
 	bool anonymous = false;
 	bool closed = false;
-	size_t refCount = 0;
+
+	explicit MappingObject() : ObjectBase(kType) {}
+	~MappingObject() override;
 };
+
+MappingObject::~MappingObject() {
+	std::lock_guard lk(m);
+	if (fd != -1) {
+		close(fd);
+		fd = -1;
+	}
+}
 
 struct ViewInfo {
 	uintptr_t viewBase = 0;
 	size_t viewLength = 0;
 	uintptr_t allocationBase = 0;
 	size_t allocationLength = 0;
-	MappingObject *owner = nullptr;
+	Pin<MappingObject> owner;
 	DWORD protect = PAGE_NOACCESS;
 	DWORD allocationProtect = PAGE_NOACCESS;
 	DWORD type = MEM_PRIVATE;
@@ -45,26 +56,6 @@ struct ViewInfo {
 
 std::map<uintptr_t, ViewInfo> g_viewInfo;
 std::mutex g_viewInfoMutex;
-
-void closeMappingIfPossible(MappingObject *mapping) {
-	if (!mapping) {
-		return;
-	}
-	if (mapping->fd != -1) {
-		close(mapping->fd);
-		mapping->fd = -1;
-	}
-	delete mapping;
-}
-
-void tryReleaseMapping(MappingObject *mapping) {
-	if (!mapping) {
-		return;
-	}
-	if (mapping->closed && mapping->refCount == 0) {
-		closeMappingIfPossible(mapping);
-	}
-}
 
 struct VirtualAllocation {
 	uintptr_t base = 0;
@@ -175,9 +166,8 @@ DWORD desiredAccessToProtect(DWORD desiredAccess, DWORD mappingProtect) {
 	if (wantCopy) {
 		wantWrite = true;
 	}
-	const bool supportsWrite =
-		mappingProtect == PAGE_READWRITE || mappingProtect == PAGE_EXECUTE_READWRITE || mappingProtect == PAGE_WRITECOPY ||
-		mappingProtect == PAGE_EXECUTE_WRITECOPY;
+	const bool supportsWrite = mappingProtect == PAGE_READWRITE || mappingProtect == PAGE_EXECUTE_READWRITE ||
+							   mappingProtect == PAGE_WRITECOPY || mappingProtect == PAGE_EXECUTE_WRITECOPY;
 	const bool supportsCopy = mappingProtect == PAGE_WRITECOPY || mappingProtect == PAGE_EXECUTE_WRITECOPY;
 
 	if (wantCopy && !supportsCopy) {
@@ -192,7 +182,7 @@ DWORD desiredAccessToProtect(DWORD desiredAccess, DWORD mappingProtect) {
 		}
 	}
 	if (!wantRead && (mappingProtect == PAGE_READONLY || mappingProtect == PAGE_EXECUTE_READ ||
-					   mappingProtect == PAGE_WRITECOPY || mappingProtect == PAGE_EXECUTE_WRITECOPY)) {
+					  mappingProtect == PAGE_WRITECOPY || mappingProtect == PAGE_EXECUTE_WRITECOPY)) {
 		wantRead = true;
 	}
 
@@ -276,7 +266,7 @@ bool moduleRegionForAddress(uintptr_t pageBase, MEMORY_BASIC_INFORMATION &info) 
 	uintptr_t blockStart = sections[matchIndex].base;
 	uintptr_t blockEnd = sections[matchIndex].base + sections[matchIndex].size;
 	DWORD blockProtect = sections[matchIndex].protect;
-	for (size_t prev = matchIndex; prev > 0; ) {
+	for (size_t prev = matchIndex; prev > 0;) {
 		--prev;
 		const auto &section = sections[prev];
 		if (section.base + section.size != blockStart) {
@@ -308,7 +298,7 @@ bool moduleRegionForAddress(uintptr_t pageBase, MEMORY_BASIC_INFORMATION &info) 
 }
 
 bool mappedViewRegionForAddress(uintptr_t request, uintptr_t pageBase, MEMORY_BASIC_INFORMATION &info) {
-	std::lock_guard<std::mutex> guard(g_viewInfoMutex);
+	std::lock_guard guard(g_viewInfoMutex);
 	if (g_viewInfo.empty()) {
 		return false;
 	}
@@ -344,7 +334,7 @@ bool mappedViewRegionForAddress(uintptr_t request, uintptr_t pageBase, MEMORY_BA
 
 bool virtualAllocationRegionForAddress(uintptr_t pageBase, MEMORY_BASIC_INFORMATION &info) {
 	const size_t pageSize = systemPageSize();
-	std::unique_lock<std::mutex> lock(g_virtualAllocMutex);
+	std::unique_lock lk(g_virtualAllocMutex);
 	VirtualAllocation *region = lookupRegion(pageBase);
 	if (!region) {
 		uintptr_t regionStart = pageBase;
@@ -358,7 +348,7 @@ bool virtualAllocationRegionForAddress(uintptr_t pageBase, MEMORY_BASIC_INFORMAT
 		if (regionEnd <= regionStart) {
 			regionEnd = regionStart + pageSize;
 		}
-		lock.unlock();
+		lk.unlock();
 		info.BaseAddress = reinterpret_cast<void *>(regionStart);
 		info.AllocationBase = nullptr;
 		info.AllocationProtect = 0;
@@ -407,7 +397,7 @@ bool virtualAllocationRegionForAddress(uintptr_t pageBase, MEMORY_BASIC_INFORMAT
 	uintptr_t allocationBase = region->base;
 	DWORD allocationProtect = region->allocationProtect != 0 ? region->allocationProtect : PAGE_NOACCESS;
 	DWORD finalProtect = committed ? pageProtect : PAGE_NOACCESS;
-	lock.unlock();
+	lk.unlock();
 	info.BaseAddress = reinterpret_cast<void *>(blockStart);
 	info.AllocationBase = reinterpret_cast<void *>(allocationBase);
 	info.AllocationProtect = allocationProtect;
@@ -477,50 +467,39 @@ HANDLE WIN_FUNC CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMap
 	(void)lpFileMappingAttributes;
 	(void)lpName;
 
-	auto *mapping = new MappingObject();
-	mapping->protect = flProtect;
-
 	uint64_t size = (static_cast<uint64_t>(dwMaximumSizeHigh) << 32) | dwMaximumSizeLow;
 	if (flProtect != PAGE_READONLY && flProtect != PAGE_READWRITE && flProtect != PAGE_WRITECOPY) {
 		DEBUG_LOG("CreateFileMappingA: unsupported protection 0x%x\n", flProtect);
 		wibo::lastError = ERROR_INVALID_PARAMETER;
-		closeMappingIfPossible(mapping);
 		return nullptr;
 	}
+
+	auto mapping = make_pin<MappingObject>();
+	mapping->protect = flProtect;
 
 	if (hFile == INVALID_HANDLE_VALUE) {
 		mapping->anonymous = true;
 		mapping->fd = -1;
 		if (size == 0) {
 			wibo::lastError = ERROR_INVALID_PARAMETER;
-			closeMappingIfPossible(mapping);
 			return nullptr;
 		}
 		mapping->maxSize = size;
 	} else {
-		FILE *fp = files::fpFromHandle(hFile);
-		if (!fp) {
+		auto file = wibo::handles().getAs<FileObject>(hFile);
+		if (!file || !file->valid()) {
 			wibo::lastError = ERROR_INVALID_HANDLE;
-			closeMappingIfPossible(mapping);
 			return nullptr;
 		}
-		int originalFd = fileno(fp);
-		if (originalFd == -1) {
-			setLastErrorFromErrno();
-			closeMappingIfPossible(mapping);
-			return nullptr;
-		}
-		int dupFd = fcntl(originalFd, F_DUPFD_CLOEXEC, 0);
+		int dupFd = fcntl(file->fd, F_DUPFD_CLOEXEC, 0);
 		if (dupFd == -1) {
 			setLastErrorFromErrno();
-			closeMappingIfPossible(mapping);
 			return nullptr;
 		}
 		mapping->fd = dupFd;
 		if (size == 0) {
-			int64_t fileSize = getFileSizeFromHandle(hFile);
+			off64_t fileSize = lseek64(dupFd, 0, SEEK_END);
 			if (fileSize < 0) {
-				closeMappingIfPossible(mapping);
 				return nullptr;
 			}
 			size = static_cast<uint64_t>(fileSize);
@@ -529,7 +508,7 @@ HANDLE WIN_FUNC CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMap
 	}
 
 	wibo::lastError = ERROR_SUCCESS;
-	return handles::allocDataHandle({handles::TYPE_MAPPED, mapping, static_cast<size_t>(mapping->maxSize)});
+	return wibo::handles().alloc(std::move(mapping), 0, 0);
 }
 
 HANDLE WIN_FUNC CreateFileMappingW(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMappingAttributes, DWORD flProtect,
@@ -540,7 +519,7 @@ HANDLE WIN_FUNC CreateFileMappingW(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMap
 							  lpName ? name.c_str() : nullptr);
 }
 
-static LPVOID mapViewOfFileInternal(MappingObject *mapping, DWORD dwDesiredAccess, uint64_t offset,
+static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredAccess, uint64_t offset,
 									SIZE_T dwNumberOfBytesToMap, LPVOID baseAddress) {
 	if (!mapping) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
@@ -660,20 +639,20 @@ static LPVOID mapViewOfFileInternal(MappingObject *mapping, DWORD dwDesiredAcces
 	if (alignedViewLength == std::numeric_limits<uintptr_t>::max()) {
 		alignedViewLength = viewLength;
 	}
+	DWORD protect = mapping->protect;
 	ViewInfo view{};
 	view.viewBase = reinterpret_cast<uintptr_t>(viewPtr);
 	view.viewLength = static_cast<size_t>(alignedViewLength);
 	view.allocationBase = reinterpret_cast<uintptr_t>(mapBase);
 	view.allocationLength = mapLength;
-	view.owner = mapping;
-	view.protect = desiredAccessToProtect(dwDesiredAccess, mapping->protect);
-	view.allocationProtect = mapping->protect;
+	view.owner = std::move(mapping);
+	view.protect = desiredAccessToProtect(dwDesiredAccess, protect);
+	view.allocationProtect = protect;
 	view.type = MEM_MAPPED;
 	{
-		std::lock_guard<std::mutex> guard(g_viewInfoMutex);
-		g_viewInfo[view.viewBase] = view;
+		std::lock_guard guard(g_viewInfoMutex);
+		g_viewInfo.emplace(view.viewBase, std::move(view));
 	}
-	mapping->refCount++;
 	wibo::lastError = ERROR_SUCCESS;
 	return viewPtr;
 }
@@ -683,14 +662,13 @@ LPVOID WIN_FUNC MapViewOfFile(HANDLE hFileMappingObject, DWORD dwDesiredAccess, 
 	DEBUG_LOG("MapViewOfFile(%p, 0x%x, %u, %u, %zu)\n", hFileMappingObject, dwDesiredAccess, dwFileOffsetHigh,
 			  dwFileOffsetLow, dwNumberOfBytesToMap);
 
-	handles::Data data = handles::dataFromHandle(hFileMappingObject, false);
-	if (data.type != handles::TYPE_MAPPED) {
+	auto mapping = wibo::handles().getAs<MappingObject>(hFileMappingObject);
+	if (!mapping) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return nullptr;
 	}
-	auto *mapping = reinterpret_cast<MappingObject *>(data.ptr);
 	uint64_t offset = (static_cast<uint64_t>(dwFileOffsetHigh) << 32) | dwFileOffsetLow;
-	return mapViewOfFileInternal(mapping, dwDesiredAccess, offset, dwNumberOfBytesToMap, nullptr);
+	return mapViewOfFileInternal(std::move(mapping), dwDesiredAccess, offset, dwNumberOfBytesToMap, nullptr);
 }
 
 LPVOID WIN_FUNC MapViewOfFileEx(HANDLE hFileMappingObject, DWORD dwDesiredAccess, DWORD dwFileOffsetHigh,
@@ -698,47 +676,32 @@ LPVOID WIN_FUNC MapViewOfFileEx(HANDLE hFileMappingObject, DWORD dwDesiredAccess
 	DEBUG_LOG("MapViewOfFileEx(%p, 0x%x, %u, %u, %zu, %p)\n", hFileMappingObject, dwDesiredAccess, dwFileOffsetHigh,
 			  dwFileOffsetLow, dwNumberOfBytesToMap, lpBaseAddress);
 
-	handles::Data data = handles::dataFromHandle(hFileMappingObject, false);
-	if (data.type != handles::TYPE_MAPPED) {
+	auto mapping = wibo::handles().getAs<MappingObject>(hFileMappingObject);
+	if (!mapping) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return nullptr;
 	}
-	auto *mapping = reinterpret_cast<MappingObject *>(data.ptr);
 	uint64_t offset = (static_cast<uint64_t>(dwFileOffsetHigh) << 32) | dwFileOffsetLow;
-	return mapViewOfFileInternal(mapping, dwDesiredAccess, offset, dwNumberOfBytesToMap, lpBaseAddress);
+	return mapViewOfFileInternal(std::move(mapping), dwDesiredAccess, offset, dwNumberOfBytesToMap, lpBaseAddress);
 }
 
 BOOL WIN_FUNC UnmapViewOfFile(LPCVOID lpBaseAddress) {
 	DEBUG_LOG("UnmapViewOfFile(%p)\n", lpBaseAddress);
-	std::unique_lock<std::mutex> lock(g_viewInfoMutex);
+	std::unique_lock lk(g_viewInfoMutex);
 	auto it = g_viewInfo.find(reinterpret_cast<uintptr_t>(lpBaseAddress));
 	if (it == g_viewInfo.end()) {
-		lock.unlock();
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
-	ViewInfo info = it->second;
+	void *base = reinterpret_cast<void *>(it->second.allocationBase);
+	size_t length = it->second.allocationLength;
 	g_viewInfo.erase(it);
-	lock.unlock();
-	if (info.allocationLength != 0) {
-		munmap(reinterpret_cast<void *>(info.allocationBase), info.allocationLength);
-	}
-	if (info.owner && info.owner->refCount > 0) {
-		info.owner->refCount--;
-		tryReleaseMapping(info.owner);
+	lk.unlock();
+	if (length != 0) {
+		munmap(base, length);
 	}
 	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
-}
-
-bool closeFileMappingHandle(void *mappingPtr) {
-	auto *mapping = reinterpret_cast<MappingObject *>(mappingPtr);
-	if (!mapping) {
-		return false;
-	}
-	mapping->closed = true;
-	tryReleaseMapping(mapping);
-	return true;
 }
 
 LPVOID WIN_FUNC VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect) {
@@ -782,7 +745,7 @@ LPVOID WIN_FUNC VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocation
 		uintptr_t start = alignDown(request, pageSize);
 		uintptr_t end = alignUp(request + static_cast<uintptr_t>(dwSize), pageSize);
 		size_t length = static_cast<size_t>(end - start);
-		std::unique_lock<std::mutex> lock(g_virtualAllocMutex);
+		std::unique_lock lk(g_virtualAllocMutex);
 		VirtualAllocation *region = lookupRegion(start);
 		if (!region || !rangeWithinRegion(*region, start, length)) {
 			wibo::lastError = ERROR_INVALID_ADDRESS;
@@ -807,7 +770,7 @@ LPVOID WIN_FUNC VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocation
 	}
 
 	const size_t pageSize = systemPageSize();
-	std::unique_lock<std::mutex> lock(g_virtualAllocMutex);
+	std::unique_lock lk(g_virtualAllocMutex);
 
 	if (reserve) {
 		uintptr_t base = 0;
@@ -950,7 +913,7 @@ BOOL WIN_FUNC VirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType) {
 	}
 
 	const size_t pageSize = systemPageSize();
-	std::unique_lock<std::mutex> lock(g_virtualAllocMutex);
+	std::unique_lock lk(g_virtualAllocMutex);
 
 	if (release) {
 		uintptr_t base = reinterpret_cast<uintptr_t>(lpAddress);
@@ -970,7 +933,7 @@ BOOL WIN_FUNC VirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType) {
 		}
 		size_t length = exact->second.size;
 		g_virtualAllocations.erase(exact);
-		lock.unlock();
+		lk.unlock();
 		if (munmap(lpAddress, length) != 0) {
 			wibo::lastError = wibo::winErrorFromErrno(errno);
 			return FALSE;
@@ -1038,7 +1001,7 @@ BOOL WIN_FUNC VirtualProtect(LPVOID lpAddress, SIZE_T dwSize, DWORD flNewProtect
 		return FALSE;
 	}
 
-	std::unique_lock<std::mutex> lock(g_virtualAllocMutex);
+	std::unique_lock lk(g_virtualAllocMutex);
 	VirtualAllocation *region = lookupRegion(start);
 	if (!region || !rangeWithinRegion(*region, start, static_cast<size_t>(end - start))) {
 		wibo::lastError = ERROR_INVALID_ADDRESS;
@@ -1072,7 +1035,7 @@ BOOL WIN_FUNC VirtualProtect(LPVOID lpAddress, SIZE_T dwSize, DWORD flNewProtect
 	for (size_t i = 0; i < pageCount; ++i) {
 		region->pageProtect[firstPage + i] = flNewProtect;
 	}
-	lock.unlock();
+	lk.unlock();
 
 	if (lpflOldProtect) {
 		*lpflOldProtect = previousProtect;

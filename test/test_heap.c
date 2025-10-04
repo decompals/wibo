@@ -50,7 +50,7 @@ int main(void) {
 
     SetLastError(0);
     TEST_CHECK(!HeapDestroy(processHeap));
-    TEST_CHECK_EQ(ERROR_INVALID_PARAMETER, GetLastError());
+    TEST_CHECK_EQ(ERROR_INVALID_HANDLE, GetLastError());
 
     return EXIT_SUCCESS;
 }

@@ -323,21 +323,14 @@ BOOL WIN_FUNC DuplicateTokenEx(HANDLE hExistingToken, DWORD dwDesiredAccess, voi
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
-	handles::Data existingData = handles::dataFromHandle(hExistingToken, false);
-	if (existingData.type != handles::TYPE_TOKEN || existingData.ptr == nullptr) {
+	auto existing = wibo::handles().getAs<TokenObject>(hExistingToken);
+	if (!existing) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
-	auto *existingToken = static_cast<TokenObject *>(existingData.ptr);
-	auto *newToken = new TokenObject(*existingToken);
-	if (dwDesiredAccess != 0) {
-		newToken->desiredAccess = dwDesiredAccess;
-	}
-	handles::Data newData;
-	newData.type = handles::TYPE_TOKEN;
-	newData.ptr = newToken;
-	newData.size = sizeof(TokenObject);
-	*phNewToken = handles::allocDataHandle(newData);
+	auto newToken =
+		make_pin<TokenObject>(existing->obj.clone(), dwDesiredAccess == 0 ? existing->desiredAccess : dwDesiredAccess);
+	*phNewToken = wibo::handles().alloc(std::move(newToken), 0, 0);
 	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
@@ -411,8 +404,8 @@ BOOL WIN_FUNC SetKernelObjectSecurity(HANDLE Handle, SECURITY_INFORMATION Securi
 		wibo::lastError = ERROR_INVALID_SECURITY_DESCR;
 		return FALSE;
 	}
-	auto data = handles::dataFromHandle(Handle, false);
-	if (data.type == handles::TYPE_UNUSED) {
+	auto obj = wibo::handles().get(Handle);
+	if (!obj) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
@@ -461,14 +454,14 @@ BOOL WIN_FUNC SetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR pSecurityDescriptor
 
 BOOL WIN_FUNC GetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS TokenInformationClass,
 								  LPVOID TokenInformation, DWORD TokenInformationLength, LPDWORD ReturnLength) {
-	DEBUG_LOG("GetTokenInformation(%p, %u, %p, %u, %p)\n", TokenHandle, TokenInformationClass, TokenInformation,
+	DEBUG_LOG("STUB: GetTokenInformation(%p, %u, %p, %u, %p)\n", TokenHandle, TokenInformationClass, TokenInformation,
 			  TokenInformationLength, ReturnLength);
 	if (!ReturnLength) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
-	auto data = handles::dataFromHandle(TokenHandle, false);
-	if (data.type != handles::TYPE_TOKEN) {
+	auto token = wibo::handles().getAs<TokenObject>(TokenHandle);
+	if (!token) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
@@ -563,8 +556,8 @@ BOOL WIN_FUNC SetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS To
 	(void)TokenInformationClass;
 	(void)TokenInformation;
 	(void)TokenInformationLength;
-	auto data = handles::dataFromHandle(TokenHandle, false);
-	if (data.type != handles::TYPE_TOKEN) {
+	auto token = wibo::handles().getAs<TokenObject>(TokenHandle);
+	if (!token) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}

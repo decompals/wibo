@@ -13,18 +13,13 @@ BOOL WIN_FUNC GetOverlappedResult(HANDLE hFile, LPOVERLAPPED lpOverlapped, LPDWO
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
-	if (bWait && lpOverlapped->Internal == STATUS_PENDING) {
-		if (lpOverlapped->hEvent) {
-			WaitForSingleObject(lpOverlapped->hEvent, 0xFFFFFFFF);
-		}
+	if (bWait && lpOverlapped->Internal == STATUS_PENDING && lpOverlapped->hEvent) {
+		WaitForSingleObject(lpOverlapped->hEvent, INFINITE);
 	}
 
 	const auto status = static_cast<NTSTATUS>(lpOverlapped->Internal);
 	if (status == STATUS_PENDING) {
 		wibo::lastError = ERROR_IO_INCOMPLETE;
-		if (lpNumberOfBytesTransferred) {
-			*lpNumberOfBytesTransferred = static_cast<DWORD>(lpOverlapped->InternalHigh);
-		}
 		return FALSE;
 	}
 
@@ -36,7 +31,7 @@ BOOL WIN_FUNC GetOverlappedResult(HANDLE hFile, LPOVERLAPPED lpOverlapped, LPDWO
 		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
-	if (status == STATUS_END_OF_FILE || status == ERROR_HANDLE_EOF) {
+	if (status == STATUS_END_OF_FILE) {
 		wibo::lastError = ERROR_HANDLE_EOF;
 		return FALSE;
 	}

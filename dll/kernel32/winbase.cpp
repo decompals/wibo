@@ -168,7 +168,7 @@ namespace kernel32 {
 UINT WIN_FUNC SetHandleCount(UINT uNumber) {
 	DEBUG_LOG("SetHandleCount(%u)\n", uNumber);
 	(void)uNumber;
-	return handles::MAX_HANDLES;
+	return (1u << 17) - 1;
 }
 
 DWORD WIN_FUNC FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId, DWORD dwLanguageId, LPSTR lpBuffer,

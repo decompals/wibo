@@ -74,10 +74,10 @@ BOOL WIN_FUNC WriteConsoleW(HANDLE hConsoleOutput, LPCVOID lpBuffer, DWORD nNumb
 		return FALSE;
 	}
 
-	FILE *fp = files::fpFromHandle(hConsoleOutput);
-	if (fp == stdout || fp == stderr) {
+	auto file = wibo::handles().getAs<FileObject>(hConsoleOutput);
+	if (file->fd == STDOUT_FILENO || file->fd == STDERR_FILENO) {
 		auto str = wideStringToString(static_cast<const uint16_t *>(lpBuffer), nNumberOfCharsToWrite);
-		fprintf(fp, "%s", str.c_str());
+		dprintf(file->fd, "%s", str.c_str());
 		if (lpNumberOfCharsWritten) {
 			*lpNumberOfCharsWritten = nNumberOfCharsToWrite;
 		}

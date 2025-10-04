@@ -88,7 +88,7 @@ BOOL WIN_FUNC TlsSetValue(DWORD dwTlsIndex, LPVOID lpTlsValue);
 HANDLE WIN_FUNC CreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dwStackSize,
 							 LPTHREAD_START_ROUTINE lpStartAddress, LPVOID lpParameter, DWORD dwCreationFlags,
 							 LPDWORD lpThreadId);
-void WIN_FUNC ExitThread(DWORD dwExitCode);
+[[noreturn]] void WIN_FUNC ExitThread(DWORD dwExitCode);
 BOOL WIN_FUNC GetExitCodeThread(HANDLE hThread, LPDWORD lpExitCode);
 BOOL WIN_FUNC SetThreadPriority(HANDLE hThread, int nPriority);
 int WIN_FUNC GetThreadPriority(HANDLE hThread);

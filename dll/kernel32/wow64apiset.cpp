@@ -1,5 +1,6 @@
 #include "wow64apiset.h"
 #include "common.h"
+#include "dll/kernel32/internal.h"
 #include "errors.h"
 #include "handles.h"
 
@@ -29,14 +30,14 @@ BOOL WIN_FUNC IsWow64Process(HANDLE hProcess, PBOOL Wow64Process) {
 	}
 
 	uintptr_t rawHandle = reinterpret_cast<uintptr_t>(hProcess);
-	bool isPseudoHandle = rawHandle == static_cast<uintptr_t>(-1);
+	bool isPseudoHandle = rawHandle == kPseudoCurrentProcessHandleValue;
 	if (!isPseudoHandle) {
 		if (!hProcess) {
 			wibo::lastError = ERROR_INVALID_HANDLE;
 			return FALSE;
 		}
-		auto data = handles::dataFromHandle(hProcess, false);
-		if (data.type != handles::TYPE_PROCESS || data.ptr == nullptr) {
+		auto obj = wibo::handles().getAs<ProcessObject>(hProcess);
+		if (!obj) {
 			wibo::lastError = ERROR_INVALID_HANDLE;
 			return FALSE;
 		}

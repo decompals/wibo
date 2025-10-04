@@ -8,16 +8,20 @@
 #include "strutil.h"
 #include "timeutil.h"
 
+#include <atomic>
 #include <cerrno>
 #include <csignal>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <functional>
 #include <limits>
+#include <mutex>
 #include <pthread.h>
 #include <string>
 #include <sys/resource.h>
+#include <sys/syscall.h>
 #include <sys/time.h>
 #include <unistd.h>
 #include <vector>
@@ -40,12 +44,6 @@ constexpr DWORD STARTF_USESHOWWINDOW = 0x00000001;
 constexpr DWORD STARTF_USESTDHANDLES = 0x00000100;
 constexpr WORD SW_SHOWNORMAL = 1;
 
-struct ThreadStartData {
-	LPTHREAD_START_ROUTINE startRoutine;
-	void *parameter;
-	ThreadObject *threadObject;
-};
-
 FILETIME fileTimeFromTimeval(const struct timeval &value) {
 	uint64_t total = 0;
 	if (value.tv_sec > 0 || value.tv_usec > 0) {
@@ -60,19 +58,6 @@ FILETIME fileTimeFromTimespec(const struct timespec &value) {
 		total = static_cast<uint64_t>(value.tv_sec) * 10000000ULL + static_cast<uint64_t>(value.tv_nsec) / 100ULL;
 	}
 	return fileTimeFromDuration(total);
-}
-
-void destroyThreadObject(ThreadObject *obj) {
-	if (!obj) {
-		return;
-	}
-	if (obj->tib) {
-		wibo::destroyTib(obj->tib);
-		obj->tib = nullptr;
-	}
-	pthread_cond_destroy(&obj->cond);
-	pthread_mutex_destroy(&obj->mutex);
-	delete obj;
 }
 
 DWORD_PTR computeSystemAffinityMask() {
@@ -103,6 +88,80 @@ template <typename StartupInfo> void populateStartupInfo(StartupInfo *info) {
 	info->hStdError = files::getStdHandle(STD_ERROR_HANDLE);
 }
 
+thread_local ThreadObject *g_currentThreadObject = nullptr;
+
+struct ThreadStartData {
+	ThreadObject *obj;
+	LPTHREAD_START_ROUTINE entry;
+	void *userData;
+};
+
+void threadCleanup(void *param) {
+	ThreadObject *obj = static_cast<ThreadObject *>(param);
+	if (!obj) {
+		return;
+	}
+	{
+		std::lock_guard lk(obj->m);
+		obj->signaled.store(true, std::memory_order_release);
+		// Exit code set before pthread_exit
+	}
+	g_currentThreadObject = nullptr;
+	wibo::notifyDllThreadDetach();
+	// TODO: mark mutexes owned by this thread as abandoned
+	obj->cv.notify_all();
+	detail::deref(obj);
+}
+
+void *threadTrampoline(void *param) {
+	// We ref'd the ThreadObject when constructing ThreadStartData,
+	// so we need to deref it when done. (Either normal exit or via pthread_cleanup)
+	ThreadStartData *dataPtr = static_cast<ThreadStartData *>(param);
+	ThreadStartData data = *dataPtr;
+	delete dataPtr;
+
+	g_currentThreadObject = data.obj;
+
+	// Install TIB
+	TIB *threadTib = nullptr;
+	uint16_t previousSegment = 0;
+	if (wibo::tibSelector) {
+		asm volatile("mov %%fs, %0" : "=r"(previousSegment));
+		threadTib = wibo::allocateTib();
+		if (threadTib) {
+			wibo::initializeTibStackInfo(threadTib);
+			if (wibo::installTibForCurrentThread(threadTib)) {
+				asm volatile("movw %0, %%fs" : : "r"(wibo::tibSelector) : "memory");
+			} else {
+				fprintf(stderr, "!!! Failed to install TIB for new thread\n");
+				wibo::destroyTib(threadTib);
+				threadTib = nullptr;
+			}
+		}
+	}
+
+	// Wait until resumed (if suspended at start)
+	{
+		std::unique_lock lk(data.obj->m);
+		data.obj->tib = threadTib;
+		data.obj->cv.wait(lk, [&] { return data.obj->suspendCount == 0; });
+	}
+
+	wibo::notifyDllThreadAttach();
+	DWORD result = data.entry ? data.entry(data.userData) : 0;
+	{
+		std::lock_guard lk(data.obj->m);
+		data.obj->exitCode = result;
+	}
+	threadCleanup(data.obj);
+	return nullptr;
+}
+
+inline bool isPseudoCurrentThreadHandle(HANDLE h) {
+	uintptr_t rawHandle = reinterpret_cast<uintptr_t>(h);
+	return rawHandle == kernel32::kPseudoCurrentThreadHandleValue;
+}
+
 } // namespace
 
 namespace kernel32 {
@@ -120,152 +179,6 @@ BOOL WIN_FUNC IsProcessorFeaturePresent(DWORD ProcessorFeature) {
 	}
 	DEBUG_LOG("  IsProcessorFeaturePresent: unknown feature %u, returning TRUE\n", ProcessorFeature);
 	return TRUE;
-}
-
-thread_local ThreadObject *g_currentThreadObject = nullptr;
-
-ThreadObject *ensureCurrentThreadObject() {
-	ThreadObject *obj = g_currentThreadObject;
-	if (obj) {
-		return obj;
-	}
-	obj = new ThreadObject();
-	obj->thread = pthread_self();
-	obj->finished = false;
-	obj->joined = false;
-	obj->detached = true;
-	obj->synthetic = false;
-	obj->exitCode = STILL_ACTIVE;
-	obj->refCount = 0;
-	obj->suspendCount = 0;
-	pthread_mutex_init(&obj->mutex, nullptr);
-	pthread_cond_init(&obj->cond, nullptr);
-	g_currentThreadObject = obj;
-	return obj;
-}
-
-ThreadObject *threadObjectFromHandle(HANDLE hThread) {
-	auto raw = reinterpret_cast<uintptr_t>(hThread);
-	if (raw == kPseudoCurrentThreadHandleValue) {
-		return ensureCurrentThreadObject();
-	}
-	if (raw == static_cast<uintptr_t>(-1) || raw == 0) {
-		return nullptr;
-	}
-	auto data = handles::dataFromHandle(hThread, false);
-	if (data.type != handles::TYPE_THREAD || data.ptr == nullptr) {
-		return nullptr;
-	}
-	return reinterpret_cast<ThreadObject *>(data.ptr);
-}
-
-ThreadObject *retainThreadObject(ThreadObject *obj) {
-	if (!obj) {
-		return nullptr;
-	}
-	pthread_mutex_lock(&obj->mutex);
-	obj->refCount++;
-	pthread_mutex_unlock(&obj->mutex);
-	return obj;
-}
-
-void releaseThreadObject(ThreadObject *obj) {
-	if (!obj) {
-		return;
-	}
-	pthread_t thread = 0;
-	pthread_mutex_lock(&obj->mutex);
-	obj->refCount--;
-	bool shouldDelete = false;
-	bool shouldDetach = false;
-	bool finished = obj->finished;
-	bool joined = obj->joined;
-	bool detached = obj->detached;
-	bool synthetic = obj->synthetic;
-	thread = obj->thread;
-	if (obj->refCount == 0) {
-		if (finished || synthetic) {
-			shouldDelete = true;
-		} else if (!detached) {
-			obj->detached = true;
-			shouldDetach = true;
-			detached = true;
-		}
-	}
-	pthread_mutex_unlock(&obj->mutex);
-
-	if (shouldDetach && !synthetic) {
-		pthread_detach(thread);
-	}
-
-	if (shouldDelete) {
-		if (!synthetic) {
-			if (!joined && !detached) {
-				pthread_join(thread, nullptr);
-			}
-		}
-		destroyThreadObject(obj);
-	}
-}
-
-static void *threadTrampoline(void *param) {
-	ThreadStartData *data = static_cast<ThreadStartData *>(param);
-	ThreadObject *obj = data->threadObject;
-	LPTHREAD_START_ROUTINE startRoutine = data->startRoutine;
-	void *userParam = data->parameter;
-	delete data;
-
-	g_currentThreadObject = obj;
-	pthread_mutex_lock(&obj->mutex);
-	while (obj->suspendCount > 0) {
-		pthread_cond_wait(&obj->cond, &obj->mutex);
-	}
-	pthread_mutex_unlock(&obj->mutex);
-
-	uint16_t previousSegment = 0;
-	bool tibInstalled = false;
-	TIB *threadTib = nullptr;
-	if (wibo::tibSelector) {
-		asm volatile("mov %%fs, %0" : "=r"(previousSegment));
-		threadTib = wibo::allocateTib();
-		if (threadTib) {
-			wibo::initializeTibStackInfo(threadTib);
-			if (wibo::installTibForCurrentThread(threadTib)) {
-				asm volatile("movw %0, %%fs" : : "r"(wibo::tibSelector) : "memory");
-				tibInstalled = true;
-				obj->tib = threadTib;
-			} else {
-				fprintf(stderr, "!!! Failed to install TIB for new thread\n");
-				wibo::destroyTib(threadTib);
-				threadTib = nullptr;
-			}
-		}
-	}
-	wibo::notifyDllThreadAttach();
-	DWORD result = startRoutine ? startRoutine(userParam) : 0;
-	pthread_mutex_lock(&obj->mutex);
-	obj->finished = true;
-	obj->exitCode = result;
-	pthread_cond_broadcast(&obj->cond);
-	bool shouldDelete = (obj->refCount == 0);
-	bool detached = obj->detached;
-	pthread_mutex_unlock(&obj->mutex);
-	wibo::notifyDllThreadDetach();
-	if (tibInstalled) {
-		asm volatile("movw %0, %%fs" : : "r"(previousSegment) : "memory");
-	}
-	if (threadTib) {
-		obj->tib = nullptr;
-		wibo::destroyTib(threadTib);
-	}
-	g_currentThreadObject = nullptr;
-
-	if (shouldDelete) {
-		assert(detached && "ThreadObject must be detached when refCount reaches zero before completion");
-		destroyThreadObject(obj);
-	}
-
-	return nullptr;
 }
 
 HANDLE WIN_FUNC GetCurrentProcess() {
@@ -287,8 +200,6 @@ DWORD WIN_FUNC GetCurrentThreadId() {
 }
 
 HANDLE WIN_FUNC GetCurrentThread() {
-	ThreadObject *obj = ensureCurrentThreadObject();
-	(void)obj;
 	HANDLE pseudoHandle = reinterpret_cast<HANDLE>(kPseudoCurrentThreadHandleValue);
 	DEBUG_LOG("GetCurrentThread() -> %p\n", pseudoHandle);
 	return pseudoHandle;
@@ -303,12 +214,12 @@ BOOL WIN_FUNC GetProcessAffinityMask(HANDLE hProcess, PDWORD_PTR lpProcessAffini
 	}
 
 	uintptr_t rawHandle = reinterpret_cast<uintptr_t>(hProcess);
-	bool isPseudoHandle = rawHandle == static_cast<uintptr_t>(-1);
+	bool isPseudoHandle = rawHandle == 0 || rawHandle == kPseudoCurrentProcessHandleValue;
 	if (!isPseudoHandle) {
-		auto data = handles::dataFromHandle(hProcess, false);
-		if (data.type != handles::TYPE_PROCESS || data.ptr == nullptr) {
+		auto obj = wibo::handles().getAs<ProcessObject>(hProcess);
+		if (!obj) {
 			wibo::lastError = ERROR_INVALID_HANDLE;
-			return FALSE;
+			return 0;
 		}
 	}
 
@@ -336,12 +247,12 @@ BOOL WIN_FUNC SetProcessAffinityMask(HANDLE hProcess, DWORD_PTR dwProcessAffinit
 	}
 
 	uintptr_t rawHandle = reinterpret_cast<uintptr_t>(hProcess);
-	bool isPseudoHandle = rawHandle == static_cast<uintptr_t>(-1);
+	bool isPseudoHandle = rawHandle == 0 || rawHandle == kPseudoCurrentProcessHandleValue;
 	if (!isPseudoHandle) {
-		auto data = handles::dataFromHandle(hProcess, false);
-		if (data.type != handles::TYPE_PROCESS) {
+		auto obj = wibo::handles().getAs<ProcessObject>(hProcess);
+		if (!obj) {
 			wibo::lastError = ERROR_INVALID_HANDLE;
-			return FALSE;
+			return 0;
 		}
 	}
 
@@ -364,12 +275,9 @@ DWORD_PTR WIN_FUNC SetThreadAffinityMask(HANDLE hThread, DWORD_PTR dwThreadAffin
 		return 0;
 	}
 
-	uintptr_t rawThreadHandle = reinterpret_cast<uintptr_t>(hThread);
-	bool isPseudoHandle = rawThreadHandle == kPseudoCurrentThreadHandleValue || rawThreadHandle == 0 ||
-						  rawThreadHandle == static_cast<uintptr_t>(-1);
-	if (!isPseudoHandle) {
-		auto data = handles::dataFromHandle(hThread, false);
-		if (data.type != handles::TYPE_THREAD) {
+	if (!isPseudoCurrentThreadHandle(hThread)) {
+		auto obj = wibo::handles().getAs<ThreadObject>(hThread);
+		if (!obj) {
 			wibo::lastError = ERROR_INVALID_HANDLE;
 			return 0;
 		}
@@ -391,23 +299,27 @@ DWORD_PTR WIN_FUNC SetThreadAffinityMask(HANDLE hThread, DWORD_PTR dwThreadAffin
 
 void WIN_FUNC ExitProcess(UINT uExitCode) {
 	DEBUG_LOG("ExitProcess(%u)\n", uExitCode);
-	std::exit(static_cast<int>(uExitCode));
+	exit(static_cast<int>(uExitCode));
 }
 
 BOOL WIN_FUNC TerminateProcess(HANDLE hProcess, UINT uExitCode) {
 	DEBUG_LOG("TerminateProcess(%p, %u)\n", hProcess, uExitCode);
 	if (hProcess == reinterpret_cast<HANDLE>(static_cast<uintptr_t>(-1))) {
-		ExitProcess(uExitCode);
+		exit(static_cast<int>(uExitCode));
 	}
-	auto data = handles::dataFromHandle(hProcess, false);
-	if (data.type != handles::TYPE_PROCESS || data.ptr == nullptr) {
+	auto process = wibo::handles().getAs<ProcessObject>(hProcess);
+	if (!process) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
-	auto *process = reinterpret_cast<processes::Process *>(data.ptr);
-	if (kill(process->pid, SIGKILL) != 0) {
+	if (process->signaled.load(std::memory_order_acquire)) {
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+	std::lock_guard lk(process->m);
+	if (syscall(SYS_pidfd_send_signal, process->pidfd, SIGKILL, nullptr, 0) != 0) {
 		int err = errno;
-		DEBUG_LOG("TerminateProcess: kill(%d) failed: %s\n", process->pid, strerror(err));
+		DEBUG_LOG("TerminateProcess: pidfd_send_signal(%d) failed: %s\n", process->pidfd, strerror(err));
 		switch (err) {
 		case ESRCH:
 		case EPERM:
@@ -419,9 +331,8 @@ BOOL WIN_FUNC TerminateProcess(HANDLE hProcess, UINT uExitCode) {
 		}
 		return FALSE;
 	}
-	process->forcedExitCode = uExitCode;
-	process->terminationRequested = true;
 	process->exitCode = uExitCode;
+	process->forcedExitCode = true;
 	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
@@ -432,12 +343,17 @@ BOOL WIN_FUNC GetExitCodeProcess(HANDLE hProcess, LPDWORD lpExitCode) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
-	auto *process = processes::processFromHandle(hProcess, false);
+	auto process = wibo::handles().getAs<ProcessObject>(hProcess);
 	if (!process) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
-	*lpExitCode = process->exitCode;
+	DWORD exitCode = STILL_ACTIVE;
+	if (process->signaled.load(std::memory_order_acquire)) {
+		std::lock_guard lk(process->m);
+		exitCode = process->exitCode;
+	}
+	*lpExitCode = exitCode;
 	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
@@ -491,20 +407,27 @@ BOOL WIN_FUNC TlsSetValue(DWORD dwTlsIndex, LPVOID lpTlsValue) {
 
 DWORD WIN_FUNC ResumeThread(HANDLE hThread) {
 	DEBUG_LOG("ResumeThread(%p)\n", hThread);
-	ThreadObject *obj = threadObjectFromHandle(hThread);
+	// TODO: behavior with current thread handle?
+	auto obj = wibo::handles().getAs<ThreadObject>(hThread);
 	if (!obj) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return static_cast<DWORD>(-1);
 	}
-	pthread_mutex_lock(&obj->mutex);
-	DWORD previous = obj->suspendCount;
-	if (obj->suspendCount > 0) {
-		obj->suspendCount--;
-		if (obj->suspendCount == 0) {
-			pthread_cond_broadcast(&obj->cond);
+	DWORD previous = 0;
+	bool notify = false;
+	{
+		std::lock_guard lk(obj->m);
+		previous = obj->suspendCount;
+		if (obj->suspendCount > 0) {
+			obj->suspendCount--;
+			if (obj->suspendCount == 0) {
+				notify = true;
+			}
 		}
 	}
-	pthread_mutex_unlock(&obj->mutex);
+	if (notify) {
+		obj->cv.notify_all();
+	}
 	wibo::lastError = ERROR_SUCCESS;
 	return previous;
 }
@@ -530,48 +453,30 @@ HANDLE WIN_FUNC CreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dw
 		wibo::lastError = ERROR_NOT_SUPPORTED;
 		return nullptr;
 	}
-	bool startSuspended = (dwCreationFlags & CREATE_SUSPENDED) != 0;
 
-	ThreadObject *obj = new ThreadObject();
-	pthread_mutex_init(&obj->mutex, nullptr);
-	pthread_cond_init(&obj->cond, nullptr);
-	obj->finished = false;
-	obj->joined = false;
-	obj->detached = false;
-	obj->exitCode = 0;
-	obj->refCount = 1;
-	obj->suspendCount = startSuspended ? 1u : 0u;
-	obj->synthetic = false;
-
-	ThreadStartData *startData = new ThreadStartData{lpStartAddress, lpParameter, obj};
+	Pin<ThreadObject> obj = make_pin<ThreadObject>(0); // tid set during pthread_create
+	if ((dwCreationFlags & CREATE_SUSPENDED) != 0) {
+		obj->suspendCount = 1;
+	}
+	detail::ref(obj.get()); // Increment ref for the new thread to adopt
+	ThreadStartData *startData = new ThreadStartData{obj.get(), lpStartAddress, lpParameter};
 
 	pthread_attr_t attr;
-	pthread_attr_t *attrPtr = nullptr;
+	pthread_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 	if (dwStackSize != 0) {
-		pthread_attr_init(&attr);
-		size_t stackSize = dwStackSize;
-#ifdef PTHREAD_STACK_MIN
-		if (stackSize < static_cast<size_t>(PTHREAD_STACK_MIN)) {
-			stackSize = PTHREAD_STACK_MIN;
-		}
-#endif
-		if (pthread_attr_setstacksize(&attr, stackSize) == 0) {
-			attrPtr = &attr;
-		} else {
-			pthread_attr_destroy(&attr);
-		}
+		// TODO: should we just ignore this?
+		pthread_attr_setstacksize(&attr, std::max(dwStackSize, static_cast<SIZE_T>(PTHREAD_STACK_MIN)));
 	}
 
-	int rc = pthread_create(&obj->thread, attrPtr, threadTrampoline, startData);
-	if (attrPtr) {
-		pthread_attr_destroy(attrPtr);
-	}
+	int rc = pthread_create(&obj->thread, &attr, threadTrampoline, startData);
+	pthread_attr_destroy(&attr);
 	if (rc != 0) {
+		// Clean up
 		delete startData;
-		destroyThreadObject(obj);
-		errno = rc;
-		setLastErrorFromErrno();
-		return nullptr;
+		detail::deref(obj.get());
+		wibo::lastError = wibo::winErrorFromErrno(rc);
+		return INVALID_HANDLE_VALUE;
 	}
 
 	if (lpThreadId) {
@@ -580,46 +485,19 @@ HANDLE WIN_FUNC CreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dw
 	}
 
 	wibo::lastError = ERROR_SUCCESS;
-	return handles::allocDataHandle({handles::TYPE_THREAD, obj, 0});
+	return wibo::handles().alloc(std::move(obj), 0 /* TODO */, 0);
 }
 
-void WIN_FUNC ExitThread(DWORD dwExitCode) {
+[[noreturn]] void WIN_FUNC ExitThread(DWORD dwExitCode) {
 	DEBUG_LOG("ExitThread(%u)\n", dwExitCode);
 	ThreadObject *obj = g_currentThreadObject;
-	TIB *threadTib = obj ? obj->tib : nullptr;
-	uint16_t previousSegment = 0;
-	bool tibInstalled = false;
-	if (wibo::tibSelector) {
-		asm volatile("mov %%fs, %0" : "=r"(previousSegment));
-		asm volatile("movw %0, %%fs" : : "r"(wibo::tibSelector) : "memory");
-		tibInstalled = true;
-	}
-	bool shouldDelete = false;
-	bool detached = false;
-	if (obj) {
-		pthread_mutex_lock(&obj->mutex);
-		obj->finished = true;
+	{
+		std::lock_guard lk(obj->m);
 		obj->exitCode = dwExitCode;
-		pthread_cond_broadcast(&obj->cond);
-		shouldDelete = (obj->refCount == 0);
-		detached = obj->detached;
-		pthread_mutex_unlock(&obj->mutex);
 	}
-	wibo::notifyDllThreadDetach();
-	if (tibInstalled) {
-		asm volatile("movw %0, %%fs" : : "r"(previousSegment) : "memory");
-	}
-	if (obj && threadTib) {
-		obj->tib = nullptr;
-		wibo::destroyTib(threadTib);
-	}
-	if (obj) {
-		g_currentThreadObject = nullptr;
-		if (shouldDelete) {
-			assert(detached && "ThreadObject must be detached when refCount reaches zero before completion");
-			destroyThreadObject(obj);
-		}
-	}
+	// Can't use pthread_cleanup_push/pop because it can't unwind the Windows stack
+	// So call the cleanup function directly before pthread_exit
+	threadCleanup(obj);
 	pthread_exit(nullptr);
 }
 
@@ -629,15 +507,18 @@ BOOL WIN_FUNC GetExitCodeThread(HANDLE hThread, LPDWORD lpExitCode) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
-	ThreadObject *obj = threadObjectFromHandle(hThread);
+	if (isPseudoCurrentThreadHandle(hThread)) {
+		*lpExitCode = STILL_ACTIVE;
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
+	}
+	auto obj = wibo::handles().getAs<ThreadObject>(hThread);
 	if (!obj) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
-	pthread_mutex_lock(&obj->mutex);
-	DWORD code = obj->finished ? obj->exitCode : STILL_ACTIVE;
-	pthread_mutex_unlock(&obj->mutex);
-	*lpExitCode = code;
+	std::lock_guard lk(obj->m);
+	*lpExitCode = obj->exitCode;
 	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
@@ -673,7 +554,7 @@ BOOL WIN_FUNC GetThreadTimes(HANDLE hThread, FILETIME *lpCreationTime, FILETIME 
 		return FALSE;
 	}
 
-	bool isPseudoCurrentThread = reinterpret_cast<uintptr_t>(hThread) == kPseudoCurrentThreadHandleValue ||
+	bool isPseudoCurrentThread = reinterpret_cast<uintptr_t>(hThread) == kernel32::kPseudoCurrentThreadHandleValue ||
 								 hThread == nullptr || hThread == reinterpret_cast<HANDLE>(static_cast<uintptr_t>(-1));
 	if (!isPseudoCurrentThread) {
 		DEBUG_LOG("GetThreadTimes: unsupported handle %p\n", hThread);
@@ -689,7 +570,7 @@ BOOL WIN_FUNC GetThreadTimes(HANDLE hThread, FILETIME *lpCreationTime, FILETIME 
 		lpExitTime->dwHighDateTime = 0;
 	}
 
-	struct rusage usage;
+	struct rusage usage{};
 	if (getrusage(RUSAGE_THREAD, &usage) == 0) {
 		*lpKernelTime = fileTimeFromTimeval(usage.ru_stime);
 		*lpUserTime = fileTimeFromTimeval(usage.ru_utime);
@@ -697,7 +578,7 @@ BOOL WIN_FUNC GetThreadTimes(HANDLE hThread, FILETIME *lpCreationTime, FILETIME 
 		return TRUE;
 	}
 
-	struct timespec cpuTime;
+	struct timespec cpuTime{};
 	if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpuTime) == 0) {
 		*lpKernelTime = fileTimeFromDuration(0);
 		*lpUserTime = fileTimeFromTimespec(cpuTime);
@@ -705,7 +586,7 @@ BOOL WIN_FUNC GetThreadTimes(HANDLE hThread, FILETIME *lpCreationTime, FILETIME 
 		return TRUE;
 	}
 
-	setLastErrorFromErrno();
+	kernel32::setLastErrorFromErrno();
 	*lpKernelTime = fileTimeFromDuration(0);
 	*lpUserTime = fileTimeFromDuration(0);
 	return FALSE;
@@ -726,7 +607,7 @@ BOOL WIN_FUNC CreateProcessA(LPCSTR lpApplicationName, LPSTR lpCommandLine, LPSE
 	if (lpApplicationName) {
 		application = lpApplicationName;
 	} else {
-		std::vector<std::string> arguments = processes::splitCommandLine(commandLine.c_str());
+		std::vector<std::string> arguments = wibo::splitCommandLine(commandLine.c_str());
 		if (arguments.empty()) {
 			wibo::lastError = ERROR_FILE_NOT_FOUND;
 			return FALSE;
@@ -734,21 +615,22 @@ BOOL WIN_FUNC CreateProcessA(LPCSTR lpApplicationName, LPSTR lpCommandLine, LPSE
 		application = arguments.front();
 	}
 
-	auto resolved = processes::resolveExecutable(application, useSearchPath);
+	auto resolved = wibo::resolveExecutable(application, useSearchPath);
 	if (!resolved) {
 		wibo::lastError = ERROR_FILE_NOT_FOUND;
 		return FALSE;
 	}
 
-	pid_t pid = -1;
-	int spawnResult = processes::spawnWithCommandLine(*resolved, commandLine, &pid);
+	Pin<ProcessObject> obj;
+	int spawnResult = wibo::spawnWithCommandLine(*resolved, commandLine, obj);
 	if (spawnResult != 0) {
 		wibo::lastError = (spawnResult == ENOENT) ? ERROR_FILE_NOT_FOUND : ERROR_ACCESS_DENIED;
 		return FALSE;
 	}
+	pid_t pid = obj->pid;
 
 	if (lpProcessInformation) {
-		lpProcessInformation->hProcess = processes::allocProcessHandle(pid);
+		lpProcessInformation->hProcess = wibo::handles().alloc(std::move(obj), 0 /* TODO: access */, 0);
 		lpProcessInformation->hThread = nullptr;
 		lpProcessInformation->dwProcessId = static_cast<DWORD>(pid);
 		lpProcessInformation->dwThreadId = 0;

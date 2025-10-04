@@ -109,9 +109,7 @@ static void test_getoverlappedresult_pending(void) {
     DWORD transferred = 0;
     TEST_CHECK(!GetOverlappedResult(NULL, &ov, &transferred, FALSE));
     TEST_CHECK_EQ(ERROR_IO_INCOMPLETE, GetLastError());
-    // Wine leaves the caller-supplied transfer count untouched for the
-    // pending case, so we avoid asserting on the value here.
-    // TEST_CHECK_EQ(42U, transferred);
+    TEST_CHECK_EQ(0U, transferred); // No update if the operation is still pending
 }
 
 static void test_overlapped_write(void) {

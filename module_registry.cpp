@@ -154,7 +154,7 @@ void registerBuiltinModule(ModuleRegistry &reg, const wibo::Module *module);
 
 LockedRegistry registry() {
 	static ModuleRegistry reg;
-	std::unique_lock<std::recursive_mutex> guard(reg.mutex);
+	std::unique_lock guard(reg.mutex);
 	if (!reg.initialized) {
 		reg.initialized = true;
 		const wibo::Module *builtins[] = {

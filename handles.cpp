@@ -1,121 +1,144 @@
 #include "handles.h"
+#include <cassert>
+#include <cstdint>
 
 namespace {
 
-constexpr uint32_t kIndexBits = 17;
-constexpr uint32_t kIndexMask = (1u << kIndexBits) - 1; // 0x1FFFF
-constexpr uint32_t kGenerationMask = (1u << 15) - 1;	// 0x7FFF
-constexpr unsigned kGenerationShift = kIndexBits;		// 17
+constexpr uint32_t kHandleAlignShift = 2;
+// Max index that still yields HANDLE < 0x10000 with (index + 1) << 2
+constexpr uint32_t kCompatMaxIndex = (0xFFFFu >> kHandleAlignShift) - 1;
+// Delay reuse of small handles to avoid accidental stale aliasing
+constexpr uint32_t kQuarantineLen = 64;
 
-inline uint32_t indexOf(HANDLE h) { return reinterpret_cast<uint32_t>(h) & kIndexMask; }
-inline uint32_t generationOf(HANDLE h) { return (reinterpret_cast<uint32_t>(h) >> kGenerationShift) & kGenerationMask; }
-inline HANDLE makeHandle(uint32_t index, uint32_t gen) {
-	return reinterpret_cast<HANDLE>((gen << kGenerationShift) | index);
+inline uint32_t indexOf(HANDLE h) {
+	uint32_t v = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(h));
+	if (v == 0 || (v & ((1U << kHandleAlignShift) - 1)) != 0) {
+		return UINT32_MAX;
+	}
+	return (v >> kHandleAlignShift) - 1;
 }
+
+inline HANDLE makeHandle(uint32_t index) {
+	uint32_t v = (index + 1) << kHandleAlignShift;
+	return reinterpret_cast<HANDLE>(static_cast<uintptr_t>(v));
+}
+
 inline bool isPseudo(HANDLE h) { return reinterpret_cast<int32_t>(h) < 0; }
 
 } // namespace
 
-HANDLE HandleTable::create(ObjectHeader *obj, uint32_t grantedAccess, uint32_t flags) {
-	std::unique_lock lk(mu_);
+HANDLE Handles::alloc(Pin<> obj, uint32_t grantedAccess, uint32_t flags) {
+	std::unique_lock lk(m);
 
+	// Attempt to, in order:
+	// 1) use a fresh index in the compat range (0..kCompatMaxIndex)
+	// 2) reuse a recently-freed index in the compat range
+	// 3) reuse a recently-freed index above the compat range
+	// 4) use a fresh index above the compat range
 	uint32_t idx;
-	if (!freeList_.empty()) {
-		idx = freeList_.back();
-		freeList_.pop_back();
+	if (nextIndex <= kCompatMaxIndex) {
+		idx = nextIndex++;
+		if (idx >= mSlots.size()) {
+			mSlots.emplace_back();
+		}
+	} else if (!mFreeBelow.empty()) {
+		idx = mFreeBelow.back();
+		mFreeBelow.pop_back();
+	} else if (!mFreeAbove.empty()) {
+		idx = mFreeAbove.back();
+		mFreeAbove.pop_back();
 	} else {
-		idx = static_cast<uint32_t>(slots_.size());
-		slots_.push_back(HandleEntry{});
+		idx = static_cast<uint32_t>(mSlots.size());
+		mSlots.emplace_back();
 	}
 
-	auto &e = slots_[idx];
-
-	// Initialize generation if needed
+	// Initialize entry
+	auto &e = mSlots[idx];
+	e.obj = obj.release(); // Transfer ownership
+	e.meta.grantedAccess = grantedAccess;
+	e.meta.flags = flags;
+	e.meta.typeCache = e.obj->type;
 	if (e.meta.generation == 0) {
 		e.meta.generation = 1;
 	}
-	const uint16_t gen = e.meta.generation;
 
-	// Table owns one pointer ref for this entry
-	detail::ref(obj);
-
-	// Initialize entry
-	e.obj = obj;
-	e.meta.grantedAccess = grantedAccess;
-	e.meta.flags = flags;
-	e.meta.typeCache = obj->type;
-
-	HANDLE h = makeHandle(idx, gen);
-	obj->handleCount.fetch_add(1, std::memory_order_acq_rel);
+	HANDLE h = makeHandle(idx);
+	e.obj->handleCount.fetch_add(1, std::memory_order_acq_rel);
 	return h;
 }
 
-bool HandleTable::get(HANDLE h, Pin<ObjectHeader> &pinOut, HandleMeta *metaOut) {
+Pin<> Handles::get(HANDLE h, HandleMeta *metaOut) {
 	if (isPseudo(h)) {
-		return false; // pseudo-handles have no entries
+		return {}; // pseudo-handles have no entries
 	}
 
-	std::shared_lock lk(mu_);
+	std::shared_lock lk(m);
 	const auto idx = indexOf(h);
-	if (idx >= slots_.size()) {
-		return false;
-	}
-	const auto &e = slots_[idx];
-	if (e.meta.generation != generationOf(h) || !e.obj) {
-		return false;
+	if (idx >= mSlots.size()) {
+		return {};
 	}
 
-	detail::ref(e.obj);						  // pin under the lock
-	pinOut = Pin<ObjectHeader>::adopt(e.obj); // dtor will deref
+	const auto &e = mSlots[idx];
+	if (!e.obj) {
+		return {};
+	}
 	if (metaOut) {
 		*metaOut = e.meta;
 	}
-	return true;
+	return Pin<>::acquire(e.obj);
 }
 
-bool HandleTable::close(HANDLE h) {
+bool Handles::release(HANDLE h) {
 	if (isPseudo(h)) {
 		return true; // no-op, success
 	}
 
-	std::unique_lock lk(mu_);
+	std::unique_lock lk(m);
 	const auto idx = indexOf(h);
-	if (idx >= slots_.size()) {
+	if (idx >= mSlots.size()) {
 		return false;
 	}
-	auto &e = slots_[idx];
-	if (e.meta.generation != generationOf(h) || !e.obj || e.meta.flags & HANDLE_FLAG_PROTECT_FROM_CLOSE) {
+	auto &e = mSlots[idx];
+	if (!e.obj || e.meta.flags & HANDLE_FLAG_PROTECT_FROM_CLOSE) {
 		return false;
 	}
 
-	ObjectHeader *obj = e.obj;
-	e.obj = nullptr; // tombstone
-	/*auto newHandleCnt =*/ obj->handleCount.fetch_sub(1, std::memory_order_acq_rel) /* - 1*/;
+	ObjectBase *obj = e.obj;
+	const auto generation = e.meta.generation + 1;
+	e = {}; // Clear entry
+	e.meta.generation = generation;
+	uint32_t handleCount = obj->handleCount.fetch_sub(1, std::memory_order_acq_rel) - 1;
 
-	// bump generation & recycle while still holding the lock
-	e.meta.generation = static_cast<uint16_t>((e.meta.generation + 1) & kGenerationMask);
-	freeList_.push_back(idx);
+	if (idx <= kCompatMaxIndex) {
+		mQuarantine.push_back(idx);
+		if (mQuarantine.size() > kQuarantineLen) {
+			mFreeBelow.push_back(mQuarantine.front());
+			mQuarantine.pop_front();
+		}
+	} else {
+		mFreeAbove.push_back(idx);
+	}
 	lk.unlock();
 
-	// if (newHandleCnt == 0) {
-	// 	namespaceOnHandleCountZero(obj);
-	// }
+	if (handleCount == 0 && mOnHandleZero) {
+		mOnHandleZero(obj);
+	}
 	detail::deref(obj);
 	return true;
 }
 
-bool HandleTable::setInformation(HANDLE h, uint32_t mask, uint32_t value) {
+bool Handles::setInformation(HANDLE h, uint32_t mask, uint32_t value) {
 	if (isPseudo(h)) {
 		return true; // no-op, success
 	}
 
-	std::unique_lock lk(mu_);
+	std::unique_lock lk(m);
 	const auto idx = indexOf(h);
-	if (idx >= slots_.size()) {
+	if (idx >= mSlots.size()) {
 		return false;
 	}
-	auto &e = slots_[idx];
-	if (e.meta.generation != generationOf(h) || !e.obj) {
+	auto &e = mSlots[idx];
+	if (!e.obj) {
 		return false;
 	}
 
@@ -126,7 +149,7 @@ bool HandleTable::setInformation(HANDLE h, uint32_t mask, uint32_t value) {
 	return true;
 }
 
-bool HandleTable::getInformation(HANDLE h, uint32_t *outFlags) const {
+bool Handles::getInformation(HANDLE h, uint32_t *outFlags) const {
 	if (!outFlags) {
 		return false;
 	}
@@ -134,37 +157,24 @@ bool HandleTable::getInformation(HANDLE h, uint32_t *outFlags) const {
 		*outFlags = 0;
 		return true;
 	}
-	std::shared_lock lk(mu_);
+	std::shared_lock lk(m);
 	const auto idx = indexOf(h);
-	if (idx >= slots_.size()) {
+	if (idx >= mSlots.size()) {
 		return false;
 	}
-	const auto &e = slots_[idx];
-	if (e.meta.generation != generationOf(h) || !e.obj) {
+	const auto &e = mSlots[idx];
+	if (!e.obj) {
 		return false;
 	}
 	*outFlags = e.meta.flags;
 	return true;
 }
 
-bool HandleTable::duplicateTo(HANDLE src, HandleTable &dst, HANDLE *out, uint32_t desiredAccess, bool inherit,
-							  uint32_t options) {
-	if (!out)
-		return false;
-
-	// Pseudo-handles: resolve to a Borrow of the live object
-	// if (isPseudo(src)) {
-	// 	Pin pin = resolvePseudoBorrow(src);
-	// 	if (!pin)
-	// 		return false;
-	// 	const uint32_t granted = desiredAccess; // or compute from type; pseudo has full rights to self
-	// 	*out = dst.create(pin.obj, granted, inherit ? HANDLE_FLAG_INHERIT : 0);
-	// 	return true;
-	// }
-
+bool Handles::duplicateTo(HANDLE src, Handles &dst, HANDLE &out, uint32_t desiredAccess, bool inherit,
+						  uint32_t options) {
 	HandleMeta meta{};
-	Pin<ObjectHeader> pin;
-	if (!get(src, pin, &meta)) {
+	Pin<> obj = get(src, &meta);
+	if (!obj) {
 		return false;
 	}
 
@@ -176,10 +186,53 @@ bool HandleTable::duplicateTo(HANDLE src, HandleTable &dst, HANDLE *out, uint32_
 
 	uint32_t effAccess = (options & DUPLICATE_SAME_ACCESS) ? meta.grantedAccess : (desiredAccess & meta.grantedAccess);
 	const uint32_t flags = (inherit ? HANDLE_FLAG_INHERIT : 0);
-	*out = dst.create(pin.obj, effAccess, flags);
+	out = dst.alloc(std::move(obj), effAccess, flags);
 
 	if (closeSource) {
-		close(src);
+		release(src);
 	}
 	return true;
 }
+
+bool Namespace::insert(const std::u16string &name, ObjectBase *obj, bool permanent) {
+	if (name.empty() || !obj) {
+		return false;
+	}
+	std::unique_lock lk(m);
+	// Namespace holds a weak ref
+	const auto [_, inserted] = mTable.try_emplace(name, obj, permanent);
+	return inserted;
+}
+
+void Namespace::remove(ObjectBase *obj) {
+	std::unique_lock lk(m);
+	for (auto it = mTable.begin(); it != mTable.end(); ++it) {
+		if (it->second.obj == obj && !it->second.permanent) {
+			mTable.erase(it);
+			break;
+		}
+	}
+}
+
+Pin<> Namespace::get(const std::u16string &name) {
+	if (name.empty()) {
+		return {};
+	}
+	std::shared_lock lk(m);
+	auto it = mTable.find(name);
+	if (it == mTable.end()) {
+		return {};
+	}
+	assert(it->second.obj);
+	return Pin<>::acquire(it->second.obj);
+}
+
+namespace wibo {
+
+Namespace g_namespace;
+Handles &handles() {
+	static Handles table([](ObjectBase *obj) { g_namespace.remove(obj); });
+	return table;
+}
+
+} // namespace wibo

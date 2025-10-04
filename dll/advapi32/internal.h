@@ -1,15 +1,21 @@
 #pragma once
 
 #include "common.h"
+#include "handles.h"
 #include "securitybaseapi.h"
 
 constexpr DWORD SECURITY_LOCAL_SYSTEM_RID = 18;
 
 constexpr BYTE kNtAuthority[6] = {0, 0, 0, 0, 0, 5};
 
-struct TokenObject {
-	HANDLE processHandle;
+struct TokenObject : ObjectBase {
+	static constexpr ObjectType kType = ObjectType::Token;
+
+	Pin<> obj;
 	DWORD desiredAccess;
+
+	explicit TokenObject(Pin<> obj, DWORD desiredAccess)
+		: ObjectBase(kType), obj(std::move(obj)), desiredAccess(desiredAccess) {}
 };
 
 using SidIdentifierAuthority = SID_IDENTIFIER_AUTHORITY;

@@ -8,6 +8,12 @@ namespace kernel32 {
 
 BOOL WIN_FUNC IsBadReadPtr(LPCVOID lp, UINT_PTR ucb);
 BOOL WIN_FUNC IsBadWritePtr(LPVOID lp, UINT_PTR ucb);
+ATOM WIN_FUNC FindAtomA(LPCSTR lpString);
+ATOM WIN_FUNC FindAtomW(LPCWSTR lpString);
+ATOM WIN_FUNC AddAtomA(LPCSTR lpString);
+ATOM WIN_FUNC AddAtomW(LPCWSTR lpString);
+UINT WIN_FUNC GetAtomNameA(ATOM nAtom, LPSTR lpBuffer, int nSize);
+UINT WIN_FUNC GetAtomNameW(ATOM nAtom, LPWSTR lpBuffer, int nSize);
 UINT WIN_FUNC SetHandleCount(UINT uNumber);
 DWORD WIN_FUNC FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId, DWORD dwLanguageId, LPSTR lpBuffer,
 							  DWORD nSize, va_list *Arguments);

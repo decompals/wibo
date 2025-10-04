@@ -15,7 +15,9 @@
 #include <filesystem>
 #include <limits>
 #include <mimalloc.h>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <sys/mman.h>
 #include <sys/statvfs.h>
 #include <system_error>
@@ -28,6 +30,141 @@ constexpr UINT GMEM_MODIFY = 0x0080;
 
 constexpr UINT LMEM_MOVEABLE = 0x0002;
 constexpr UINT LMEM_ZEROINIT = 0x0040;
+
+constexpr ATOM kMinIntegerAtom = 0x0001;
+constexpr ATOM kMaxIntegerAtom = 0xBFFF;
+constexpr ATOM kMinStringAtom = 0xC000;
+constexpr ATOM kMaxStringAtom = 0xFFFF;
+
+struct AtomData {
+	uint16_t refCount = 0;
+	std::string original;
+};
+
+struct AtomTable {
+	std::mutex mutex;
+	std::unordered_map<std::string, ATOM> stringToAtom;
+	std::unordered_map<ATOM, AtomData> atomToData;
+	ATOM nextStringAtom = kMinStringAtom;
+};
+
+AtomTable &localAtomTable() {
+	static AtomTable table;
+	return table;
+}
+
+ATOM allocateStringAtomLocked(AtomTable &table) {
+	constexpr unsigned int kRange = static_cast<unsigned int>(kMaxStringAtom - kMinStringAtom + 1);
+	unsigned int startOffset = 0;
+	if (table.nextStringAtom >= kMinStringAtom && table.nextStringAtom <= kMaxStringAtom) {
+		startOffset = static_cast<unsigned int>(table.nextStringAtom - kMinStringAtom);
+	}
+	for (unsigned int i = 0; i < kRange; ++i) {
+		unsigned int offset = (startOffset + i) % kRange;
+		ATOM candidate = static_cast<ATOM>(kMinStringAtom + offset);
+		if (table.atomToData.find(candidate) == table.atomToData.end()) {
+			table.nextStringAtom = static_cast<ATOM>(candidate + 1);
+			if (table.nextStringAtom > kMaxStringAtom) {
+				table.nextStringAtom = kMinStringAtom;
+			}
+			return candidate;
+		}
+	}
+	return 0;
+}
+
+bool tryHandleIntegerAtomPointer(const void *ptr, ATOM &atomOut) {
+	uintptr_t value = reinterpret_cast<uintptr_t>(ptr);
+	if ((value >> 16) != 0) {
+		return false;
+	}
+	ATOM maybeAtom = static_cast<ATOM>(value & 0xFFFFu);
+	if (maybeAtom < kMinIntegerAtom || maybeAtom > kMaxIntegerAtom) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		atomOut = 0;
+		return true;
+	}
+	wibo::lastError = ERROR_SUCCESS;
+	atomOut = maybeAtom;
+	return true;
+}
+
+ATOM findAtomByNormalizedKey(const std::string &normalizedKey) {
+	auto &table = localAtomTable();
+	std::lock_guard lk(table.mutex);
+	auto it = table.stringToAtom.find(normalizedKey);
+	if (it == table.stringToAtom.end()) {
+		wibo::lastError = ERROR_FILE_NOT_FOUND;
+		return 0;
+	}
+	wibo::lastError = ERROR_SUCCESS;
+	return it->second;
+}
+
+ATOM tryParseIntegerAtomString(const std::string &value, bool &handled) {
+	handled = false;
+	if (value.empty() || value[0] != '#') {
+		return 0;
+	}
+	char *end = nullptr;
+	unsigned long parsed = std::strtoul(value.c_str() + 1, &end, 10);
+	if (end == value.c_str() + 1 || *end != '\0') {
+		return 0;
+	}
+	handled = true;
+	if (parsed < kMinIntegerAtom || parsed > kMaxIntegerAtom) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return 0;
+	}
+	wibo::lastError = ERROR_SUCCESS;
+	return static_cast<ATOM>(parsed);
+}
+
+ATOM findAtomByString(const std::string &value) {
+	bool handledInteger = false;
+	ATOM atom = tryParseIntegerAtomString(value, handledInteger);
+	if (handledInteger) {
+		return atom;
+	}
+	std::string normalized = stringToLower(value);
+	return findAtomByNormalizedKey(normalized);
+}
+
+ATOM addAtomByString(const std::string &value) {
+	bool handledInteger = false;
+	ATOM atom = tryParseIntegerAtomString(value, handledInteger);
+	if (handledInteger) {
+		return atom;
+	}
+	if (value.empty() || value.size() > 255) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return 0;
+	}
+	std::string normalized = stringToLower(value);
+	auto &table = localAtomTable();
+	std::lock_guard lk(table.mutex);
+	auto existing = table.stringToAtom.find(normalized);
+	if (existing != table.stringToAtom.end()) {
+		auto dataIt = table.atomToData.find(existing->second);
+		if (dataIt != table.atomToData.end() && dataIt->second.refCount < std::numeric_limits<uint16_t>::max()) {
+			dataIt->second.refCount++;
+		}
+		wibo::lastError = ERROR_SUCCESS;
+		return existing->second;
+	}
+	ATOM newAtom = allocateStringAtomLocked(table);
+	if (newAtom == 0) {
+		wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+		return 0;
+	}
+	AtomData data;
+	data.refCount = 1;
+	data.original = value;
+	table.stringToAtom.emplace(std::move(normalized), newAtom);
+	table.atomToData.emplace(newAtom, std::move(data));
+	wibo::lastError = ERROR_SUCCESS;
+	return newAtom;
+}
 
 void *doAlloc(UINT dwBytes, bool zero) {
 	if (dwBytes == 0) {
@@ -164,6 +301,166 @@ const uint16_t kComputerNameWide[] = {u'C', u'O', u'M', u'P', u'N', u'A', u'M', 
 } // namespace
 
 namespace kernel32 {
+
+ATOM WIN_FUNC AddAtomA(LPCSTR lpString) {
+	ATOM atom = 0;
+	if (tryHandleIntegerAtomPointer(lpString, atom)) {
+		DEBUG_LOG("AddAtomA(int:%u)\n", atom);
+		return atom;
+	}
+	DEBUG_LOG("AddAtomA(%s)\n", lpString ? lpString : "<null>");
+	if (!lpString) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return 0;
+	}
+	size_t len = strnlen(lpString, 256);
+	if (len == 0 || len >= 256) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return 0;
+	}
+	std::string value(lpString, len);
+	ATOM result = addAtomByString(value);
+	DEBUG_LOG("AddAtomA -> %u (lastError=%u)\n", result, wibo::lastError);
+	return result;
+}
+
+ATOM WIN_FUNC AddAtomW(LPCWSTR lpString) {
+	ATOM atom = 0;
+	if (tryHandleIntegerAtomPointer(lpString, atom)) {
+		DEBUG_LOG("AddAtomW(int:%u)\n", atom);
+		return atom;
+	}
+	if (!lpString) {
+		DEBUG_LOG("AddAtomW(<null>)\n");
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return 0;
+	}
+	size_t len = wstrnlen(reinterpret_cast<const uint16_t *>(lpString), 256);
+	if (len == 0 || len >= 256) {
+		DEBUG_LOG("AddAtomW(invalid length)\n");
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return 0;
+	}
+	std::string value = wideStringToString(reinterpret_cast<const uint16_t *>(lpString), static_cast<int>(len));
+	DEBUG_LOG("AddAtomW(%s)\n", value.c_str());
+	ATOM result = addAtomByString(value);
+	DEBUG_LOG("AddAtomW -> %u (lastError=%u)\n", result, wibo::lastError);
+	return result;
+}
+
+ATOM WIN_FUNC FindAtomA(LPCSTR lpString) {
+	ATOM atom = 0;
+	if (tryHandleIntegerAtomPointer(lpString, atom)) {
+		DEBUG_LOG("FindAtomA(int:%u)\n", atom);
+		return atom;
+	}
+	DEBUG_LOG("FindAtomA(%s)\n", lpString ? lpString : "<null>");
+	if (!lpString) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return 0;
+	}
+	size_t len = strnlen(lpString, 256);
+	if (len == 0 || len >= 256) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return 0;
+	}
+	std::string value(lpString, len);
+	ATOM result = findAtomByString(value);
+	DEBUG_LOG("FindAtomA -> %u (lastError=%u)\n", result, wibo::lastError);
+	return result;
+}
+
+ATOM WIN_FUNC FindAtomW(LPCWSTR lpString) {
+	ATOM atom = 0;
+	if (tryHandleIntegerAtomPointer(lpString, atom)) {
+		DEBUG_LOG("FindAtomW(int:%u)\n", atom);
+		return atom;
+	}
+	if (!lpString) {
+		DEBUG_LOG("FindAtomW(<null>)\n");
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return 0;
+	}
+	size_t len = wstrnlen(reinterpret_cast<const uint16_t *>(lpString), 256);
+	if (len == 0 || len >= 256) {
+		DEBUG_LOG("FindAtomW(invalid length)\n");
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return 0;
+	}
+	std::string value = wideStringToString(reinterpret_cast<const uint16_t *>(lpString), static_cast<int>(len));
+	DEBUG_LOG("FindAtomW(%s)\n", value.c_str());
+	ATOM result = findAtomByString(value);
+	DEBUG_LOG("FindAtomW -> %u (lastError=%u)\n", result, wibo::lastError);
+	return result;
+}
+
+UINT WIN_FUNC GetAtomNameA(ATOM nAtom, LPSTR lpBuffer, int nSize) {
+	DEBUG_LOG("GetAtomNameA(%u, %p, %d)\n", nAtom, lpBuffer, nSize);
+	if (!lpBuffer || nSize <= 0) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return 0;
+	}
+	std::string value;
+	if (nAtom >= kMinIntegerAtom && nAtom <= kMaxIntegerAtom) {
+		value = '#';
+		value += std::to_string(nAtom);
+	} else {
+		auto &table = localAtomTable();
+		std::lock_guard lk(table.mutex);
+		auto it = table.atomToData.find(nAtom);
+		if (it == table.atomToData.end()) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return 0;
+		}
+		value = it->second.original;
+	}
+	if (value.size() + 1 > static_cast<size_t>(nSize)) {
+		wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+		return 0;
+	}
+	std::memcpy(lpBuffer, value.c_str(), value.size());
+	lpBuffer[value.size()] = '\0';
+	wibo::lastError = ERROR_SUCCESS;
+	UINT written = static_cast<UINT>(value.size());
+	DEBUG_LOG("GetAtomNameA -> %u (lastError=%u)\n", written, wibo::lastError);
+	return written;
+}
+
+UINT WIN_FUNC GetAtomNameW(ATOM nAtom, LPWSTR lpBuffer, int nSize) {
+	DEBUG_LOG("GetAtomNameW(%u, %p, %d)\n", nAtom, lpBuffer, nSize);
+	if (!lpBuffer || nSize <= 0) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return 0;
+	}
+	std::string narrow;
+	if (nAtom >= kMinIntegerAtom && nAtom <= kMaxIntegerAtom) {
+		narrow = '#';
+		narrow += std::to_string(nAtom);
+	} else {
+		auto &table = localAtomTable();
+		std::lock_guard lk(table.mutex);
+		auto it = table.atomToData.find(nAtom);
+		if (it == table.atomToData.end()) {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return 0;
+		}
+		narrow = it->second.original;
+	}
+	auto wide = stringToWideString(narrow.c_str(), narrow.size());
+	size_t needed = wide.size();
+	if (needed > static_cast<size_t>(nSize)) {
+		wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+		return 0;
+	}
+	std::memcpy(lpBuffer, wide.data(), needed * sizeof(uint16_t));
+	if (needed > 0) {
+		lpBuffer[needed - 1] = 0;
+	}
+	wibo::lastError = ERROR_SUCCESS;
+	UINT written = static_cast<UINT>(needed ? needed - 1 : 0);
+	DEBUG_LOG("GetAtomNameW -> %u (lastError=%u)\n", written, wibo::lastError);
+	return written;
+}
 
 UINT WIN_FUNC SetHandleCount(UINT uNumber) {
 	DEBUG_LOG("SetHandleCount(%u)\n", uNumber);

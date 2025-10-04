@@ -68,7 +68,7 @@ HANDLE Handles::alloc(Pin<> obj, uint32_t grantedAccess, uint32_t flags) {
 }
 
 Pin<> Handles::get(HANDLE h, HandleMeta *metaOut) {
-	if (isPseudo(h)) {
+	if (h == nullptr || isPseudo(h)) {
 		return {}; // pseudo-handles have no entries
 	}
 

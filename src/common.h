@@ -51,6 +51,7 @@ using FARPROC = void *;
 using WORD = uint16_t;
 using LPWORD = WORD *;
 using LANGID = WORD;
+using ATOM = uint16_t;
 using DWORD = uint32_t;
 using PDWORD = DWORD *;
 using LPDWORD = DWORD *;

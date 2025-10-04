@@ -198,6 +198,18 @@ void *resolveByName(const char *name) {
 		return (void *)kernel32::CreatePipe;
 
 	// winbase.h
+	if (strcmp(name, "FindAtomA") == 0)
+		return (void *)kernel32::FindAtomA;
+	if (strcmp(name, "FindAtomW") == 0)
+		return (void *)kernel32::FindAtomW;
+	if (strcmp(name, "AddAtomA") == 0)
+		return (void *)kernel32::AddAtomA;
+	if (strcmp(name, "AddAtomW") == 0)
+		return (void *)kernel32::AddAtomW;
+	if (strcmp(name, "GetAtomNameA") == 0)
+		return (void *)kernel32::GetAtomNameA;
+	if (strcmp(name, "GetAtomNameW") == 0)
+		return (void *)kernel32::GetAtomNameW;
 	if (strcmp(name, "GlobalAlloc") == 0)
 		return (void *)kernel32::GlobalAlloc;
 	if (strcmp(name, "GlobalReAlloc") == 0)

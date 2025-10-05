@@ -498,8 +498,11 @@ HANDLE WIN_FUNC CreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dw
 	pthread_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 	if (dwStackSize != 0) {
+#ifdef PTHREAD_STACK_MIN
+		dwStackSize = std::max(dwStackSize, static_cast<SIZE_T>(PTHREAD_STACK_MIN));
+#endif
 		// TODO: should we just ignore this?
-		pthread_attr_setstacksize(&attr, std::max(dwStackSize, static_cast<SIZE_T>(PTHREAD_STACK_MIN)));
+		pthread_attr_setstacksize(&attr, dwStackSize);
 	}
 
 	int rc = pthread_create(&obj->thread, &attr, threadTrampoline, startData);

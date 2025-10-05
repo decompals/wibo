@@ -1,3 +1,5 @@
+.cache/
 .git/
 .vscode/
 build/
+tmp/

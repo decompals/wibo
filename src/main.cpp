@@ -362,7 +362,8 @@ int main(int argc, char **argv) {
 	}
 
 	// Resolve the guest program path
-	std::filesystem::path resolvedGuestPath = wibo::resolveExecutable(programName, true).value_or({});
+	std::filesystem::path resolvedGuestPath =
+		wibo::resolveExecutable(programName, true).value_or(std::filesystem::path{});
 	if (resolvedGuestPath.empty()) {
 		fprintf(stderr, "Failed to resolve path to guest program %s\n", programName.c_str());
 		return 1;

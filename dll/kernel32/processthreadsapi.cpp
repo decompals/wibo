@@ -144,11 +144,16 @@ void *threadTrampoline(void *param) {
 	{
 		std::unique_lock lk(data.obj->m);
 		data.obj->tib = threadTib;
-		data.obj->cv.wait(lk, [&] { return data.obj->suspendCount == 0; });
+		if (data.obj->suspendCount) {
+			DEBUG_LOG("Thread is suspended at start; waiting...\n");
+			data.obj->cv.wait(lk, [&] { return data.obj->suspendCount == 0; });
+		}
 	}
 
 	wibo::notifyDllThreadAttach();
+	DEBUG_LOG("Calling thread entry %p with userData %p\n", data.entry, data.userData);
 	DWORD result = data.entry ? data.entry(data.userData) : 0;
+	DEBUG_LOG("Thread exiting with code %u\n", result);
 	{
 		std::lock_guard lk(data.obj->m);
 		data.obj->exitCode = result;

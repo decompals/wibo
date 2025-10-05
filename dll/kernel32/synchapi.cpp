@@ -43,7 +43,7 @@ void WIN_FUNC Sleep(DWORD dwMilliseconds) {
 }
 
 HANDLE WIN_FUNC CreateMutexW(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInitialOwner, LPCWSTR lpName) {
-	DEBUG_LOG("CreateMutexW(%p, %d, %ls)\n", lpMutexAttributes, static_cast<int>(bInitialOwner),
+	DEBUG_LOG("CreateMutexW(%p, %d, %s)\n", lpMutexAttributes, static_cast<int>(bInitialOwner),
 			  wideStringToString(lpName).c_str());
 	std::u16string name = makeU16String(lpName);
 	const uint32_t grantedAccess = MUTEX_ALL_ACCESS;
@@ -110,7 +110,7 @@ BOOL WIN_FUNC ReleaseMutex(HANDLE hMutex) {
 
 HANDLE WIN_FUNC CreateEventW(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManualReset, BOOL bInitialState,
 							 LPCWSTR lpName) {
-	DEBUG_LOG("CreateEventW(%p, %d, %d, %ls)\n", lpEventAttributes, static_cast<int>(bManualReset),
+	DEBUG_LOG("CreateEventW(%p, %d, %d, %s)\n", lpEventAttributes, static_cast<int>(bManualReset),
 			  static_cast<int>(bInitialState), wideStringToString(lpName).c_str());
 	std::u16string name = makeU16String(lpName);
 	const uint32_t grantedAccess = EVENT_ALL_ACCESS;
@@ -118,12 +118,9 @@ HANDLE WIN_FUNC CreateEventW(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManu
 	if (lpEventAttributes && lpEventAttributes->bInheritHandle) {
 		handleFlags |= HANDLE_FLAG_INHERIT;
 	}
-	auto [ev, alreadyExists] = wibo::g_namespace.getOrCreate(name, [&]() {
-		auto e = new EventObject(!!bManualReset);
-		if (bInitialState) {
-			std::lock_guard lk(e->m);
-			e->signaled.store(true, std::memory_order_relaxed);
-		}
+	auto [ev, created] = wibo::g_namespace.getOrCreate(name, [&]() {
+		auto e = new EventObject(bManualReset);
+		e->signaled.store(bInitialState, std::memory_order_relaxed);
 		return e;
 	});
 	if (!ev) {
@@ -132,7 +129,8 @@ HANDLE WIN_FUNC CreateEventW(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManu
 		return nullptr;
 	}
 	HANDLE h = wibo::handles().alloc(std::move(ev), grantedAccess, handleFlags);
-	wibo::lastError = alreadyExists ? ERROR_ALREADY_EXISTS : ERROR_SUCCESS;
+	DEBUG_LOG("-> %p (created=%d)\n", h, created ? 1 : 0);
+	wibo::lastError = created ? ERROR_SUCCESS : ERROR_ALREADY_EXISTS;
 	return h;
 }
 
@@ -147,7 +145,7 @@ HANDLE WIN_FUNC CreateEventA(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManu
 
 HANDLE WIN_FUNC CreateSemaphoreW(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LONG lInitialCount, LONG lMaximumCount,
 								 LPCWSTR lpName) {
-	DEBUG_LOG("CreateSemaphoreW(%p, %ld, %ld, %ls)\n", lpSemaphoreAttributes, lInitialCount, lMaximumCount,
+	DEBUG_LOG("CreateSemaphoreW(%p, %ld, %ld, %s)\n", lpSemaphoreAttributes, lInitialCount, lMaximumCount,
 			  wideStringToString(lpName).c_str());
 	auto name = makeU16String(lpName);
 	const uint32_t granted = SEMAPHORE_ALL_ACCESS;
@@ -265,6 +263,8 @@ DWORD WIN_FUNC WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds) {
 			return cv.wait_for(lk, std::chrono::milliseconds(dwMilliseconds), pred);
 		}
 	};
+
+	DEBUG_LOG("Waiting on object with type %d\n", static_cast<int>(obj->type));
 
 	switch (obj->type) {
 	case ObjectType::Event: {

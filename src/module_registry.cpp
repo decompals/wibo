@@ -854,11 +854,13 @@ ModuleInfo *loadModule(const char *dllName) {
 			registerExternalModuleAliases(*reg, requested, files::canonicalPath(path), info);
 			return info;
 		}
+		reg.lock.unlock();
 
 		DEBUG_LOG("  loading external module from %s\n", path.c_str());
 		FILE *file = fopen(path.c_str(), "rb");
 		if (!file) {
 			perror("loadModule");
+			reg.lock.lock();
 			diskError = ERROR_MOD_NOT_FOUND;
 			return nullptr;
 		}
@@ -867,6 +869,7 @@ ModuleInfo *loadModule(const char *dllName) {
 		if (!executable->loadPE(file, true)) {
 			DEBUG_LOG("  loadPE failed for %s\n", path.c_str());
 			fclose(file);
+			reg.lock.lock();
 			diskError = ERROR_BAD_EXE_FORMAT;
 			return nullptr;
 		}
@@ -881,16 +884,20 @@ ModuleInfo *loadModule(const char *dllName) {
 		info->executable = std::move(executable);
 		info->refCount = 1;
 
+		reg.lock.lock();
 		ModuleInfo *raw = info.get();
 		reg->modulesByKey[key] = std::move(info);
 		registerExternalModuleAliases(*reg, requested, raw->resolvedPath, raw);
+		reg.lock.unlock();
 		ensureExportsInitialized(*raw);
 		if (!raw->executable->resolveImports()) {
 			DEBUG_LOG("  resolveImports failed for %s\n", raw->originalName.c_str());
+			reg.lock.lock();
 			reg->modulesByKey.erase(key);
 			diskError = wibo::lastError;
 			return nullptr;
 		}
+		reg.lock.lock();
 		if (!callDllMain(*raw, DLL_PROCESS_ATTACH, nullptr)) {
 			DEBUG_LOG("  DllMain failed for %s\n", raw->originalName.c_str());
 			runPendingOnExit(*raw);

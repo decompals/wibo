@@ -98,6 +98,8 @@ using REGSAM = DWORD;
 using LSTATUS = LONG;
 using LCID = DWORD;
 using LCTYPE = DWORD;
+using HWINSTA = HANDLE;
+using HWND = HANDLE;
 
 constexpr BOOL TRUE = 1;
 constexpr BOOL FALSE = 0;

@@ -312,7 +312,7 @@ BOOL WIN_FUNC HeapFree(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem) {
 		return FALSE;
 	}
 	if (!mi_heap_check_owned(record->heap, lpMem)) {
-		DEBUG_LOG("HeapFree: block %p not owned by heap %p\n", lpMem, record->heap);
+		DEBUG_LOG("-> INVALID_PARAMETER (not owned)\n");
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}

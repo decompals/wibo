@@ -246,6 +246,10 @@ void *resolveByName(const char *name) {
 		return (void *)kernel32::GetCurrentDirectoryA;
 	if (strcmp(name, "GetCurrentDirectoryW") == 0)
 		return (void *)kernel32::GetCurrentDirectoryW;
+	if (strcmp(name, "GetSystemWindowsDirectoryA") == 0)
+		return (void *)kernel32::GetSystemWindowsDirectoryA;
+	if (strcmp(name, "GetSystemWindowsDirectoryW") == 0)
+		return (void *)kernel32::GetSystemWindowsDirectoryW;
 	if (strcmp(name, "SetCurrentDirectoryA") == 0)
 		return (void *)kernel32::SetCurrentDirectoryA;
 	if (strcmp(name, "SetCurrentDirectoryW") == 0)
@@ -264,6 +268,10 @@ void *resolveByName(const char *name) {
 		return (void *)kernel32::DecodePointer;
 	if (strcmp(name, "SetDllDirectoryA") == 0)
 		return (void *)kernel32::SetDllDirectoryA;
+	if (strcmp(name, "FindActCtxSectionStringA") == 0)
+		return (void *)kernel32::FindActCtxSectionStringA;
+	if (strcmp(name, "FindActCtxSectionStringW") == 0)
+		return (void *)kernel32::FindActCtxSectionStringW;
 	if (strcmp(name, "GetLongPathNameA") == 0)
 		return (void *)kernel32::GetLongPathNameA;
 	if (strcmp(name, "GetLongPathNameW") == 0)

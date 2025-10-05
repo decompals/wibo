@@ -4,6 +4,61 @@
 
 #include <cstdarg>
 
+struct GUID;
+
+struct ACTCTX_SECTION_KEYED_DATA_ASSEMBLY_METADATA {
+	PVOID lpInformation;
+	PVOID lpSectionBase;
+	ULONG ulSectionLength;
+	PVOID lpSectionGlobalData;
+	ULONG ulSectionGlobalDataLength;
+};
+
+struct ACTCTX_SECTION_KEYED_DATA {
+	ULONG cbSize;
+	ULONG ulDataFormatVersion;
+	PVOID lpData;
+	ULONG ulLength;
+	PVOID lpSectionGlobalData;
+	ULONG ulSectionGlobalDataLength;
+	PVOID lpSectionBase;
+	ULONG ulSectionTotalLength;
+	HANDLE hActCtx;
+	ULONG ulAssemblyRosterIndex;
+	ULONG ulFlags;
+	ACTCTX_SECTION_KEYED_DATA_ASSEMBLY_METADATA AssemblyMetadata;
+};
+
+using PACTCTX_SECTION_KEYED_DATA = ACTCTX_SECTION_KEYED_DATA *;
+using PCACTCTX_SECTION_KEYED_DATA = const ACTCTX_SECTION_KEYED_DATA *;
+
+constexpr DWORD FIND_ACTCTX_SECTION_KEY_RETURN_HACTCTX = 0x00000001;
+
+constexpr ULONG ACTIVATION_CONTEXT_SECTION_ASSEMBLY_INFORMATION = 1;
+constexpr ULONG ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION = 2;
+constexpr ULONG ACTIVATION_CONTEXT_SECTION_WINDOW_CLASS_REDIRECTION = 3;
+constexpr ULONG ACTIVATION_CONTEXT_SECTION_COM_PROGID_REDIRECTION = 7;
+
+constexpr ULONG ACTCTX_SECTION_KEYED_DATA_FLAG_FOUND_IN_ACTCTX = 0x00000001;
+
+constexpr ULONG ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION_PATH_INCLUDES_BASE_NAME = 1;
+constexpr ULONG ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION_PATH_OMITS_ASSEMBLY_ROOT = 2;
+constexpr ULONG ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION_PATH_EXPAND = 4;
+constexpr ULONG ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION_PATH_SYSTEM_DEFAULT_REDIRECTED_SYSTEM32_DLL = 8;
+
+struct ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION {
+	ULONG Size;
+	ULONG Flags;
+	ULONG TotalPathLength;
+	ULONG PathSegmentCount;
+	ULONG PathSegmentOffset;
+};
+
+struct ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION_PATH_SEGMENT {
+	ULONG Length;
+	ULONG Offset;
+};
+
 namespace kernel32 {
 
 BOOL WIN_FUNC IsBadReadPtr(LPCVOID lp, UINT_PTR ucb);
@@ -20,6 +75,11 @@ DWORD WIN_FUNC FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId
 PVOID WIN_FUNC EncodePointer(PVOID Ptr);
 PVOID WIN_FUNC DecodePointer(PVOID Ptr);
 BOOL WIN_FUNC SetDllDirectoryA(LPCSTR lpPathName);
+
+BOOL WIN_FUNC FindActCtxSectionStringA(DWORD dwFlags, const GUID *lpExtensionGuid, ULONG ulSectionId,
+							 LPCSTR lpStringToFind, PACTCTX_SECTION_KEYED_DATA ReturnedData);
+BOOL WIN_FUNC FindActCtxSectionStringW(DWORD dwFlags, const GUID *lpExtensionGuid, ULONG ulSectionId,
+							 LPCWSTR lpStringToFind, PACTCTX_SECTION_KEYED_DATA ReturnedData);
 
 BOOL WIN_FUNC GetComputerNameA(LPSTR lpBuffer, LPDWORD nSize);
 BOOL WIN_FUNC GetComputerNameW(LPWSTR lpBuffer, LPDWORD nSize);
@@ -43,6 +103,8 @@ UINT WIN_FUNC GetSystemDirectoryW(LPWSTR lpBuffer, UINT uSize);
 UINT WIN_FUNC GetSystemWow64DirectoryA(LPSTR lpBuffer, UINT uSize);
 UINT WIN_FUNC GetSystemWow64DirectoryW(LPWSTR lpBuffer, UINT uSize);
 UINT WIN_FUNC GetWindowsDirectoryA(LPSTR lpBuffer, UINT uSize);
+UINT WIN_FUNC GetSystemWindowsDirectoryA(LPSTR lpBuffer, UINT uSize);
+UINT WIN_FUNC GetSystemWindowsDirectoryW(LPWSTR lpBuffer, UINT uSize);
 DWORD WIN_FUNC GetCurrentDirectoryA(DWORD nBufferLength, LPSTR lpBuffer);
 DWORD WIN_FUNC GetCurrentDirectoryW(DWORD nBufferLength, LPWSTR lpBuffer);
 int WIN_FUNC SetCurrentDirectoryA(LPCSTR lpPathName);

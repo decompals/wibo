@@ -13,11 +13,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <mimalloc.h>
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <vector>
 #include <sys/mman.h>
 #include <sys/statvfs.h>
 #include <system_error>
@@ -298,7 +300,82 @@ constexpr DWORD kComputerNameRequiredSize = kComputerNameLength + 1;
 constexpr const char kComputerNameAnsi[] = "COMPNAME";
 const uint16_t kComputerNameWide[] = {u'C', u'O', u'M', u'P', u'N', u'A', u'M', u'E', 0};
 
+struct DllRedirectionEntry {
+	std::string nameLower;
+	ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION dllData;
+};
+
+struct ActivationContext {
+	std::vector<DllRedirectionEntry> dllRedirections;
+};
+
+ActivationContext g_builtinActCtx;
+
+ActivationContext *currentActivationContext() {
+	// TODO: hook into real activation context stack once we have it.
+	return &g_builtinActCtx;
+}
+
 } // namespace
+void ensureDefaultActivationContext() {
+	static std::once_flag initFlag;
+	std::call_once(initFlag, [] {
+		ActivationContext *ctx = currentActivationContext();
+		auto addDll = [ctx](const std::string &name) {
+			DllRedirectionEntry entry;
+			entry.nameLower = stringToLower(name);
+			entry.dllData.Size = sizeof(entry.dllData);
+			entry.dllData.Flags = ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION_PATH_OMITS_ASSEMBLY_ROOT;
+			entry.dllData.TotalPathLength = 0;
+			entry.dllData.PathSegmentCount = 0;
+			entry.dllData.PathSegmentOffset = 0;
+			ctx->dllRedirections.emplace_back(std::move(entry));
+		};
+		addDll("msvcr80.dll");
+		addDll("msvcp80.dll");
+		addDll("mfc80.dll");
+		addDll("mfc80u.dll");
+		addDll("msvcrt.dll");
+	});
+}
+
+constexpr const char kVc80ManifestName[] = "Microsoft.VC80.CRT.manifest";
+
+void ensureVc80ManifestOnDisk(const DllRedirectionEntry &entry) {
+	static std::once_flag manifestOnce;
+	if (entry.nameLower != "msvcr80.dll") {
+		return;
+	}
+	std::call_once(manifestOnce, [] {
+		wibo::ModuleInfo *module = wibo::findLoadedModule("msvcr80.dll");
+		if (!module || module->resolvedPath.empty()) {
+			DEBUG_LOG("VC80 manifest: module not yet loaded, skipping creation\n");
+			return;
+		}
+		std::filesystem::path manifestPath = module->resolvedPath.parent_path() / kVc80ManifestName;
+		std::error_code ec;
+		if (std::filesystem::exists(manifestPath, ec)) {
+			return;
+		}
+		constexpr const char kManifestContents[] =
+			"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n"
+			"<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">\n"
+			"  <assemblyIdentity type=\"win32\" name=\"Microsoft.VC80.CRT\" version=\"8.0.50727.762\" processorArchitecture=\"x86\" publicKeyToken=\"1fc8b3b9a1e18e3b\"/>\n"
+			"  <file name=\"msvcr80.dll\"/>\n"
+			"  <file name=\"msvcp80.dll\"/>\n"
+			"  <file name=\"msvcm80.dll\"/>\n"
+			"</assembly>\n";
+		std::ofstream out(manifestPath, std::ios::binary);
+		if (!out) {
+			DEBUG_LOG("VC80 manifest: failed to create %s\n", manifestPath.string().c_str());
+			return;
+		}
+		out.write(kManifestContents, sizeof(kManifestContents) - 1);
+		if (!out) {
+			DEBUG_LOG("VC80 manifest: write error for %s\n", manifestPath.string().c_str());
+		}
+	});
+}
 
 namespace kernel32 {
 
@@ -549,6 +626,90 @@ BOOL WIN_FUNC SetDllDirectoryA(LPCSTR lpPathName) {
 	}
 
 	wibo::setDllDirectoryOverride(std::filesystem::absolute(hostPath));
+	wibo::lastError = ERROR_SUCCESS;
+	return TRUE;
+}
+
+BOOL WIN_FUNC FindActCtxSectionStringA(DWORD dwFlags, const GUID *lpExtensionGuid, ULONG ulSectionId,
+							 LPCSTR lpStringToFind, PACTCTX_SECTION_KEYED_DATA ReturnedData) {
+	DEBUG_LOG("FindActCtxSectionStringA(%#x, %p, %u, %s, %p)\n", dwFlags, lpExtensionGuid, ulSectionId,
+			  lpStringToFind ? lpStringToFind : "<null>", ReturnedData);
+	std::vector<uint16_t> wideStorage;
+	if (lpStringToFind) {
+		size_t length = strlen(lpStringToFind);
+		wideStorage.resize(length + 1);
+		for (size_t i = 0; i <= length; ++i) {
+			wideStorage[i] = static_cast<uint8_t>(lpStringToFind[i]);
+		}
+	}
+	const uint16_t *widePtr = wideStorage.empty() ? nullptr : wideStorage.data();
+	return FindActCtxSectionStringW(dwFlags, lpExtensionGuid, ulSectionId,
+								 reinterpret_cast<LPCWSTR>(widePtr), ReturnedData);
+}
+
+BOOL WIN_FUNC FindActCtxSectionStringW(DWORD dwFlags, const GUID *lpExtensionGuid, ULONG ulSectionId,
+							 LPCWSTR lpStringToFind, PACTCTX_SECTION_KEYED_DATA ReturnedData) {
+	std::string lookup = lpStringToFind ? wideStringToString(lpStringToFind) : std::string();
+	DEBUG_LOG("FindActCtxSectionStringW(%#x, %p, %u, %s, %p)\n", dwFlags, lpExtensionGuid, ulSectionId,
+		  lookup.c_str(), ReturnedData);
+
+	if (lpExtensionGuid) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return FALSE;
+	}
+
+	if (!ReturnedData) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return FALSE;
+	}
+
+	if (dwFlags & ~FIND_ACTCTX_SECTION_KEY_RETURN_HACTCTX) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return FALSE;
+	}
+
+	ULONG originalSize = ReturnedData->cbSize;
+	if (originalSize < sizeof(ACTCTX_SECTION_KEYED_DATA)) {
+		wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+		return FALSE;
+	}
+
+	ensureDefaultActivationContext();
+	ActivationContext *ctx = currentActivationContext();
+	const DllRedirectionEntry *matchedEntry = nullptr;
+	if (ulSectionId == ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION && !lookup.empty()) {
+		std::string lowerLookup = stringToLower(lookup);
+		for (const auto &entry : ctx->dllRedirections) {
+			if (entry.nameLower == lowerLookup) {
+				matchedEntry = &entry;
+				break;
+			}
+		}
+	}
+
+	size_t zeroSize = std::min(static_cast<size_t>(ReturnedData->cbSize), sizeof(*ReturnedData));
+	std::memset(ReturnedData, 0, zeroSize);
+	ReturnedData->cbSize = originalSize;
+	ReturnedData->ulDataFormatVersion = 1;
+	ReturnedData->ulFlags = ACTCTX_SECTION_KEYED_DATA_FLAG_FOUND_IN_ACTCTX;
+	if (dwFlags & FIND_ACTCTX_SECTION_KEY_RETURN_HACTCTX) {
+		ReturnedData->hActCtx = reinterpret_cast<HANDLE>(&g_builtinActCtx);
+	}
+
+	if (!matchedEntry) {
+		wibo::lastError = ERROR_SXS_KEY_NOT_FOUND;
+		return FALSE;
+	}
+
+	ensureVc80ManifestOnDisk(*matchedEntry);
+
+	ReturnedData->lpData = const_cast<ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION *>(&matchedEntry->dllData);
+	ReturnedData->ulLength = matchedEntry->dllData.Size;
+	ReturnedData->lpSectionBase = const_cast<ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION *>(&matchedEntry->dllData);
+	ReturnedData->ulSectionTotalLength = matchedEntry->dllData.Size;
+	ReturnedData->ulAssemblyRosterIndex = 1;
+	ReturnedData->AssemblyMetadata = {};
+
 	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
@@ -822,6 +983,27 @@ UINT WIN_FUNC GetWindowsDirectoryA(LPSTR lpBuffer, UINT uSize) {
 	}
 	std::strcpy(lpBuffer, windowsDir);
 	return static_cast<UINT>(len);
+}
+
+UINT WIN_FUNC GetSystemWindowsDirectoryA(LPSTR lpBuffer, UINT uSize) {
+	DEBUG_LOG("GetSystemWindowsDirectoryA(%p, %u)\n", lpBuffer, uSize);
+	return GetWindowsDirectoryA(lpBuffer, uSize);
+}
+
+UINT WIN_FUNC GetSystemWindowsDirectoryW(LPWSTR lpBuffer, UINT uSize) {
+	DEBUG_LOG("GetSystemWindowsDirectoryW(%p, %u)\n", lpBuffer, uSize);
+	if (!lpBuffer) {
+		return 0;
+	}
+
+	const char *windowsDir = "C:\\Windows";
+	auto wide = stringToWideString(windowsDir);
+	UINT length = static_cast<UINT>(wide.size() - 1);
+	if (uSize < length + 1) {
+		return length + 1;
+	}
+	std::memcpy(lpBuffer, wide.data(), (length + 1) * sizeof(uint16_t));
+	return length;
 }
 
 DWORD WIN_FUNC GetCurrentDirectoryA(DWORD nBufferLength, LPSTR lpBuffer) {

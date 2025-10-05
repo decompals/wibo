@@ -1,5 +1,7 @@
 #include "common.h"
+#include "context.h"
 #include "errors.h"
+#include "modules.h"
 
 #include <sys/random.h>
 #include <vector>
@@ -72,7 +74,7 @@ static void *resolveByName(const char *name) {
 	return nullptr;
 }
 
-wibo::Module lib_bcrypt = {
+wibo::ModuleStub lib_bcrypt = {
 	(const char *[]){
 		"bcrypt",
 		nullptr,

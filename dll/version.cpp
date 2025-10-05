@@ -1,6 +1,8 @@
 #include "common.h"
+#include "context.h"
 #include "errors.h"
 #include "files.h"
+#include "modules.h"
 #include "resources.h"
 #include "strutil.h"
 
@@ -14,13 +16,9 @@ namespace {
 
 constexpr uint32_t RT_VERSION = 16;
 
-static uint16_t readU16(const uint8_t *ptr) {
-	return static_cast<uint16_t>(ptr[0] | (ptr[1] << 8));
-}
+static uint16_t readU16(const uint8_t *ptr) { return static_cast<uint16_t>(ptr[0] | (ptr[1] << 8)); }
 
-static size_t align4(size_t offset) {
-	return (offset + 3u) & ~static_cast<size_t>(3u);
-}
+static size_t align4(size_t offset) { return (offset + 3u) & ~static_cast<size_t>(3u); }
 
 static std::string narrowKey(const std::u16string &key) {
 	std::string result;
@@ -70,7 +68,8 @@ static bool parseVersionBlock(const uint8_t *block, size_t available, VersionBlo
 
 	cursor = block + sizeof(uint16_t) * 3 + (out.key.size() + 1) * sizeof(uint16_t);
 	if (cursor > end) {
-		DEBUG_LOG("key cursor beyond block: cursor=%zu end=%zu\n", static_cast<size_t>(cursor - block), static_cast<size_t>(end - block));
+		DEBUG_LOG("key cursor beyond block: cursor=%zu end=%zu\n", static_cast<size_t>(cursor - block),
+				  static_cast<size_t>(end - block));
 		return false;
 	}
 
@@ -78,8 +77,8 @@ static bool parseVersionBlock(const uint8_t *block, size_t available, VersionBlo
 
 	uint32_t valueBytes = 0;
 	if (valueLength) {
-		valueBytes = type == 1 ? static_cast<uint32_t>(valueLength) * sizeof(uint16_t)
-					 : static_cast<uint32_t>(valueLength);
+		valueBytes =
+			type == 1 ? static_cast<uint32_t>(valueLength) * sizeof(uint16_t) : static_cast<uint32_t>(valueLength);
 		if (cursor + valueBytes > end) {
 			DEBUG_LOG("value beyond block: bytes=%u remaining=%zu\n", valueBytes, static_cast<size_t>(end - cursor));
 			return false;
@@ -100,12 +99,8 @@ static bool parseVersionBlock(const uint8_t *block, size_t available, VersionBlo
 	return true;
 }
 
-static bool queryVersionBlock(const uint8_t *block, size_t available,
-						 const std::vector<std::string> &segments,
-						 size_t depth,
-						 const uint8_t **outPtr,
-						 uint32_t *outLen,
-						 uint16_t *outType) {
+static bool queryVersionBlock(const uint8_t *block, size_t available, const std::vector<std::string> &segments,
+							  size_t depth, const uint8_t **outPtr, uint32_t *outLen, uint16_t *outType) {
 	VersionBlockView view;
 	if (!parseVersionBlock(block, available, view))
 		return false;
@@ -217,9 +212,10 @@ unsigned int WIN_FUNC GetFileVersionInfoSizeA(const char *lptstrFilename, unsign
 	return static_cast<unsigned int>(buffer.size());
 }
 
-unsigned int WIN_FUNC GetFileVersionInfoA(const char *lptstrFilename, unsigned int dwHandle, unsigned int dwLen, void *lpData) {
+unsigned int WIN_FUNC GetFileVersionInfoA(const char *lptstrFilename, unsigned int dwHandle, unsigned int dwLen,
+										  void *lpData) {
 	HOST_CONTEXT_GUARD();
-	(void) dwHandle;
+	(void)dwHandle;
 	DEBUG_LOG("GetFileVersionInfoA(%s, %u, %p)\n", lptstrFilename, dwLen, lpData);
 	if (!lpData || dwLen == 0) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -243,7 +239,8 @@ unsigned int WIN_FUNC GetFileVersionInfoA(const char *lptstrFilename, unsigned i
 	return 1;
 }
 
-static unsigned int VerQueryValueImpl(const void *pBlock, const std::string &subBlock, void **lplpBuffer, unsigned int *puLen) {
+static unsigned int VerQueryValueImpl(const void *pBlock, const std::string &subBlock, void **lplpBuffer,
+									  unsigned int *puLen) {
 	if (!pBlock)
 		return 0;
 
@@ -280,7 +277,8 @@ static unsigned int VerQueryValueImpl(const void *pBlock, const std::string &sub
 	return 1;
 }
 
-unsigned int WIN_FUNC VerQueryValueA(const void *pBlock, const char *lpSubBlock, void **lplpBuffer, unsigned int *puLen) {
+unsigned int WIN_FUNC VerQueryValueA(const void *pBlock, const char *lpSubBlock, void **lplpBuffer,
+									 unsigned int *puLen) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("VerQueryValueA(%p, %s, %p, %p)\n", pBlock, lpSubBlock ? lpSubBlock : "(null)", lplpBuffer, puLen);
 	if (!lpSubBlock)
@@ -295,14 +293,16 @@ unsigned int WIN_FUNC GetFileVersionInfoSizeW(const uint16_t *lptstrFilename, un
 	return GetFileVersionInfoSizeA(narrow.c_str(), lpdwHandle);
 }
 
-unsigned int WIN_FUNC GetFileVersionInfoW(const uint16_t *lptstrFilename, unsigned int dwHandle, unsigned int dwLen, void *lpData) {
+unsigned int WIN_FUNC GetFileVersionInfoW(const uint16_t *lptstrFilename, unsigned int dwHandle, unsigned int dwLen,
+										  void *lpData) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetFileVersionInfoW -> ");
 	auto narrow = wideStringToString(lptstrFilename);
 	return GetFileVersionInfoA(narrow.c_str(), dwHandle, dwLen, lpData);
 }
 
-unsigned int WIN_FUNC VerQueryValueW(const void *pBlock, const uint16_t *lpSubBlock, void **lplpBuffer, unsigned int *puLen) {
+unsigned int WIN_FUNC VerQueryValueW(const void *pBlock, const uint16_t *lpSubBlock, void **lplpBuffer,
+									 unsigned int *puLen) {
 	HOST_CONTEXT_GUARD();
 	if (!lpSubBlock)
 		return 0;
@@ -314,16 +314,22 @@ unsigned int WIN_FUNC VerQueryValueW(const void *pBlock, const uint16_t *lpSubBl
 } // namespace version
 
 static void *resolveByName(const char *name) {
-	if (strcmp(name, "GetFileVersionInfoSizeA") == 0) return (void *) version::GetFileVersionInfoSizeA;
-	if (strcmp(name, "GetFileVersionInfoA") == 0) return (void *) version::GetFileVersionInfoA;
-	if (strcmp(name, "VerQueryValueA") == 0) return (void *) version::VerQueryValueA;
-	if (strcmp(name, "GetFileVersionInfoSizeW") == 0) return (void *) version::GetFileVersionInfoSizeW;
-	if (strcmp(name, "GetFileVersionInfoW") == 0) return (void *) version::GetFileVersionInfoW;
-	if (strcmp(name, "VerQueryValueW") == 0) return (void *) version::VerQueryValueW;
+	if (strcmp(name, "GetFileVersionInfoSizeA") == 0)
+		return (void *)version::GetFileVersionInfoSizeA;
+	if (strcmp(name, "GetFileVersionInfoA") == 0)
+		return (void *)version::GetFileVersionInfoA;
+	if (strcmp(name, "VerQueryValueA") == 0)
+		return (void *)version::VerQueryValueA;
+	if (strcmp(name, "GetFileVersionInfoSizeW") == 0)
+		return (void *)version::GetFileVersionInfoSizeW;
+	if (strcmp(name, "GetFileVersionInfoW") == 0)
+		return (void *)version::GetFileVersionInfoW;
+	if (strcmp(name, "VerQueryValueW") == 0)
+		return (void *)version::VerQueryValueW;
 	return nullptr;
 }
 
-wibo::Module lib_version = {
+wibo::ModuleStub lib_version = {
 	(const char *[]){
 		"version",
 		nullptr,

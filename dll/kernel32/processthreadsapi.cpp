@@ -1,9 +1,12 @@
 #include "processthreadsapi.h"
+
 #include "common.h"
+#include "context.h"
 #include "errors.h"
 #include "files.h"
 #include "handles.h"
 #include "internal.h"
+#include "modules.h"
 #include "processes.h"
 #include "strutil.h"
 #include "timeutil.h"

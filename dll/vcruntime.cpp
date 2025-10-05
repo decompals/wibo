@@ -1,4 +1,6 @@
 #include "common.h"
+#include "context.h"
+#include "modules.h"
 
 namespace vcruntime {
 
@@ -36,7 +38,7 @@ static void *resolveByName(const char *name) {
 	return nullptr;
 }
 
-wibo::Module lib_vcruntime = {
+wibo::ModuleStub lib_vcruntime = {
 	(const char *[]){
 		"vcruntime140",
 		nullptr,

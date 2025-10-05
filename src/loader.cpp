@@ -1,9 +1,9 @@
 #include "common.h"
 #include "errors.h"
+#include "modules.h"
+
 #include <algorithm>
 #include <cstring>
-#include <errno.h>
-#include <memory>
 #include <strings.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
@@ -291,10 +291,11 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 
 		size_t sectionSpan = std::max(section.virtualSize, section.sizeOfRawData);
 		if (sectionSpan != 0) {
-			uintptr_t sectionStart = alignDown(imageBaseAddr + static_cast<uintptr_t>(section.virtualAddress), pageSizeValue);
+			uintptr_t sectionStart =
+				alignDown(imageBaseAddr + static_cast<uintptr_t>(section.virtualAddress), pageSizeValue);
 			uintptr_t sectionEnd = alignUp(imageBaseAddr + static_cast<uintptr_t>(section.virtualAddress) +
-									 static_cast<uintptr_t>(sectionSpan),
-						pageSizeValue);
+											   static_cast<uintptr_t>(sectionSpan),
+										   pageSizeValue);
 			if (sectionEnd > sectionStart) {
 				Executable::SectionInfo sectionInfo{};
 				sectionInfo.base = sectionStart;
@@ -305,9 +306,8 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 			}
 		}
 	}
-	std::sort(sections.begin(), sections.end(), [](const SectionInfo &lhs, const SectionInfo &rhs) {
-		return lhs.base < rhs.base;
-	});
+	std::sort(sections.begin(), sections.end(),
+			  [](const SectionInfo &lhs, const SectionInfo &rhs) { return lhs.base < rhs.base; });
 
 	if (exec && relocationDelta != 0) {
 		if (relocationDirectoryRVA == 0 || relocationDirectorySize == 0) {

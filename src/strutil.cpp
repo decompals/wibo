@@ -1,5 +1,7 @@
 #include "strutil.h"
+
 #include "common.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cstdint>

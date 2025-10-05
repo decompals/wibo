@@ -1,9 +1,11 @@
 #include "common.h"
-#include "kernel32/internal.h"
+#include "context.h"
 #include "errors.h"
 #include "files.h"
 #include "handles.h"
+#include "kernel32/internal.h"
 #include "kernel32/processthreadsapi.h"
+#include "modules.h"
 #include "processes.h"
 #include "strutil.h"
 
@@ -408,7 +410,7 @@ static void *resolveByName(const char *name) {
 	return nullptr;
 }
 
-wibo::Module lib_ntdll = {
+wibo::ModuleStub lib_ntdll = {
 	(const char *[]){
 		"ntdll",
 		nullptr,

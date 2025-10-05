@@ -1,5 +1,7 @@
 #include "winreg.h"
 
+#include "common.h"
+#include "context.h"
 #include "errors.h"
 #include "handles.h"
 #include "strutil.h"

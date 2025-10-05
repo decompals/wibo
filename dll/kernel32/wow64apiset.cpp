@@ -1,8 +1,10 @@
 #include "wow64apiset.h"
+
 #include "common.h"
-#include "kernel32/internal.h"
+#include "context.h"
 #include "errors.h"
 #include "handles.h"
+#include "internal.h"
 
 namespace kernel32 {
 

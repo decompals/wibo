@@ -2,6 +2,7 @@
 
 #include "access.h"
 #include "common.h"
+#include "context.h"
 #include "errors.h"
 #include "files.h"
 #include "handles.h"

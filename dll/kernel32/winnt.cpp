@@ -1,6 +1,7 @@
 #include "winnt.h"
 
 #include "common.h"
+#include "context.h"
 
 namespace kernel32 {
 

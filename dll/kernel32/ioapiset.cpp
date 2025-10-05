@@ -1,5 +1,6 @@
 #include "ioapiset.h"
 
+#include "context.h"
 #include "errors.h"
 #include "synchapi.h"
 

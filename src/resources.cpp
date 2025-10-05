@@ -1,6 +1,8 @@
 #include "resources.h"
-#include "errors.h"
+
 #include "common.h"
+#include "errors.h"
+#include "modules.h"
 
 namespace {
 

@@ -80,7 +80,7 @@ add_executable(wibo
     src/handles.cpp
     src/loader.cpp
     src/main.cpp
-    src/module_registry.cpp
+    src/modules.cpp
     src/processes.cpp
     src/resources.cpp
     src/strutil.cpp

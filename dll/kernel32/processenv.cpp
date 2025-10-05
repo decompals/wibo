@@ -1,5 +1,6 @@
 #include "processenv.h"
 
+#include "context.h"
 #include "errors.h"
 #include "files.h"
 #include "internal.h"

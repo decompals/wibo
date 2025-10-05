@@ -1,4 +1,4 @@
-#include "common.h"
+#include "modules.h"
 
 #include "kernel32/debugapi.h"
 #include "kernel32/errhandlingapi.h"
@@ -600,7 +600,7 @@ void *resolveByName(const char *name) {
 
 } // namespace
 
-wibo::Module lib_kernel32 = {
+wibo::ModuleStub lib_kernel32 = {
 	(const char *[]){
 		"kernel32",
 		nullptr,

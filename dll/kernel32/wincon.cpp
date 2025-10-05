@@ -1,10 +1,10 @@
 #include "wincon.h"
 
+#include "context.h"
 #include "errors.h"
 #include "files.h"
+#include "handles.h"
 #include "strutil.h"
-
-#include <cstdio>
 
 namespace kernel32 {
 
@@ -83,7 +83,7 @@ BOOL WIN_FUNC WriteConsoleW(HANDLE hConsoleOutput, LPCVOID lpBuffer, DWORD nNumb
 
 	auto file = wibo::handles().getAs<FileObject>(hConsoleOutput);
 	if (file->fd == STDOUT_FILENO || file->fd == STDERR_FILENO) {
-		auto str = wideStringToString(static_cast<const uint16_t *>(lpBuffer), nNumberOfCharsToWrite);
+		auto str = wideStringToString(static_cast<const uint16_t *>(lpBuffer), static_cast<int>(nNumberOfCharsToWrite));
 		dprintf(file->fd, "%s", str.c_str());
 		if (lpNumberOfCharsWritten) {
 			*lpNumberOfCharsWritten = nNumberOfCharsToWrite;

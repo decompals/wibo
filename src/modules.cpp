@@ -1,4 +1,7 @@
+#include "modules.h"
+
 #include "common.h"
+#include "context.h"
 #include "errors.h"
 #include "files.h"
 #include "strutil.h"
@@ -17,19 +20,19 @@
 #include <utility>
 #include <vector>
 
-extern const wibo::Module lib_advapi32;
-extern const wibo::Module lib_bcrypt;
-extern const wibo::Module lib_crt;
-extern const wibo::Module lib_kernel32;
-extern const wibo::Module lib_lmgr;
-extern const wibo::Module lib_mscoree;
-extern const wibo::Module lib_msvcrt;
-extern const wibo::Module lib_ntdll;
-extern const wibo::Module lib_rpcrt4;
-extern const wibo::Module lib_ole32;
-extern const wibo::Module lib_user32;
-extern const wibo::Module lib_vcruntime;
-extern const wibo::Module lib_version;
+extern const wibo::ModuleStub lib_advapi32;
+extern const wibo::ModuleStub lib_bcrypt;
+extern const wibo::ModuleStub lib_crt;
+extern const wibo::ModuleStub lib_kernel32;
+extern const wibo::ModuleStub lib_lmgr;
+extern const wibo::ModuleStub lib_mscoree;
+extern const wibo::ModuleStub lib_msvcrt;
+extern const wibo::ModuleStub lib_ntdll;
+extern const wibo::ModuleStub lib_rpcrt4;
+extern const wibo::ModuleStub lib_ole32;
+extern const wibo::ModuleStub lib_user32;
+extern const wibo::ModuleStub lib_vcruntime;
+extern const wibo::ModuleStub lib_version;
 
 namespace {
 
@@ -118,16 +121,14 @@ StubFuncType resolveMissingFuncOrdinal(const char *dllName, uint16_t ordinal) {
 	return resolveMissingFuncName(dllName, buf);
 }
 
-using ModulePtr = std::unique_ptr<wibo::ModuleInfo>;
-
 struct ModuleRegistry {
 	std::recursive_mutex mutex;
-	std::unordered_map<std::string, ModulePtr> modulesByKey;
+	std::unordered_map<std::string, wibo::ModulePtr> modulesByKey;
 	std::unordered_map<std::string, wibo::ModuleInfo *> modulesByAlias;
 	std::optional<std::filesystem::path> dllDirectory;
 	bool initialized = false;
 	std::unordered_map<void *, wibo::ModuleInfo *> onExitTables;
-	std::unordered_map<const wibo::Module *, std::vector<std::string>> builtinAliasLists;
+	std::unordered_map<const wibo::ModuleStub *, std::vector<std::string>> builtinAliasLists;
 	std::unordered_map<std::string, wibo::ModuleInfo *> builtinAliasMap;
 	std::unordered_set<std::string> pinnedAliases;
 	std::unordered_set<wibo::ModuleInfo *> pinnedModules;
@@ -150,18 +151,18 @@ struct LockedRegistry {
 	ModuleRegistry &operator*() const { return *reg; }
 };
 
-void registerBuiltinModule(ModuleRegistry &reg, const wibo::Module *module);
+void registerBuiltinModule(ModuleRegistry &reg, const wibo::ModuleStub *module);
 
 LockedRegistry registry() {
 	static ModuleRegistry reg;
 	std::unique_lock guard(reg.mutex);
 	if (!reg.initialized) {
 		reg.initialized = true;
-		const wibo::Module *builtins[] = {
+		const wibo::ModuleStub *builtins[] = {
 			&lib_advapi32, &lib_bcrypt, &lib_crt,	 &lib_kernel32, &lib_lmgr,		&lib_mscoree, &lib_msvcrt,
 			&lib_ntdll,	   &lib_ole32,	&lib_rpcrt4, &lib_user32,	&lib_vcruntime, &lib_version, nullptr,
 		};
-		for (const wibo::Module **module = builtins; *module; ++module) {
+		for (const wibo::ModuleStub **module = builtins; *module; ++module) {
 			registerBuiltinModule(reg, *module);
 		}
 	}
@@ -365,18 +366,18 @@ void registerAlias(ModuleRegistry &reg, const std::string &alias, wibo::ModuleIn
 		return;
 	}
 	// Prefer externally loaded modules over built-ins when both are present.
-	if (it->second && it->second->module != nullptr && info->module == nullptr) {
+	if (it->second && it->second->moduleStub != nullptr && info->moduleStub == nullptr) {
 		reg.modulesByAlias[alias] = info;
 	}
 }
 
-void registerBuiltinModule(ModuleRegistry &reg, const wibo::Module *module) {
+void registerBuiltinModule(ModuleRegistry &reg, const wibo::ModuleStub *module) {
 	if (!module) {
 		return;
 	}
-	ModulePtr entry = std::make_unique<wibo::ModuleInfo>();
+	wibo::ModulePtr entry = std::make_shared<wibo::ModuleInfo>();
 	entry->handle = entry.get();
-	entry->module = module;
+	entry->moduleStub = module;
 	entry->refCount = UINT_MAX;
 	entry->originalName = module->names[0] ? module->names[0] : "";
 	entry->normalizedName = normalizedBaseKey(parseModuleName(entry->originalName));
@@ -520,7 +521,7 @@ bool shouldDeliverThreadNotifications(const wibo::ModuleInfo &info) {
 	if (&info == wibo::mainModule) {
 		return false;
 	}
-	if (info.module != nullptr) {
+	if (info.moduleStub != nullptr) {
 		return false;
 	}
 	if (!info.executable) {
@@ -536,7 +537,7 @@ bool shouldDeliverThreadNotifications(const wibo::ModuleInfo &info) {
 }
 
 void ensureExportsInitialized(wibo::ModuleInfo &info) {
-	if (info.module || info.exportsInitialized)
+	if (info.moduleStub || info.exportsInitialized)
 		return;
 	if (!info.executable)
 		return;
@@ -604,7 +605,7 @@ ModuleInfo *registerProcessModule(std::unique_ptr<Executable> executable, std::f
 
 	ModulePtr info = std::make_unique<ModuleInfo>();
 	info->handle = executable->imageBase; // Use image base as handle for main module
-	info->module = nullptr;
+	info->moduleStub = nullptr;
 	info->originalName = std::move(originalName);
 	info->normalizedName = std::move(normalizedName);
 	info->resolvedPath = std::move(resolvedPath);
@@ -655,7 +656,7 @@ void shutdownModuleRegistry() {
 	auto reg = registry();
 	for (auto &pair : reg->modulesByKey) {
 		ModuleInfo *info = pair.second.get();
-		if (!info || info->module) {
+		if (!info || info->moduleStub) {
 			continue;
 		}
 		runPendingOnExit(*info);
@@ -877,7 +878,7 @@ ModuleInfo *loadModule(const char *dllName) {
 
 		ModulePtr info = std::make_unique<ModuleInfo>();
 		info->handle = info.get();
-		info->module = nullptr;
+		info->moduleStub = nullptr;
 		info->originalName = requested;
 		info->normalizedName = normalizedBaseKey(parsed);
 		info->resolvedPath = files::canonicalPath(path);
@@ -940,8 +941,8 @@ ModuleInfo *loadModule(const char *dllName) {
 		existing = findByAlias(*reg, normalizeAlias(requested));
 	}
 	if (existing) {
-		DEBUG_LOG("  found existing module alias %s (builtin=%d)\n", alias.c_str(), existing->module != nullptr);
-		if (existing->module == nullptr) {
+		DEBUG_LOG("  found existing module alias %s (builtin=%d)\n", alias.c_str(), existing->moduleStub != nullptr);
+		if (existing->moduleStub == nullptr) {
 			if (existing->refCount != UINT_MAX) {
 				existing->refCount++;
 			}
@@ -986,7 +987,7 @@ ModuleInfo *loadModule(const char *dllName) {
 			builtin = builtinIt->second;
 		}
 	}
-	if (builtin && builtin->module != nullptr) {
+	if (builtin && builtin->moduleStub != nullptr) {
 		DEBUG_LOG("  falling back to builtin module %s\n", builtin->originalName.c_str());
 		lastError = (diskError != ERROR_SUCCESS) ? diskError : ERROR_SUCCESS;
 		return builtin;
@@ -1032,14 +1033,14 @@ void *resolveFuncByName(ModuleInfo *info, const char *funcName) {
 	if (!info) {
 		return nullptr;
 	}
-	if (info->module && info->module->byName) {
-		void *func = info->module->byName(funcName);
+	if (info->moduleStub && info->moduleStub->byName) {
+		void *func = info->moduleStub->byName(funcName);
 		if (func) {
 			return func;
 		}
 	}
 	ensureExportsInitialized(*info);
-	if (!info->module) {
+	if (!info->moduleStub) {
 		auto it = info->exportNameToOrdinal.find(funcName);
 		if (it != info->exportNameToOrdinal.end()) {
 			return resolveFuncByOrdinal(info, it->second);
@@ -1052,13 +1053,13 @@ void *resolveFuncByOrdinal(ModuleInfo *info, uint16_t ordinal) {
 	if (!info) {
 		return nullptr;
 	}
-	if (info->module && info->module->byOrdinal) {
-		void *func = info->module->byOrdinal(ordinal);
+	if (info->moduleStub && info->moduleStub->byOrdinal) {
+		void *func = info->moduleStub->byOrdinal(ordinal);
 		if (func) {
 			return func;
 		}
 	}
-	if (!info->module) {
+	if (!info->moduleStub) {
 		ensureExportsInitialized(*info);
 		if (!info->exportsByOrdinal.empty() && ordinal >= info->exportOrdinalBase) {
 			auto index = static_cast<size_t>(ordinal - info->exportOrdinalBase);
@@ -1107,6 +1108,11 @@ Executable *executableFromModule(HMODULE module) {
 		info->executable = std::move(executable);
 	}
 	return info->executable.get();
+}
+
+std::unordered_map<std::string, ModulePtr> allLoadedModules() {
+	auto reg = registry();
+	return reg->modulesByKey;
 }
 
 } // namespace wibo

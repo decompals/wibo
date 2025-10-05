@@ -1,14 +1,11 @@
 #include "namedpipeapi.h"
 
 #include "common.h"
+#include "context.h"
 #include "errors.h"
-#include "fileapi.h"
-#include "files.h"
 #include "handles.h"
 #include "internal.h"
 
-#include <cerrno>
-#include <cstdio>
 #include <fcntl.h>
 #include <unistd.h>
 

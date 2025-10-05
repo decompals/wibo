@@ -1,7 +1,10 @@
 #include "common.h"
+#include "context.h"
 #include "files.h"
+#include "modules.h"
 #include "processes.h"
 #include "strutil.h"
+
 #include <asm/ldt.h>
 #include <charconv>
 #include <cstdarg>

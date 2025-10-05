@@ -1,5 +1,7 @@
 #include "interlockedapi.h"
+
 #include "common.h"
+#include "context.h"
 
 #include <cstring>
 

@@ -1,46 +1,50 @@
 #include "common.h"
+#include "context.h"
+#include "files.h"
 #include "kernel32/internal.h"
+#include "modules.h"
+#include "processes.h"
+#include "strutil.h"
+
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cerrno>
 #include <climits>
 #include <clocale>
 #include <cmath>
-#include <cctype>
-#include <float.h>
+#include <csignal>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <csignal>
 #include <cstring>
+#include <ctime>
 #include <cwchar>
 #include <cwctype>
+#include <fcntl.h>
 #include <filesystem>
+#include <float.h>
+#include <math.h>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <ctime>
+#include <spawn.h>
 #include <string>
 #include <strings.h>
-#include <type_traits>
-#include <unordered_map>
-#include <unistd.h>
-#include <vector>
-#include <spawn.h>
-#include <sys/wait.h>
-#include <math.h>
-#include <utime.h>
-#include <fcntl.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 #include <sys/time.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <type_traits>
+#include <unistd.h>
+#include <unordered_map>
+#include <utime.h>
+#include <vector>
+
 #ifndef O_BINARY
 #define O_BINARY 0
 #endif
-#include "files.h"
-#include "processes.h"
-#include "strutil.h"
 
 typedef void (*_PVFV)();
 typedef int (*_PIFV)();
@@ -3218,7 +3222,7 @@ static void *resolveByName(const char *name) {
 	return nullptr;
 }
 
-wibo::Module lib_msvcrt = {
+wibo::ModuleStub lib_msvcrt = {
 	(const char *[]){
 		"msvcrt",
 		"msvcrt40",

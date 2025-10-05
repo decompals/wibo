@@ -1,4 +1,6 @@
 #include "common.h"
+#include "context.h"
+#include "modules.h"
 
 namespace ole32 {
 	int WIN_FUNC CoInitialize(void *pvReserved) {
@@ -37,7 +39,7 @@ static void *resolveByName(const char *name) {
 	return nullptr;
 }
 
-wibo::Module lib_ole32 = {
+wibo::ModuleStub lib_ole32 = {
 	(const char *[]){
 		"ole32",
 		nullptr,

@@ -1,4 +1,6 @@
 #include "common.h"
+#include "context.h"
+#include "modules.h"
 
 #include <cstdarg>
 #include <cstdlib>
@@ -283,7 +285,7 @@ void *resolveByName(const char *name) {
 
 } // namespace
 
-wibo::Module lib_rpcrt4 = {
+wibo::ModuleStub lib_rpcrt4 = {
 	(const char *[]){"rpcrt4", nullptr},
 	resolveByName,
 	nullptr,

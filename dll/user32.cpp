@@ -1,6 +1,8 @@
 #include "common.h"
+#include "context.h"
 #include "errors.h"
-#include "strutil.h"
+#include "modules.h"
+#include "resources.h"
 
 namespace user32 {
 	constexpr uint32_t RT_STRING_ID = 6;
@@ -186,7 +188,7 @@ static void *resolveByName(const char *name) {
 	return nullptr;
 }
 
-wibo::Module lib_user32 = {
+wibo::ModuleStub lib_user32 = {
 	(const char *[]){
 		"user32",
 		nullptr,

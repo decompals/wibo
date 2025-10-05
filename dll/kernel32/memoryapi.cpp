@@ -1,8 +1,11 @@
 #include "memoryapi.h"
+
 #include "common.h"
+#include "context.h"
 #include "errors.h"
 #include "handles.h"
 #include "internal.h"
+#include "modules.h"
 #include "strutil.h"
 
 #include <cerrno>

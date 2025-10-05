@@ -1,5 +1,7 @@
 #include "sysinfoapi.h"
+
 #include "common.h"
+#include "context.h"
 #include "errors.h"
 #include "timeutil.h"
 

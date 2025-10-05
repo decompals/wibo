@@ -1,4 +1,6 @@
 #include "common.h"
+#include "context.h"
+#include "modules.h"
 
 namespace mscoree {
 
@@ -16,7 +18,7 @@ static void *resolveByName(const char *name) {
 	return nullptr;
 }
 
-wibo::Module lib_mscoree = {
+wibo::ModuleStub lib_mscoree = {
 	(const char *[]){
 		"mscoree",
 		nullptr,

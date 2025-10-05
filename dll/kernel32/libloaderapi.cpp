@@ -1,7 +1,9 @@
 #include "libloaderapi.h"
 
+#include "context.h"
 #include "errors.h"
 #include "files.h"
+#include "modules.h"
 #include "resources.h"
 #include "strutil.h"
 

@@ -1,9 +1,10 @@
 #include "winbase.h"
 
+#include "context.h"
 #include "errors.h"
 #include "files.h"
-#include "handles.h"
 #include "internal.h"
+#include "modules.h"
 #include "strutil.h"
 
 #include <algorithm>
@@ -13,16 +14,15 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <limits>
 #include <mimalloc.h>
 #include <mutex>
 #include <string>
-#include <unordered_map>
-#include <vector>
 #include <sys/mman.h>
 #include <sys/statvfs.h>
 #include <system_error>
+#include <unordered_map>
+#include <vector>
 
 namespace {
 
@@ -317,6 +317,7 @@ ActivationContext *currentActivationContext() {
 }
 
 } // namespace
+
 void ensureDefaultActivationContext() {
 	static std::once_flag initFlag;
 	std::call_once(initFlag, [] {
@@ -331,48 +332,10 @@ void ensureDefaultActivationContext() {
 			entry.dllData.PathSegmentOffset = 0;
 			ctx->dllRedirections.emplace_back(std::move(entry));
 		};
-		addDll("msvcr80.dll");
-		addDll("msvcp80.dll");
-		addDll("mfc80.dll");
-		addDll("mfc80u.dll");
-		addDll("msvcrt.dll");
-	});
-}
-
-constexpr const char kVc80ManifestName[] = "Microsoft.VC80.CRT.manifest";
-
-void ensureVc80ManifestOnDisk(const DllRedirectionEntry &entry) {
-	static std::once_flag manifestOnce;
-	if (entry.nameLower != "msvcr80.dll") {
-		return;
-	}
-	std::call_once(manifestOnce, [] {
-		wibo::ModuleInfo *module = wibo::findLoadedModule("msvcr80.dll");
-		if (!module || module->resolvedPath.empty()) {
-			DEBUG_LOG("VC80 manifest: module not yet loaded, skipping creation\n");
-			return;
-		}
-		std::filesystem::path manifestPath = module->resolvedPath.parent_path() / kVc80ManifestName;
-		std::error_code ec;
-		if (std::filesystem::exists(manifestPath, ec)) {
-			return;
-		}
-		constexpr const char kManifestContents[] =
-			"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n"
-			"<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">\n"
-			"  <assemblyIdentity type=\"win32\" name=\"Microsoft.VC80.CRT\" version=\"8.0.50727.762\" processorArchitecture=\"x86\" publicKeyToken=\"1fc8b3b9a1e18e3b\"/>\n"
-			"  <file name=\"msvcr80.dll\"/>\n"
-			"  <file name=\"msvcp80.dll\"/>\n"
-			"  <file name=\"msvcm80.dll\"/>\n"
-			"</assembly>\n";
-		std::ofstream out(manifestPath, std::ios::binary);
-		if (!out) {
-			DEBUG_LOG("VC80 manifest: failed to create %s\n", manifestPath.string().c_str());
-			return;
-		}
-		out.write(kManifestContents, sizeof(kManifestContents) - 1);
-		if (!out) {
-			DEBUG_LOG("VC80 manifest: write error for %s\n", manifestPath.string().c_str());
+		for (const auto &[key, module] : wibo::allLoadedModules()) {
+			if (!module->moduleStub) {
+				addDll(module->normalizedName);
+			}
 		}
 	});
 }
@@ -631,7 +594,7 @@ BOOL WIN_FUNC SetDllDirectoryA(LPCSTR lpPathName) {
 }
 
 BOOL WIN_FUNC FindActCtxSectionStringA(DWORD dwFlags, const GUID *lpExtensionGuid, ULONG ulSectionId,
-							 LPCSTR lpStringToFind, PACTCTX_SECTION_KEYED_DATA ReturnedData) {
+									   LPCSTR lpStringToFind, PACTCTX_SECTION_KEYED_DATA ReturnedData) {
 	DEBUG_LOG("FindActCtxSectionStringA(%#x, %p, %u, %s, %p)\n", dwFlags, lpExtensionGuid, ulSectionId,
 			  lpStringToFind ? lpStringToFind : "<null>", ReturnedData);
 	std::vector<uint16_t> wideStorage;
@@ -643,15 +606,15 @@ BOOL WIN_FUNC FindActCtxSectionStringA(DWORD dwFlags, const GUID *lpExtensionGui
 		}
 	}
 	const uint16_t *widePtr = wideStorage.empty() ? nullptr : wideStorage.data();
-	return FindActCtxSectionStringW(dwFlags, lpExtensionGuid, ulSectionId,
-								 reinterpret_cast<LPCWSTR>(widePtr), ReturnedData);
+	return FindActCtxSectionStringW(dwFlags, lpExtensionGuid, ulSectionId, reinterpret_cast<LPCWSTR>(widePtr),
+									ReturnedData);
 }
 
 BOOL WIN_FUNC FindActCtxSectionStringW(DWORD dwFlags, const GUID *lpExtensionGuid, ULONG ulSectionId,
-							 LPCWSTR lpStringToFind, PACTCTX_SECTION_KEYED_DATA ReturnedData) {
+									   LPCWSTR lpStringToFind, PACTCTX_SECTION_KEYED_DATA ReturnedData) {
 	std::string lookup = lpStringToFind ? wideStringToString(lpStringToFind) : std::string();
-	DEBUG_LOG("FindActCtxSectionStringW(%#x, %p, %u, %s, %p)\n", dwFlags, lpExtensionGuid, ulSectionId,
-		  lookup.c_str(), ReturnedData);
+	DEBUG_LOG("FindActCtxSectionStringW(%#x, %p, %u, %s, %p)\n", dwFlags, lpExtensionGuid, ulSectionId, lookup.c_str(),
+			  ReturnedData);
 
 	if (lpExtensionGuid) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -700,8 +663,6 @@ BOOL WIN_FUNC FindActCtxSectionStringW(DWORD dwFlags, const GUID *lpExtensionGui
 		wibo::lastError = ERROR_SXS_KEY_NOT_FOUND;
 		return FALSE;
 	}
-
-	ensureVc80ManifestOnDisk(*matchedEntry);
 
 	ReturnedData->lpData = const_cast<ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION *>(&matchedEntry->dllData);
 	ReturnedData->ulLength = matchedEntry->dllData.Size;

@@ -1,9 +1,10 @@
+#include "modules.h"
+
 #include "advapi32/processthreadsapi.h"
 #include "advapi32/securitybaseapi.h"
 #include "advapi32/winbase.h"
 #include "advapi32/wincrypt.h"
 #include "advapi32/winreg.h"
-#include "common.h"
 
 #include <cstring>
 
@@ -105,7 +106,7 @@ void *resolveByName(const char *name) {
 
 } // namespace
 
-wibo::Module lib_advapi32 = {
+wibo::ModuleStub lib_advapi32 = {
 	(const char *[]){
 		"advapi32",
 		nullptr,

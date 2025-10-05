@@ -1,4 +1,6 @@
 #include "common.h"
+#include "context.h"
+#include "modules.h"
 
 namespace lmgr {
 	int WIN_ENTRY lp_checkout(int a, int b, const char* c, const char* d, int e, const char* f, int* out) {
@@ -25,7 +27,7 @@ static void *resolveByOrdinal(uint16_t ordinal) {
 	return 0;
 }
 
-wibo::Module lib_lmgr = {
+wibo::ModuleStub lib_lmgr = {
 	(const char *[]){
 		"lmgr11",
 		"lmgr326b",

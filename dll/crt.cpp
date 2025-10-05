@@ -1,4 +1,6 @@
 #include "common.h"
+#include "context.h"
+#include "modules.h"
 
 #include <csignal>
 #include <cstdarg>
@@ -436,7 +438,7 @@ static void *resolveByName(const char *name) {
 	return nullptr;
 }
 
-wibo::Module lib_crt = {
+wibo::ModuleStub lib_crt = {
 	(const char *[]){
 		"api-ms-win-crt-heap-l1-1-0",
 		"api-ms-win-crt-locale-l1-1-0",

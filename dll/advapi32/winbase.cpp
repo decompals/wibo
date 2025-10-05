@@ -1,5 +1,7 @@
 #include "winbase.h"
 
+#include "common.h"
+#include "context.h"
 #include "errors.h"
 #include "internal.h"
 #include "strutil.h"

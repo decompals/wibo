@@ -1,5 +1,6 @@
 #include "stringapiset.h"
 
+#include "context.h"
 #include "errors.h"
 #include "strutil.h"
 

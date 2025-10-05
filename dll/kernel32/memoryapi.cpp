@@ -462,7 +462,7 @@ namespace kernel32 {
 
 HANDLE WIN_FUNC CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMappingAttributes, DWORD flProtect,
 								   DWORD dwMaximumSizeHigh, DWORD dwMaximumSizeLow, LPCSTR lpName) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CreateFileMappingA(%p, %p, %u, %u, %u, %s)\n", hFile, lpFileMappingAttributes, flProtect,
 			  dwMaximumSizeHigh, dwMaximumSizeLow, lpName ? lpName : "(null)");
 	(void)lpFileMappingAttributes;
@@ -514,7 +514,7 @@ HANDLE WIN_FUNC CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMap
 
 HANDLE WIN_FUNC CreateFileMappingW(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMappingAttributes, DWORD flProtect,
 								   DWORD dwMaximumSizeHigh, DWORD dwMaximumSizeLow, LPCWSTR lpName) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CreateFileMappingW -> ");
 	std::string name = wideStringToString(lpName);
 	return CreateFileMappingA(hFile, lpFileMappingAttributes, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow,
@@ -661,7 +661,7 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 
 LPVOID WIN_FUNC MapViewOfFile(HANDLE hFileMappingObject, DWORD dwDesiredAccess, DWORD dwFileOffsetHigh,
 							  DWORD dwFileOffsetLow, SIZE_T dwNumberOfBytesToMap) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("MapViewOfFile(%p, 0x%x, %u, %u, %zu)\n", hFileMappingObject, dwDesiredAccess, dwFileOffsetHigh,
 			  dwFileOffsetLow, dwNumberOfBytesToMap);
 
@@ -676,7 +676,7 @@ LPVOID WIN_FUNC MapViewOfFile(HANDLE hFileMappingObject, DWORD dwDesiredAccess, 
 
 LPVOID WIN_FUNC MapViewOfFileEx(HANDLE hFileMappingObject, DWORD dwDesiredAccess, DWORD dwFileOffsetHigh,
 								DWORD dwFileOffsetLow, SIZE_T dwNumberOfBytesToMap, LPVOID lpBaseAddress) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("MapViewOfFileEx(%p, 0x%x, %u, %u, %zu, %p)\n", hFileMappingObject, dwDesiredAccess, dwFileOffsetHigh,
 			  dwFileOffsetLow, dwNumberOfBytesToMap, lpBaseAddress);
 
@@ -690,7 +690,7 @@ LPVOID WIN_FUNC MapViewOfFileEx(HANDLE hFileMappingObject, DWORD dwDesiredAccess
 }
 
 BOOL WIN_FUNC UnmapViewOfFile(LPCVOID lpBaseAddress) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("UnmapViewOfFile(%p)\n", lpBaseAddress);
 	std::unique_lock lk(g_viewInfoMutex);
 	auto it = g_viewInfo.find(reinterpret_cast<uintptr_t>(lpBaseAddress));
@@ -710,7 +710,7 @@ BOOL WIN_FUNC UnmapViewOfFile(LPCVOID lpBaseAddress) {
 }
 
 LPVOID WIN_FUNC VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("VirtualAlloc(%p, %zu, %u, %u)\n", lpAddress, dwSize, flAllocationType, flProtect);
 
 	if (dwSize == 0) {
@@ -900,7 +900,7 @@ LPVOID WIN_FUNC VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocation
 }
 
 BOOL WIN_FUNC VirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("VirtualFree(%p, %zu, %u)\n", lpAddress, dwSize, dwFreeType);
 	if (!lpAddress) {
 		wibo::lastError = ERROR_INVALID_ADDRESS;
@@ -993,7 +993,7 @@ BOOL WIN_FUNC VirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType) {
 }
 
 BOOL WIN_FUNC VirtualProtect(LPVOID lpAddress, SIZE_T dwSize, DWORD flNewProtect, PDWORD lpflOldProtect) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("VirtualProtect(%p, %zu, %u)\n", lpAddress, dwSize, flNewProtect);
 	if (!lpAddress || dwSize == 0) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -1053,7 +1053,7 @@ BOOL WIN_FUNC VirtualProtect(LPVOID lpAddress, SIZE_T dwSize, DWORD flNewProtect
 }
 
 SIZE_T WIN_FUNC VirtualQuery(LPCVOID lpAddress, PMEMORY_BASIC_INFORMATION lpBuffer, SIZE_T dwLength) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("VirtualQuery(%p, %p, %zu)\n", lpAddress, lpBuffer, dwLength);
 	if (!lpBuffer || dwLength < sizeof(MEMORY_BASIC_INFORMATION)) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -1095,7 +1095,7 @@ SIZE_T WIN_FUNC VirtualQuery(LPCVOID lpAddress, PMEMORY_BASIC_INFORMATION lpBuff
 
 BOOL WIN_FUNC GetProcessWorkingSetSize(HANDLE hProcess, PSIZE_T lpMinimumWorkingSetSize,
 									   PSIZE_T lpMaximumWorkingSetSize) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetProcessWorkingSetSize(%p, %p, %p)\n", hProcess, lpMinimumWorkingSetSize, lpMaximumWorkingSetSize);
 	(void)hProcess;
 	if (!lpMinimumWorkingSetSize || !lpMaximumWorkingSetSize) {
@@ -1110,7 +1110,7 @@ BOOL WIN_FUNC GetProcessWorkingSetSize(HANDLE hProcess, PSIZE_T lpMinimumWorking
 
 BOOL WIN_FUNC SetProcessWorkingSetSize(HANDLE hProcess, SIZE_T dwMinimumWorkingSetSize,
 									   SIZE_T dwMaximumWorkingSetSize) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetProcessWorkingSetSize(%p, %zu, %zu)\n", hProcess, dwMinimumWorkingSetSize, dwMaximumWorkingSetSize);
 	(void)hProcess;
 	(void)dwMinimumWorkingSetSize;

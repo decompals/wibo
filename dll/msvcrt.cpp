@@ -230,12 +230,12 @@ namespace msvcrt {
 	}
 
 	IOBProxy *WIN_ENTRY __iob_func() {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		return standardIobEntries();
 	}
 
 	IOBProxy *WIN_ENTRY __p__iob() {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		return standardIobEntries();
 	}
 
@@ -270,7 +270,7 @@ namespace msvcrt {
 	}
 
 	void WIN_ENTRY setbuf(FILE *stream, char *buffer) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("setbuf(%p, %p)\n", stream, buffer);
 		if (!stream) {
 			return;
@@ -284,7 +284,7 @@ namespace msvcrt {
 	}
 
 	void WIN_ENTRY _splitpath(const char *path, char *drive, char *dir, char *fname, char *ext) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		if (drive) drive[0] = '\0';
 		if (dir) dir[0] = '\0';
 		if (fname) fname[0] = '\0';
@@ -349,7 +349,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _fileno(FILE *stream) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_fileno(%p)\n", stream);
 		if (!stream) {
 			errno = EINVAL;
@@ -386,21 +386,21 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _getmbcp() {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		ensureMbctypeInitialized();
 		DEBUG_LOG("_getmbcp() -> %d\n", mbCodePageSetting);
 		return mbCodePageSetting;
 	}
 
 	unsigned int* WIN_ENTRY __p___mb_cur_max() {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		ensureMbctypeInitialized();
 		DEBUG_LOG("__p___mb_cur_max() -> %u\n", mbCurMaxValue);
 		return &mbCurMaxValue;
 	}
 
 	int WIN_ENTRY _setmbcp(int codepage) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_setmbcp(%d)\n", codepage);
 		ensureMbctypeInitialized();
 
@@ -426,14 +426,14 @@ namespace msvcrt {
 	}
 
 	unsigned char *WIN_ENTRY __p__mbctype() {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		ensureMbctypeInitialized();
 		DEBUG_LOG("__p__mbctype() -> %p\n", mbctypeTable().data());
 		return mbctypeTable().data();
 	}
 
 	unsigned short **WIN_ENTRY __p__pctype() {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("__p__pctype()\n");
 		static unsigned short *pointer = nullptr;
 		pointer = pctypeTable().data() + 1;
@@ -441,7 +441,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _isctype(int ch, int mask) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_isctype(%d, %d)\n", ch, mask);
 		if (ch == EOF) {
 			return 0;
@@ -678,42 +678,51 @@ namespace msvcrt {
 
 	// Stub because we're only ever a console application
 	void WIN_ENTRY __set_app_type(int at) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("STUB: __set_app_type(%d)\n", at);
 		(void)at;
 	}
 
 	int* WIN_FUNC __p__fmode() {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("__p__fmode() -> %p\n", &_fmode);
 		return &_fmode;
 	}
 
 	int* WIN_FUNC __p__commode() {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("__p__commode() -> %p\n", &_commode);
 		return &_commode;
 	}
 
 	void WIN_ENTRY _initterm(const _PVFV *ppfn, const _PVFV* end) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_initterm(%p, %p)\n", ppfn, end);
+		TIB *tib = wibo::getThreadTibForHost();
 		for (; ppfn < end; ppfn++) {
 			_PVFV func = *ppfn;
 			if (func) {
 				DEBUG_LOG("_initterm: calling %p\n", func);
-				func();
+				{
+					GUEST_CONTEXT_GUARD(tib);
+					func();
+				}
 			}
 		}
 	}
 
 	int WIN_ENTRY _initterm_e(const _PIFV *ppfn, const _PIFV *end) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_initterm_e(%p, %p)\n", ppfn, end);
+		TIB *tib = wibo::getThreadTibForHost();
 		for (; ppfn < end; ppfn++) {
 			_PIFV func = *ppfn;
 			if (func) {
-				int err = func();
+				int err = 0;
+				{
+					GUEST_CONTEXT_GUARD(tib);
+					err = func();
+				}
 				DEBUG_LOG("_initterm_e: calling %p -> %d\n", func, err);
 				if (err != 0)
 					return err;
@@ -723,7 +732,7 @@ namespace msvcrt {
 	}
 
 	unsigned int WIN_ENTRY _controlfp(unsigned int newControl, unsigned int mask) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_controlfp(newControl=%08x, mask=%08x)\n", newControl, mask);
 		unsigned int previous = floatingPointControlWord;
 		if (mask != 0) {
@@ -733,7 +742,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _controlfp_s(unsigned int *currentControl, unsigned int newControl, unsigned int mask) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_controlfp_s(currentControl=%p, newControl=%08x, mask=%08x)\n", currentControl, newControl, mask);
 		if (mask != 0 && (mask & 0xFF000000) != 0) {
 			// Unsupported bits: match real CRT behaviour by ignoring but logging.
@@ -749,7 +758,7 @@ namespace msvcrt {
 	}
 
 	_PIFV WIN_ENTRY _onexit(_PIFV func) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_onexit(%p)\n", func);
 		if(!func) return nullptr;
 		if (atexit(reinterpret_cast<void (*)()>(func)) != 0) return nullptr;
@@ -758,7 +767,7 @@ namespace msvcrt {
 
 	// NOLINTNEXTLINE(readability-non-const-parameter)
 	int WIN_ENTRY __wgetmainargs(int *wargc, uint16_t ***wargv, uint16_t ***wenv, int doWildcard, int *startInfo) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("__wgetmainargs(doWildcard=%d)\n", doWildcard);
 		(void)startInfo;
 		if (doWildcard) {
@@ -771,7 +780,7 @@ namespace msvcrt {
 
 	// NOLINTNEXTLINE(readability-non-const-parameter)
 	int WIN_ENTRY __getmainargs(int *argc, char ***argv, char ***env, int doWildcard, int *startInfo) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("__getmainargs(doWildcard=%d)\n", doWildcard);
 		(void)startInfo;
 		if (doWildcard) {
@@ -781,31 +790,31 @@ namespace msvcrt {
 	}
 
 	char* WIN_ENTRY getenv(const char *varname){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("getenv(%s)\n", varname);
 		return std::getenv(varname);
 	}
 
 	char*** WIN_ENTRY __p___initenv() {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("__p___initenv() -> %p\n", &__initenv);
 		return &__initenv;
 	}
 
 	char* WIN_ENTRY strcat(char *dest, const char *src) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("strcat(%p, %s)\n", dest, src);
 		return std::strcat(dest, src);
 	}
 
 	char* WIN_ENTRY strcpy(char *dest, const char *src) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("strcpy(%p, %s)\n", dest, src);
 		return std::strcpy(dest, src);
 	}
 
 	int WIN_ENTRY _access(const char *path, int mode) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_access(%s, %d)\n", path ? path : "(null)", mode);
 		if (!path) {
 			errno = EINVAL;
@@ -832,7 +841,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _ismbblead(unsigned int c) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_ismbblead(%d)\n", c);
 		if (c > 0xFF) {
 			return 0;
@@ -841,7 +850,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _ismbbtrail(unsigned int c) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_ismbbtrail(%d)\n", c);
 		if (c > 0xFF) {
 			return 0;
@@ -850,7 +859,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _ismbcspace(unsigned int c) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_ismbcspace(%d)\n", c);
 		if (c <= 0xFF) {
 			return std::isspace(static_cast<unsigned char>(c)) ? 1 : 0;
@@ -868,7 +877,7 @@ namespace msvcrt {
 	}
 
 	void WIN_ENTRY _mbccpy(unsigned char *dest, const unsigned char *src) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbccpy(%p, %s)\n", dest, src);
 		if (!dest || !src) {
 			return;
@@ -881,7 +890,7 @@ namespace msvcrt {
 	}
 
 	unsigned char* WIN_ENTRY _mbsinc(const unsigned char *str) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbsinc(%p)\n", str);
 		if (!str) {
 			return nullptr;
@@ -896,7 +905,7 @@ namespace msvcrt {
 	}
 
 	unsigned char* WIN_ENTRY _mbsdec(const unsigned char *start, const unsigned char *current) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbsdec(%p, %p)\n", start, current);
 		if (!start || !current || current <= start) {
 			DEBUG_LOG("_mbsdec invalid args start=%p current=%p\n", start, current);
@@ -933,7 +942,7 @@ namespace msvcrt {
 	}
 
 	unsigned int WIN_ENTRY _mbclen(const unsigned char *str) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbclen(%s)\n", str);
 		if (!str || *str == '\0') {
 			return 0;
@@ -942,7 +951,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _mbscmp(const unsigned char *lhs, const unsigned char *rhs) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbscmp(%s, %s)\n", lhs, rhs);
 		if (!lhs || !rhs) {
 			return (lhs == rhs) ? 0 : (lhs ? 1 : -1);
@@ -951,7 +960,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _mbsicmp(const unsigned char *lhs, const unsigned char *rhs) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbsicmp(%s, %s)\n", lhs, rhs);
 		if (!lhs || !rhs) {
 			return (lhs == rhs) ? 0 : (lhs ? 1 : -1);
@@ -960,7 +969,7 @@ namespace msvcrt {
 	}
 
 	unsigned char* WIN_ENTRY _mbsstr(const unsigned char *haystack, const unsigned char *needle) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbsstr(%s, %s)\n", haystack, needle);
 		if (!haystack || !needle) {
 			return nullptr;
@@ -970,7 +979,7 @@ namespace msvcrt {
 	}
 
 	unsigned char* WIN_ENTRY _mbschr(const unsigned char *str, unsigned int ch) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbschr(%s, %d)\n", str, ch);
 		if (!str) {
 			return nullptr;
@@ -981,7 +990,7 @@ namespace msvcrt {
 	}
 
 	unsigned char* WIN_ENTRY _mbsrchr(const unsigned char *str, unsigned int ch) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbsrchr(%s, %d)\n", str, ch);
 		if (!str) {
 			return nullptr;
@@ -992,7 +1001,7 @@ namespace msvcrt {
 	}
 
 	unsigned char* WIN_ENTRY _mbslwr(unsigned char *str) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbslwr(%p)\n", str);
 		if (!str) {
 			return nullptr;
@@ -1004,7 +1013,7 @@ namespace msvcrt {
 	}
 
 	unsigned char* WIN_ENTRY _mbsupr(unsigned char *str) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbsupr(%p)\n", str);
 		if (!str) {
 			return nullptr;
@@ -1016,19 +1025,19 @@ namespace msvcrt {
 	}
 
 	unsigned char *WIN_ENTRY _mbsinc_l(const unsigned char *str, void *) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbsinc_l(%p)\n", str);
 		return _mbsinc(str);
 	}
 
 	unsigned char *WIN_ENTRY _mbsdec_l(const unsigned char *start, const unsigned char *current, void *locale) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbsdec_l(%p, %p, %p)\n", start, current, locale);
 		return _mbsdec(start, current);
 	}
 
 	int WIN_ENTRY _mbsncmp(const unsigned char *lhs, const unsigned char *rhs, size_t count) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbsncmp(%s, %s, %zu)\n", lhs, rhs, count);
 		if (!lhs || !rhs) {
 			return (lhs == rhs) ? 0 : (lhs ? 1 : -1);
@@ -1037,7 +1046,7 @@ namespace msvcrt {
 	}
 
 	size_t WIN_ENTRY _mbsspn(const unsigned char *str, const unsigned char *set) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbsspn(%s, %s)\n", str, set);
 		if (!str || !set) {
 			return 0;
@@ -1046,7 +1055,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _ismbcdigit(unsigned int ch) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_ismbcdigit(%d)\n", ch);
 		if (ch <= 0xFF) {
 			return std::isdigit(static_cast<unsigned char>(ch)) ? 1 : 0;
@@ -1055,7 +1064,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _stricmp(const char *lhs, const char *rhs) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_stricmp(%s, %s)\n", lhs, rhs);
 		if (!lhs || !rhs) {
 			return (lhs == rhs) ? 0 : (lhs ? 1 : -1);
@@ -1064,7 +1073,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _strnicmp(const char *lhs, const char *rhs, size_t count) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_strnicmp(%s, %s, %zu)\n", lhs, rhs, count);
 		if (!lhs || !rhs) {
 			return (lhs == rhs) ? 0 : (lhs ? 1 : -1);
@@ -1073,7 +1082,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _memicmp(const void *lhs, const void *rhs, size_t count) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_memicmp(%p, %p, %zu)\n", lhs, rhs, count);
 		if (!lhs || !rhs) {
 			return (lhs == rhs) ? 0 : (lhs ? 1 : -1);
@@ -1091,7 +1100,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _vsnprintf(char *buffer, size_t count, const char *format, va_list args) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_vsnprintf(%p, %zu, %s, %p)\n", buffer, count, format, args);
 		if (!buffer || !format) {
 			errno = EINVAL;
@@ -1109,7 +1118,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _snprintf(char *buffer, size_t count, const char *format, ...) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_snprintf(%p, %zu, %s, ...)\n", buffer, count, format);
 		va_list args;
 		va_start(args, format);
@@ -1119,7 +1128,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY sprintf(char *buffer, const char *format, ...) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("sprintf(%p, %s, ...)\n", buffer, format);
 		va_list args;
 		va_start(args, format);
@@ -1129,7 +1138,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY printf(const char *format, ...) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("printf(%s, ...)\n", format);
 		va_list args;
 		va_start(args, format);
@@ -1139,7 +1148,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY sscanf(const char *buffer, const char *format, ...) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("sscanf(%p, %p, ...)\n", buffer, format);
 		va_list args;
 		va_start(args, format);
@@ -1149,7 +1158,7 @@ namespace msvcrt {
 	}
 
 	char *WIN_ENTRY fgets(char *str, int count, FILE *stream) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fgets(%p, %d, %p)\n", str, count, stream);
 		if (!str || count <= 0) {
 			return nullptr;
@@ -1159,14 +1168,14 @@ namespace msvcrt {
 	}
 
 	size_t WIN_ENTRY fread(void *buffer, size_t size, size_t count, FILE *stream) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fread(%p, %zu, %zu, %p)\n", buffer, size, count, stream);
 		FILE *host = mapToHostFile(stream);
 		return ::fread(buffer, size, count, host);
 	}
 
 	FILE *WIN_ENTRY _fsopen(const char *filename, const char *mode, int shflag) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_fsopen(%s, %s, %d)\n", filename ? filename : "(null)", mode ? mode : "(null)", shflag);
 		(void)shflag;
 		if (!filename || !mode) {
@@ -1178,7 +1187,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _sopen(const char *path, int oflag, int shflag, int pmode) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_sopen(%s, %d, %d, %d)\n", path ? path : "(null)", oflag, shflag, pmode);
 		(void)shflag;
 		if (!path) {
@@ -1192,26 +1201,26 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _read(int fd, void *buffer, unsigned int count) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_read(%d, %p, %u)\n", fd, buffer, count);
 		return static_cast<int>(::read(fd, buffer, count));
 	}
 
 	int WIN_ENTRY _close(int fd) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_close(%d)\n", fd);
 		return ::close(fd);
 	}
 
 	long WIN_ENTRY _lseek(int fd, long offset, int origin) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_lseek(%d, %ld, %d)\n", fd, offset, origin);
 		off_t result = ::lseek(fd, static_cast<off_t>(offset), origin);
 		return static_cast<long>(result);
 	}
 
 	int WIN_ENTRY _unlink(const char *path) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_unlink(%s)\n", path ? path : "(null)");
 		if (!path) {
 			errno = EINVAL;
@@ -1222,7 +1231,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _utime(const char *path, const _utimbuf *times) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_utime(%s, %p)\n", path ? path : "(null)", times);
 		if (!path) {
 			errno = EINVAL;
@@ -1237,58 +1246,58 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _chsize(int fd, long size) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_chsize(%d, %ld)\n", fd, size);
 		return ::ftruncate(fd, static_cast<off_t>(size));
 	}
 
 	char* WIN_ENTRY strncpy(char *dest, const char *src, size_t count) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("strncpy(%p, %s, %zu)\n", dest, src ? src : "(null)", count);
 		return std::strncpy(dest, src, count);
 	}
 
 	char* WIN_ENTRY strpbrk(const char *str, const char *accept) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		const char *result = std::strpbrk(str, accept);
 		DEBUG_LOG("strpbrk(%s, %s) -> %p\n", str ? str : "(null)", accept ? accept : "(null)", result);
 		return result ? const_cast<char *>(result) : nullptr;
 	}
 
 	char* WIN_ENTRY strstr(const char *haystack, const char *needle) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		const char *result = std::strstr(haystack, needle);
 		DEBUG_LOG("strstr(%s, %s) -> %p\n", haystack ? haystack : "(null)", needle ? needle : "(null)", result);
 		return result ? const_cast<char *>(result) : nullptr;
 	}
 
 	char* WIN_ENTRY strrchr(const char *str, int ch) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("strrchr(%s, %c)\n", str ? str : "(null)", ch);
 		const char *result = std::strrchr(str, ch);
 		return result ? const_cast<char *>(result) : nullptr;
 	}
 
 	char* WIN_ENTRY strtok(char *str, const char *delim) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("strtok(%p, %s)\n", str, delim ? delim : "(null)");
 		return std::strtok(str, delim);
 	}
 
 	long WIN_ENTRY _adj_fdiv_r(long value) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("STUB: _adj_fdiv_r(%ld)\n", value);
 		return value;
 	}
 
 	void WIN_ENTRY _adjust_fdiv(long n) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("STUB: _adjust_fdiv(%ld)\n", n);
 		(void)n;
 	}
 
 	int WIN_ENTRY _ftime(struct _timeb *timeptr) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_ftime(%p)\n", timeptr);
 		if (!timeptr) {
 			errno = EINVAL;
@@ -1306,7 +1315,7 @@ namespace msvcrt {
 	}
 
 	unsigned long WIN_ENTRY _ultoa(unsigned long value, char *str, int radix) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_ultoa(%lu, %p, %d)\n", value, str, radix);
 		if (!str || radix < 2 || radix > 36) {
 			errno = EINVAL;
@@ -1328,7 +1337,7 @@ namespace msvcrt {
 	}
 
 	char* WIN_ENTRY _ltoa(long value, char *str, int radix) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_ltoa(%ld, %p, %d)\n", value, str, radix);
 		if (!str || radix < 2 || radix > 36) {
 			errno = EINVAL;
@@ -1348,7 +1357,7 @@ namespace msvcrt {
 	}
 
 	char* WIN_ENTRY _makepath(char *path, const char *drive, const char *dir, const char *fname, const char *ext) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		if (!path) {
 			return nullptr;
 		}
@@ -1382,7 +1391,7 @@ namespace msvcrt {
 	}
 
 	char* WIN_ENTRY _fullpath(char *absPath, const char *relPath, size_t maxLength) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_fullpath(%p, %s, %zu)\n", absPath, relPath ? relPath : "(null)", maxLength);
 		if (!relPath) {
 			errno = EINVAL;
@@ -1413,7 +1422,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _putenv(const char *envString) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_putenv(%s)\n", envString ? envString : "(null)");
 		if (!envString) {
 			errno = EINVAL;
@@ -1431,7 +1440,7 @@ namespace msvcrt {
 	}
 
 	char *WIN_ENTRY _mktemp(char *templateName) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mktemp(%s)\n", templateName);
 		if (!templateName) {
 			errno = EINVAL;
@@ -1460,19 +1469,19 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _except_handler3(void *record, void *frame, void *context, void *dispatch) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_except_handler3(%p, %p, %p, %p)\n", record, frame, context, dispatch);
 		return _except_handler4_common(record, frame, context, dispatch);
 	}
 
 	int WIN_ENTRY getchar() {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("getchar()\n");
 		return std::getchar();
 	}
 
 	time_t WIN_ENTRY time(time_t *t) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("time(%p)\n", t);
 		time_t result = std::time(nullptr);
 		if (t) {
@@ -1483,7 +1492,7 @@ namespace msvcrt {
 
 	char *WIN_ENTRY __unDName(char *outputString, const char *mangledName, int maxStringLength,
 							  void *(*allocFunc)(size_t), void (*freeFunc)(void *), unsigned short) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("STUB: __unDName(%p, %s, %d, %p, %p)\n", outputString, mangledName ? mangledName : "(null)",
 				  maxStringLength, allocFunc, freeFunc);
 		(void)allocFunc;
@@ -1496,7 +1505,7 @@ namespace msvcrt {
 	}
 
 	char* WIN_ENTRY setlocale(int category, const char *locale){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("setlocale(%d, %s)\n", category, locale ? locale : "(null)");
 		char *result = std::setlocale(category, locale);
 		if (result) {
@@ -1506,7 +1515,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _wdupenv_s(uint16_t **buffer, size_t *numberOfElements, const uint16_t *varname){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_wdupenv_s(%p, %p, %s)\n", buffer, numberOfElements, wideStringToString(varname).c_str());
 		if (buffer) {
 			*buffer = nullptr;
@@ -1549,7 +1558,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _wgetenv_s(size_t* pReturnValue, uint16_t* buffer, size_t numberOfElements, const uint16_t* varname){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_wgetenv_s(%p, %p, %zu, %s)\n", pReturnValue, buffer, numberOfElements,
 				  wideStringToString(varname).c_str());
 		if (pReturnValue) {
@@ -1592,31 +1601,31 @@ namespace msvcrt {
 	}
 
 	size_t WIN_ENTRY strlen(const char *str) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("strlen(%s)\n", str);
 		return ::strlen(str);
 	}
 
 	int WIN_ENTRY strcmp(const char *lhs, const char *rhs) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("strcmp(%s, %s)\n", lhs, rhs);
 		return ::strcmp(lhs, rhs); 
 	}
 
 	int WIN_ENTRY strncmp(const char *lhs, const char *rhs, size_t count) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("strncmp(%s, %s, %zu)\n", lhs, rhs, count);
 		return ::strncmp(lhs, rhs, count); 
 	}
 
 	void WIN_ENTRY _exit(int status) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_exit(%d)\n", status);
 		_Exit(status);
 	}
 
 	int WIN_ENTRY strcpy_s(char *dest, size_t dest_size, const char *src) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("strcpy_s(%p, %zu, %s)\n", dest, dest_size, src);
 		if (!dest || !src || dest_size == 0) {
 			return 22;
@@ -1633,7 +1642,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY strcat_s(char *dest, size_t numberOfElements, const char *src) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("strcat_s(%p, %zu, %s)\n", dest, numberOfElements, src);
 		if (!dest || !src || numberOfElements == 0) {
 			return 22;
@@ -1651,7 +1660,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY strncpy_s(char *dest, size_t dest_size, const char *src, size_t count) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("strncpy_s(%p, %zu, %s, %zu)\n", dest, dest_size, src, count);
 		constexpr size_t TRUNCATE = static_cast<size_t>(-1);
 		constexpr int STRUNCATE = 80;
@@ -1699,7 +1708,7 @@ namespace msvcrt {
 	}
 
 	char *WIN_ENTRY _strdup(const char *strSource) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_strdup(%s)\n", strSource);
 		if (!strSource) {
 			return nullptr;
@@ -1716,37 +1725,37 @@ namespace msvcrt {
 	}
 
 	unsigned long WIN_ENTRY strtoul(const char *str, char **endptr, int base) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("strtoul(%s, %p, %d)\n", str, endptr, base);
 		return ::strtoul(str, endptr, base);
 	}
 
 	void* WIN_ENTRY malloc(size_t size){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("malloc(%zu)\n", size);
 		return std::malloc(size);
 	}
 
 	void* WIN_ENTRY calloc(size_t count, size_t size){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("calloc(%zu, %zu)\n", count, size);
 		return std::calloc(count, size);
 	}
 
 	void* WIN_ENTRY realloc(void *ptr, size_t size) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("realloc(%p, %zu)\n", ptr, size);
 		return std::realloc(ptr, size);
 	}
 
 	void* WIN_ENTRY _malloc_crt(size_t size) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_malloc_crt(%zu)\n", size);
 		return std::malloc(size);
 	}
 
 	void WIN_ENTRY _lock(int locknum) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_lock(%d)\n", locknum);
 		if (locknum < 0 || static_cast<size_t>(locknum) >= LOCK_TABLE_SIZE) {
 			DEBUG_LOG("_lock: unsupported lock %d\n", locknum);
@@ -1756,7 +1765,7 @@ namespace msvcrt {
 	}
 
 	void WIN_ENTRY _unlock(int locknum) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_unlock(%d)\n", locknum);
 		if (locknum < 0 || static_cast<size_t>(locknum) >= LOCK_TABLE_SIZE) {
 			DEBUG_LOG("_unlock: unsupported lock %d\n", locknum);
@@ -1766,7 +1775,7 @@ namespace msvcrt {
 	}
 
 	_onexit_t WIN_ENTRY __dllonexit(_onexit_t func, _PVFV **pbegin, _PVFV **pend) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("__dllonexit(%p, %p, %p)\n", func, pbegin, pend);
 		if (!pbegin || !pend) {
 			return nullptr;
@@ -1798,37 +1807,37 @@ namespace msvcrt {
 	}
 
 	void WIN_ENTRY free(void* ptr){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("free(%p)\n", ptr);
 		std::free(ptr);
 	}
 
 	void* WIN_ENTRY memcpy(void *dest, const void *src, size_t count) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("memcpy(%p, %p, %zu)\n", dest, src, count);
 		return std::memcpy(dest, src, count);
 	}
 
 	void* WIN_ENTRY memmove(void *dest, const void *src, size_t count) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("memmove(%p, %p, %zu)\n", dest, src, count);
 		return std::memmove(dest, src, count);
 	}
 
 	int WIN_ENTRY memcmp(const void *lhs, const void *rhs, size_t count) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("memcmp(%p, %p, %zu)\n", lhs, rhs, count);
 		return std::memcmp(lhs, rhs, count);
 	}
 
 	void WIN_ENTRY qsort(void *base, size_t num, size_t size, int (*compar)(const void *, const void *)) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("qsort(%p, %zu, %zu, %p)\n", base, num, size, compar);
 		std::qsort(base, num, size, compar);
 	}
 
 	int WIN_ENTRY fflush(FILE *stream) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fflush(%p)\n", stream);
 		if (!stream) {
 			return std::fflush(nullptr);
@@ -1838,7 +1847,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY vfwprintf(FILE *stream, const uint16_t *format, va_list args) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("vfwprintf(%p, %s, ...)\n", stream, wideStringToString(format).c_str());
 		FILE *host = mapToHostFile(stream ? stream : stdout);
 		std::wstring fmt;
@@ -1852,43 +1861,43 @@ namespace msvcrt {
 	}
 
 	FILE *WIN_ENTRY fopen(const char *filename, const char *mode) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fopen(%s, %s)\n", filename ? filename : "(null)", mode ? mode : "(null)");
 		return std::fopen(filename, mode);
 	}
 
 	int WIN_ENTRY _dup2(int fd1, int fd2) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_dup2(%d, %d)\n", fd1, fd2);
 		return dup2(fd1, fd2);
 	}
 
 	int WIN_ENTRY _isatty(int fd) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_isatty(%d)\n", fd);
 		return isatty(fd);
 	}
 
 	int WIN_ENTRY fseek(FILE *stream, long offset, int origin) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("fseek(%p, %ld, %d)\n", stream, offset, origin);
 		return std::fseek(stream, offset, origin);
 	}
 
 	long WIN_ENTRY ftell(FILE *stream) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("ftell(%p)\n", stream);
 		return std::ftell(stream);
 	}
 
 	int WIN_ENTRY feof(FILE *stream) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("feof(%p)\n", stream);
 		return std::feof(stream);
 	}
 
 	int WIN_ENTRY fputws(const uint16_t *str, FILE *stream) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fputws(%s, %p)\n", wideStringToString(str).c_str(), stream);
 		std::wstring temp;
 		if (str) {
@@ -1900,13 +1909,13 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _cputws(const uint16_t *string) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_cputws(%s)\n", wideStringToString(string).c_str());
 		return fputws(string, stdout);
 	}
 
 	uint16_t* WIN_ENTRY fgetws(uint16_t *buffer, int size, FILE *stream) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fgetws(%p, %d, %p)\n", buffer, size, stream);
 		if (!buffer || size <= 0) {
 			return nullptr;
@@ -1926,13 +1935,13 @@ namespace msvcrt {
 	}
 
 	wint_t WIN_ENTRY fgetwc(FILE *stream) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("fgetwc(%p)\n", stream);
 		return std::fgetwc(stream);
 	}
 
 	int WIN_ENTRY _wfopen_s(FILE **stream, const uint16_t *filename, const uint16_t *mode) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_wfopen_s(%p, %s, %s)\n", stream, wideStringToString(filename).c_str(),
 				  wideStringToString(mode).c_str());
 		if (!stream || !filename || !mode) {
@@ -1951,7 +1960,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _wcsicmp(const uint16_t *lhs, const uint16_t *rhs) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_wcsicmp(%s, %s)\n", wideStringToString(lhs).c_str(), wideStringToString(rhs).c_str());
 		if (lhs == rhs) {
 			return 0;
@@ -1978,7 +1987,7 @@ namespace msvcrt {
 
 	int WIN_ENTRY _wmakepath_s(uint16_t *path, size_t sizeInWords, const uint16_t *drive, const uint16_t *dir,
 				 const uint16_t *fname, const uint16_t *ext) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_wmakepath_s(%p, %zu, %s, %s, %s, %s)\n", path, sizeInWords, wideStringToString(drive).c_str(),
 				  wideStringToString(dir).c_str(), wideStringToString(fname).c_str(), wideStringToString(ext).c_str());
 		if (!path || sizeInWords == 0) {
@@ -2050,7 +2059,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _wputenv_s(const uint16_t *varname, const uint16_t *value) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_wputenv_s(%p, %p)\n", varname, value);
 		if (!varname || !value) {
 			errno = EINVAL;
@@ -2098,7 +2107,7 @@ namespace msvcrt {
 	}
 
 	unsigned long WIN_ENTRY wcsspn(const uint16_t *str1, const uint16_t *str2) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("wcsspn(%p, %p)\n", str1, str2);
 		if (!str1 || !str2) {
 			return 0;
@@ -2121,13 +2130,13 @@ namespace msvcrt {
 	}
 
 	long WIN_ENTRY _wtol(const uint16_t *str) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_wtol(%p)\n", str);
 		return wstrtol(str, nullptr, 10);
 	}
 
 	int WIN_ENTRY _wcsupr_s(uint16_t *str, size_t size) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_wcsupr_s(%p, %zu)\n", str, size);
 		if (!str || size == 0) {
 			return EINVAL;
@@ -2144,7 +2153,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _wcslwr_s(uint16_t *str, size_t size) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_wcslwr_s(%p, %zu)\n", str, size);
 		if (!str || size == 0) {
 			return EINVAL;
@@ -2161,13 +2170,13 @@ namespace msvcrt {
 	}
 
 	wint_t WIN_ENTRY towlower(wint_t ch) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("towlower(%d)\n", ch);
 		return static_cast<wint_t>(std::towlower(static_cast<wchar_t>(ch)));
 	}
 
 	unsigned int WIN_ENTRY _mbctolower(unsigned int ch) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_mbctolower(%u)\n", ch);
 		if (ch <= 0xFF) {
 			unsigned char byte = static_cast<unsigned char>(ch);
@@ -2178,33 +2187,33 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY toupper(int ch) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("toupper(%d)\n", ch);
 		return std::toupper(ch);
 	}
 
 	int WIN_ENTRY tolower(int ch) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("tolower(%d)\n", ch);
 		return std::tolower(ch);
 	}
 
 	int WIN_ENTRY _ftime64_s(void *timeb) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("STUB: _ftime64_s(%p)\n", timeb);
 		(void)timeb;
 		return 0;
 	}
 
 	int WIN_ENTRY _crt_debugger_hook(int value) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("STUB: _crt_debugger_hook(%d)\n", value);
 		(void)value;
 		return 0;
 	}
 
 	int WIN_ENTRY _configthreadlocale(int mode) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_configthreadlocale(mode=%d)\n", mode);
 		static int currentMode = 0;
 		int previous = currentMode;
@@ -2220,13 +2229,13 @@ namespace msvcrt {
 	}
 
 	void WIN_ENTRY __setusermatherr(void* handler) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("STUB: __setusermatherr(handler=%p)\n", handler);
 		(void)handler;
 	}
 
 	void WIN_ENTRY _cexit() {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_cexit()\n");
 		std::fflush(nullptr);
 	}
@@ -2239,7 +2248,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY vfprintf(FILE *stream, const char *format, va_list args) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("vfprintf(stream=%p, format=%s, args=%p)\n", stream, format, args);
 		if (!format || !stream) {
 			errno = EINVAL;
@@ -2258,7 +2267,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY fprintf(FILE *stream, const char *format, ...) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fprintf(%p, %s, ...)\n", stream, format);
 		va_list args;
 		va_start(args, format);
@@ -2268,7 +2277,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY fputc(int ch, FILE *stream) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fputc(%d, %p)\n", ch, stream);
 		if (!stream) {
 			errno = EINVAL;
@@ -2283,7 +2292,7 @@ namespace msvcrt {
 	}
 
 	size_t WIN_ENTRY fwrite(const void *buffer, size_t size, size_t count, FILE *stream) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fwrite(%p, %zu, %zu, %p)\n", buffer, size, count, stream);
 		if (!buffer || !stream) {
 			errno = EINVAL;
@@ -2298,19 +2307,19 @@ namespace msvcrt {
 	}
 
 	char *WIN_ENTRY strerror(int errnum) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("strerror(%d)\n", errnum);
 		return std::strerror(errnum);
 	}
 
 	char *WIN_ENTRY strchr(const char *str, int character) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("strchr(%s, %d)\n", str, character);
 		return const_cast<char *>(std::strchr(str, character));
 	}
 
 	struct lconv *WIN_ENTRY localeconv() {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("localeconv()\n");
 		return std::localeconv();
 	}
@@ -2318,7 +2327,7 @@ namespace msvcrt {
 	using SignalHandler = void (*)(int);
 
 	SignalHandler WIN_ENTRY signal(int sig, SignalHandler handler) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("signal(%d, %p)\n", sig, handler);
 		if (sig != SIGABRT && sig != SIGFPE && sig != SIGILL && sig != SIGINT &&
 			sig != SIGSEGV && sig != SIGTERM) {
@@ -2330,7 +2339,7 @@ namespace msvcrt {
 	}
 
 	size_t WIN_ENTRY wcslen(const uint16_t *str) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("wcslen(%p)\n", str);
 		return wstrlen(str);
 	}
@@ -2341,12 +2350,12 @@ namespace msvcrt {
 	}
 
 	void WIN_ENTRY abort() {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		abort_and_log("abort");
 	}
 
 	int WIN_ENTRY atoi(const char *str) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("atoi(%s)\n", str);
 		if (!str) {
 			errno = EINVAL;
@@ -2356,43 +2365,43 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _amsg_exit(int reason) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_amsg_exit(%d)\n", reason);
 		abort_and_log("_amsg_exit");
 		return reason;
 	}
 
 	void WIN_ENTRY _invoke_watson(const uint16_t *, const uint16_t *, const uint16_t *, unsigned int, uintptr_t) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_invoke_watson(...)\n");
 		abort_and_log("_invoke_watson");
 	}
 
 	void WIN_ENTRY terminateShim() {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		abort_and_log("terminate");
 	}
 
 	int WIN_ENTRY _purecall() {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		abort_and_log("_purecall");
 		return 0;
 	}
 
 	int WIN_ENTRY _except_handler4_common(void *, void *, void *, void *) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("STUB: _except_handler4_common\n");
 		return 0;
 	}
 
 	long WIN_ENTRY _XcptFilter(unsigned long code, void *) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("STUB: _XcptFilter(%lu)\n", code);
 		return 0;
 	}
 
 	int WIN_ENTRY _get_wpgmptr(uint16_t **pValue) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_get_wpgmptr(%p)\n", pValue);
 		if (!pValue) {
 			return 22;
@@ -2415,7 +2424,7 @@ namespace msvcrt {
 	}
 
 	char** WIN_ENTRY __p__pgmptr() {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("__p__pgmptr()\n");
 		_pgmptr = const_cast<char *>(wibo::guestExecutablePath.c_str());
 		return &_pgmptr;
@@ -2423,7 +2432,7 @@ namespace msvcrt {
 
 	int WIN_ENTRY _wsplitpath_s(const uint16_t * path, uint16_t * drive, size_t driveNumberOfElements, uint16_t *dir, size_t dirNumberOfElements,
 		uint16_t * fname, size_t nameNumberOfElements, uint16_t * ext, size_t extNumberOfElements){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		if(!path){
 			return 22;
 		}
@@ -2476,7 +2485,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY wcscat_s(uint16_t *strDestination, size_t numberOfElements, const uint16_t *strSource){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		std::string dst_str = wideStringToString(strDestination);
 		std::string src_str = wideStringToString(strSource);
 		DEBUG_LOG("wcscat_s %s %d %s", dst_str.c_str(), numberOfElements, src_str.c_str());
@@ -2498,7 +2507,7 @@ namespace msvcrt {
 	}
 
 	uint16_t* WIN_ENTRY _wcsdup(const uint16_t *strSource){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		// std::string src_str = wideStringToString(strSource);
 		// DEBUG_LOG("_wcsdup: %s", src_str.c_str());
 		if(!strSource) return nullptr;
@@ -2517,7 +2526,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _waccess_s(const uint16_t* path, int mode){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		std::string original = wideStringToString(path);
 		DEBUG_LOG("_waccess_s %s\n", original.c_str());
 		std::filesystem::path host = files::pathFromWindows(original.c_str());
@@ -2532,12 +2541,12 @@ namespace msvcrt {
 	}
 
 	void* WIN_ENTRY memset(void *s, int c, size_t n){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		return std::memset(s, c, n);
 	}
 
 	int WIN_ENTRY wcsncpy_s(uint16_t *strDest, size_t numberOfElements, const uint16_t *strSource, size_t count){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		std::string src_str = wideStringToString(strSource);
 		DEBUG_LOG("wcsncpy_s(%p, %zu, %p, %zu)\n", strDest, numberOfElements, strSource, count);
 
@@ -2560,7 +2569,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY wcsncat_s(uint16_t *strDest, size_t numberOfElements, const uint16_t *strSource, size_t count){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		std::string dst_str = wideStringToString(strDest);
 		std::string src_str = wideStringToString(strSource);
 		DEBUG_LOG("wscncat_s(%p, %zu, %p, %zu)\n", strDest, numberOfElements, strSource, count);
@@ -2584,7 +2593,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _itow_s(int value, uint16_t *buffer, size_t size, int radix){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_itow_s(%d, %p, %zu, %d)\n", value, buffer, size, radix);
 		if (!buffer || size == 0) return 22;
 		assert(radix == 10); // only base 10 supported for now
@@ -2603,13 +2612,13 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _wtoi(const uint16_t* str) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_wtoi(%p)\n", str);
 		return wstrtol(str, nullptr, 10);
 	}
 
 	int WIN_ENTRY _ltoa_s(long value, char *buffer, size_t sizeInChars, int radix) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_ltoa_s(%ld, %p, %zu, %d)\n", value, buffer, sizeInChars, radix);
 		if (!buffer || sizeInChars == 0) {
 			return 22;
@@ -2647,7 +2656,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY wcscpy_s(uint16_t *dest, size_t dest_size, const uint16_t *src){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		std::string src_str = wideStringToString(src);
 		VERBOSE_LOG("wcscpy_s(%p, %zu, %p)\n", dest, dest_size, src);
 		if (!dest || !src || dest_size == 0) {
@@ -2664,7 +2673,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY swprintf_s(uint16_t *buffer, size_t sizeOfBuffer, const uint16_t *format, ...) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("swprintf_s(%p, %zu, %p, ...)\n", buffer, sizeOfBuffer, format);
 		if (!buffer || sizeOfBuffer == 0 || !format) {
 			errno = EINVAL;
@@ -2692,7 +2701,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY swscanf_s(const uint16_t *buffer, const uint16_t *format, ...) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("swscanf_s(%p, %p, ...)\n", buffer, format);
 		if (!buffer || !format) {
 			errno = EINVAL;
@@ -2716,31 +2725,31 @@ namespace msvcrt {
 	}
 
 	int* WIN_ENTRY _get_osfhandle(int fd){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("STUB: _get_osfhandle(%d)\n", fd);
 		return (int*)fd;
 	}
 
 	int WIN_ENTRY _write(int fd, const void* buffer, unsigned int count) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_write(fd=%d, buffer=%p, count=%u)\n", fd, buffer, count);
 		return (int)write(fd, buffer, count);
 	}
 
 	void WIN_ENTRY exit(int status) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("exit(%d)\n", status);
 		_Exit(status);
 	}
 
 	int WIN_ENTRY wcsncmp(const uint16_t *string1, const uint16_t *string2, size_t count) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("wcsncmp(%p, %p, %zu)\n", string1, string2, count);
 		return wstrncmp(string1, string2, count);
 	}
 
 	int WIN_ENTRY _vswprintf_c_l(uint16_t* buffer, size_t size, const uint16_t* format, ...) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_vswprintf_c_l(%p, %zu, %p, ...)\n", buffer, size, format);
 		if (!buffer || !format || size == 0)
 			return -1;
@@ -2773,43 +2782,43 @@ namespace msvcrt {
 	}
 
 	const uint16_t* WIN_ENTRY wcsstr( const uint16_t *dest, const uint16_t *src ){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("wcsstr(%p, %p)\n", dest, src);
 		return wstrstr(dest, src);
 	}
 
 	int WIN_ENTRY iswspace(uint32_t w){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("iswspace(%u)\n", w);
 		return std::iswspace(w);
 	}
 
 	int WIN_ENTRY iswdigit(uint32_t w){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("iswdigit(%u)\n", w);
 		return std::iswdigit(w);
 	}
 
 	const uint16_t* WIN_ENTRY wcschr(const uint16_t* str, uint16_t c){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("wcschr(%p, %u)\n", str, c);
 		return wstrchr(str, c);
 	}
 
 	const uint16_t* WIN_ENTRY wcsrchr(const uint16_t *str, uint16_t c){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("wcsrchr(%p, %u)\n", str, c);
 		return wstrrchr(str, c);
 	}
 
 	unsigned long WIN_ENTRY wcstoul(const uint16_t *strSource, uint16_t **endptr, int base){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("wcstoul(%p, %p, %d)\n", strSource, endptr, base);
 		return wstrtoul(strSource, endptr, base);
 	}
 
 	FILE* WIN_ENTRY _wfsopen(const uint16_t* filename, const uint16_t* mode, int shflag){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		if (!filename || !mode) return nullptr;
 		std::string fname_str = wideStringToString(filename);
 		std::string mode_str = wideStringToString(mode);
@@ -2820,7 +2829,7 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY puts(const char *str) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		if (!str) {
 			str = "(null)";
 		}
@@ -2833,13 +2842,13 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY fclose(FILE* stream){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("fclose(%p)\n", stream);
 		return ::fclose(stream);
 	}
 
 	int WIN_ENTRY _flushall(){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_flushall()\n");
 		int count = 0;
 
@@ -2851,13 +2860,13 @@ namespace msvcrt {
 	}
 
 	int* WIN_ENTRY _errno() {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_errno()\n");
 		return &errno;
 	}
 
 	intptr_t WIN_ENTRY _wspawnvp(int mode, const uint16_t* cmdname, const uint16_t* const * argv) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		if (!cmdname || !argv) {
 			errno = EINVAL;
 			return -1;
@@ -2906,7 +2915,7 @@ namespace msvcrt {
 	}
 
 	intptr_t WIN_ENTRY _spawnvp(int mode, const char *cmdname, const char * const *argv) {
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		if (!cmdname || !argv) {
 			errno = EINVAL;
 			return -1;
@@ -2954,14 +2963,14 @@ namespace msvcrt {
 	}
 
 	int WIN_ENTRY _wunlink(const uint16_t *filename){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		std::string str = wideStringToString(filename);
 		DEBUG_LOG("_wunlink(%s)\n", str.c_str());
 		return unlink(str.c_str());
 	}
 
 	uint16_t* WIN_ENTRY _wfullpath(uint16_t* absPath, const uint16_t* relPath, size_t maxLength){
-		WIN_API_SEGMENT_GUARD();
+		HOST_CONTEXT_GUARD();
 		std::string relPathStr = wideStringToString(relPath);
 		DEBUG_LOG("_wfullpath(%s, %zu)\n", relPathStr.c_str(), maxLength);
 		if(!relPath) return nullptr;

@@ -31,7 +31,7 @@ DWORD_PTR computeSystemProcessorMask(unsigned int cpuCount) {
 namespace kernel32 {
 
 void WIN_FUNC GetSystemInfo(LPSYSTEM_INFO lpSystemInfo) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetSystemInfo(%p)\n", lpSystemInfo);
 	if (!lpSystemInfo) {
 		return;
@@ -68,7 +68,7 @@ void WIN_FUNC GetSystemInfo(LPSYSTEM_INFO lpSystemInfo) {
 }
 
 void WIN_FUNC GetSystemTime(LPSYSTEMTIME lpSystemTime) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetSystemTime(%p)\n", lpSystemTime);
 	if (!lpSystemTime) {
 		return;
@@ -97,7 +97,7 @@ void WIN_FUNC GetSystemTime(LPSYSTEMTIME lpSystemTime) {
 }
 
 void WIN_FUNC GetLocalTime(LPSYSTEMTIME lpSystemTime) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetLocalTime(%p)\n", lpSystemTime);
 	if (!lpSystemTime) {
 		return;
@@ -126,7 +126,7 @@ void WIN_FUNC GetLocalTime(LPSYSTEMTIME lpSystemTime) {
 }
 
 void WIN_FUNC GetSystemTimeAsFileTime(LPFILETIME lpSystemTimeAsFileTime) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetSystemTimeAsFileTime(%p)\n", lpSystemTimeAsFileTime);
 	if (!lpSystemTimeAsFileTime) {
 		return;
@@ -158,7 +158,7 @@ void WIN_FUNC GetSystemTimeAsFileTime(LPFILETIME lpSystemTimeAsFileTime) {
 }
 
 DWORD WIN_FUNC GetTickCount() {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetTickCount()\n");
 #if defined(CLOCK_MONOTONIC)
 	struct timespec ts{};
@@ -183,13 +183,13 @@ DWORD WIN_FUNC GetTickCount() {
 }
 
 DWORD WIN_FUNC GetVersion() {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetVersion()\n");
 	return kMajorVersion | (kMinorVersion << 8) | (5 << 16) | (kBuildNumber << 24);
 }
 
 BOOL WIN_FUNC GetVersionExA(LPOSVERSIONINFOA lpVersionInformation) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetVersionExA(%p)\n", lpVersionInformation);
 	if (!lpVersionInformation) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;

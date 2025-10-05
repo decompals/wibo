@@ -130,7 +130,7 @@ extern "C" {
 
 RPC_STATUS WIN_FUNC RpcStringBindingComposeW(RPC_WSTR objUuid, RPC_WSTR protSeq, RPC_WSTR networkAddr,
 											 RPC_WSTR endpoint, RPC_WSTR options, RPC_WSTR *stringBinding) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	BindingComponents components;
 	components.objectUuid = toU16(objUuid);
 	components.protocolSequence = toU16(protSeq);
@@ -160,7 +160,7 @@ RPC_STATUS WIN_FUNC RpcStringBindingComposeW(RPC_WSTR objUuid, RPC_WSTR protSeq,
 }
 
 RPC_STATUS WIN_FUNC RpcBindingFromStringBindingW(RPC_WSTR stringBinding, RPC_BINDING_HANDLE *binding) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	if (!binding) {
 		return RPC_S_INVALID_ARG;
 	}
@@ -187,7 +187,7 @@ RPC_STATUS WIN_FUNC RpcBindingSetAuthInfoExW(RPC_BINDING_HANDLE binding, RPC_WST
 											 unsigned long authnLevel, unsigned long authnSvc,
 											 RPC_AUTH_IDENTITY_HANDLE authIdentity, unsigned long authzSvc,
 											 RPC_SECURITY_QOS *securityQos) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	BindingHandleData *data = getBinding(binding);
 	if (!data) {
 		return RPC_S_INVALID_BINDING;
@@ -209,7 +209,7 @@ RPC_STATUS WIN_FUNC RpcBindingSetAuthInfoExW(RPC_BINDING_HANDLE binding, RPC_WST
 }
 
 RPC_STATUS WIN_FUNC RpcBindingFree(RPC_BINDING_HANDLE *binding) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	if (!binding) {
 		return RPC_S_INVALID_ARG;
 	}
@@ -228,7 +228,7 @@ RPC_STATUS WIN_FUNC RpcBindingFree(RPC_BINDING_HANDLE *binding) {
 }
 
 RPC_STATUS WIN_FUNC RpcStringFreeW(RPC_WSTR *string) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	if (!string) {
 		return RPC_S_INVALID_ARG;
 	}
@@ -255,7 +255,7 @@ NdrClientCall2(PMIDL_STUB_DESC stubDescriptor, PFORMAT_STRING format, ...) {
 }
 
 void WIN_FUNC NdrServerCall2(PRPC_MESSAGE message) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: NdrServerCall2 message=%p\n", message);
 }
 

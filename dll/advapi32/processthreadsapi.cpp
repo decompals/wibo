@@ -8,7 +8,7 @@
 namespace advapi32 {
 
 BOOL WIN_FUNC OpenProcessToken(HANDLE ProcessHandle, DWORD DesiredAccess, PHANDLE TokenHandle) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("OpenProcessToken(%p, %u, %p)\n", ProcessHandle, DesiredAccess, TokenHandle);
 	if (!TokenHandle) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;

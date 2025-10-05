@@ -74,15 +74,15 @@ add_executable(wibo
     dll/vcruntime.cpp
     dll/version.cpp
     src/access.cpp
+    src/context.cpp
     src/errors.cpp
     src/files.cpp
     src/handles.cpp
     src/loader.cpp
-    src/resources.cpp
-    src/module_registry.cpp
-    src/winapi_segments.cpp
     src/main.cpp
+    src/module_registry.cpp
     src/processes.cpp
+    src/resources.cpp
     src/strutil.cpp
 )
 target_include_directories(wibo PRIVATE dll src)

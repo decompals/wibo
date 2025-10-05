@@ -35,7 +35,7 @@ void configureInheritability(int fd, bool inherit) {
 } // namespace
 
 BOOL WIN_FUNC CreatePipe(PHANDLE hReadPipe, PHANDLE hWritePipe, LPSECURITY_ATTRIBUTES lpPipeAttributes, DWORD nSize) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CreatePipe(%p, %p, %p, %u)\n", hReadPipe, hWritePipe, lpPipeAttributes, nSize);
 	if (!hReadPipe || !hWritePipe) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;

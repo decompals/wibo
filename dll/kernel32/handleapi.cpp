@@ -11,7 +11,7 @@ namespace kernel32 {
 
 BOOL WIN_FUNC DuplicateHandle(HANDLE hSourceProcessHandle, HANDLE hSourceHandle, HANDLE hTargetProcessHandle,
 							  LPHANDLE lpTargetHandle, DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwOptions) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("DuplicateHandle(%p, %p, %p, %p, %x, %d, %x)\n", hSourceProcessHandle, hSourceHandle,
 			  hTargetProcessHandle, lpTargetHandle, dwDesiredAccess, bInheritHandle, dwOptions);
 	(void)dwDesiredAccess;
@@ -63,7 +63,7 @@ BOOL WIN_FUNC DuplicateHandle(HANDLE hSourceProcessHandle, HANDLE hSourceHandle,
 }
 
 BOOL WIN_FUNC CloseHandle(HANDLE hObject) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CloseHandle(%p)\n", hObject);
 	if (!wibo::handles().release(hObject)) {
 		wibo::lastError = ERROR_INVALID_HANDLE;

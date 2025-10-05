@@ -4,7 +4,7 @@
 
 namespace psapi {
 BOOL WIN_FUNC EnumProcessModules(HANDLE hProcess, HMODULE *lphModule, DWORD cb, DWORD *lpcbNeeded) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("EnumProcessModules(%p, %p, %u, %p)\n", hProcess, lphModule, cb, lpcbNeeded);
 
 	bool recognizedHandle = false;

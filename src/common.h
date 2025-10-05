@@ -255,12 +255,15 @@ extern uint16_t tibSelector;
 extern int tibEntryNumber;
 extern PEB *processPeb;
 
-class WinApiSegmentScope {
+void setThreadTibForHost(TIB *tib);
+TIB *getThreadTibForHost();
+
+class HostContextGuard {
 public:
-	WinApiSegmentScope();
-	~WinApiSegmentScope();
-	WinApiSegmentScope(const WinApiSegmentScope &) = delete;
-	WinApiSegmentScope &operator=(const WinApiSegmentScope &) = delete;
+	HostContextGuard();
+	~HostContextGuard();
+	HostContextGuard(const HostContextGuard &) = delete;
+	HostContextGuard &operator=(const HostContextGuard &) = delete;
 
 private:
 	uint16_t previousFs_;
@@ -268,7 +271,21 @@ private:
 	bool restore_;
 };
 
-#define WIN_API_SEGMENT_GUARD() wibo::WinApiSegmentScope _wiboSegmentScopeGuard
+class GuestContextGuard {
+public:
+	explicit GuestContextGuard(TIB *tib);
+	~GuestContextGuard();
+	GuestContextGuard(const GuestContextGuard &) = delete;
+	GuestContextGuard &operator=(const GuestContextGuard &) = delete;
+
+private:
+	uint16_t previousFs_;
+	uint16_t previousGs_;
+	bool applied_;
+};
+
+#define HOST_CONTEXT_GUARD() wibo::HostContextGuard _wiboHostContextGuard
+#define GUEST_CONTEXT_GUARD(tibPtr) wibo::GuestContextGuard _wiboGuestContextGuard(tibPtr)
 
 TIB *allocateTib();
 void initializeTibStackInfo(TIB *tib);

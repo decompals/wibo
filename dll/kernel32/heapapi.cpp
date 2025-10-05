@@ -76,7 +76,7 @@ HeapObject::~HeapObject() {
 namespace kernel32 {
 
 HANDLE WIN_FUNC HeapCreate(DWORD flOptions, SIZE_T dwInitialSize, SIZE_T dwMaximumSize) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("HeapCreate(%u, %zu, %zu)\n", flOptions, dwInitialSize, dwMaximumSize);
 	if (dwMaximumSize != 0 && dwInitialSize > dwMaximumSize) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -102,7 +102,7 @@ HANDLE WIN_FUNC HeapCreate(DWORD flOptions, SIZE_T dwInitialSize, SIZE_T dwMaxim
 }
 
 BOOL WIN_FUNC HeapDestroy(HANDLE hHeap) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("HeapDestroy(%p)\n", hHeap);
 	auto record = wibo::handles().getAs<HeapObject>(hHeap);
 	if (!record) {
@@ -121,7 +121,7 @@ BOOL WIN_FUNC HeapDestroy(HANDLE hHeap) {
 }
 
 HANDLE WIN_FUNC GetProcessHeap() {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	ensureProcessHeapInitialized();
 	wibo::lastError = ERROR_SUCCESS;
 	DEBUG_LOG("GetProcessHeap() -> %p\n", g_processHeapHandle);
@@ -130,7 +130,7 @@ HANDLE WIN_FUNC GetProcessHeap() {
 
 BOOL WIN_FUNC HeapSetInformation(HANDLE HeapHandle, HEAP_INFORMATION_CLASS HeapInformationClass, PVOID HeapInformation,
 								 SIZE_T HeapInformationLength) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("HeapSetInformation(%p, %d, %p, %zu)\n", HeapHandle, static_cast<int>(HeapInformationClass),
 			  HeapInformation, HeapInformationLength);
 	auto record = wibo::handles().getAs<HeapObject>(HeapHandle);
@@ -166,7 +166,7 @@ BOOL WIN_FUNC HeapSetInformation(HANDLE HeapHandle, HEAP_INFORMATION_CLASS HeapI
 }
 
 LPVOID WIN_FUNC HeapAlloc(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("HeapAlloc(%p, 0x%x, %zu) ", hHeap, dwFlags, dwBytes);
 	auto record = wibo::handles().getAs<HeapObject>(hHeap);
 	if (!record) {
@@ -186,7 +186,7 @@ LPVOID WIN_FUNC HeapAlloc(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes) {
 }
 
 LPVOID WIN_FUNC HeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dwBytes) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("HeapReAlloc(%p, 0x%x, %p, %zu) ", hHeap, dwFlags, lpMem, dwBytes);
 	auto record = wibo::handles().getAs<HeapObject>(hHeap);
 	if (!record) {
@@ -264,7 +264,7 @@ LPVOID WIN_FUNC HeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dw
 }
 
 SIZE_T WIN_FUNC HeapSize(HANDLE hHeap, DWORD dwFlags, LPCVOID lpMem) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("HeapSize(%p, 0x%x, %p)\n", hHeap, dwFlags, lpMem);
 	(void)dwFlags;
 	auto record = wibo::handles().getAs<HeapObject>(hHeap);
@@ -292,7 +292,7 @@ SIZE_T WIN_FUNC HeapSize(HANDLE hHeap, DWORD dwFlags, LPCVOID lpMem) {
 }
 
 BOOL WIN_FUNC HeapFree(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("HeapFree(%p, 0x%x, %p)\n", hHeap, dwFlags, lpMem);
 	(void)dwFlags;
 	if (lpMem == nullptr) {

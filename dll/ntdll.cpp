@@ -123,7 +123,7 @@ namespace ntdll {
 NTSTATUS WIN_FUNC NtReadFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext,
 							 PIO_STATUS_BLOCK IoStatusBlock, PVOID Buffer, ULONG Length, PLARGE_INTEGER ByteOffset,
 							 PULONG Key) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("NtReadFile(%p, %p, %p, %p, %p, %p, %u, %p, %p) ", FileHandle, Event, ApcRoutine, ApcContext,
 			  IoStatusBlock, Buffer, Length, ByteOffset, Key);
 	(void)ApcRoutine;
@@ -181,7 +181,7 @@ NTSTATUS WIN_FUNC NtReadFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE Ap
 
 NTSTATUS WIN_FUNC NtAllocateVirtualMemory(HANDLE ProcessHandle, PVOID *BaseAddress, ULONG_PTR ZeroBits,
 										  PSIZE_T RegionSize, ULONG AllocationType, ULONG Protect) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("NtAllocateVirtualMemory(%p, %p, %lu, %p, %lu, %lu) ", ProcessHandle, BaseAddress, ZeroBits, RegionSize,
 			  AllocationType, Protect);
 	assert(ProcessHandle == (HANDLE)-1);
@@ -220,7 +220,7 @@ NTSTATUS WIN_FUNC NtAllocateVirtualMemory(HANDLE ProcessHandle, PVOID *BaseAddre
 
 NTSTATUS WIN_FUNC NtProtectVirtualMemory(HANDLE ProcessHandle, PVOID *BaseAddress, PSIZE_T NumberOfBytesToProtect,
 										 ULONG NewAccessProtection, PULONG OldAccessProtection) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("NtProtectVirtualMemory(%p, %p, %p, %lu, %p) ", ProcessHandle, BaseAddress, NumberOfBytesToProtect,
 			  NewAccessProtection, OldAccessProtection);
 	assert(ProcessHandle == (HANDLE)-1);
@@ -260,7 +260,7 @@ NTSTATUS WIN_FUNC NtProtectVirtualMemory(HANDLE ProcessHandle, PVOID *BaseAddres
 }
 
 NTSTATUS WIN_FUNC RtlGetVersion(PRTL_OSVERSIONINFOW lpVersionInformation) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("RtlGetVersion(%p) ", lpVersionInformation);
 	if (!lpVersionInformation) {
 		DEBUG_LOG("-> 0x%x\n", STATUS_INVALID_PARAMETER);
@@ -292,7 +292,7 @@ NTSTATUS WIN_FUNC RtlGetVersion(PRTL_OSVERSIONINFOW lpVersionInformation) {
 NTSTATUS WIN_FUNC NtQueryInformationProcess(HANDLE ProcessHandle, PROCESSINFOCLASS ProcessInformationClass,
 											PVOID ProcessInformation, ULONG ProcessInformationLength,
 											PULONG ReturnLength) {
-	WIN_API_SEGMENT_GUARD();
+	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("NtQueryInformationProcess(%p, %u, %p, %u, %p) ", ProcessHandle, ProcessInformationClass,
 			  ProcessInformation, ProcessInformationLength, ReturnLength);
 	if (!ProcessInformation) {

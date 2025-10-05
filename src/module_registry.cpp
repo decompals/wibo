@@ -449,11 +449,9 @@ BOOL callDllMain(wibo::ModuleInfo &info, DWORD reason, LPVOID reserved) {
 		if (!wibo::tibSelector) {
 			result = dllMain(reinterpret_cast<HMODULE>(info.executable->imageBase), callReason, callReserved);
 		} else {
-			uint16_t previousSegment = 0;
-			asm volatile("mov %%fs, %0" : "=r"(previousSegment));
-			asm volatile("movw %0, %%fs" : : "r"(wibo::tibSelector) : "memory");
+			TIB *tib = wibo::getThreadTibForHost();
+			GUEST_CONTEXT_GUARD(tib);
 			result = dllMain(reinterpret_cast<HMODULE>(info.executable->imageBase), callReason, callReserved);
-			asm volatile("movw %0, %%fs" : : "r"(previousSegment) : "memory");
 		}
 		DEBUG_LOG("  callDllMain: %s DllMain returned %d\n", info.normalizedName.c_str(), result);
 		return result;
@@ -749,9 +747,11 @@ void addOnExitFunction(void *table, void (*func)()) {
 }
 
 void runPendingOnExit(ModuleInfo &info) {
+	TIB *tib = wibo::getThreadTibForHost();
 	for (auto it = info.onExitFunctions.rbegin(); it != info.onExitFunctions.rend(); ++it) {
 		auto fn = reinterpret_cast<void (*)()>(*it);
 		if (fn) {
+			GUEST_CONTEXT_GUARD(tib);
 			fn();
 		}
 	}

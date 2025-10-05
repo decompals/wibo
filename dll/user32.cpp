@@ -7,6 +7,7 @@ namespace user32 {
 	constexpr uintptr_t kDefaultKeyboardLayout = 0x04090409;
 
 	int WIN_FUNC LoadStringA(void* hInstance, unsigned int uID, char* lpBuffer, int cchBufferMax) {
+		WIN_API_SEGMENT_GUARD();
 		DEBUG_LOG("LoadStringA(%p, %u, %p, %d)\n", hInstance, uID, lpBuffer, cchBufferMax);
 		if (!lpBuffer || cchBufferMax <= 0) {
 			return 0;
@@ -54,6 +55,7 @@ namespace user32 {
 	}
 
 	int WIN_FUNC LoadStringW(void* hInstance, unsigned int uID, uint16_t* lpBuffer, int cchBufferMax) {
+		WIN_API_SEGMENT_GUARD();
 		DEBUG_LOG("LoadStringW(%p, %u, %p, %d)\n", hInstance, uID, lpBuffer, cchBufferMax);
 		wibo::Executable *mod = wibo::executableFromModule((HMODULE) hInstance);
 		if (!mod) {
@@ -107,12 +109,14 @@ namespace user32 {
 	}
 
 	int WIN_FUNC MessageBoxA(void *hwnd, const char *lpText, const char *lpCaption, unsigned int uType) {
+		WIN_API_SEGMENT_GUARD();
 		printf("MESSAGE BOX: [%s] %s\n", lpCaption, lpText);
 		fflush(stdout);
 		return 1;
 	}
 
 	HKL WIN_FUNC GetKeyboardLayout(DWORD idThread) {
+		WIN_API_SEGMENT_GUARD();
 		DEBUG_LOG("GetKeyboardLayout(%u)\n", idThread);
 		(void)idThread;
 		wibo::lastError = ERROR_SUCCESS;

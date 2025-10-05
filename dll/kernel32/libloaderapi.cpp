@@ -31,6 +31,7 @@ HRSRC findResourceInternal(HMODULE hModule, const wibo::ResourceIdentifier &type
 namespace kernel32 {
 
 BOOL WIN_FUNC DisableThreadLibraryCalls(HMODULE hLibModule) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("DisableThreadLibraryCalls(%p)\n", hLibModule);
 	if (!hLibModule) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
@@ -50,6 +51,7 @@ BOOL WIN_FUNC DisableThreadLibraryCalls(HMODULE hLibModule) {
 }
 
 HMODULE WIN_FUNC GetModuleHandleA(LPCSTR lpModuleName) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetModuleHandleA(%s)\n", lpModuleName);
 	const auto *module = wibo::findLoadedModule(lpModuleName);
 	if (!module) {
@@ -61,6 +63,7 @@ HMODULE WIN_FUNC GetModuleHandleA(LPCSTR lpModuleName) {
 }
 
 HMODULE WIN_FUNC GetModuleHandleW(LPCWSTR lpModuleName) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetModuleHandleW -> ");
 	if (lpModuleName) {
 		const auto lpModuleNameA = wideStringToString(lpModuleName);
@@ -70,6 +73,7 @@ HMODULE WIN_FUNC GetModuleHandleW(LPCWSTR lpModuleName) {
 }
 
 DWORD WIN_FUNC GetModuleFileNameA(HMODULE hModule, LPSTR lpFilename, DWORD nSize) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetModuleFileNameA(%p, %p, %u)\n", hModule, lpFilename, nSize);
 	if (!lpFilename) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -106,6 +110,7 @@ DWORD WIN_FUNC GetModuleFileNameA(HMODULE hModule, LPSTR lpFilename, DWORD nSize
 }
 
 DWORD WIN_FUNC GetModuleFileNameW(HMODULE hModule, LPWSTR lpFilename, DWORD nSize) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetModuleFileNameW(%p, %s, %u)\n", hModule, wideStringToString(lpFilename).c_str(), nSize);
 	if (!lpFilename) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -147,6 +152,7 @@ DWORD WIN_FUNC GetModuleFileNameW(HMODULE hModule, LPWSTR lpFilename, DWORD nSiz
 }
 
 HRSRC WIN_FUNC FindResourceA(HMODULE hModule, LPCSTR lpName, LPCSTR lpType) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("FindResourceA %p %p %p\n", hModule, lpName, lpType);
 	auto type = wibo::resourceIdentifierFromAnsi(lpType);
 	auto name = wibo::resourceIdentifierFromAnsi(lpName);
@@ -154,6 +160,7 @@ HRSRC WIN_FUNC FindResourceA(HMODULE hModule, LPCSTR lpName, LPCSTR lpType) {
 }
 
 HRSRC WIN_FUNC FindResourceExA(HMODULE hModule, LPCSTR lpType, LPCSTR lpName, WORD wLanguage) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("FindResourceExA %p %p %p %u\n", hModule, lpName, lpType, wLanguage);
 	auto type = wibo::resourceIdentifierFromAnsi(lpType);
 	auto name = wibo::resourceIdentifierFromAnsi(lpName);
@@ -161,6 +168,7 @@ HRSRC WIN_FUNC FindResourceExA(HMODULE hModule, LPCSTR lpType, LPCSTR lpName, WO
 }
 
 HRSRC WIN_FUNC FindResourceW(HMODULE hModule, LPCWSTR lpName, LPCWSTR lpType) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("FindResourceW %p\n", hModule);
 	auto type = wibo::resourceIdentifierFromWide(lpType);
 	auto name = wibo::resourceIdentifierFromWide(lpName);
@@ -168,6 +176,7 @@ HRSRC WIN_FUNC FindResourceW(HMODULE hModule, LPCWSTR lpName, LPCWSTR lpType) {
 }
 
 HRSRC WIN_FUNC FindResourceExW(HMODULE hModule, LPCWSTR lpType, LPCWSTR lpName, WORD wLanguage) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("FindResourceExW %p %u\n", hModule, wLanguage);
 	auto type = wibo::resourceIdentifierFromWide(lpType);
 	auto name = wibo::resourceIdentifierFromWide(lpName);
@@ -175,6 +184,7 @@ HRSRC WIN_FUNC FindResourceExW(HMODULE hModule, LPCWSTR lpType, LPCWSTR lpName, 
 }
 
 HGLOBAL WIN_FUNC LoadResource(HMODULE hModule, HRSRC hResInfo) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("LoadResource %p %p\n", hModule, hResInfo);
 	if (!hResInfo) {
 		wibo::lastError = ERROR_RESOURCE_DATA_NOT_FOUND;
@@ -194,11 +204,13 @@ HGLOBAL WIN_FUNC LoadResource(HMODULE hModule, HRSRC hResInfo) {
 }
 
 LPVOID WIN_FUNC LockResource(HGLOBAL hResData) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("LockResource(%p)\n", hResData);
 	return hResData;
 }
 
 DWORD WIN_FUNC SizeofResource(HMODULE hModule, HRSRC hResInfo) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("SizeofResource(%p, %p)\n", hModule, hResInfo);
 	if (!hResInfo) {
 		wibo::lastError = ERROR_RESOURCE_DATA_NOT_FOUND;
@@ -218,6 +230,7 @@ DWORD WIN_FUNC SizeofResource(HMODULE hModule, HRSRC hResInfo) {
 }
 
 HMODULE WIN_FUNC LoadLibraryA(LPCSTR lpLibFileName) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("LoadLibraryA(%s)\n", lpLibFileName);
 	const auto *info = wibo::loadModule(lpLibFileName);
 	if (!info) {
@@ -229,6 +242,7 @@ HMODULE WIN_FUNC LoadLibraryA(LPCSTR lpLibFileName) {
 }
 
 HMODULE WIN_FUNC LoadLibraryW(LPCWSTR lpLibFileName) {
+	WIN_API_SEGMENT_GUARD();
 	if (!lpLibFileName) {
 		return nullptr;
 	}
@@ -238,6 +252,7 @@ HMODULE WIN_FUNC LoadLibraryW(LPCWSTR lpLibFileName) {
 }
 
 HMODULE WIN_FUNC LoadLibraryExW(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwFlags) {
+	WIN_API_SEGMENT_GUARD();
 	assert(!hFile);
 	DEBUG_LOG("LoadLibraryExW(%x) -> ", dwFlags);
 	auto filename = wideStringToString(lpLibFileName);
@@ -245,6 +260,7 @@ HMODULE WIN_FUNC LoadLibraryExW(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwFla
 }
 
 BOOL WIN_FUNC FreeLibrary(HMODULE hLibModule) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("FreeLibrary(%p)\n", hLibModule);
 	auto *info = wibo::moduleInfoFromHandle(hLibModule);
 	if (!info) {
@@ -256,6 +272,7 @@ BOOL WIN_FUNC FreeLibrary(HMODULE hLibModule) {
 }
 
 FARPROC WIN_FUNC GetProcAddress(HMODULE hModule, LPCSTR lpProcName) {
+	WIN_API_SEGMENT_GUARD();
 	FARPROC result;
 	const auto info = wibo::moduleInfoFromHandle(hModule);
 	if (!info) {

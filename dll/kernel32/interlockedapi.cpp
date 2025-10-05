@@ -6,16 +6,19 @@
 namespace kernel32 {
 
 LONG WIN_FUNC InterlockedIncrement(LONG volatile *Addend) {
+	WIN_API_SEGMENT_GUARD();
 	VERBOSE_LOG("InterlockedIncrement(%p)\n", Addend);
 	return ++(*Addend);
 }
 
 LONG WIN_FUNC InterlockedDecrement(LONG volatile *Addend) {
+	WIN_API_SEGMENT_GUARD();
 	VERBOSE_LOG("InterlockedDecrement(%p)\n", Addend);
 	return --(*Addend);
 }
 
 LONG WIN_FUNC InterlockedExchange(LONG volatile *Target, LONG Value) {
+	WIN_API_SEGMENT_GUARD();
 	VERBOSE_LOG("InterlockedExchange(%p, %ld)\n", Target, static_cast<long>(Value));
 	LONG initial = *Target;
 	*Target = Value;
@@ -23,6 +26,7 @@ LONG WIN_FUNC InterlockedExchange(LONG volatile *Target, LONG Value) {
 }
 
 LONG WIN_FUNC InterlockedCompareExchange(LONG volatile *Destination, LONG Exchange, LONG Comperand) {
+	WIN_API_SEGMENT_GUARD();
 	VERBOSE_LOG("InterlockedCompareExchange(%p, %ld, %ld)\n", Destination, static_cast<long>(Exchange),
 				static_cast<long>(Comperand));
 	LONG original = *Destination;
@@ -33,6 +37,7 @@ LONG WIN_FUNC InterlockedCompareExchange(LONG volatile *Destination, LONG Exchan
 }
 
 void WIN_FUNC InitializeSListHead(PSLIST_HEADER ListHead) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("InitializeSListHead(%p)\n", ListHead);
 	if (!ListHead) {
 		return;

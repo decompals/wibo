@@ -82,22 +82,26 @@ std::string localeInfoString(int LCType) {
 namespace kernel32 {
 
 UINT WIN_FUNC GetACP() {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetACP() -> %u\n", 28591);
 	wibo::lastError = ERROR_SUCCESS;
 	return 28591; // Latin1 (ISO/IEC 8859-1)
 }
 
 LANGID WIN_FUNC GetSystemDefaultLangID() {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("STUB: GetSystemDefaultLangID()\n");
 	return 0;
 }
 
 LANGID WIN_FUNC GetUserDefaultUILanguage() {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("STUB: GetUserDefaultUILanguage()\n");
 	return 0;
 }
 
 BOOL WIN_FUNC GetCPInfo(UINT CodePage, LPCPINFO lpCPInfo) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetCPInfo(%u, %p)\n", CodePage, lpCPInfo);
 	(void)CodePage;
 
@@ -117,6 +121,7 @@ BOOL WIN_FUNC GetCPInfo(UINT CodePage, LPCPINFO lpCPInfo) {
 
 int WIN_FUNC CompareStringA(LCID Locale, DWORD dwCmpFlags, LPCSTR lpString1, int cchCount1, LPCSTR lpString2,
 							int cchCount2) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("CompareStringA(%u, %u, %s, %d, %s, %d)\n", Locale, dwCmpFlags, lpString1 ? lpString1 : "(null)",
 			  cchCount1, lpString2 ? lpString2 : "(null)", cchCount2);
 	(void)Locale;
@@ -140,6 +145,7 @@ int WIN_FUNC CompareStringA(LCID Locale, DWORD dwCmpFlags, LPCSTR lpString1, int
 
 int WIN_FUNC CompareStringW(LCID Locale, DWORD dwCmpFlags, LPCWCH lpString1, int cchCount1, LPCWCH lpString2,
 							int cchCount2) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("CompareStringW(%u, %u, %p, %d, %p, %d)\n", Locale, dwCmpFlags, lpString1, cchCount1, lpString2,
 			  cchCount2);
 	(void)Locale;
@@ -155,6 +161,7 @@ int WIN_FUNC CompareStringW(LCID Locale, DWORD dwCmpFlags, LPCWCH lpString1, int
 }
 
 BOOL WIN_FUNC IsValidCodePage(UINT CodePage) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("IsValidCodePage(%u)\n", CodePage);
 	(void)CodePage;
 	wibo::lastError = ERROR_SUCCESS;
@@ -162,6 +169,7 @@ BOOL WIN_FUNC IsValidCodePage(UINT CodePage) {
 }
 
 BOOL WIN_FUNC IsValidLocale(LCID Locale, DWORD dwFlags) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("IsValidLocale(%u, 0x%x)\n", Locale, dwFlags);
 	(void)Locale;
 	if (dwFlags != 0 && (dwFlags & ~(LCID_INSTALLED | LCID_SUPPORTED | LCID_ALTERNATE_SORTS)) != 0) {
@@ -173,6 +181,7 @@ BOOL WIN_FUNC IsValidLocale(LCID Locale, DWORD dwFlags) {
 }
 
 int WIN_FUNC GetLocaleInfoA(LCID Locale, LCTYPE LCType, LPSTR lpLCData, int cchData) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetLocaleInfoA(%u, %u, %p, %d)\n", Locale, LCType, lpLCData, cchData);
 	(void)Locale;
 
@@ -198,6 +207,7 @@ int WIN_FUNC GetLocaleInfoA(LCID Locale, LCTYPE LCType, LPSTR lpLCData, int cchD
 }
 
 int WIN_FUNC GetLocaleInfoW(LCID Locale, LCTYPE LCType, LPWSTR lpLCData, int cchData) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetLocaleInfoW(%u, %u, %p, %d)\n", Locale, LCType, lpLCData, cchData);
 	(void)Locale;
 
@@ -224,6 +234,7 @@ int WIN_FUNC GetLocaleInfoW(LCID Locale, LCTYPE LCType, LPWSTR lpLCData, int cch
 }
 
 BOOL WIN_FUNC EnumSystemLocalesA(LOCALE_ENUMPROCA lpLocaleEnumProc, DWORD dwFlags) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("EnumSystemLocalesA(%p, 0x%x)\n", lpLocaleEnumProc, dwFlags);
 	(void)dwFlags;
 	if (!lpLocaleEnumProc) {
@@ -237,12 +248,14 @@ BOOL WIN_FUNC EnumSystemLocalesA(LOCALE_ENUMPROCA lpLocaleEnumProc, DWORD dwFlag
 }
 
 LCID WIN_FUNC GetUserDefaultLCID() {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetUserDefaultLCID()\n");
 	wibo::lastError = ERROR_SUCCESS;
 	return 0x0409; // en-US
 }
 
 BOOL WIN_FUNC IsDBCSLeadByte(BYTE TestChar) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("IsDBCSLeadByte(%u)\n", TestChar);
 	(void)TestChar;
 	wibo::lastError = ERROR_SUCCESS;
@@ -250,6 +263,7 @@ BOOL WIN_FUNC IsDBCSLeadByte(BYTE TestChar) {
 }
 
 BOOL WIN_FUNC IsDBCSLeadByteEx(UINT CodePage, BYTE TestChar) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("IsDBCSLeadByteEx(%u, %u)\n", CodePage, TestChar);
 
 	auto inRanges = [TestChar](std::initializer_list<std::pair<uint8_t, uint8_t>> ranges) -> BOOL {
@@ -282,6 +296,7 @@ BOOL WIN_FUNC IsDBCSLeadByteEx(UINT CodePage, BYTE TestChar) {
 }
 
 int WIN_FUNC LCMapStringW(LCID Locale, DWORD dwMapFlags, LPCWCH lpSrcStr, int cchSrc, LPWSTR lpDestStr, int cchDest) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("LCMapStringW(%u, 0x%x, %p, %d, %p, %d)\n", Locale, dwMapFlags, lpSrcStr, cchSrc, lpDestStr, cchDest);
 	(void)Locale;
 	if (!lpSrcStr || cchSrc == 0) {
@@ -330,6 +345,7 @@ int WIN_FUNC LCMapStringW(LCID Locale, DWORD dwMapFlags, LPCWCH lpSrcStr, int cc
 }
 
 int WIN_FUNC LCMapStringA(LCID Locale, DWORD dwMapFlags, LPCCH lpSrcStr, int cchSrc, LPSTR lpDestStr, int cchDest) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("LCMapStringA(%u, 0x%x, %p, %d, %p, %d)\n", Locale, dwMapFlags, lpSrcStr, cchSrc, lpDestStr, cchDest);
 	if (!lpSrcStr) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;

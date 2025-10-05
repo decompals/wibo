@@ -2,13 +2,25 @@
 
 namespace vcruntime {
 
-void *WIN_ENTRY memcpy(void *dest, const void *src, size_t count) { return ::memcpy(dest, src, count); }
+void *WIN_ENTRY memcpy(void *dest, const void *src, size_t count) {
+	WIN_API_SEGMENT_GUARD();
+	return ::memcpy(dest, src, count);
+}
 
-void *WIN_ENTRY memset(void *dest, int ch, size_t count) { return ::memset(dest, ch, count); }
+void *WIN_ENTRY memset(void *dest, int ch, size_t count) {
+	WIN_API_SEGMENT_GUARD();
+	return ::memset(dest, ch, count);
+}
 
-int WIN_ENTRY memcmp(const void *buf1, const void *buf2, size_t count) { return ::memcmp(buf1, buf2, count); }
+int WIN_ENTRY memcmp(const void *buf1, const void *buf2, size_t count) {
+	WIN_API_SEGMENT_GUARD();
+	return ::memcmp(buf1, buf2, count);
+}
 
-void *WIN_ENTRY memmove(void *dest, const void *src, size_t count) { return ::memmove(dest, src, count); }
+void *WIN_ENTRY memmove(void *dest, const void *src, size_t count) {
+	WIN_API_SEGMENT_GUARD();
+	return ::memmove(dest, src, count);
+}
 
 } // namespace vcruntime
 

@@ -294,6 +294,7 @@ void resetOverlappedEvent(OVERLAPPED *ov) {
 } // namespace
 
 DWORD WIN_FUNC GetFileAttributesA(LPCSTR lpFileName) {
+	WIN_API_SEGMENT_GUARD();
 	if (!lpFileName) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return INVALID_FILE_ATTRIBUTES;
@@ -332,6 +333,7 @@ DWORD WIN_FUNC GetFileAttributesA(LPCSTR lpFileName) {
 }
 
 DWORD WIN_FUNC GetFileAttributesW(LPCWSTR lpFileName) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetFileAttributesW -> ");
 	if (!lpFileName) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -342,6 +344,7 @@ DWORD WIN_FUNC GetFileAttributesW(LPCWSTR lpFileName) {
 }
 
 UINT WIN_FUNC GetDriveTypeA(LPCSTR lpRootPathName) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("STUB: GetDriveTypeA(%s)\n", lpRootPathName ? lpRootPathName : "(null)");
 	(void)lpRootPathName;
 	wibo::lastError = ERROR_SUCCESS;
@@ -349,6 +352,7 @@ UINT WIN_FUNC GetDriveTypeA(LPCSTR lpRootPathName) {
 }
 
 UINT WIN_FUNC GetDriveTypeW(LPCWSTR lpRootPathName) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("STUB: GetDriveTypeW(%p)\n", lpRootPathName);
 	(void)lpRootPathName;
 	wibo::lastError = ERROR_SUCCESS;
@@ -359,6 +363,7 @@ BOOL WIN_FUNC GetVolumeInformationA(LPCSTR lpRootPathName, LPSTR lpVolumeNameBuf
 									LPDWORD lpVolumeSerialNumber, LPDWORD lpMaximumComponentLength,
 									LPDWORD lpFileSystemFlags, LPSTR lpFileSystemNameBuffer,
 									DWORD nFileSystemNameSize) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("STUB: GetVolumeInformationA(%s)\n", lpRootPathName ? lpRootPathName : "(null)");
 	if (lpVolumeNameBuffer && nVolumeNameSize > 0) {
 		lpVolumeNameBuffer[0] = '\0';
@@ -388,6 +393,7 @@ BOOL WIN_FUNC GetVolumeInformationW(LPCWSTR lpRootPathName, LPWSTR lpVolumeNameB
 									LPDWORD lpVolumeSerialNumber, LPDWORD lpMaximumComponentLength,
 									LPDWORD lpFileSystemFlags, LPWSTR lpFileSystemNameBuffer,
 									DWORD nFileSystemNameSize) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("STUB: GetVolumeInformationW(%p)\n", lpRootPathName);
 	if (lpVolumeNameBuffer && nVolumeNameSize > 0) {
 		lpVolumeNameBuffer[0] = 0;
@@ -416,6 +422,7 @@ BOOL WIN_FUNC GetVolumeInformationW(LPCWSTR lpRootPathName, LPWSTR lpVolumeNameB
 }
 
 LONG WIN_FUNC CompareFileTime(const FILETIME *lpFileTime1, const FILETIME *lpFileTime2) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("CompareFileTime(%p, %p)\n", lpFileTime1, lpFileTime2);
 	auto toInt64 = [](const FILETIME *ft) -> int64_t {
 		if (!ft) {
@@ -437,6 +444,7 @@ LONG WIN_FUNC CompareFileTime(const FILETIME *lpFileTime1, const FILETIME *lpFil
 
 BOOL WIN_FUNC WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten,
 						LPOVERLAPPED lpOverlapped) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("WriteFile(%p, %p, %u, %p, %p)\n", hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten,
 			  lpOverlapped);
 	wibo::lastError = ERROR_SUCCESS;
@@ -494,6 +502,7 @@ BOOL WIN_FUNC WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWr
 }
 
 BOOL WIN_FUNC FlushFileBuffers(HANDLE hFile) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("FlushFileBuffers(%p)\n", hFile);
 	auto file = wibo::handles().getAs<FileObject>(hFile);
 	if (!file || !file->valid()) {
@@ -510,6 +519,7 @@ BOOL WIN_FUNC FlushFileBuffers(HANDLE hFile) {
 
 BOOL WIN_FUNC ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead,
 					   LPOVERLAPPED lpOverlapped) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("ReadFile(%p, %u)\n", hFile, nNumberOfBytesToRead);
 	wibo::lastError = ERROR_SUCCESS;
 
@@ -568,6 +578,7 @@ BOOL WIN_FUNC ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead
 HANDLE WIN_FUNC CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
 							LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition,
 							DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
+	WIN_API_SEGMENT_GUARD();
 	(void)hTemplateFile;
 	if (!lpFileName) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -789,6 +800,7 @@ HANDLE WIN_FUNC CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwSh
 HANDLE WIN_FUNC CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
 							LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition,
 							DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("CreateFileW -> ");
 	if (!lpFileName) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -800,6 +812,7 @@ HANDLE WIN_FUNC CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwS
 }
 
 BOOL WIN_FUNC DeleteFileA(LPCSTR lpFileName) {
+	WIN_API_SEGMENT_GUARD();
 	if (!lpFileName) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		DEBUG_LOG("DeleteFileA(NULL) -> ERROR_INVALID_PARAMETER\n");
@@ -816,6 +829,7 @@ BOOL WIN_FUNC DeleteFileA(LPCSTR lpFileName) {
 }
 
 BOOL WIN_FUNC DeleteFileW(LPCWSTR lpFileName) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("DeleteFileW -> ");
 	if (!lpFileName) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -826,6 +840,7 @@ BOOL WIN_FUNC DeleteFileW(LPCWSTR lpFileName) {
 }
 
 BOOL WIN_FUNC MoveFileA(LPCSTR lpExistingFileName, LPCSTR lpNewFileName) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("MoveFileA(%s, %s)\n", lpExistingFileName ? lpExistingFileName : "(null)",
 			  lpNewFileName ? lpNewFileName : "(null)");
 	if (!lpExistingFileName || !lpNewFileName) {
@@ -855,6 +870,7 @@ BOOL WIN_FUNC MoveFileA(LPCSTR lpExistingFileName, LPCSTR lpNewFileName) {
 }
 
 BOOL WIN_FUNC MoveFileW(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("MoveFileW -> ");
 	if (!lpExistingFileName || !lpNewFileName) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -866,6 +882,7 @@ BOOL WIN_FUNC MoveFileW(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName) {
 }
 
 DWORD WIN_FUNC SetFilePointer(HANDLE hFile, LONG lDistanceToMove, PLONG lpDistanceToMoveHigh, DWORD dwMoveMethod) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("SetFilePointer(%p, %ld, %p, %u)\n", hFile, static_cast<long>(lDistanceToMove), lpDistanceToMoveHigh,
 			  dwMoveMethod);
 	if (hFile == nullptr) {
@@ -907,6 +924,7 @@ DWORD WIN_FUNC SetFilePointer(HANDLE hFile, LONG lDistanceToMove, PLONG lpDistan
 
 BOOL WIN_FUNC SetFilePointerEx(HANDLE hFile, LARGE_INTEGER liDistanceToMove, PLARGE_INTEGER lpNewFilePointer,
 							   DWORD dwMoveMethod) {
+	WIN_API_SEGMENT_GUARD();
 	if (hFile == nullptr) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
@@ -952,6 +970,7 @@ BOOL WIN_FUNC SetFilePointerEx(HANDLE hFile, LARGE_INTEGER liDistanceToMove, PLA
 }
 
 BOOL WIN_FUNC SetEndOfFile(HANDLE hFile) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("SetEndOfFile(%p)\n", hFile);
 	HandleMeta meta{};
 	auto file = wibo::handles().getAs<FileObject>(hFile, &meta);
@@ -974,6 +993,7 @@ BOOL WIN_FUNC SetEndOfFile(HANDLE hFile) {
 }
 
 BOOL WIN_FUNC CreateDirectoryA(LPCSTR lpPathName, LPSECURITY_ATTRIBUTES lpSecurityAttributes) {
+	WIN_API_SEGMENT_GUARD();
 	(void)lpSecurityAttributes;
 	if (!lpPathName) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -990,6 +1010,7 @@ BOOL WIN_FUNC CreateDirectoryA(LPCSTR lpPathName, LPSECURITY_ATTRIBUTES lpSecuri
 }
 
 BOOL WIN_FUNC RemoveDirectoryA(LPCSTR lpPathName) {
+	WIN_API_SEGMENT_GUARD();
 	if (!lpPathName) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
@@ -1005,6 +1026,7 @@ BOOL WIN_FUNC RemoveDirectoryA(LPCSTR lpPathName) {
 }
 
 BOOL WIN_FUNC SetFileAttributesA(LPCSTR lpFileName, DWORD dwFileAttributes) {
+	WIN_API_SEGMENT_GUARD();
 	(void)dwFileAttributes;
 	if (!lpFileName) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -1016,6 +1038,7 @@ BOOL WIN_FUNC SetFileAttributesA(LPCSTR lpFileName, DWORD dwFileAttributes) {
 }
 
 DWORD WIN_FUNC GetFileSize(HANDLE hFile, LPDWORD lpFileSizeHigh) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetFileSize(%p, %p) ", hFile, lpFileSizeHigh);
 	// TODO access check
 	auto file = wibo::handles().getAs<FileObject>(hFile);
@@ -1043,6 +1066,7 @@ DWORD WIN_FUNC GetFileSize(HANDLE hFile, LPDWORD lpFileSizeHigh) {
 
 BOOL WIN_FUNC GetFileTime(HANDLE hFile, LPFILETIME lpCreationTime, LPFILETIME lpLastAccessTime,
 						  LPFILETIME lpLastWriteTime) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetFileTime(%p, %p, %p, %p)\n", hFile, lpCreationTime, lpLastAccessTime, lpLastWriteTime);
 	HandleMeta meta{};
 	auto file = wibo::handles().getAs<FileObject>(hFile, &meta);
@@ -1085,6 +1109,7 @@ BOOL WIN_FUNC GetFileTime(HANDLE hFile, LPFILETIME lpCreationTime, LPFILETIME lp
 
 BOOL WIN_FUNC SetFileTime(HANDLE hFile, const FILETIME *lpCreationTime, const FILETIME *lpLastAccessTime,
 						  const FILETIME *lpLastWriteTime) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("SetFileTime(%p, %p, %p, %p)\n", hFile, lpCreationTime, lpLastAccessTime, lpLastWriteTime);
 	HandleMeta meta{};
 	auto file = wibo::handles().getAs<FileObject>(hFile, &meta);
@@ -1155,6 +1180,7 @@ BOOL WIN_FUNC SetFileTime(HANDLE hFile, const FILETIME *lpCreationTime, const FI
 }
 
 BOOL WIN_FUNC GetFileInformationByHandle(HANDLE hFile, LPBY_HANDLE_FILE_INFORMATION lpFileInformation) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetFileInformationByHandle(%p, %p)\n", hFile, lpFileInformation);
 	if (!lpFileInformation) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -1193,6 +1219,7 @@ BOOL WIN_FUNC GetFileInformationByHandle(HANDLE hFile, LPBY_HANDLE_FILE_INFORMAT
 }
 
 DWORD WIN_FUNC GetFileType(HANDLE hFile) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetFileType(%p) ", hFile);
 	auto file = wibo::handles().getAs<FileObject>(hFile);
 	if (!file || !file->valid()) {
@@ -1222,6 +1249,7 @@ DWORD WIN_FUNC GetFileType(HANDLE hFile) {
 }
 
 DWORD WIN_FUNC GetFullPathNameA(LPCSTR lpFileName, DWORD nBufferLength, LPSTR lpBuffer, LPSTR *lpFilePart) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetFullPathNameA(%s, %u)\n", lpFileName ? lpFileName : "(null)", nBufferLength);
 
 	if (lpFilePart) {
@@ -1274,6 +1302,7 @@ DWORD WIN_FUNC GetFullPathNameA(LPCSTR lpFileName, DWORD nBufferLength, LPSTR lp
 }
 
 DWORD WIN_FUNC GetFullPathNameW(LPCWSTR lpFileName, DWORD nBufferLength, LPWSTR lpBuffer, LPWSTR *lpFilePart) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetFullPathNameW(%p, %u)\n", lpFileName, nBufferLength);
 
 	if (lpFilePart) {
@@ -1327,6 +1356,7 @@ DWORD WIN_FUNC GetFullPathNameW(LPCWSTR lpFileName, DWORD nBufferLength, LPWSTR 
 }
 
 DWORD WIN_FUNC GetShortPathNameA(LPCSTR lpszLongPath, LPSTR lpszShortPath, DWORD cchBuffer) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetShortPathNameA(%s)\n", lpszLongPath ? lpszLongPath : "(null)");
 	if (!lpszLongPath || !lpszShortPath) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -1347,6 +1377,7 @@ DWORD WIN_FUNC GetShortPathNameA(LPCSTR lpszLongPath, LPSTR lpszShortPath, DWORD
 }
 
 DWORD WIN_FUNC GetShortPathNameW(LPCWSTR lpszLongPath, LPWSTR lpszShortPath, DWORD cchBuffer) {
+	WIN_API_SEGMENT_GUARD();
 	if (!lpszLongPath || !lpszShortPath) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return 0;
@@ -1368,6 +1399,7 @@ DWORD WIN_FUNC GetShortPathNameW(LPCWSTR lpszLongPath, LPWSTR lpszShortPath, DWO
 }
 
 UINT WIN_FUNC GetTempFileNameA(LPCSTR lpPathName, LPCSTR lpPrefixString, UINT uUnique, LPSTR lpTempFileName) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetTempFileNameA(%s, %s, %u)\n", lpPathName ? lpPathName : "(null)",
 			  lpPrefixString ? lpPrefixString : "(null)", uUnique);
 	if (!lpPathName || !lpPrefixString || !lpTempFileName) {
@@ -1410,6 +1442,7 @@ UINT WIN_FUNC GetTempFileNameA(LPCSTR lpPathName, LPCSTR lpPrefixString, UINT uU
 }
 
 DWORD WIN_FUNC GetTempPathA(DWORD nBufferLength, LPSTR lpBuffer) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetTempPathA(%u, %p)\n", nBufferLength, lpBuffer);
 
 	if (nBufferLength == 0 || lpBuffer == nullptr) {
@@ -1437,6 +1470,7 @@ DWORD WIN_FUNC GetTempPathA(DWORD nBufferLength, LPSTR lpBuffer) {
 }
 
 HANDLE WIN_FUNC FindFirstFileA(LPCSTR lpFileName, LPWIN32_FIND_DATAA lpFindFileData) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("FindFirstFileA(%s, %p)", lpFileName ? lpFileName : "(null)", lpFindFileData);
 	if (!lpFileName || !lpFindFileData) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -1479,6 +1513,7 @@ HANDLE WIN_FUNC FindFirstFileA(LPCSTR lpFileName, LPWIN32_FIND_DATAA lpFindFileD
 }
 
 HANDLE WIN_FUNC FindFirstFileW(LPCWSTR lpFileName, LPWIN32_FIND_DATAW lpFindFileData) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("FindFirstFileW(%p, %p)", lpFileName, lpFindFileData);
 	if (!lpFileName || !lpFindFileData) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -1523,6 +1558,7 @@ HANDLE WIN_FUNC FindFirstFileW(LPCWSTR lpFileName, LPWIN32_FIND_DATAW lpFindFile
 
 HANDLE WIN_FUNC FindFirstFileExA(LPCSTR lpFileName, FINDEX_INFO_LEVELS fInfoLevelId, LPVOID lpFindFileData,
 								 FINDEX_SEARCH_OPS fSearchOp, LPVOID lpSearchFilter, DWORD dwAdditionalFlags) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("FindFirstFileExA(%s, %d, %p, %d, %p, 0x%x) -> ", lpFileName ? lpFileName : "(null)", fInfoLevelId,
 			  lpFindFileData, fSearchOp, lpSearchFilter, dwAdditionalFlags);
 	(void)fInfoLevelId;
@@ -1533,6 +1569,7 @@ HANDLE WIN_FUNC FindFirstFileExA(LPCSTR lpFileName, FINDEX_INFO_LEVELS fInfoLeve
 }
 
 BOOL WIN_FUNC FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileData) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("FindNextFileA(%p, %p)\n", hFindFile, lpFindFileData);
 	if (!lpFindFileData) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -1561,6 +1598,7 @@ BOOL WIN_FUNC FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileData)
 }
 
 BOOL WIN_FUNC FindNextFileW(HANDLE hFindFile, LPWIN32_FIND_DATAW lpFindFileData) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("FindNextFileW(%p, %p)\n", hFindFile, lpFindFileData);
 	if (!lpFindFileData) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -1589,6 +1627,7 @@ BOOL WIN_FUNC FindNextFileW(HANDLE hFindFile, LPWIN32_FIND_DATAW lpFindFileData)
 }
 
 BOOL WIN_FUNC FindClose(HANDLE hFindFile) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("FindClose(%p)\n", hFindFile);
 	if (isPseudoHandle(hFindFile) || hFindFile == nullptr) {
 		wibo::lastError = ERROR_SUCCESS;

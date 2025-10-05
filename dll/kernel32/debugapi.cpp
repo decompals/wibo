@@ -5,6 +5,7 @@
 namespace kernel32 {
 
 BOOL WIN_FUNC IsDebuggerPresent() {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("STUB: IsDebuggerPresent()\n");
 	wibo::lastError = ERROR_SUCCESS;
 	return FALSE;

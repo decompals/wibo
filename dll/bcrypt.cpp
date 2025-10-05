@@ -32,6 +32,7 @@ bool fillWithSystemRandom(PUCHAR buffer, size_t length) {
 namespace bcrypt {
 
 NTSTATUS WIN_FUNC BCryptGenRandom(BCRYPT_ALG_HANDLE hAlgorithm, PUCHAR pbBuffer, ULONG cbBuffer, ULONG dwFlags) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("BCryptGenRandom(%p, %p, %lu, %lu)\n", hAlgorithm, pbBuffer, cbBuffer, dwFlags);
 	if (pbBuffer == nullptr && cbBuffer != 0)
 		return STATUS_INVALID_HANDLE;

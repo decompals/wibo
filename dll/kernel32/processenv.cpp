@@ -41,28 +41,33 @@ std::string convertEnvValueToHost(const std::string &name, const char *rawValue)
 namespace kernel32 {
 
 LPSTR WIN_FUNC GetCommandLineA() {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetCommandLineA() -> %s\n", wibo::commandLine.c_str());
 	wibo::lastError = ERROR_SUCCESS;
 	return const_cast<LPSTR>(wibo::commandLine.c_str());
 }
 
 LPWSTR WIN_FUNC GetCommandLineW() {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetCommandLineW() -> %s\n", wideStringToString(wibo::commandLineW.data()).c_str());
 	wibo::lastError = ERROR_SUCCESS;
 	return wibo::commandLineW.data();
 }
 
 HANDLE WIN_FUNC GetStdHandle(DWORD nStdHandle) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetStdHandle(%d)\n", nStdHandle);
 	return files::getStdHandle(nStdHandle);
 }
 
 BOOL WIN_FUNC SetStdHandle(DWORD nStdHandle, HANDLE hHandle) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("SetStdHandle(%d, %p)\n", nStdHandle, hHandle);
 	return files::setStdHandle(nStdHandle, hHandle);
 }
 
 LPCH WIN_FUNC GetEnvironmentStrings() {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetEnvironmentStrings()\n");
 
 	size_t bufSize = 0;
@@ -96,6 +101,7 @@ LPCH WIN_FUNC GetEnvironmentStrings() {
 }
 
 LPWCH WIN_FUNC GetEnvironmentStringsW() {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetEnvironmentStringsW()\n");
 
 	size_t bufSizeW = 0;
@@ -131,6 +137,7 @@ LPWCH WIN_FUNC GetEnvironmentStringsW() {
 }
 
 BOOL WIN_FUNC FreeEnvironmentStringsA(LPCH penv) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("FreeEnvironmentStringsA(%p)\n", penv);
 	if (!penv) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -142,6 +149,7 @@ BOOL WIN_FUNC FreeEnvironmentStringsA(LPCH penv) {
 }
 
 BOOL WIN_FUNC FreeEnvironmentStringsW(LPWCH penv) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("FreeEnvironmentStringsW(%p)\n", penv);
 	if (!penv) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -153,6 +161,7 @@ BOOL WIN_FUNC FreeEnvironmentStringsW(LPWCH penv) {
 }
 
 DWORD WIN_FUNC GetEnvironmentVariableA(LPCSTR lpName, LPSTR lpBuffer, DWORD nSize) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetEnvironmentVariableA(%s, %p, %u)\n", lpName ? lpName : "(null)", lpBuffer, nSize);
 	if (!lpName) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -184,6 +193,7 @@ DWORD WIN_FUNC GetEnvironmentVariableA(LPCSTR lpName, LPSTR lpBuffer, DWORD nSiz
 }
 
 DWORD WIN_FUNC GetEnvironmentVariableW(LPCWSTR lpName, LPWSTR lpBuffer, DWORD nSize) {
+	WIN_API_SEGMENT_GUARD();
 	std::string name = lpName ? wideStringToString(lpName) : std::string();
 	DEBUG_LOG("GetEnvironmentVariableW(%s, %p, %u)\n", name.c_str(), lpBuffer, nSize);
 	if (name.empty()) {
@@ -217,6 +227,7 @@ DWORD WIN_FUNC GetEnvironmentVariableW(LPCWSTR lpName, LPWSTR lpBuffer, DWORD nS
 }
 
 BOOL WIN_FUNC SetEnvironmentVariableA(LPCSTR lpName, LPCSTR lpValue) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("SetEnvironmentVariableA(%s, %s)\n", lpName ? lpName : "(null)", lpValue ? lpValue : "(null)");
 	if (!lpName || std::strchr(lpName, '=')) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -244,6 +255,7 @@ BOOL WIN_FUNC SetEnvironmentVariableA(LPCSTR lpName, LPCSTR lpValue) {
 }
 
 BOOL WIN_FUNC SetEnvironmentVariableW(LPCWSTR lpName, LPCWSTR lpValue) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("SetEnvironmentVariableW -> ");
 	if (!lpName) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;

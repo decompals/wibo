@@ -10,6 +10,7 @@
 namespace kernel32 {
 
 BOOL WIN_FUNC SystemTimeToFileTime(const SYSTEMTIME *lpSystemTime, LPFILETIME lpFileTime) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("SystemTimeToFileTime(%p, %p)\n", lpSystemTime, lpFileTime);
 	if (!lpSystemTime || !lpFileTime) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -36,6 +37,7 @@ BOOL WIN_FUNC SystemTimeToFileTime(const SYSTEMTIME *lpSystemTime, LPFILETIME lp
 }
 
 BOOL WIN_FUNC FileTimeToSystemTime(const FILETIME *lpFileTime, LPSYSTEMTIME lpSystemTime) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("FileTimeToSystemTime(%p, %p)\n", lpFileTime, lpSystemTime);
 	if (!lpFileTime || !lpSystemTime) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -65,6 +67,7 @@ BOOL WIN_FUNC FileTimeToSystemTime(const FILETIME *lpFileTime, LPSYSTEMTIME lpSy
 }
 
 BOOL WIN_FUNC FileTimeToLocalFileTime(const FILETIME *lpFileTime, LPFILETIME lpLocalFileTime) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("FileTimeToLocalFileTime(%p, %p)\n", lpFileTime, lpLocalFileTime);
 	if (!lpFileTime || !lpLocalFileTime) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -114,6 +117,7 @@ BOOL WIN_FUNC FileTimeToLocalFileTime(const FILETIME *lpFileTime, LPFILETIME lpL
 }
 
 BOOL WIN_FUNC LocalFileTimeToFileTime(const FILETIME *lpLocalFileTime, LPFILETIME lpFileTime) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("LocalFileTimeToFileTime(%p, %p)\n", lpLocalFileTime, lpFileTime);
 	if (!lpLocalFileTime || !lpFileTime) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -156,6 +160,7 @@ BOOL WIN_FUNC LocalFileTimeToFileTime(const FILETIME *lpLocalFileTime, LPFILETIM
 }
 
 BOOL WIN_FUNC DosDateTimeToFileTime(WORD wFatDate, WORD wFatTime, LPFILETIME lpFileTime) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("DosDateTimeToFileTime(%04x, %04x, %p)\n", wFatDate, wFatTime, lpFileTime);
 	if (!lpFileTime) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -191,6 +196,7 @@ BOOL WIN_FUNC DosDateTimeToFileTime(WORD wFatDate, WORD wFatTime, LPFILETIME lpF
 }
 
 BOOL WIN_FUNC FileTimeToDosDateTime(const FILETIME *lpFileTime, LPWORD lpFatDate, LPWORD lpFatTime) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("FileTimeToDosDateTime(%p, %p, %p)\n", lpFileTime, lpFatDate, lpFatTime);
 	if (!lpFileTime || !lpFatDate || !lpFatTime) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -220,6 +226,7 @@ BOOL WIN_FUNC FileTimeToDosDateTime(const FILETIME *lpFileTime, LPWORD lpFatDate
 }
 
 DWORD WIN_FUNC GetTimeZoneInformation(LPTIME_ZONE_INFORMATION lpTimeZoneInformation) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetTimeZoneInformation(%p)\n", lpTimeZoneInformation);
 	if (!lpTimeZoneInformation) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;

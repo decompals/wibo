@@ -347,6 +347,14 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
+	uint16_t hostFsSelector = 0;
+	uint16_t hostGsSelector = 0;
+	asm volatile("mov %%fs, %0" : "=r"(hostFsSelector));
+	asm volatile("mov %%gs, %0" : "=r"(hostGsSelector));
+	tib.hostFsSelector = hostFsSelector;
+	tib.hostGsSelector = hostGsSelector;
+	tib.hostSegmentsValid = 1;
+
 	// Determine the guest program name
 	auto guestArgs = wibo::splitCommandLine(cmdLine.c_str());
 	std::string programName;
@@ -483,6 +491,10 @@ int main(int argc, char **argv) {
 
 	// Invoke the damn thing
 	asm("movw %0, %%fs; call *%1" : : "r"(wibo::tibSelector), "r"(entryPoint));
+	if (tib.hostSegmentsValid) {
+		asm volatile("movw %0, %%fs" : : "r"(tib.hostFsSelector) : "memory");
+		asm volatile("movw %0, %%gs" : : "r"(tib.hostGsSelector) : "memory");
+	}
 	DEBUG_LOG("We came back\n");
 	wibo::shutdownModuleRegistry();
 

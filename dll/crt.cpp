@@ -40,6 +40,7 @@ std::vector<_PVFV> atexitFuncs;
 _invalid_parameter_handler invalidParameterHandler = nullptr;
 
 void WIN_ENTRY _initterm(const _PVFV *ppfn, const _PVFV *end) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("_initterm(%p, %p)\n", ppfn, end);
 	do {
 		if (_PVFV pfn = *++ppfn) {
@@ -50,6 +51,7 @@ void WIN_ENTRY _initterm(const _PVFV *ppfn, const _PVFV *end) {
 }
 
 int WIN_ENTRY _initterm_e(const _PIFV *ppfn, const _PIFV *end) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("_initterm_e(%p, %p)\n", ppfn, end);
 	do {
 		if (_PIFV pfn = *++ppfn) {
@@ -62,36 +64,45 @@ int WIN_ENTRY _initterm_e(const _PIFV *ppfn, const _PIFV *end) {
 	return 0;
 }
 
-void WIN_ENTRY _set_app_type(_crt_app_type type) { DEBUG_LOG("STUB: _set_app_type(%i)\n", type); }
+void WIN_ENTRY _set_app_type(_crt_app_type type) {
+	WIN_API_SEGMENT_GUARD();
+	DEBUG_LOG("STUB: _set_app_type(%i)\n", type);
+}
 
 int WIN_ENTRY _set_fmode(int mode) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("_set_fmode(%i)\n", mode);
 	_fmode = mode;
 	return 0;
 }
 
 int *WIN_ENTRY __p__commode() {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("__p__commode()\n");
 	return &_commode;
 }
 
 int *WIN_ENTRY __p__fmode() {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("__p__fmode()\n");
 	return &_fmode;
 }
 
 int WIN_ENTRY _crt_atexit(void (*func)()) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("_crt_atexit(%p)\n", func);
 	atexitFuncs.push_back(func);
 	return 0;
 }
 
 int WIN_ENTRY _configure_narrow_argv(_crt_argv_mode mode) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("STUB: _configure_narrow_argv(%i)\n", mode);
 	return 0;
 }
 
 _invalid_parameter_handler WIN_ENTRY _set_invalid_parameter_handler(_invalid_parameter_handler newHandler) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("STUB: _set_invalid_parameter_handler(%p)\n", newHandler);
 	_invalid_parameter_handler oldHandler = invalidParameterHandler;
 	invalidParameterHandler = newHandler;
@@ -99,129 +110,154 @@ _invalid_parameter_handler WIN_ENTRY _set_invalid_parameter_handler(_invalid_par
 }
 
 int WIN_ENTRY _controlfp_s(unsigned int *currentControl, unsigned int newControl, unsigned int mask) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("STUB: _controlfp_s(%p, %u, %u)\n", currentControl, newControl, mask);
 	return 0;
 }
 
 int WIN_ENTRY _configthreadlocale(int per_thread_locale_type) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("STUB: _configthreadlocale(%i)\n", per_thread_locale_type);
 	return 0;
 }
 
 int WIN_ENTRY _initialize_narrow_environment() {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("STUB: _initialize_narrow_environment()\n");
 	return 0;
 }
 
 int WIN_ENTRY _set_new_mode(int newhandlermode) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("STUB: _set_new_mode(%i)\n", newhandlermode);
 	return 0;
 }
 
 char **WIN_ENTRY _get_initial_narrow_environment() {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("_get_initial_narrow_environment()\n");
 	return environ;
 }
 
 char ***WIN_ENTRY __p__environ() {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("__p__environ()\n");
 	return &environ;
 }
 
 char ***WIN_ENTRY __p___argv() {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("__p___argv()\n");
 	return &wibo::argv;
 }
 
 int *WIN_ENTRY __p___argc() {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("__p___argc()\n");
 	return &wibo::argc;
 }
 
 size_t WIN_ENTRY strlen(const char *str) {
+	WIN_API_SEGMENT_GUARD();
 	VERBOSE_LOG("strlen(%p)\n", str);
 	return ::strlen(str);
 }
 
 int WIN_ENTRY strcmp(const char *lhs, const char *rhs) {
+	WIN_API_SEGMENT_GUARD();
 	VERBOSE_LOG("strcmp(%p, %p)\n", lhs, rhs);
 	return ::strcmp(lhs, rhs);
 }
 
 int WIN_ENTRY strncmp(const char *lhs, const char *rhs, size_t count) {
+	WIN_API_SEGMENT_GUARD();
 	VERBOSE_LOG("strncmp(%p, %p, %zu)\n", lhs, rhs, count);
 	return ::strncmp(lhs, rhs, count);
 }
 
 char *WIN_ENTRY strcpy(char *dest, const char *src) {
+	WIN_API_SEGMENT_GUARD();
 	VERBOSE_LOG("strcpy(%p, %p)\n", dest, src);
 	return ::strcpy(dest, src);
 }
 
 void *WIN_ENTRY malloc(size_t size) {
+	WIN_API_SEGMENT_GUARD();
 	VERBOSE_LOG("malloc(%zu)\n", size);
 	return ::malloc(size);
 }
 
 void *WIN_ENTRY calloc(size_t count, size_t size) {
+	WIN_API_SEGMENT_GUARD();
 	VERBOSE_LOG("calloc(%zu, %zu)\n", count, size);
 	return ::calloc(count, size);
 }
 
 void *WIN_ENTRY realloc(void *ptr, size_t newSize) {
+	WIN_API_SEGMENT_GUARD();
 	VERBOSE_LOG("realloc(%p, %zu)\n", ptr, newSize);
 	return ::realloc(ptr, newSize);
 }
 
 void WIN_ENTRY free(void *ptr) {
+	WIN_API_SEGMENT_GUARD();
 	VERBOSE_LOG("free(%p)\n", ptr);
 	::free(ptr);
 }
 
 void *WIN_ENTRY memcpy(void *dest, const void *src, size_t count) {
+	WIN_API_SEGMENT_GUARD();
 	VERBOSE_LOG("memcpy(%p, %p, %zu)\n", dest, src, count);
 	return std::memcpy(dest, src, count);
 }
 
 void *WIN_ENTRY memmove(void *dest, const void *src, size_t count) {
+	WIN_API_SEGMENT_GUARD();
 	VERBOSE_LOG("memmove(%p, %p, %zu)\n", dest, src, count);
 	return std::memmove(dest, src, count);
 }
 
 void *WIN_ENTRY memset(void *dest, int ch, size_t count) {
+	WIN_API_SEGMENT_GUARD();
 	VERBOSE_LOG("memset(%p, %i, %zu)\n", dest, ch, count);
 	return std::memset(dest, ch, count);
 }
 
 int WIN_ENTRY memcmp(const void *lhs, const void *rhs, size_t count) {
+	WIN_API_SEGMENT_GUARD();
 	VERBOSE_LOG("memcmp(%p, %p, %zu)\n", lhs, rhs, count);
 	return std::memcmp(lhs, rhs, count);
 }
 
 int WIN_ENTRY __setusermatherr(void *handler) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("STUB: __setusermatherr(%p)\n", handler);
 	return 0;
 }
 
 int WIN_ENTRY _initialize_onexit_table(void *table) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("STUB: _initialize_onexit_table(%p)\n", table);
 	wibo::registerOnExitTable(table);
 	return 0;
 }
 
 int WIN_ENTRY _register_onexit_function(void *table, void (*func)()) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("STUB: _register_onexit_function(%p, %p)\n", table, func);
 	wibo::addOnExitFunction(table, func);
 	return 0;
 }
 
 int WIN_ENTRY _execute_onexit_table(void *table) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("STUB: _execute_onexit_table(%p)\n", table);
 	wibo::executeOnExitTable(table);
 	return 0;
 }
 
 void WIN_ENTRY exit(int status) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("exit(%i)\n", status);
 	for (auto it = atexitFuncs.rbegin(); it != atexitFuncs.rend(); ++it) {
 		DEBUG_LOG("Calling atexit function %p\n", *it);
@@ -231,6 +267,7 @@ void WIN_ENTRY exit(int status) {
 }
 
 void WIN_ENTRY _cexit(void) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("_cexit()\n");
 	for (auto it = atexitFuncs.rbegin(); it != atexitFuncs.rend(); ++it) {
 		DEBUG_LOG("Calling atexit function %p\n", *it);
@@ -239,11 +276,13 @@ void WIN_ENTRY _cexit(void) {
 }
 
 void WIN_ENTRY _exit(int status) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("_exit(%i)\n", status);
 	::_exit(status);
 }
 
 void WIN_ENTRY abort(void) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("abort()\n");
 	std::abort();
 }
@@ -251,11 +290,13 @@ void WIN_ENTRY abort(void) {
 using signal_handler = void (*)(int);
 
 signal_handler WIN_ENTRY signal(int signum, signal_handler handler) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("signal(%i, %p)\n", signum, handler);
 	return std::signal(signum, handler);
 }
 
 void *WIN_ENTRY __acrt_iob_func(unsigned int index) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("__acrt_iob_func(%u)\n", index);
 	if (index == 0)
 		return stdin;
@@ -268,12 +309,14 @@ void *WIN_ENTRY __acrt_iob_func(unsigned int index) {
 
 int WIN_ENTRY __stdio_common_vfprintf(unsigned long long options, FILE *stream, const char *format, void *locale,
 									  va_list args) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("__stdio_common_vfprintf(%llu, %p, %s, %p, %p)\n", options, stream, format, locale, args);
 	return vfprintf(stream, format, args);
 }
 
 int WIN_ENTRY __stdio_common_vsprintf(unsigned long long options, char *buffer, size_t len, const char *format,
 									  void *locale, va_list args) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("__stdio_common_vsprintf(%llu, %p, %zu, %s, %p, ...)\n", options, buffer, len, format, locale);
 	if (!buffer || !format)
 		return -1;

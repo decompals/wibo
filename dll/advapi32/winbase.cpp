@@ -83,6 +83,7 @@ namespace advapi32 {
 
 BOOL WIN_FUNC LookupAccountSidW(LPCWSTR lpSystemName, PSID Sid, LPWSTR Name, LPDWORD cchName,
 								LPWSTR ReferencedDomainName, LPDWORD cchReferencedDomainName, SID_NAME_USE *peUse) {
+	WIN_API_SEGMENT_GUARD();
 	std::string systemName = lpSystemName ? wideStringToString(lpSystemName) : std::string("(null)");
 	DEBUG_LOG("LookupAccountSidW(%s, %p, %p, %p, %p, %p, %p)\n", systemName.c_str(), Sid, Name, cchName,
 			  ReferencedDomainName, cchReferencedDomainName, peUse);
@@ -113,6 +114,7 @@ BOOL WIN_FUNC LookupAccountSidW(LPCWSTR lpSystemName, PSID Sid, LPWSTR Name, LPD
 }
 
 BOOL WIN_FUNC LookupPrivilegeValueA(LPCSTR lpSystemName, LPCSTR lpName, PLUID lpLuid) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("LookupPrivilegeValueA(%s, %s, %p)\n", lpSystemName ? lpSystemName : "(null)", lpName ? lpName : "(null)",
 			  lpLuid);
 	(void)lpSystemName; // only local lookup supported
@@ -128,6 +130,7 @@ BOOL WIN_FUNC LookupPrivilegeValueA(LPCSTR lpSystemName, LPCSTR lpName, PLUID lp
 }
 
 BOOL WIN_FUNC LookupPrivilegeValueW(LPCWSTR lpSystemName, LPCWSTR lpName, PLUID lpLuid) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("LookupPrivilegeValueW(%p, %p, %p)\n", lpSystemName, lpName, lpLuid);
 	(void)lpSystemName; // only local lookup supported
 	if (!lpName || !lpLuid) {
@@ -143,6 +146,7 @@ BOOL WIN_FUNC LookupPrivilegeValueW(LPCWSTR lpSystemName, LPCWSTR lpName, PLUID 
 }
 
 BOOL WIN_FUNC GetUserNameA(LPSTR lpBuffer, LPDWORD pcbBuffer) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetUserNameA(%p, %p)\n", lpBuffer, pcbBuffer);
 	if (!pcbBuffer) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -162,6 +166,7 @@ BOOL WIN_FUNC GetUserNameA(LPSTR lpBuffer, LPDWORD pcbBuffer) {
 }
 
 BOOL WIN_FUNC GetUserNameW(LPWSTR lpBuffer, LPDWORD pcbBuffer) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetUserNameW(%p, %p)\n", lpBuffer, pcbBuffer);
 	if (!pcbBuffer) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;

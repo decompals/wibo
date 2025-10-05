@@ -12,6 +12,7 @@ namespace kernel32 {
 
 int WIN_FUNC WideCharToMultiByte(UINT CodePage, DWORD dwFlags, LPCWCH lpWideCharStr, int cchWideChar,
 								 LPSTR lpMultiByteStr, int cbMultiByte, LPCCH lpDefaultChar, LPBOOL lpUsedDefaultChar) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("WideCharToMultiByte(%u, %u, %p, %d, %p, %d, %p, %p)\n", CodePage, dwFlags, lpWideCharStr, cchWideChar,
 			  lpMultiByteStr, cbMultiByte, lpDefaultChar, lpUsedDefaultChar);
 
@@ -43,6 +44,7 @@ int WIN_FUNC WideCharToMultiByte(UINT CodePage, DWORD dwFlags, LPCWCH lpWideChar
 
 int WIN_FUNC MultiByteToWideChar(UINT CodePage, DWORD dwFlags, LPCCH lpMultiByteStr, int cbMultiByte,
 								 LPWSTR lpWideCharStr, int cchWideChar) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("MultiByteToWideChar(%u, %u, %d, %d)\n", CodePage, dwFlags, cbMultiByte, cchWideChar);
 
 	(void)CodePage;
@@ -68,6 +70,7 @@ int WIN_FUNC MultiByteToWideChar(UINT CodePage, DWORD dwFlags, LPCCH lpMultiByte
 }
 
 BOOL WIN_FUNC GetStringTypeW(DWORD dwInfoType, LPCWCH lpSrcStr, int cchSrc, LPWORD lpCharType) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetStringTypeW(%u, %p, %i, %p)\n", dwInfoType, lpSrcStr, cchSrc, lpCharType);
 
 	assert(dwInfoType == 1); // CT_CTYPE1
@@ -101,6 +104,7 @@ BOOL WIN_FUNC GetStringTypeW(DWORD dwInfoType, LPCWCH lpSrcStr, int cchSrc, LPWO
 }
 
 BOOL WIN_FUNC GetStringTypeA(LCID Locale, DWORD dwInfoType, LPCSTR lpSrcStr, int cchSrc, LPWORD lpCharType) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetStringTypeA(%u, %u, %p, %d, %p)\n", Locale, dwInfoType, lpSrcStr, cchSrc, lpCharType);
 	(void)Locale;
 

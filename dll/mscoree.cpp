@@ -3,6 +3,7 @@
 namespace mscoree {
 
 void WIN_FUNC CorExitProcess(int exitCode) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("CorExitProcess(%i)\n", exitCode);
 	exit(exitCode);
 }

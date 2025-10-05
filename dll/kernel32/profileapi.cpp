@@ -5,6 +5,7 @@
 namespace kernel32 {
 
 BOOL WIN_FUNC QueryPerformanceCounter(LARGE_INTEGER *lpPerformanceCount) {
+	WIN_API_SEGMENT_GUARD();
 	VERBOSE_LOG("STUB: QueryPerformanceCounter(%p)\n", lpPerformanceCount);
 	if (!lpPerformanceCount) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -16,6 +17,7 @@ BOOL WIN_FUNC QueryPerformanceCounter(LARGE_INTEGER *lpPerformanceCount) {
 }
 
 BOOL WIN_FUNC QueryPerformanceFrequency(LARGE_INTEGER *lpFrequency) {
+	WIN_API_SEGMENT_GUARD();
 	VERBOSE_LOG("STUB: QueryPerformanceFrequency(%p)\n", lpFrequency);
 	if (!lpFrequency) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;

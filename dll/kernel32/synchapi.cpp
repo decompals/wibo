@@ -38,11 +38,13 @@ void makeWideNameFromAnsi(LPCSTR ansiName, std::vector<uint16_t> &outWide) {
 namespace kernel32 {
 
 void WIN_FUNC Sleep(DWORD dwMilliseconds) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("Sleep(%u)\n", dwMilliseconds);
 	usleep(static_cast<useconds_t>(dwMilliseconds) * 1000);
 }
 
 HANDLE WIN_FUNC CreateMutexW(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInitialOwner, LPCWSTR lpName) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("CreateMutexW(%p, %d, %s)\n", lpMutexAttributes, static_cast<int>(bInitialOwner),
 			  wideStringToString(lpName).c_str());
 	std::u16string name = makeU16String(lpName);
@@ -73,6 +75,7 @@ HANDLE WIN_FUNC CreateMutexW(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInit
 }
 
 HANDLE WIN_FUNC CreateMutexA(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInitialOwner, LPCSTR lpName) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("CreateMutexA -> ");
 	std::vector<uint16_t> wideName;
 	makeWideNameFromAnsi(lpName, wideName);
@@ -81,6 +84,7 @@ HANDLE WIN_FUNC CreateMutexA(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInit
 }
 
 BOOL WIN_FUNC ReleaseMutex(HANDLE hMutex) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("ReleaseMutex(%p)\n", hMutex);
 	auto mu = wibo::handles().getAs<MutexObject>(hMutex);
 	if (!mu) {
@@ -110,6 +114,7 @@ BOOL WIN_FUNC ReleaseMutex(HANDLE hMutex) {
 
 HANDLE WIN_FUNC CreateEventW(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManualReset, BOOL bInitialState,
 							 LPCWSTR lpName) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("CreateEventW(%p, %d, %d, %s)\n", lpEventAttributes, static_cast<int>(bManualReset),
 			  static_cast<int>(bInitialState), wideStringToString(lpName).c_str());
 	std::u16string name = makeU16String(lpName);
@@ -136,6 +141,7 @@ HANDLE WIN_FUNC CreateEventW(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManu
 
 HANDLE WIN_FUNC CreateEventA(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManualReset, BOOL bInitialState,
 							 LPCSTR lpName) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("CreateEventA -> ");
 	std::vector<uint16_t> wideName;
 	makeWideNameFromAnsi(lpName, wideName);
@@ -145,6 +151,7 @@ HANDLE WIN_FUNC CreateEventA(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManu
 
 HANDLE WIN_FUNC CreateSemaphoreW(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LONG lInitialCount, LONG lMaximumCount,
 								 LPCWSTR lpName) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("CreateSemaphoreW(%p, %ld, %ld, %s)\n", lpSemaphoreAttributes, lInitialCount, lMaximumCount,
 			  wideStringToString(lpName).c_str());
 	auto name = makeU16String(lpName);
@@ -171,6 +178,7 @@ HANDLE WIN_FUNC CreateSemaphoreW(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LO
 
 HANDLE WIN_FUNC CreateSemaphoreA(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LONG lInitialCount, LONG lMaximumCount,
 								 LPCSTR lpName) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("CreateSemaphoreA -> ");
 	std::vector<uint16_t> wideName;
 	makeWideNameFromAnsi(lpName, wideName);
@@ -179,6 +187,7 @@ HANDLE WIN_FUNC CreateSemaphoreA(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LO
 }
 
 BOOL WIN_FUNC ReleaseSemaphore(HANDLE hSemaphore, LONG lReleaseCount, PLONG lpPreviousCount) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("ReleaseSemaphore(%p, %ld, %p)\n", hSemaphore, lReleaseCount, lpPreviousCount);
 	if (lReleaseCount <= 0) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -215,6 +224,7 @@ BOOL WIN_FUNC ReleaseSemaphore(HANDLE hSemaphore, LONG lReleaseCount, PLONG lpPr
 }
 
 BOOL WIN_FUNC SetEvent(HANDLE hEvent) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("SetEvent(%p)\n", hEvent);
 	auto ev = wibo::handles().getAs<EventObject>(hEvent);
 	if (!ev) {
@@ -227,6 +237,7 @@ BOOL WIN_FUNC SetEvent(HANDLE hEvent) {
 }
 
 BOOL WIN_FUNC ResetEvent(HANDLE hEvent) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("ResetEvent(%p)\n", hEvent);
 	auto ev = wibo::handles().getAs<EventObject>(hEvent);
 	if (!ev) {
@@ -239,6 +250,7 @@ BOOL WIN_FUNC ResetEvent(HANDLE hEvent) {
 }
 
 DWORD WIN_FUNC WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("WaitForSingleObject(%p, %u)\n", hHandle, dwMilliseconds);
 	HandleMeta meta{};
 	Pin<> obj = wibo::handles().get(hHandle, &meta);
@@ -346,6 +358,7 @@ DWORD WIN_FUNC WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds) {
 }
 
 void WIN_FUNC InitializeCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
+	WIN_API_SEGMENT_GUARD();
 	VERBOSE_LOG("STUB: InitializeCriticalSection(%p)\n", lpCriticalSection);
 	if (!lpCriticalSection) {
 		return;
@@ -354,6 +367,7 @@ void WIN_FUNC InitializeCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
 }
 
 BOOL WIN_FUNC InitializeCriticalSectionEx(LPCRITICAL_SECTION lpCriticalSection, DWORD dwSpinCount, DWORD Flags) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("STUB: InitializeCriticalSectionEx(%p, %u, 0x%x)\n", lpCriticalSection, dwSpinCount, Flags);
 	if (!lpCriticalSection) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -370,6 +384,7 @@ BOOL WIN_FUNC InitializeCriticalSectionEx(LPCRITICAL_SECTION lpCriticalSection, 
 }
 
 BOOL WIN_FUNC InitializeCriticalSectionAndSpinCount(LPCRITICAL_SECTION lpCriticalSection, DWORD dwSpinCount) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("STUB: InitializeCriticalSectionAndSpinCount(%p, %u)\n", lpCriticalSection, dwSpinCount);
 	if (!lpCriticalSection) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -382,21 +397,25 @@ BOOL WIN_FUNC InitializeCriticalSectionAndSpinCount(LPCRITICAL_SECTION lpCritica
 }
 
 void WIN_FUNC DeleteCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
+	WIN_API_SEGMENT_GUARD();
 	VERBOSE_LOG("STUB: DeleteCriticalSection(%p)\n", lpCriticalSection);
 	(void)lpCriticalSection;
 }
 
 void WIN_FUNC EnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
+	WIN_API_SEGMENT_GUARD();
 	VERBOSE_LOG("STUB: EnterCriticalSection(%p)\n", lpCriticalSection);
 	(void)lpCriticalSection;
 }
 
 void WIN_FUNC LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
+	WIN_API_SEGMENT_GUARD();
 	VERBOSE_LOG("STUB: LeaveCriticalSection(%p)\n", lpCriticalSection);
 	(void)lpCriticalSection;
 }
 
 BOOL WIN_FUNC InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBOOL fPending, LPVOID *lpContext) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("STUB: InitOnceBeginInitialize(%p, %u, %p, %p)\n", lpInitOnce, dwFlags, fPending, lpContext);
 	if (!lpInitOnce) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -417,6 +436,7 @@ BOOL WIN_FUNC InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBO
 }
 
 BOOL WIN_FUNC InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpContext) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("STUB: InitOnceComplete(%p, %u, %p)\n", lpInitOnce, dwFlags, lpContext);
 	if (!lpInitOnce) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
@@ -431,15 +451,28 @@ BOOL WIN_FUNC InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpC
 	return TRUE;
 }
 
-void WIN_FUNC AcquireSRWLockShared(PSRWLOCK SRWLock) { VERBOSE_LOG("STUB: AcquireSRWLockShared(%p)\n", SRWLock); }
+void WIN_FUNC AcquireSRWLockShared(PSRWLOCK SRWLock) {
+	WIN_API_SEGMENT_GUARD();
+	VERBOSE_LOG("STUB: AcquireSRWLockShared(%p)\n", SRWLock);
+}
 
-void WIN_FUNC ReleaseSRWLockShared(PSRWLOCK SRWLock) { VERBOSE_LOG("STUB: ReleaseSRWLockShared(%p)\n", SRWLock); }
+void WIN_FUNC ReleaseSRWLockShared(PSRWLOCK SRWLock) {
+	WIN_API_SEGMENT_GUARD();
+	VERBOSE_LOG("STUB: ReleaseSRWLockShared(%p)\n", SRWLock);
+}
 
-void WIN_FUNC AcquireSRWLockExclusive(PSRWLOCK SRWLock) { VERBOSE_LOG("STUB: AcquireSRWLockExclusive(%p)\n", SRWLock); }
+void WIN_FUNC AcquireSRWLockExclusive(PSRWLOCK SRWLock) {
+	WIN_API_SEGMENT_GUARD();
+	VERBOSE_LOG("STUB: AcquireSRWLockExclusive(%p)\n", SRWLock);
+}
 
-void WIN_FUNC ReleaseSRWLockExclusive(PSRWLOCK SRWLock) { VERBOSE_LOG("STUB: ReleaseSRWLockExclusive(%p)\n", SRWLock); }
+void WIN_FUNC ReleaseSRWLockExclusive(PSRWLOCK SRWLock) {
+	WIN_API_SEGMENT_GUARD();
+	VERBOSE_LOG("STUB: ReleaseSRWLockExclusive(%p)\n", SRWLock);
+}
 
 BOOLEAN WIN_FUNC TryAcquireSRWLockExclusive(PSRWLOCK SRWLock) {
+	WIN_API_SEGMENT_GUARD();
 	VERBOSE_LOG("STUB: TryAcquireSRWLockExclusive(%p)\n", SRWLock);
 	return TRUE;
 }

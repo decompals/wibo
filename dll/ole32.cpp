@@ -2,6 +2,7 @@
 
 namespace ole32 {
 	int WIN_FUNC CoInitialize(void *pvReserved) {
+		WIN_API_SEGMENT_GUARD();
 		DEBUG_LOG("STUB: CoInitialize(%p)\n", pvReserved);
 		(void) pvReserved;
 		return 0; // S_OK
@@ -21,6 +22,7 @@ namespace ole32 {
 		const GUID *riid,
 		void **ppv
 	) {
+		WIN_API_SEGMENT_GUARD();
 		DEBUG_LOG("STUB: CoCreateInstance(0x%x, %p, %d, 0x%x, %p)\n", rclsid->Data1, pUnkOuter, dwClsContext, riid->Data1, *ppv);
 		*ppv = 0;
 		// E_POINTER is returned when ppv is NULL, which isn't true here, but returning 1 results

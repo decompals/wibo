@@ -235,6 +235,10 @@ struct TIB {
 	char reserved1[0x14];
 	PEB *peb;
 	char reserved2[0x1000];
+	uint16_t hostFsSelector;
+	uint16_t hostGsSelector;
+	uint8_t hostSegmentsValid;
+	uint8_t hostSegmentsPadding[5];
 };
 
 namespace wibo {
@@ -250,6 +254,21 @@ extern unsigned int debugIndent;
 extern uint16_t tibSelector;
 extern int tibEntryNumber;
 extern PEB *processPeb;
+
+class WinApiSegmentScope {
+public:
+	WinApiSegmentScope();
+	~WinApiSegmentScope();
+	WinApiSegmentScope(const WinApiSegmentScope &) = delete;
+	WinApiSegmentScope &operator=(const WinApiSegmentScope &) = delete;
+
+private:
+	uint16_t previousFs_;
+	uint16_t previousGs_;
+	bool restore_;
+};
+
+#define WIN_API_SEGMENT_GUARD() wibo::WinApiSegmentScope _wiboSegmentScopeGuard
 
 TIB *allocateTib();
 void initializeTibStackInfo(TIB *tib);

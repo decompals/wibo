@@ -206,6 +206,7 @@ static bool loadVersionResource(const char *fileName, std::vector<uint8_t> &buff
 namespace version {
 
 unsigned int WIN_FUNC GetFileVersionInfoSizeA(const char *lptstrFilename, unsigned int *lpdwHandle) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetFileVersionInfoSizeA(%s, %p)\n", lptstrFilename, lpdwHandle);
 	if (lpdwHandle)
 		*lpdwHandle = 0;
@@ -217,6 +218,7 @@ unsigned int WIN_FUNC GetFileVersionInfoSizeA(const char *lptstrFilename, unsign
 }
 
 unsigned int WIN_FUNC GetFileVersionInfoA(const char *lptstrFilename, unsigned int dwHandle, unsigned int dwLen, void *lpData) {
+	WIN_API_SEGMENT_GUARD();
 	(void) dwHandle;
 	DEBUG_LOG("GetFileVersionInfoA(%s, %u, %p)\n", lptstrFilename, dwLen, lpData);
 	if (!lpData || dwLen == 0) {
@@ -279,6 +281,7 @@ static unsigned int VerQueryValueImpl(const void *pBlock, const std::string &sub
 }
 
 unsigned int WIN_FUNC VerQueryValueA(const void *pBlock, const char *lpSubBlock, void **lplpBuffer, unsigned int *puLen) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("VerQueryValueA(%p, %s, %p, %p)\n", pBlock, lpSubBlock ? lpSubBlock : "(null)", lplpBuffer, puLen);
 	if (!lpSubBlock)
 		return 0;
@@ -286,18 +289,21 @@ unsigned int WIN_FUNC VerQueryValueA(const void *pBlock, const char *lpSubBlock,
 }
 
 unsigned int WIN_FUNC GetFileVersionInfoSizeW(const uint16_t *lptstrFilename, unsigned int *lpdwHandle) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetFileVersionInfoSizeW -> ");
 	auto narrow = wideStringToString(lptstrFilename);
 	return GetFileVersionInfoSizeA(narrow.c_str(), lpdwHandle);
 }
 
 unsigned int WIN_FUNC GetFileVersionInfoW(const uint16_t *lptstrFilename, unsigned int dwHandle, unsigned int dwLen, void *lpData) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("GetFileVersionInfoW -> ");
 	auto narrow = wideStringToString(lptstrFilename);
 	return GetFileVersionInfoA(narrow.c_str(), dwHandle, dwLen, lpData);
 }
 
 unsigned int WIN_FUNC VerQueryValueW(const void *pBlock, const uint16_t *lpSubBlock, void **lplpBuffer, unsigned int *puLen) {
+	WIN_API_SEGMENT_GUARD();
 	if (!lpSubBlock)
 		return 0;
 	auto narrow = wideStringToString(lpSubBlock);

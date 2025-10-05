@@ -205,6 +205,7 @@ HCRYPTHASH hashHandleFromObject(HashObject *hash) { return static_cast<HCRYPTHAS
 namespace advapi32 {
 
 BOOL WIN_FUNC CryptReleaseContext(HCRYPTPROV hProv, DWORD dwFlags) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("STUB: CryptReleaseContext(%p, %u)\n", reinterpret_cast<void *>(static_cast<uintptr_t>(hProv)), dwFlags);
 	(void)hProv;
 	(void)dwFlags;
@@ -214,6 +215,7 @@ BOOL WIN_FUNC CryptReleaseContext(HCRYPTPROV hProv, DWORD dwFlags) {
 
 BOOL WIN_FUNC CryptAcquireContextW(HCRYPTPROV *phProv, LPCWSTR pszContainer, LPCWSTR pszProvider, DWORD dwProvType,
 								   DWORD dwFlags) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("STUB: CryptAcquireContextW(%p, %p, %p, %u, %u)\n", phProv, pszContainer, pszProvider, dwProvType,
 			  dwFlags);
 	// to quote the guy above me: screw them for now
@@ -228,6 +230,7 @@ BOOL WIN_FUNC CryptAcquireContextW(HCRYPTPROV *phProv, LPCWSTR pszContainer, LPC
 }
 
 BOOL WIN_FUNC CryptGenRandom(HCRYPTPROV hProv, DWORD dwLen, BYTE *pbBuffer) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("CryptGenRandom(%p)\n", reinterpret_cast<void *>(static_cast<uintptr_t>(hProv)));
 	(void)hProv;
 	if (!pbBuffer || dwLen == 0) {
@@ -246,6 +249,7 @@ BOOL WIN_FUNC CryptGenRandom(HCRYPTPROV hProv, DWORD dwLen, BYTE *pbBuffer) {
 }
 
 BOOL WIN_FUNC CryptCreateHash(HCRYPTPROV hProv, ALG_ID Algid, HCRYPTKEY hKey, DWORD dwFlags, HCRYPTHASH *phHash) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("CryptCreateHash(%p, %u, %p, %u, %p)\n", reinterpret_cast<void *>(static_cast<uintptr_t>(hProv)), Algid,
 			  reinterpret_cast<void *>(static_cast<uintptr_t>(hKey)), dwFlags, phHash);
 	(void)hProv;
@@ -276,6 +280,7 @@ BOOL WIN_FUNC CryptCreateHash(HCRYPTPROV hProv, ALG_ID Algid, HCRYPTKEY hKey, DW
 }
 
 BOOL WIN_FUNC CryptHashData(HCRYPTHASH hHash, const BYTE *pbData, DWORD dwDataLen, DWORD dwFlags) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("CryptHashData(%p, %p, %u, %u)\n", reinterpret_cast<void *>(static_cast<uintptr_t>(hHash)), pbData,
 			  dwDataLen, dwFlags);
 	if (dwFlags != 0) {
@@ -297,6 +302,7 @@ BOOL WIN_FUNC CryptHashData(HCRYPTHASH hHash, const BYTE *pbData, DWORD dwDataLe
 }
 
 BOOL WIN_FUNC CryptGetHashParam(HCRYPTHASH hHash, DWORD dwParam, BYTE *pbData, DWORD *pdwDataLen, DWORD dwFlags) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("CryptGetHashParam(%p, %u, %p, %p, %u)\n", reinterpret_cast<void *>(static_cast<uintptr_t>(hHash)),
 			  dwParam, pbData, pdwDataLen, dwFlags);
 	if (dwFlags != 0 || !pdwDataLen) {
@@ -382,6 +388,7 @@ BOOL WIN_FUNC CryptGetHashParam(HCRYPTHASH hHash, DWORD dwParam, BYTE *pbData, D
 }
 
 BOOL WIN_FUNC CryptDestroyHash(HCRYPTHASH hHash) {
+	WIN_API_SEGMENT_GUARD();
 	DEBUG_LOG("CryptDestroyHash(%p)\n", reinterpret_cast<void *>(static_cast<uintptr_t>(hHash)));
 	auto *hash = hashObjectFromHandle(hHash);
 	if (!hash) {

@@ -127,6 +127,7 @@ static void printHelp(const char *argv0) {
 	std::filesystem::path exePath(argv0 ? argv0 : "wibo");
 	std::string exeName = exePath.filename().string();
 	fprintf(stdout, "Usage: %s [options] <program.exe> [arguments...]\n", exeName.c_str());
+	fprintf(stdout, "       %s path [subcommand options] <path> [path...]\n", exeName.c_str());
 	fprintf(stdout, "\n");
 	fprintf(stdout, "Options:\n");
 	fprintf(stdout, "  --help\t\tShow this help message and exit\n");
@@ -135,6 +136,72 @@ static void printHelp(const char *argv0) {
 	fprintf(stdout, "  --cmdline STRING\tUse STRING as the exact guest command line\n");
 	fprintf(stdout,
 			"  --\t\tStop option parsing; following arguments are interpreted as the exact guest command line\n");
+	fprintf(stdout, "\n");
+	fprintf(stdout, "Subcommands:\n");
+	fprintf(stdout, "  path\t\tConvert between host and Windows-style paths (see '%s path --help')\n", exeName.c_str());
+}
+
+static void printPathHelp(const char *argv0) {
+	std::filesystem::path exePath(argv0 ? argv0 : "wibo");
+	std::string exeName = exePath.filename().string();
+	fprintf(stdout, "Usage: %s path (-u | --unix | -w | --windows) <path> [path...]\n", exeName.c_str());
+	fprintf(stdout, "\n");
+	fprintf(stdout, "Path Options:\n");
+	fprintf(stdout, "  -u, --unix\tConvert Windows paths to host paths\n");
+	fprintf(stdout, "  -w, --windows\tConvert host paths to Windows paths\n");
+	fprintf(stdout, "  -h, --help\tShow this help message and exit\n");
+}
+
+static int handlePathCommand(int argc, char **argv, const char *argv0) {
+	bool convertToUnix = false;
+	bool convertToWindows = false;
+	std::vector<const char *> inputs;
+
+	for (int i = 0; i < argc; ++i) {
+		const char *arg = argv[i];
+		if (strcmp(arg, "-u") == 0 || strcmp(arg, "--unix") == 0) {
+			convertToUnix = true;
+			continue;
+		}
+		if (strcmp(arg, "-w") == 0 || strcmp(arg, "--windows") == 0) {
+			convertToWindows = true;
+			continue;
+		}
+		if (strcmp(arg, "-h") == 0 || strcmp(arg, "--help") == 0) {
+			printPathHelp(argv0);
+			return 0;
+		}
+		if (arg[0] == '-' && arg[1] != '\0') {
+			fprintf(stderr, "Unknown option for 'path' subcommand: %s\n", arg);
+			printPathHelp(argv0);
+			return 1;
+		}
+		inputs.push_back(arg);
+	}
+
+	if (convertToUnix == convertToWindows) {
+		fprintf(stderr, "Specify exactly one of --unix or --windows for the 'path' subcommand\n");
+		printPathHelp(argv0);
+		return 1;
+	}
+	if (inputs.empty()) {
+		fprintf(stderr, "No path specified for conversion\n");
+		printPathHelp(argv0);
+		return 1;
+	}
+
+	for (const char *input : inputs) {
+		if (convertToUnix) {
+			auto hostPath = files::pathFromWindows(input).string();
+			fprintf(stdout, "%s\n", hostPath.c_str());
+		} else {
+			std::filesystem::path hostInput(input);
+			std::string windowsPath = files::pathToWindows(hostInput);
+			fprintf(stdout, "%s\n", windowsPath.c_str());
+		}
+	}
+
+	return 0;
 }
 
 /**
@@ -240,6 +307,10 @@ static void blockUpper2GB() {
 }
 
 int main(int argc, char **argv) {
+	if (argc >= 2 && strcmp(argv[1], "path") == 0) {
+		return handlePathCommand(argc - 2, argv + 2, argv[0]);
+	}
+
 	std::string chdirPath;
 	bool optionDebug = false;
 	bool parsingOptions = true;

@@ -11,27 +11,28 @@
 #include "timeutil.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
 #include <filesystem>
-#include <fnmatch.h>
+#include <mutex>
 #include <optional>
 #include <random>
 #include <string>
+#include <string_view>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <system_error>
 #include <unistd.h>
+#include <unordered_map>
+#include <vector>
 
 namespace {
 
 using random_shorts_engine =
 	std::independent_bits_engine<std::default_random_engine, sizeof(unsigned short) * 8, unsigned short>;
-
-constexpr uintptr_t kPseudoFindHandleValue = 1;
-const HANDLE kPseudoFindHandle = reinterpret_cast<HANDLE>(kPseudoFindHandleValue);
 
 constexpr uint64_t kWindowsTicksPerSecond = 10000000ULL;
 constexpr uint64_t kSecondsBetween1601And1970 = 11644473600ULL;
@@ -89,12 +90,6 @@ struct timespec changeTimespec(const struct stat &st) {
 #endif
 }
 
-struct FindFirstFileHandle {
-	std::filesystem::directory_iterator it;
-	std::filesystem::directory_iterator end;
-	std::string pattern;
-};
-
 struct FullPathInfo {
 	std::string path;
 	size_t filePartOffset = std::string::npos;
@@ -135,99 +130,380 @@ bool computeFullPath(const std::string &input, FullPathInfo &outInfo) {
 	return true;
 }
 
-inline bool isPseudoHandle(HANDLE handle) { return reinterpret_cast<uintptr_t>(handle) == kPseudoFindHandleValue; }
+struct FindSearchEntry {
+	std::string name;
+	std::filesystem::path fullPath;
+	bool isDirectory = false;
+};
 
-inline void setCommonFindDataFields(WIN32_FIND_DATAA &data) {
-	data.ftCreationTime = kDefaultFindFileTime;
-	data.ftLastAccessTime = kDefaultFindFileTime;
-	data.ftLastWriteTime = kDefaultFindFileTime;
-	data.dwFileAttributes = 0;
-	data.nFileSizeHigh = 0;
-	data.nFileSizeLow = 0;
-	data.dwReserved0 = 0;
-	data.dwReserved1 = 0;
-	data.cFileName[0] = '\0';
-	data.cAlternateFileName[0] = '\0';
+struct FindSearchHandle {
+	bool singleResult = false;
+	std::vector<FindSearchEntry> entries;
+	size_t nextIndex = 0;
+};
+
+std::mutex g_findHandleMutex;
+std::unordered_map<FindSearchHandle *, std::unique_ptr<FindSearchHandle>> g_findHandles;
+
+HANDLE registerFindHandle(std::unique_ptr<FindSearchHandle> handle) {
+	if (!handle) {
+		return INVALID_HANDLE_VALUE;
+	}
+	FindSearchHandle *raw = handle.get();
+	std::lock_guard lk(g_findHandleMutex);
+	g_findHandles.emplace(raw, std::move(handle));
+	return reinterpret_cast<HANDLE>(raw);
 }
 
-inline void setCommonFindDataFields(WIN32_FIND_DATAW &data) {
-	data.ftCreationTime = kDefaultFindFileTime;
-	data.ftLastAccessTime = kDefaultFindFileTime;
-	data.ftLastWriteTime = kDefaultFindFileTime;
-	data.dwFileAttributes = 0;
-	data.nFileSizeHigh = 0;
-	data.nFileSizeLow = 0;
-	data.dwReserved0 = 0;
-	data.dwReserved1 = 0;
-	data.cFileName[0] = 0;
-	data.cAlternateFileName[0] = 0;
+FindSearchHandle *lookupFindHandleLocked(HANDLE handle) {
+	if (handle == nullptr) {
+		return nullptr;
+	}
+	auto *raw = reinterpret_cast<FindSearchHandle *>(handle);
+	auto it = g_findHandles.find(raw);
+	if (it == g_findHandles.end()) {
+		return nullptr;
+	}
+	return it->second.get();
 }
 
-DWORD computeAttributesAndSize(const std::filesystem::path &path, DWORD &sizeHigh, DWORD &sizeLow) {
-	std::error_code ec;
-	auto status = std::filesystem::status(path, ec);
-	uint64_t fileSize = 0;
+std::unique_ptr<FindSearchHandle> detachFindHandle(HANDLE handle) {
+	std::lock_guard lk(g_findHandleMutex);
+	auto *raw = reinterpret_cast<FindSearchHandle *>(handle);
+	auto it = g_findHandles.find(raw);
+	if (it == g_findHandles.end()) {
+		return nullptr;
+	}
+	auto owned = std::move(it->second);
+	g_findHandles.erase(it);
+	return owned;
+}
+
+bool containsWildcard(std::string_view value) { return value.find_first_of("*?") != std::string_view::npos; }
+
+bool containsWildcardOutsideExtendedPrefix(std::string_view value) {
+	if (value.rfind(R"(\\?\)", 0) == 0) {
+		value.remove_prefix(4);
+	}
+	return containsWildcard(value);
+}
+
+inline char toLowerAscii(char ch) { return static_cast<char>(std::tolower(static_cast<unsigned char>(ch))); }
+
+inline bool equalsIgnoreCase(char a, char b) { return toLowerAscii(a) == toLowerAscii(b); }
+
+bool wildcardMatchInsensitive(std::string_view pattern, std::string_view text) {
+	size_t p = 0;
+	size_t t = 0;
+	size_t star = std::string_view::npos;
+	size_t match = 0;
+
+	while (t < text.size()) {
+		if (p < pattern.size()) {
+			char pc = pattern[p];
+			if (pc == '?') {
+				++p;
+				++t;
+				continue;
+			}
+			if (pc == '*') {
+				star = p++;
+				match = t;
+				continue;
+			}
+			if (equalsIgnoreCase(pc, text[t])) {
+				++p;
+				++t;
+				continue;
+			}
+		}
+		if (star != std::string_view::npos) {
+			p = star + 1;
+			t = ++match;
+			continue;
+		}
+		return false;
+	}
+
+	while (p < pattern.size() && pattern[p] == '*') {
+		++p;
+	}
+	return p == pattern.size();
+}
+
+void toFileTime(const struct timespec &ts, FILETIME &out) {
+	int64_t seconds = static_cast<int64_t>(ts.tv_sec) + static_cast<int64_t>(kSecondsBetween1601And1970);
+	if (seconds < 0) {
+		seconds = 0;
+	}
+	uint64_t ticks = static_cast<uint64_t>(seconds) * kWindowsTicksPerSecond;
+	ticks += static_cast<uint64_t>(ts.tv_nsec > 0 ? ts.tv_nsec / 100 : 0);
+	out.dwLowDateTime = static_cast<DWORD>(ticks & 0xFFFFFFFFULL);
+	out.dwHighDateTime = static_cast<DWORD>(ticks >> 32);
+}
+
+template <typename FindData> void resetFindDataStruct(FindData &data) { std::memset(&data, 0, sizeof(FindData)); }
+
+void assignFileName(WIN32_FIND_DATAA &data, const std::string &name) {
+	size_t count = std::min(name.size(), static_cast<size_t>(MAX_PATH - 1));
+	std::memcpy(data.cFileName, name.data(), count);
+	data.cFileName[count] = '\0';
+}
+
+void assignFileName(WIN32_FIND_DATAW &data, const std::string &name) {
+	auto wide = stringToWideString(name.c_str(), name.size());
+	size_t length = std::min<size_t>(wstrlen(wide.data()), MAX_PATH - 1);
+	wstrncpy(data.cFileName, wide.data(), length);
+	data.cFileName[length] = 0;
+}
+
+void clearAlternateName(WIN32_FIND_DATAA &data) { data.cAlternateFileName[0] = '\0'; }
+
+void clearAlternateName(WIN32_FIND_DATAW &data) { data.cAlternateFileName[0] = 0; }
+
+DWORD buildFileAttributes(const struct stat &st, bool isDirectory) {
 	DWORD attributes = 0;
-	if (status.type() == std::filesystem::file_type::directory) {
+	mode_t mode = st.st_mode;
+	if (S_ISDIR(mode) || isDirectory) {
 		attributes |= FILE_ATTRIBUTE_DIRECTORY;
 	}
-	if (status.type() == std::filesystem::file_type::regular) {
-		attributes |= FILE_ATTRIBUTE_NORMAL;
-		fileSize = std::filesystem::file_size(path, ec);
+	if (S_ISREG(mode) && !isDirectory) {
+		attributes |= FILE_ATTRIBUTE_ARCHIVE;
 	}
-	sizeHigh = static_cast<DWORD>(fileSize >> 32);
-	sizeLow = static_cast<DWORD>(fileSize);
+	if ((mode & S_IWUSR) == 0) {
+		attributes |= FILE_ATTRIBUTE_READONLY;
+	}
+	if (attributes == 0) {
+		attributes = FILE_ATTRIBUTE_NORMAL;
+	}
 	return attributes;
 }
 
-void setFindFileDataFromPath(const std::filesystem::path &path, WIN32_FIND_DATAA &data) {
-	setCommonFindDataFields(data);
-	data.dwFileAttributes = computeAttributesAndSize(path, data.nFileSizeHigh, data.nFileSizeLow);
-	std::string fileName = path.filename().string();
-	if (fileName.size() >= MAX_PATH) {
-		fileName.resize(MAX_PATH - 1);
+template <typename FindData> void populateFromStat(const FindSearchEntry &entry, const struct stat &st, FindData &out) {
+	out.dwFileAttributes = buildFileAttributes(st, entry.isDirectory);
+	uint64_t fileSize = (entry.isDirectory || !S_ISREG(st.st_mode)) ? 0ULL : static_cast<uint64_t>(st.st_size);
+	out.nFileSizeHigh = static_cast<DWORD>(fileSize >> 32);
+	out.nFileSizeLow = static_cast<DWORD>(fileSize & 0xFFFFFFFFULL);
+	toFileTime(changeTimespec(st), out.ftCreationTime);
+	toFileTime(accessTimespec(st), out.ftLastAccessTime);
+	toFileTime(modifyTimespec(st), out.ftLastWriteTime);
+}
+
+template <typename FindData> void populateFindData(const FindSearchEntry &entry, FindData &out) {
+	resetFindDataStruct(out);
+	std::string nativePath = entry.fullPath.empty() ? std::string() : entry.fullPath.u8string();
+	struct stat st{};
+	if (!nativePath.empty() && stat(nativePath.c_str(), &st) == 0) {
+		populateFromStat(entry, st, out);
+	} else {
+		out.dwFileAttributes = entry.isDirectory ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
+		out.ftCreationTime = kDefaultFindFileTime;
+		out.ftLastAccessTime = kDefaultFindFileTime;
+		out.ftLastWriteTime = kDefaultFindFileTime;
+		out.nFileSizeHigh = 0;
+		out.nFileSizeLow = 0;
 	}
-	std::strncpy(data.cFileName, fileName.c_str(), MAX_PATH);
-	data.cFileName[MAX_PATH - 1] = '\0';
-	std::strncpy(data.cAlternateFileName, "8P3FMTFN.BAD", sizeof(data.cAlternateFileName));
-	data.cAlternateFileName[sizeof(data.cAlternateFileName) - 1] = '\0';
+	assignFileName(out, entry.name);
+	clearAlternateName(out);
 }
 
-void setFindFileDataFromPath(const std::filesystem::path &path, WIN32_FIND_DATAW &data) {
-	setCommonFindDataFields(data);
-	data.dwFileAttributes = computeAttributesAndSize(path, data.nFileSizeHigh, data.nFileSizeLow);
-	std::string fileName = path.filename().string();
-	auto wideName = stringToWideString(fileName.c_str());
-	size_t copyLen = std::min<size_t>(MAX_PATH - 1, wstrlen(wideName.data()));
-	wstrncpy(data.cFileName, wideName.data(), copyLen);
-	data.cFileName[copyLen] = 0;
-	auto wideAlt = stringToWideString("8P3FMTFN.BAD");
-	copyLen = std::min<size_t>(sizeof(data.cAlternateFileName) / sizeof(data.cAlternateFileName[0]) - 1,
-							   wstrlen(wideAlt.data()));
-	wstrncpy(data.cAlternateFileName, wideAlt.data(), copyLen);
-	data.cAlternateFileName[copyLen] = 0;
+std::filesystem::path parentOrSelf(const std::filesystem::path &path) {
+	auto parent = path.parent_path();
+	if (parent.empty()) {
+		return path;
+	}
+	return parent;
 }
 
-bool nextMatch(FindFirstFileHandle &handle, std::filesystem::path &outPath) {
-	for (; handle.it != handle.end; ++handle.it) {
-		const auto current = *handle.it;
-		if (fnmatch(handle.pattern.c_str(), current.path().filename().c_str(), 0) == 0) {
-			outPath = current.path();
-			++handle.it;
-			return true;
+std::filesystem::path resolvedPath(const std::filesystem::path &path) {
+	std::error_code ec;
+	auto canonical = std::filesystem::weakly_canonical(path, ec);
+	if (!ec) {
+		return canonical;
+	}
+	auto absolute = std::filesystem::absolute(path, ec);
+	if (!ec) {
+		return absolute;
+	}
+	return path;
+}
+
+std::string determineDisplayName(const std::filesystem::path &path, const std::string &filePart) {
+	std::string name = path.filename().string();
+	if (name.empty() || name == "." || name == "..") {
+		std::error_code ec;
+		auto absolute = std::filesystem::absolute(path, ec);
+		if (!ec) {
+			auto absoluteName = absolute.filename().string();
+			if (!absoluteName.empty()) {
+				name = absoluteName;
+			}
 		}
 	}
-	return false;
+	if (name.empty()) {
+		name = filePart;
+	}
+	return name;
 }
 
-bool initializeEnumeration(const std::filesystem::path &parent, const std::string &pattern, FindFirstFileHandle &handle,
-						   std::filesystem::path &firstMatch) {
-	if (pattern.empty()) {
+bool collectDirectoryMatches(const std::filesystem::path &directory, const std::string &pattern,
+							 std::vector<FindSearchEntry> &outEntries) {
+	auto addEntry = [&](const std::string &name, const std::filesystem::path &path, bool isDirectory) {
+		FindSearchEntry entry;
+		entry.name = name;
+		entry.fullPath = resolvedPath(path);
+		entry.isDirectory = isDirectory;
+		outEntries.push_back(std::move(entry));
+	};
+
+	if (wildcardMatchInsensitive(pattern, ".")) {
+		addEntry(".", directory, true);
+	}
+	if (wildcardMatchInsensitive(pattern, "..")) {
+		addEntry("..", parentOrSelf(directory), true);
+	}
+
+	std::error_code iterEc;
+	std::filesystem::directory_iterator end;
+	for (std::filesystem::directory_iterator it(directory, iterEc); !iterEc && it != end; ++it) {
+		std::string name = it->path().filename().string();
+		if (!wildcardMatchInsensitive(pattern, name)) {
+			continue;
+		}
+		std::error_code statusEc;
+		bool isDir = it->is_directory(statusEc);
+		if (statusEc) {
+			isDir = false;
+		}
+		FindSearchEntry entry;
+		entry.name = name;
+		entry.fullPath = resolvedPath(it->path());
+		entry.isDirectory = isDir;
+		outEntries.push_back(std::move(entry));
+	}
+	if (iterEc) {
+		wibo::lastError = wibo::winErrorFromErrno(iterEc.value());
 		return false;
 	}
-	handle = FindFirstFileHandle{std::filesystem::directory_iterator(parent), std::filesystem::directory_iterator(),
-								 pattern};
-	return nextMatch(handle, firstMatch);
+	return true;
+}
+
+template <typename FindData> HANDLE findFirstFileCommon(const std::string &rawInput, FindData *lpFindFileData) {
+	if (!lpFindFileData) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return INVALID_HANDLE_VALUE;
+	}
+
+	if (rawInput.empty()) {
+		wibo::lastError = ERROR_PATH_NOT_FOUND;
+		return INVALID_HANDLE_VALUE;
+	}
+
+	std::string input = rawInput;
+	std::replace(input.begin(), input.end(), '/', '\\');
+
+	if (input.empty()) {
+		wibo::lastError = ERROR_PATH_NOT_FOUND;
+		return INVALID_HANDLE_VALUE;
+	}
+
+	if (!input.empty() && input.back() == '\\') {
+		wibo::lastError = ERROR_FILE_NOT_FOUND;
+		return INVALID_HANDLE_VALUE;
+	}
+
+	std::string directoryPart;
+	std::string filePart;
+	size_t lastSlash = input.find_last_of('\\');
+	if (lastSlash == std::string::npos) {
+		directoryPart = ".";
+		filePart = input;
+	} else {
+		directoryPart = input.substr(0, lastSlash);
+		filePart = input.substr(lastSlash + 1);
+		if (directoryPart.empty()) {
+			directoryPart = "\\";
+		} else if (lastSlash == 2 && input.size() >= 3 && input[1] == ':') {
+			directoryPart = input.substr(0, lastSlash + 1);
+		}
+	}
+
+	if (filePart.empty()) {
+		wibo::lastError = ERROR_FILE_NOT_FOUND;
+		return INVALID_HANDLE_VALUE;
+	}
+
+	if (containsWildcardOutsideExtendedPrefix(directoryPart)) {
+		wibo::lastError = ERROR_INVALID_NAME;
+		return INVALID_HANDLE_VALUE;
+	}
+
+	if (directoryPart.empty()) {
+		directoryPart = ".";
+	}
+
+	std::filesystem::path hostDirectory = resolvedPath(files::pathFromWindows(directoryPart.c_str()));
+
+	std::error_code dirStatusEc;
+	auto dirStatus = std::filesystem::status(hostDirectory, dirStatusEc);
+	if (dirStatusEc) {
+		wibo::lastError = wibo::winErrorFromErrno(dirStatusEc.value());
+		return INVALID_HANDLE_VALUE;
+	}
+	if (dirStatus.type() == std::filesystem::file_type::not_found) {
+		wibo::lastError = ERROR_PATH_NOT_FOUND;
+		return INVALID_HANDLE_VALUE;
+	}
+	if (dirStatus.type() != std::filesystem::file_type::directory) {
+		wibo::lastError = ERROR_PATH_NOT_FOUND;
+		return INVALID_HANDLE_VALUE;
+	}
+
+	bool hasWildcards = containsWildcard(filePart);
+
+	if (!hasWildcards) {
+		std::filesystem::path targetPath = resolvedPath(files::pathFromWindows(input.c_str()));
+
+		std::error_code targetEc;
+		auto targetStatus = std::filesystem::status(targetPath, targetEc);
+		if (targetEc) {
+			wibo::lastError = wibo::winErrorFromErrno(targetEc.value());
+			return INVALID_HANDLE_VALUE;
+		}
+		if (targetStatus.type() == std::filesystem::file_type::not_found) {
+			wibo::lastError = ERROR_FILE_NOT_FOUND;
+			return INVALID_HANDLE_VALUE;
+		}
+
+		FindSearchEntry entry;
+		entry.fullPath = targetPath;
+		entry.isDirectory = targetStatus.type() == std::filesystem::file_type::directory;
+		entry.name = determineDisplayName(targetPath, filePart);
+
+		populateFindData(entry, *lpFindFileData);
+		wibo::lastError = ERROR_SUCCESS;
+
+		auto state = std::make_unique<FindSearchHandle>();
+		state->singleResult = true;
+		return registerFindHandle(std::move(state));
+	}
+
+	std::vector<FindSearchEntry> matches;
+	if (!collectDirectoryMatches(hostDirectory, filePart, matches)) {
+		return INVALID_HANDLE_VALUE;
+	}
+	if (matches.empty()) {
+		wibo::lastError = ERROR_FILE_NOT_FOUND;
+		return INVALID_HANDLE_VALUE;
+	}
+
+	populateFindData(matches[0], *lpFindFileData);
+	wibo::lastError = ERROR_SUCCESS;
+
+	auto state = std::make_unique<FindSearchHandle>();
+	state->entries = std::move(matches);
+	state->nextIndex = 1;
+	return registerFindHandle(std::move(state));
 }
 
 std::optional<DWORD> stdHandleForConsoleDevice(const std::string &name, DWORD desiredAccess) {
@@ -576,7 +852,7 @@ BOOL WIN_FUNC ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead
 		signalOverlappedEvent(lpOverlapped);
 	}
 
-	DEBUG_LOG("-> %u bytes read, error %d\n", io.bytesTransferred, wibo::lastError);
+	DEBUG_LOG("-> %u bytes read, error %d\n", io.bytesTransferred, io.unixError == 0 ? 0 : wibo::lastError);
 	return io.unixError == 0;
 }
 
@@ -1454,123 +1730,104 @@ DWORD WIN_FUNC GetTempPathA(DWORD nBufferLength, LPSTR lpBuffer) {
 HANDLE WIN_FUNC FindFirstFileA(LPCSTR lpFileName, LPWIN32_FIND_DATAA lpFindFileData) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FindFirstFileA(%s, %p)", lpFileName ? lpFileName : "(null)", lpFindFileData);
-	if (!lpFileName || !lpFindFileData) {
+	if (!lpFindFileData) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		DEBUG_LOG(" -> ERROR_INVALID_PARAMETER\n");
 		return INVALID_HANDLE_VALUE;
 	}
-
-	std::filesystem::path hostPath = files::pathFromWindows(lpFileName);
-	DEBUG_LOG(" -> %s\n", hostPath.c_str());
-
-	std::error_code ec;
-	auto status = std::filesystem::status(hostPath, ec);
-	setCommonFindDataFields(*lpFindFileData);
-	if (status.type() == std::filesystem::file_type::regular) {
-		setFindFileDataFromPath(hostPath, *lpFindFileData);
-		return kPseudoFindHandle;
-	}
-
-	std::filesystem::path parent = hostPath.parent_path();
-	if (parent.empty()) {
-		parent = ".";
-	}
-	if (!std::filesystem::exists(parent)) {
+	if (!lpFileName) {
 		wibo::lastError = ERROR_PATH_NOT_FOUND;
+		DEBUG_LOG(" -> ERROR_PATH_NOT_FOUND\n");
 		return INVALID_HANDLE_VALUE;
 	}
 
-	std::filesystem::path match;
-	auto *handle = new FindFirstFileHandle();
-	if (!initializeEnumeration(parent, hostPath.filename().string(), *handle, match)) {
-		delete handle;
-		wibo::lastError = ERROR_FILE_NOT_FOUND;
-		return INVALID_HANDLE_VALUE;
-	}
-
-	setFindFileDataFromPath(match, *lpFindFileData);
-	return reinterpret_cast<HANDLE>(handle);
+	HANDLE handle = findFirstFileCommon(std::string(lpFileName), lpFindFileData);
+	DEBUG_LOG(" -> %p\n", handle);
+	return handle;
 }
 
 HANDLE WIN_FUNC FindFirstFileW(LPCWSTR lpFileName, LPWIN32_FIND_DATAW lpFindFileData) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FindFirstFileW(%p, %p)", lpFileName, lpFindFileData);
-	if (!lpFileName || !lpFindFileData) {
+	if (!lpFindFileData) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		DEBUG_LOG(" -> ERROR_INVALID_PARAMETER\n");
 		return INVALID_HANDLE_VALUE;
 	}
+	if (!lpFileName) {
+		wibo::lastError = ERROR_PATH_NOT_FOUND;
+		DEBUG_LOG(" -> ERROR_PATH_NOT_FOUND\n");
+		return INVALID_HANDLE_VALUE;
+	}
 
 	std::string narrowName = wideStringToString(lpFileName);
-	std::filesystem::path hostPath = files::pathFromWindows(narrowName.c_str());
-	DEBUG_LOG(", %s -> %s\n", narrowName.c_str(), hostPath.c_str());
-
-	std::error_code ec;
-	auto status = std::filesystem::status(hostPath, ec);
-	setCommonFindDataFields(*lpFindFileData);
-	if (status.type() == std::filesystem::file_type::regular) {
-		setFindFileDataFromPath(hostPath, *lpFindFileData);
-		return kPseudoFindHandle;
-	}
-
-	std::filesystem::path parent = hostPath.parent_path();
-	if (parent.empty()) {
-		parent = ".";
-	}
-	if (!std::filesystem::exists(parent)) {
-		wibo::lastError = ERROR_PATH_NOT_FOUND;
-		return INVALID_HANDLE_VALUE;
-	}
-
-	std::filesystem::path match;
-	auto *handle = new FindFirstFileHandle();
-	if (!initializeEnumeration(parent, hostPath.filename().string(), *handle, match)) {
-		delete handle;
-		wibo::lastError = ERROR_FILE_NOT_FOUND;
-		return INVALID_HANDLE_VALUE;
-	}
-
-	setFindFileDataFromPath(match, *lpFindFileData);
-	return reinterpret_cast<HANDLE>(handle);
+	HANDLE handle = findFirstFileCommon(narrowName, lpFindFileData);
+	DEBUG_LOG(" -> %p\n", handle);
+	return handle;
 }
 
 HANDLE WIN_FUNC FindFirstFileExA(LPCSTR lpFileName, FINDEX_INFO_LEVELS fInfoLevelId, LPVOID lpFindFileData,
 								 FINDEX_SEARCH_OPS fSearchOp, LPVOID lpSearchFilter, DWORD dwAdditionalFlags) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("FindFirstFileExA(%s, %d, %p, %d, %p, 0x%x) -> ", lpFileName ? lpFileName : "(null)", fInfoLevelId,
+	DEBUG_LOG("FindFirstFileExA(%s, %d, %p, %d, %p, 0x%x)", lpFileName ? lpFileName : "(null)", fInfoLevelId,
 			  lpFindFileData, fSearchOp, lpSearchFilter, dwAdditionalFlags);
-	(void)fInfoLevelId;
-	(void)fSearchOp;
-	(void)lpSearchFilter;
-	(void)dwAdditionalFlags;
-	return FindFirstFileA(lpFileName, static_cast<LPWIN32_FIND_DATAA>(lpFindFileData));
+	if (!lpFindFileData) {
+		DEBUG_LOG(" -> ERROR_INVALID_PARAMETER\n");
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return INVALID_HANDLE_VALUE;
+	}
+	if (!lpFileName) {
+		DEBUG_LOG(" -> ERROR_PATH_NOT_FOUND\n");
+		wibo::lastError = ERROR_PATH_NOT_FOUND;
+		return INVALID_HANDLE_VALUE;
+	}
+	if (fInfoLevelId != FindExInfoStandard) {
+		DEBUG_LOG(" -> ERROR_INVALID_PARAMETER\n");
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return INVALID_HANDLE_VALUE;
+	}
+	if (fSearchOp != FindExSearchNameMatch) {
+		DEBUG_LOG(" -> ERROR_INVALID_PARAMETER\n");
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return INVALID_HANDLE_VALUE;
+	}
+	if (lpSearchFilter) {
+		DEBUG_LOG(" -> ERROR_INVALID_PARAMETER\n");
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return INVALID_HANDLE_VALUE;
+	}
+	if (dwAdditionalFlags != 0) {
+		DEBUG_LOG(" -> ERROR_INVALID_PARAMETER\n");
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return INVALID_HANDLE_VALUE;
+	}
+
+	auto *findData = static_cast<LPWIN32_FIND_DATAA>(lpFindFileData);
+	return findFirstFileCommon(std::string(lpFileName), findData);
 }
 
 BOOL WIN_FUNC FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileData) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FindNextFileA(%p, %p)\n", hFindFile, lpFindFileData);
 	if (!lpFindFileData) {
+		DEBUG_LOG(" -> ERROR_INVALID_PARAMETER\n");
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
-	if (isPseudoHandle(hFindFile)) {
-		wibo::lastError = ERROR_NO_MORE_FILES;
-		return FALSE;
-	}
 
-	auto *handle = reinterpret_cast<FindFirstFileHandle *>(hFindFile);
-	if (!handle) {
+	std::lock_guard lk(g_findHandleMutex);
+	auto *state = lookupFindHandleLocked(hFindFile);
+	if (!state) {
+		DEBUG_LOG(" -> ERROR_INVALID_HANDLE\n");
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
-
-	std::filesystem::path match;
-	if (!nextMatch(*handle, match)) {
+	if (state->singleResult || state->nextIndex >= state->entries.size()) {
+		DEBUG_LOG(" -> ERROR_NO_MORE_FILES\n");
 		wibo::lastError = ERROR_NO_MORE_FILES;
 		return FALSE;
 	}
-
-	setFindFileDataFromPath(match, *lpFindFileData);
+	populateFindData(state->entries[state->nextIndex++], *lpFindFileData);
 	return TRUE;
 }
 
@@ -1581,40 +1838,38 @@ BOOL WIN_FUNC FindNextFileW(HANDLE hFindFile, LPWIN32_FIND_DATAW lpFindFileData)
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
-	if (isPseudoHandle(hFindFile)) {
-		wibo::lastError = ERROR_NO_MORE_FILES;
-		return FALSE;
-	}
 
-	auto *handle = reinterpret_cast<FindFirstFileHandle *>(hFindFile);
-	if (!handle) {
+	std::lock_guard lk(g_findHandleMutex);
+	auto *state = lookupFindHandleLocked(hFindFile);
+	if (!state) {
+		DEBUG_LOG(" -> ERROR_INVALID_HANDLE\n");
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
-
-	std::filesystem::path match;
-	if (!nextMatch(*handle, match)) {
+	if (state->singleResult || state->nextIndex >= state->entries.size()) {
+		DEBUG_LOG(" -> ERROR_NO_MORE_FILES\n");
 		wibo::lastError = ERROR_NO_MORE_FILES;
 		return FALSE;
 	}
-
-	setFindFileDataFromPath(match, *lpFindFileData);
+	populateFindData(state->entries[state->nextIndex++], *lpFindFileData);
 	return TRUE;
 }
 
 BOOL WIN_FUNC FindClose(HANDLE hFindFile) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FindClose(%p)\n", hFindFile);
-	if (isPseudoHandle(hFindFile) || hFindFile == nullptr) {
-		return TRUE;
-	}
-
-	auto *handle = reinterpret_cast<FindFirstFileHandle *>(hFindFile);
-	if (!handle) {
+	if (hFindFile == nullptr) {
+		DEBUG_LOG(" -> ERROR_INVALID_HANDLE\n");
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
-	delete handle;
+
+	auto owned = detachFindHandle(hFindFile);
+	if (!owned) {
+		DEBUG_LOG(" -> ERROR_INVALID_HANDLE\n");
+		wibo::lastError = ERROR_INVALID_HANDLE;
+		return FALSE;
+	}
 	return TRUE;
 }
 

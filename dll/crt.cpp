@@ -193,6 +193,18 @@ char *WIN_ENTRY strcpy(char *dest, const char *src) {
 	return ::strcpy(dest, src);
 }
 
+char *WIN_ENTRY strncpy(char *dest, const char *src, size_t count) {
+	HOST_CONTEXT_GUARD();
+	VERBOSE_LOG("strncpy(%p, %p, %zu)\n", dest, src, count);
+	return ::strncpy(dest, src, count);
+}
+
+const char *WIN_ENTRY strrchr(const char *str, int ch) {
+	HOST_CONTEXT_GUARD();
+	VERBOSE_LOG("strrchr(%p, %i)\n", str, ch);
+	return ::strrchr(str, ch);
+}
+
 void *WIN_ENTRY malloc(size_t size) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("malloc(%zu)\n", size);
@@ -348,6 +360,13 @@ int WIN_ENTRY __stdio_common_vsprintf(unsigned long long options, char *buffer, 
 	return result;
 }
 
+int WIN_ENTRY qsort(void *base, size_t num, size_t size, int (*compar)(const void *, const void *)) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("qsort(%p, %zu, %zu, %p)\n", base, num, size, compar);
+	::qsort(base, num, size, compar);
+	return 0;
+}
+
 } // namespace crt
 
 static void *resolveByName(const char *name) {
@@ -393,6 +412,10 @@ static void *resolveByName(const char *name) {
 		return (void *)crt::strncmp;
 	if (strcmp(name, "strcpy") == 0)
 		return (void *)crt::strcpy;
+	if (strcmp(name, "strncpy") == 0)
+		return (void *)crt::strncpy;
+	if (strcmp(name, "strrchr") == 0)
+		return (void *)crt::strrchr;
 	if (strcmp(name, "malloc") == 0)
 		return (void *)crt::malloc;
 	if (strcmp(name, "calloc") == 0)
@@ -435,6 +458,8 @@ static void *resolveByName(const char *name) {
 		return (void *)crt::_register_onexit_function;
 	if (strcmp(name, "_execute_onexit_table") == 0)
 		return (void *)crt::_execute_onexit_table;
+	if (strcmp(name, "qsort") == 0)
+		return (void *)crt::qsort;
 	return nullptr;
 }
 
@@ -448,6 +473,7 @@ wibo::ModuleStub lib_crt = {
 		"api-ms-win-crt-environment-l1-1-0",
 		"api-ms-win-crt-math-l1-1-0",
 		"api-ms-win-crt-private-l1-1-0",
+		"api-ms-win-crt-utility-l1-1-0",
 		nullptr,
 	},
 	resolveByName,

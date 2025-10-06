@@ -222,6 +222,17 @@ if(BUILD_TESTING)
                     ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
 
             add_custom_command(
+                OUTPUT ${WIBO_TEST_BIN_DIR}/test_findfile.exe
+                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
+                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
+                        -o test_findfile.exe
+                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_findfile.c
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_findfile.c
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
+
+            add_custom_command(
                 OUTPUT ${WIBO_TEST_BIN_DIR}/test_synchapi.exe
                 COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
                         -I${CMAKE_CURRENT_SOURCE_DIR}/test
@@ -376,6 +387,7 @@ if(BUILD_TESTING)
                     ${WIBO_TEST_BIN_DIR}/test_resources.exe
                     ${WIBO_TEST_BIN_DIR}/test_threading.exe
                     ${WIBO_TEST_BIN_DIR}/test_handleapi.exe
+                    ${WIBO_TEST_BIN_DIR}/test_findfile.exe
                     ${WIBO_TEST_BIN_DIR}/test_synchapi.exe
                     ${WIBO_TEST_BIN_DIR}/test_processes.exe
                     ${WIBO_TEST_BIN_DIR}/test_heap.exe
@@ -427,6 +439,12 @@ if(BUILD_TESTING)
             add_test(NAME wibo.test_handleapi
                 COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_handleapi.exe)
             set_tests_properties(wibo.test_handleapi PROPERTIES
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS wibo.build_fixtures)
+
+            add_test(NAME wibo.test_findfile
+                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_findfile.exe)
+            set_tests_properties(wibo.test_findfile PROPERTIES
                 WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
                 DEPENDS wibo.build_fixtures)
 

@@ -292,10 +292,15 @@ static std::vector<std::filesystem::path> buildSearchDirectories() {
 		dirs.push_back(wibo::guestExecutablePath.parent_path());
 	}
 	dirs.push_back(std::filesystem::current_path());
-	if (const char *envPath = std::getenv("PATH")) {
-		auto parsed = parseHostPath(envPath);
-		dirs.insert(dirs.end(), parsed.begin(), parsed.end());
-	}
+	const auto addFromEnv = [&](const char *envVar) {
+		if (const char *envPath = std::getenv(envVar)) {
+			auto parsed = parseHostPath(envPath);
+			dirs.insert(dirs.end(), parsed.begin(), parsed.end());
+		}
+	};
+	addFromEnv("WIBO_PATH");
+	addFromEnv("WINEPATH"); // Wine compatibility
+	addFromEnv("PATH");
 	return dirs;
 }
 

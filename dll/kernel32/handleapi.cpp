@@ -37,22 +37,22 @@ BOOL WIN_FUNC DuplicateHandle(HANDLE hSourceProcessHandle, HANDLE hSourceHandle,
 		return FALSE;
 	}
 
+	auto &handles = wibo::handles();
 	if (isPseudoCurrentProcessHandle(hSourceHandle)) {
 		auto po = make_pin<ProcessObject>(getpid(), -1);
-		auto handle = wibo::handles().alloc(std::move(po), 0, 0);
+		auto handle = handles.alloc(std::move(po), 0, 0);
 		DEBUG_LOG("DuplicateHandle: created process handle for current process -> %p\n", handle);
 		*lpTargetHandle = handle;
 		return TRUE;
 	} else if (isPseudoCurrentThreadHandle(hSourceHandle)) {
 		auto th = make_pin<ThreadObject>(pthread_self());
-		auto handle = wibo::handles().alloc(std::move(th), 0, 0);
+		auto handle = handles.alloc(std::move(th), 0, 0);
 		DEBUG_LOG("DuplicateHandle: created thread handle for current thread -> %p\n", handle);
 		*lpTargetHandle = handle;
 		return TRUE;
 	}
 
-	if (!wibo::handles().duplicateTo(hSourceHandle, wibo::handles(), *lpTargetHandle, dwDesiredAccess, bInheritHandle,
-									 dwOptions)) {
+	if (!handles.duplicateTo(hSourceHandle, handles, *lpTargetHandle, dwDesiredAccess, bInheritHandle, dwOptions)) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}

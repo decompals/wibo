@@ -6,6 +6,7 @@
 #include "handles.h"
 #include "strutil.h"
 
+#include <algorithm>
 #include <iterator>
 #include <mutex>
 #include <string>
@@ -115,12 +116,8 @@ Pin<RegistryKeyObject> handleDataFromHKeyLocked(HKEY hKey) {
 
 bool isPredefinedKeyHandle(HKEY hKey) {
 	uintptr_t raw = reinterpret_cast<uintptr_t>(hKey);
-	for (const auto &kPredefinedKeyInfo : kPredefinedKeyInfos) {
-		if (kPredefinedKeyInfo.value == raw) {
-			return true;
-		}
-	}
-	return false;
+	return std::any_of(std::begin(kPredefinedKeyInfos), std::end(kPredefinedKeyInfos),
+					   [raw](const PredefinedKeyInfo &info) { return info.value == raw; });
 }
 
 } // namespace

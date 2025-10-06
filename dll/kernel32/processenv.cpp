@@ -44,14 +44,12 @@ namespace kernel32 {
 LPSTR WIN_FUNC GetCommandLineA() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetCommandLineA() -> %s\n", wibo::commandLine.c_str());
-	wibo::lastError = ERROR_SUCCESS;
 	return const_cast<LPSTR>(wibo::commandLine.c_str());
 }
 
 LPWSTR WIN_FUNC GetCommandLineW() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetCommandLineW() -> %s\n", wideStringToString(wibo::commandLineW.data()).c_str());
-	wibo::lastError = ERROR_SUCCESS;
 	return wibo::commandLineW.data();
 }
 
@@ -97,7 +95,6 @@ LPCH WIN_FUNC GetEnvironmentStrings() {
 	}
 	*ptr = 0;
 
-	wibo::lastError = ERROR_SUCCESS;
 	return buffer;
 }
 
@@ -133,7 +130,6 @@ LPWCH WIN_FUNC GetEnvironmentStringsW() {
 	}
 	*ptr = 0;
 
-	wibo::lastError = ERROR_SUCCESS;
 	return buffer;
 }
 
@@ -145,7 +141,6 @@ BOOL WIN_FUNC FreeEnvironmentStringsA(LPCH penv) {
 		return FALSE;
 	}
 	free(penv);
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -157,7 +152,6 @@ BOOL WIN_FUNC FreeEnvironmentStringsW(LPWCH penv) {
 		return FALSE;
 	}
 	free(penv);
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -177,7 +171,6 @@ DWORD WIN_FUNC GetEnvironmentVariableA(LPCSTR lpName, LPSTR lpBuffer, DWORD nSiz
 	const std::string &finalValue = converted.empty() ? std::string(rawValue) : converted;
 	DWORD len = static_cast<DWORD>(finalValue.size());
 	if (nSize == 0) {
-		wibo::lastError = ERROR_SUCCESS;
 		return len + 1;
 	}
 	if (!lpBuffer) {
@@ -185,11 +178,9 @@ DWORD WIN_FUNC GetEnvironmentVariableA(LPCSTR lpName, LPSTR lpBuffer, DWORD nSiz
 		return 0;
 	}
 	if (nSize <= len) {
-		wibo::lastError = ERROR_SUCCESS;
 		return len + 1;
 	}
 	memcpy(lpBuffer, finalValue.c_str(), len + 1);
-	wibo::lastError = ERROR_SUCCESS;
 	return len;
 }
 
@@ -211,7 +202,6 @@ DWORD WIN_FUNC GetEnvironmentVariableW(LPCWSTR lpName, LPWSTR lpBuffer, DWORD nS
 	auto wideValue = stringToWideString(finalValue.c_str());
 	DWORD required = static_cast<DWORD>(wideValue.size());
 	if (nSize == 0) {
-		wibo::lastError = ERROR_SUCCESS;
 		return required;
 	}
 	if (!lpBuffer) {
@@ -219,11 +209,9 @@ DWORD WIN_FUNC GetEnvironmentVariableW(LPCWSTR lpName, LPWSTR lpBuffer, DWORD nS
 		return 0;
 	}
 	if (nSize < required) {
-		wibo::lastError = ERROR_SUCCESS;
 		return required;
 	}
 	std::copy(wideValue.begin(), wideValue.end(), lpBuffer);
-	wibo::lastError = ERROR_SUCCESS;
 	return required - 1;
 }
 
@@ -241,7 +229,6 @@ BOOL WIN_FUNC SetEnvironmentVariableA(LPCSTR lpName, LPCSTR lpValue) {
 			setLastErrorFromErrno();
 			return FALSE;
 		}
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 	std::string hostValue = convertEnvValueToHost(lpName, lpValue);
@@ -251,7 +238,6 @@ BOOL WIN_FUNC SetEnvironmentVariableA(LPCSTR lpName, LPCSTR lpValue) {
 		setLastErrorFromErrno();
 		return FALSE;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 

@@ -1,5 +1,6 @@
 #include "winbase.h"
 
+#include "common.h"
 #include "context.h"
 #include "errors.h"
 #include "files.h"
@@ -86,7 +87,6 @@ bool tryHandleIntegerAtomPointer(const void *ptr, ATOM &atomOut) {
 		atomOut = 0;
 		return true;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	atomOut = maybeAtom;
 	return true;
 }
@@ -99,7 +99,6 @@ ATOM findAtomByNormalizedKey(const std::string &normalizedKey) {
 		wibo::lastError = ERROR_FILE_NOT_FOUND;
 		return 0;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return it->second;
 }
 
@@ -118,7 +117,6 @@ ATOM tryParseIntegerAtomString(const std::string &value, bool &handled) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return 0;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return static_cast<ATOM>(parsed);
 }
 
@@ -151,7 +149,6 @@ ATOM addAtomByString(const std::string &value) {
 		if (dataIt != table.atomToData.end() && dataIt->second.refCount < std::numeric_limits<uint16_t>::max()) {
 			dataIt->second.refCount++;
 		}
-		wibo::lastError = ERROR_SUCCESS;
 		return existing->second;
 	}
 	ATOM newAtom = allocateStringAtomLocked(table);
@@ -164,7 +161,6 @@ ATOM addAtomByString(const std::string &value) {
 	data.original = value;
 	table.stringToAtom.emplace(std::move(normalized), newAtom);
 	table.atomToData.emplace(newAtom, std::move(data));
-	wibo::lastError = ERROR_SUCCESS;
 	return newAtom;
 }
 
@@ -196,8 +192,7 @@ bool tryGetCurrentDirectoryPath(std::string &outPath) {
 	std::error_code ec;
 	std::filesystem::path cwd = std::filesystem::current_path(ec);
 	if (ec) {
-		errno = ec.value();
-		kernel32::setLastErrorFromErrno();
+		wibo::lastError = wibo::winErrorFromErrno(ec.value());
 		return false;
 	}
 	outPath = files::pathToWindows(cwd);
@@ -227,7 +222,6 @@ bool computeLongWindowsPath(const std::string &inputPath, std::string &longPath)
 	if (hasTrailingSlash && !longPath.empty() && longPath.back() != '\\') {
 		longPath.push_back('\\');
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return true;
 }
 
@@ -271,21 +265,18 @@ bool resolveDiskFreeSpaceStat(const char *rootPathName, struct statvfs &outBuf, 
 		}
 		if (statvfs(query.c_str(), &outBuf) == 0) {
 			resolvedPath = query;
-			wibo::lastError = ERROR_SUCCESS;
 			return true;
 		}
 
 		int savedErrno = errno;
 		if (savedErrno != ENOENT && savedErrno != ENOTDIR) {
-			errno = savedErrno;
-			kernel32::setLastErrorFromErrno();
+			wibo::lastError = wibo::winErrorFromErrno(savedErrno);
 			return false;
 		}
 
 		std::filesystem::path parent = queryPath.parent_path();
 		if (parent == queryPath) {
-			errno = savedErrno;
-			kernel32::setLastErrorFromErrno();
+			wibo::lastError = wibo::winErrorFromErrno(savedErrno);
 			return false;
 		}
 		if (parent.empty()) {
@@ -465,7 +456,6 @@ UINT WIN_FUNC GetAtomNameA(ATOM nAtom, LPSTR lpBuffer, int nSize) {
 	}
 	std::memcpy(lpBuffer, value.c_str(), value.size());
 	lpBuffer[value.size()] = '\0';
-	wibo::lastError = ERROR_SUCCESS;
 	UINT written = static_cast<UINT>(value.size());
 	DEBUG_LOG("GetAtomNameA -> %u (lastError=%u)\n", written, wibo::lastError);
 	return written;
@@ -502,7 +492,6 @@ UINT WIN_FUNC GetAtomNameW(ATOM nAtom, LPWSTR lpBuffer, int nSize) {
 	if (needed > 0) {
 		lpBuffer[needed - 1] = 0;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	UINT written = static_cast<UINT>(needed ? needed - 1 : 0);
 	DEBUG_LOG("GetAtomNameW -> %u (lastError=%u)\n", written, wibo::lastError);
 	return written;
@@ -546,7 +535,6 @@ DWORD WIN_FUNC FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId
 			return 0;
 		}
 		lpBuffer[length] = '\0';
-		wibo::lastError = ERROR_SUCCESS;
 		return static_cast<DWORD>(length);
 	} else if (dwFlags & 0x00000200) {
 		// FORMAT_MESSAGE_IGNORE_INSERTS
@@ -578,7 +566,6 @@ BOOL WIN_FUNC SetDllDirectoryA(LPCSTR lpPathName) {
 	DEBUG_LOG("SetDllDirectoryA(%s)\n", lpPathName);
 	if (!lpPathName || lpPathName[0] == '\0') {
 		wibo::clearDllDirectoryOverride();
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 
@@ -589,7 +576,6 @@ BOOL WIN_FUNC SetDllDirectoryA(LPCSTR lpPathName) {
 	}
 
 	wibo::setDllDirectoryOverride(std::filesystem::absolute(hostPath));
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -671,7 +657,6 @@ BOOL WIN_FUNC FindActCtxSectionStringW(DWORD dwFlags, const GUID *lpExtensionGui
 	ReturnedData->ulAssemblyRosterIndex = 1;
 	ReturnedData->AssemblyMetadata = {};
 
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -734,7 +719,6 @@ BOOL WIN_FUNC GetComputerNameA(LPSTR lpBuffer, LPDWORD nSize) {
 
 	std::strcpy(lpBuffer, kComputerNameAnsi);
 	*nSize = kComputerNameLength;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -757,7 +741,6 @@ BOOL WIN_FUNC GetComputerNameW(LPWSTR lpBuffer, LPDWORD nSize) {
 
 	wstrncpy(lpBuffer, kComputerNameWide, static_cast<size_t>(kComputerNameRequiredSize));
 	*nSize = kComputerNameLength;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -813,7 +796,6 @@ HLOCAL WIN_FUNC LocalAlloc(UINT uFlags, SIZE_T uBytes) {
 	// Legacy Windows applications (pre-NX and DEP) may expect executable memory from LocalAlloc.
 	tryMarkExecutable(result);
 	DEBUG_LOG("  -> %p\n", result);
-	wibo::lastError = ERROR_SUCCESS;
 	return result;
 }
 
@@ -822,7 +804,6 @@ HLOCAL WIN_FUNC LocalFree(HLOCAL hMem) {
 	VERBOSE_LOG("LocalFree(%p)\n", hMem);
 	// Windows returns NULL on success.
 	std::free(hMem);
-	wibo::lastError = ERROR_SUCCESS;
 	return nullptr;
 }
 
@@ -841,7 +822,6 @@ HLOCAL WIN_FUNC LocalReAlloc(HLOCAL hMem, SIZE_T uBytes, UINT uFlags) {
 	// Legacy Windows applications (pre-NX and DEP) may expect executable memory from LocalReAlloc.
 	tryMarkExecutable(result);
 	DEBUG_LOG("  -> %p\n", result);
-	wibo::lastError = ERROR_SUCCESS;
 	return result;
 }
 
@@ -854,7 +834,6 @@ HLOCAL WIN_FUNC LocalHandle(LPCVOID pMem) {
 LPVOID WIN_FUNC LocalLock(HLOCAL hMem) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("LocalLock(%p)\n", hMem);
-	wibo::lastError = ERROR_SUCCESS;
 	return hMem;
 }
 
@@ -862,7 +841,6 @@ BOOL WIN_FUNC LocalUnlock(HLOCAL hMem) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("LocalUnlock(%p)\n", hMem);
 	(void)hMem;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -989,7 +967,6 @@ DWORD WIN_FUNC GetCurrentDirectoryA(DWORD nBufferLength, LPSTR lpBuffer) {
 		return required;
 	}
 	std::memcpy(lpBuffer, path.c_str(), required);
-	wibo::lastError = ERROR_SUCCESS;
 	return required - 1;
 }
 
@@ -1015,7 +992,6 @@ DWORD WIN_FUNC GetCurrentDirectoryW(DWORD nBufferLength, LPWSTR lpBuffer) {
 		return required;
 	}
 	std::copy(widePath.begin(), widePath.end(), lpBuffer);
-	wibo::lastError = ERROR_SUCCESS;
 	return required - 1;
 }
 
@@ -1030,11 +1006,9 @@ int WIN_FUNC SetCurrentDirectoryA(LPCSTR lpPathName) {
 	std::error_code ec;
 	std::filesystem::current_path(hostPath, ec);
 	if (ec) {
-		errno = ec.value();
-		kernel32::setLastErrorFromErrno();
+		wibo::lastError = wibo::winErrorFromErrno(ec.value());
 		return 0;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return 1;
 }
 
@@ -1076,7 +1050,6 @@ DWORD WIN_FUNC GetLongPathNameA(LPCSTR lpszShortPath, LPSTR lpszLongPath, DWORD 
 		return required;
 	}
 	std::memcpy(lpszLongPath, longPath.c_str(), required);
-	wibo::lastError = ERROR_SUCCESS;
 	return required - 1;
 }
 
@@ -1106,7 +1079,6 @@ DWORD WIN_FUNC GetLongPathNameW(LPCWSTR lpszShortPath, LPWSTR lpszLongPath, DWOR
 		return required;
 	}
 	std::copy(wideLong.begin(), wideLong.end(), lpszLongPath);
-	wibo::lastError = ERROR_SUCCESS;
 	return required - 1;
 }
 
@@ -1158,8 +1130,6 @@ BOOL WIN_FUNC GetDiskFreeSpaceA(LPCSTR lpRootPathName, LPDWORD lpSectorsPerClust
 			  lpSectorsPerCluster ? *lpSectorsPerCluster : 0, lpBytesPerSector ? *lpBytesPerSector : 0,
 			  lpNumberOfFreeClusters ? *lpNumberOfFreeClusters : 0,
 			  lpTotalNumberOfClusters ? *lpTotalNumberOfClusters : 0);
-
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -1203,8 +1173,6 @@ BOOL WIN_FUNC GetDiskFreeSpaceExA(LPCSTR lpDirectoryName, uint64_t *lpFreeBytesA
 	DEBUG_LOG("\t-> host %s, free %llu, total %llu, total free %llu\n", resolvedPath.c_str(),
 			  static_cast<unsigned long long>(freeToCaller), static_cast<unsigned long long>(totalBytes),
 			  static_cast<unsigned long long>(totalFree));
-
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 

@@ -425,6 +425,9 @@ BOOL callDllMain(wibo::ModuleInfo &info, DWORD reason, LPVOID reserved) {
 		return TRUE;
 	}
 
+	// Reset last error
+	wibo::lastError = ERROR_SUCCESS;
+
 	using DllMainFunc = BOOL(WIN_FUNC *)(HMODULE, DWORD, LPVOID);
 	auto dllMain = reinterpret_cast<DllMainFunc>(entry);
 
@@ -789,6 +792,7 @@ void notifyDllThreadAttach() {
 	for (wibo::ModuleInfo *info : targets) {
 		callDllMain(*info, DLL_THREAD_ATTACH, nullptr);
 	}
+	wibo::lastError = ERROR_SUCCESS;
 }
 
 void notifyDllThreadDetach() {
@@ -804,6 +808,7 @@ void notifyDllThreadDetach() {
 	for (auto it = targets.rbegin(); it != targets.rend(); ++it) {
 		callDllMain(**it, DLL_THREAD_DETACH, nullptr);
 	}
+	wibo::lastError = ERROR_SUCCESS;
 }
 
 BOOL disableThreadNotifications(ModuleInfo *info) {
@@ -947,28 +952,24 @@ ModuleInfo *loadModule(const char *dllName) {
 				existing->refCount++;
 			}
 			DEBUG_LOG("  returning existing external module %s\n", existing->originalName.c_str());
-			lastError = ERROR_SUCCESS;
 			return existing;
 		}
 		bool pinned = reg->pinnedModules.count(existing) != 0;
 		if (!pinned) {
 			if (ModuleInfo *external = resolveAndLoadExternal()) {
 				DEBUG_LOG("  replaced builtin module %s with external copy\n", requested.c_str());
-				lastError = ERROR_SUCCESS;
 				return external;
 			} else if (diskError != ERROR_MOD_NOT_FOUND) {
 				lastError = diskError;
 				return nullptr;
 			}
 		}
-		lastError = ERROR_SUCCESS;
 		DEBUG_LOG("  returning builtin module %s\n", existing->originalName.c_str());
 		return existing;
 	}
 
 	if (ModuleInfo *external = resolveAndLoadExternal()) {
 		DEBUG_LOG("  loaded external module %s\n", requested.c_str());
-		lastError = ERROR_SUCCESS;
 		return external;
 	} else if (diskError != ERROR_MOD_NOT_FOUND) {
 		lastError = diskError;
@@ -989,7 +990,6 @@ ModuleInfo *loadModule(const char *dllName) {
 	}
 	if (builtin && builtin->moduleStub != nullptr) {
 		DEBUG_LOG("  falling back to builtin module %s\n", builtin->originalName.c_str());
-		lastError = (diskError != ERROR_SUCCESS) ? diskError : ERROR_SUCCESS;
 		return builtin;
 	}
 

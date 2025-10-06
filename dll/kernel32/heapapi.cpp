@@ -56,7 +56,6 @@ LPVOID heapAllocFromRecord(HeapObject *record, DWORD dwFlags, SIZE_T dwBytes) {
 	if (isExecutableHeap(record)) {
 		kernel32::tryMarkExecutable(mem);
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return mem;
 }
 
@@ -99,7 +98,6 @@ HANDLE WIN_FUNC HeapCreate(DWORD flOptions, SIZE_T dwInitialSize, SIZE_T dwMaxim
 	record->isProcessHeap = false;
 
 	HANDLE handle = wibo::handles().alloc(std::move(record), 0, 0);
-	wibo::lastError = ERROR_SUCCESS;
 	return handle;
 }
 
@@ -118,14 +116,12 @@ BOOL WIN_FUNC HeapDestroy(HANDLE hHeap) {
 	}
 	mi_heap_destroy(record->heap);
 	record->heap = nullptr;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
 HANDLE WIN_FUNC GetProcessHeap() {
 	HOST_CONTEXT_GUARD();
 	ensureProcessHeapInitialized();
-	wibo::lastError = ERROR_SUCCESS;
 	DEBUG_LOG("GetProcessHeap() -> %p\n", g_processHeapHandle);
 	return g_processHeapHandle;
 }
@@ -152,11 +148,9 @@ BOOL WIN_FUNC HeapSetInformation(HANDLE HeapHandle, HEAP_INFORMATION_CLASS HeapI
 			return FALSE;
 		}
 		record->compatibility = *static_cast<ULONG *>(HeapInformation);
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 	case HeapEnableTerminationOnCorruption:
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	case HeapOptimizeResources:
 		wibo::lastError = ERROR_CALL_NOT_IMPLEMENTED;
@@ -205,7 +199,6 @@ LPVOID WIN_FUNC HeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dw
 	if (lpMem == nullptr) {
 		void *alloc = heapAllocFromRecord(record.get(), dwFlags, dwBytes);
 		DEBUG_LOG("-> %p (alloc)\n", alloc);
-		wibo::lastError = ERROR_SUCCESS;
 		return alloc;
 	}
 	// if (!mi_heap_check_owned(record->heap, lpMem)) {
@@ -224,7 +217,6 @@ LPVOID WIN_FUNC HeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dw
 		if (!inplaceOnly) {
 			mi_free(lpMem);
 			DEBUG_LOG("-> NULL (freed)\n");
-			wibo::lastError = ERROR_SUCCESS;
 			return nullptr;
 		}
 		DEBUG_LOG("-> NULL (zero size with in-place flag)\n");
@@ -241,7 +233,6 @@ LPVOID WIN_FUNC HeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dw
 			return nullptr;
 		}
 		DEBUG_LOG("-> %p (in-place)\n", lpMem);
-		wibo::lastError = ERROR_SUCCESS;
 		return lpMem;
 	}
 
@@ -260,7 +251,6 @@ LPVOID WIN_FUNC HeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dw
 	if (isExecutableHeap(record.get())) {
 		tryMarkExecutable(ret);
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	DEBUG_LOG("-> %p\n", ret);
 	return ret;
 }
@@ -289,7 +279,6 @@ SIZE_T WIN_FUNC HeapSize(HANDLE hHeap, DWORD dwFlags, LPCVOID lpMem) {
 		return static_cast<SIZE_T>(-1);
 	}
 	size_t size = mi_usable_size(lpMem);
-	wibo::lastError = ERROR_SUCCESS;
 	return static_cast<SIZE_T>(size);
 }
 
@@ -298,7 +287,6 @@ BOOL WIN_FUNC HeapFree(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem) {
 	DEBUG_LOG("HeapFree(%p, 0x%x, %p)\n", hHeap, dwFlags, lpMem);
 	(void)dwFlags;
 	if (lpMem == nullptr) {
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 	auto record = wibo::handles().getAs<HeapObject>(hHeap);
@@ -320,7 +308,6 @@ BOOL WIN_FUNC HeapFree(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem) {
 	}
 	mi_free(lpMem);
 	DEBUG_LOG("-> SUCCESS\n");
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 

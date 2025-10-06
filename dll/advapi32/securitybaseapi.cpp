@@ -129,7 +129,6 @@ BOOL WIN_FUNC InitializeAcl(PACL pAcl, DWORD nAclLength, DWORD dwAclRevision) {
 	pAcl->AclSize = static_cast<WORD>(sizeof(ACL));
 	pAcl->AceCount = 0;
 	pAcl->Sbz2 = static_cast<WORD>(nAclLength);
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -199,7 +198,6 @@ BOOL WIN_FUNC AddAccessAllowedAce(PACL pAcl, DWORD dwAceRevision, DWORD AccessMa
 	std::memcpy(&ace->SidStart, sid, sidLen);
 	pAcl->AceCount = static_cast<WORD>(pAcl->AceCount + 1);
 	pAcl->AclSize = static_cast<WORD>(used + aceSize);
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -223,7 +221,6 @@ BOOL WIN_FUNC FindFirstFreeAce(PACL pAcl, LPVOID *pAce) {
 	}
 	*pAce = reinterpret_cast<BYTE *>(pAcl) + used;
 	pAcl->AclSize = static_cast<WORD>(std::max<size_t>(pAcl->AclSize, used));
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -253,7 +250,6 @@ BOOL WIN_FUNC GetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR pSecurityDescriptor
 		if (lpbDaclDefaulted) {
 			*lpbDaclDefaulted = FALSE;
 		}
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 	if (pDacl) {
@@ -262,7 +258,6 @@ BOOL WIN_FUNC GetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR pSecurityDescriptor
 	if (lpbDaclDefaulted) {
 		*lpbDaclDefaulted = (pSecurityDescriptor->Control & SE_DACL_DEFAULTED) ? TRUE : FALSE;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -278,7 +273,6 @@ PSID_IDENTIFIER_AUTHORITY WIN_FUNC GetSidIdentifierAuthority(PSID pSid) {
 		wibo::lastError = ERROR_INVALID_SID;
 		return nullptr;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return reinterpret_cast<PSID_IDENTIFIER_AUTHORITY>(&sid->IdentifierAuthority);
 }
 
@@ -294,7 +288,6 @@ PUCHAR WIN_FUNC GetSidSubAuthorityCount(PSID pSid) {
 		wibo::lastError = ERROR_INVALID_SID;
 		return nullptr;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return &sid->SubAuthorityCount;
 }
 
@@ -310,7 +303,6 @@ PDWORD WIN_FUNC GetSidSubAuthority(PSID pSid, DWORD nSubAuthority) {
 		wibo::lastError = ERROR_INVALID_SID;
 		return nullptr;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return &sid->SubAuthority[nSubAuthority];
 }
 
@@ -318,7 +310,6 @@ BOOL WIN_FUNC ImpersonateLoggedOnUser(HANDLE hToken) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: ImpersonateLoggedOnUser(%p)\n", hToken);
 	(void)hToken;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -342,7 +333,6 @@ BOOL WIN_FUNC DuplicateTokenEx(HANDLE hExistingToken, DWORD dwDesiredAccess, voi
 	auto newToken =
 		make_pin<TokenObject>(existing->obj.clone(), dwDesiredAccess == 0 ? existing->desiredAccess : dwDesiredAccess);
 	*phNewToken = wibo::handles().alloc(std::move(newToken), 0, 0);
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -360,7 +350,6 @@ BOOL WIN_FUNC CopySid(DWORD nDestinationSidLength, PSID pDestinationSid, PSID pS
 		return FALSE;
 	}
 	std::memcpy(pDestinationSid, pSourceSid, required);
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -382,7 +371,6 @@ BOOL WIN_FUNC InitializeSid(PSID sid, PSID_IDENTIFIER_AUTHORITY pIdentifierAutho
 	if (nSubAuthorityCount > 0) {
 		std::memset(sidStruct->SubAuthority, 0, sizeof(DWORD) * nSubAuthorityCount);
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -406,7 +394,6 @@ BOOL WIN_FUNC EqualSid(PSID pSid1, PSID pSid2) {
 	if (equal && sid1->SubAuthorityCount > 0) {
 		equal = std::memcmp(sid1->SubAuthority, sid2->SubAuthority, sizeof(DWORD) * sid1->SubAuthorityCount) == 0;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return equal ? TRUE : FALSE;
 }
 
@@ -424,7 +411,6 @@ BOOL WIN_FUNC SetKernelObjectSecurity(HANDLE Handle, SECURITY_INFORMATION Securi
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -442,7 +428,6 @@ BOOL WIN_FUNC InitializeSecurityDescriptor(PSECURITY_DESCRIPTOR pSecurityDescrip
 	pSecurityDescriptor->Group = nullptr;
 	pSecurityDescriptor->Sacl = nullptr;
 	pSecurityDescriptor->Dacl = nullptr;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -465,7 +450,6 @@ BOOL WIN_FUNC SetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR pSecurityDescriptor
 		pSecurityDescriptor->Dacl = nullptr;
 	}
 	pSecurityDescriptor->Control = control;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -501,7 +485,6 @@ BOOL WIN_FUNC GetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS To
 		}
 		tokenUser->User.SidPtr = sid;
 		tokenUser->User.Attributes = 0;
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 	if (TokenInformationClass == TOKEN_INFORMATION_CLASS::TokenStatistics) {
@@ -518,7 +501,6 @@ BOOL WIN_FUNC GetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS To
 		stats->tokenId.LowPart = 1;
 		stats->authenticationId.LowPart = 1;
 		stats->modifiedId.LowPart = 1;
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 	if (TokenInformationClass == TOKEN_INFORMATION_CLASS::TokenElevation) {
@@ -529,7 +511,6 @@ BOOL WIN_FUNC GetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS To
 			return FALSE;
 		}
 		*reinterpret_cast<DWORD *>(TokenInformation) = 0; // not elevated
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 	if (TokenInformationClass == TOKEN_INFORMATION_CLASS::TokenPrimaryGroup) {
@@ -546,7 +527,6 @@ BOOL WIN_FUNC GetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS To
 			return FALSE;
 		}
 		groupInfo->PrimaryGroup = sid;
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 	wibo::lastError = ERROR_NOT_SUPPORTED;
@@ -564,7 +544,6 @@ BOOL WIN_FUNC AdjustTokenPrivileges(HANDLE TokenHandle, BOOL DisableAllPrivilege
 	(void)BufferLength;
 	(void)PreviousState;
 	(void)ReturnLength;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -581,7 +560,6 @@ BOOL WIN_FUNC SetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS To
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 

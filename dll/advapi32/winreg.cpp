@@ -186,13 +186,11 @@ LSTATUS WIN_FUNC RegCreateKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD Reserved, LP
 	}
 	if (targetingBase) {
 		*phkResult = hKey;
-		wibo::lastError = ERROR_SUCCESS;
 		return ERROR_SUCCESS;
 	}
 	auto obj = make_pin<RegistryKeyObject>(std::move(targetPath));
 	auto handle = wibo::handles().alloc(std::move(obj), 0, 0);
 	*phkResult = reinterpret_cast<HKEY>(handle);
-	wibo::lastError = ERROR_SUCCESS;
 	return ERROR_SUCCESS;
 }
 
@@ -264,14 +262,12 @@ LSTATUS WIN_FUNC RegOpenKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD ulOptions, REG
 	if (!lpSubKey || lpSubKey[0] == 0) {
 		if (baseHandle->predefined) {
 			*phkResult = hKey;
-			wibo::lastError = ERROR_SUCCESS;
 			return ERROR_SUCCESS;
 		}
 	}
 	auto obj = make_pin<RegistryKeyObject>(std::move(targetPath));
 	auto handle = wibo::handles().alloc(std::move(obj), 0, 0);
 	*phkResult = reinterpret_cast<HKEY>(handle);
-	wibo::lastError = ERROR_SUCCESS;
 	return ERROR_SUCCESS;
 }
 
@@ -383,7 +379,6 @@ LSTATUS WIN_FUNC RegCloseKey(HKEY hKey) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("RegCloseKey(%p)\n", hKey);
 	if (isPredefinedKeyHandle(hKey)) {
-		wibo::lastError = ERROR_SUCCESS;
 		return ERROR_SUCCESS;
 	}
 	auto obj = wibo::handles().getAs<RegistryKeyObject>(hKey);
@@ -391,7 +386,6 @@ LSTATUS WIN_FUNC RegCloseKey(HKEY hKey) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return ERROR_INVALID_HANDLE;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return ERROR_SUCCESS;
 }
 

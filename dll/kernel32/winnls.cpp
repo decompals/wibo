@@ -85,7 +85,6 @@ namespace kernel32 {
 UINT WIN_FUNC GetACP() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetACP() -> %u\n", 28591);
-	wibo::lastError = ERROR_SUCCESS;
 	return 28591; // Latin1 (ISO/IEC 8859-1)
 }
 
@@ -115,8 +114,6 @@ BOOL WIN_FUNC GetCPInfo(UINT CodePage, LPCPINFO lpCPInfo) {
 	std::fill(lpCPInfo->DefaultChar, lpCPInfo->DefaultChar + MAX_DEFAULTCHAR, 0);
 	lpCPInfo->DefaultChar[0] = '?';
 	std::fill(lpCPInfo->LeadByte, lpCPInfo->LeadByte + MAX_LEADBYTES, 0);
-
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -140,7 +137,6 @@ int WIN_FUNC CompareStringA(LCID Locale, DWORD dwCmpFlags, LPCSTR lpString1, int
 
 	std::string str1(lpString1, lpString1 + cchCount1);
 	std::string str2(lpString2, lpString2 + cchCount2);
-	wibo::lastError = ERROR_SUCCESS;
 	return compareStrings(str1, str2, dwCmpFlags);
 }
 
@@ -157,7 +153,6 @@ int WIN_FUNC CompareStringW(LCID Locale, DWORD dwCmpFlags, LPCWCH lpString1, int
 
 	std::string str1 = wideStringToString(lpString1, cchCount1);
 	std::string str2 = wideStringToString(lpString2, cchCount2);
-	wibo::lastError = ERROR_SUCCESS;
 	return compareStrings(str1, str2, dwCmpFlags);
 }
 
@@ -165,7 +160,6 @@ BOOL WIN_FUNC IsValidCodePage(UINT CodePage) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("IsValidCodePage(%u)\n", CodePage);
 	(void)CodePage;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -177,7 +171,6 @@ BOOL WIN_FUNC IsValidLocale(LCID Locale, DWORD dwFlags) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -190,7 +183,6 @@ int WIN_FUNC GetLocaleInfoA(LCID Locale, LCTYPE LCType, LPSTR lpLCData, int cchD
 	size_t required = value.size() + 1;
 
 	if (cchData == 0) {
-		wibo::lastError = ERROR_SUCCESS;
 		return static_cast<int>(required);
 	}
 	if (!lpLCData || cchData < 0) {
@@ -203,7 +195,6 @@ int WIN_FUNC GetLocaleInfoA(LCID Locale, LCTYPE LCType, LPSTR lpLCData, int cchD
 	}
 
 	std::memcpy(lpLCData, value.c_str(), required);
-	wibo::lastError = ERROR_SUCCESS;
 	return static_cast<int>(required);
 }
 
@@ -217,7 +208,6 @@ int WIN_FUNC GetLocaleInfoW(LCID Locale, LCTYPE LCType, LPWSTR lpLCData, int cch
 	size_t required = wide.size();
 
 	if (cchData == 0) {
-		wibo::lastError = ERROR_SUCCESS;
 		return static_cast<int>(required);
 	}
 	if (!lpLCData || cchData < 0) {
@@ -230,7 +220,6 @@ int WIN_FUNC GetLocaleInfoW(LCID Locale, LCTYPE LCType, LPWSTR lpLCData, int cch
 	}
 
 	std::memcpy(lpLCData, wide.data(), required * sizeof(uint16_t));
-	wibo::lastError = ERROR_SUCCESS;
 	return static_cast<int>(required);
 }
 
@@ -244,14 +233,12 @@ BOOL WIN_FUNC EnumSystemLocalesA(LOCALE_ENUMPROCA lpLocaleEnumProc, DWORD dwFlag
 	}
 	char localeId[] = "00000409"; // en-US
 	BOOL callbackResult = lpLocaleEnumProc(localeId);
-	wibo::lastError = ERROR_SUCCESS;
 	return callbackResult;
 }
 
 LCID WIN_FUNC GetUserDefaultLCID() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetUserDefaultLCID()\n");
-	wibo::lastError = ERROR_SUCCESS;
 	return 0x0409; // en-US
 }
 
@@ -259,7 +246,6 @@ BOOL WIN_FUNC IsDBCSLeadByte(BYTE TestChar) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("IsDBCSLeadByte(%u)\n", TestChar);
 	(void)TestChar;
-	wibo::lastError = ERROR_SUCCESS;
 	return FALSE;
 }
 
@@ -276,22 +262,20 @@ BOOL WIN_FUNC IsDBCSLeadByteEx(UINT CodePage, BYTE TestChar) {
 		return FALSE;
 	};
 
+	wibo::lastError = ERROR_SUCCESS;
 	switch (CodePage) {
 	case 932: // Shift-JIS
-		wibo::lastError = ERROR_SUCCESS;
 		return inRanges({{0x81, 0x9F}, {0xE0, 0xFC}});
 	case 936:  // GBK
 	case 949:  // Korean
 	case 950:  // Big5
 	case 1361: // Johab
-		wibo::lastError = ERROR_SUCCESS;
 		return inRanges({{0x81, 0xFE}});
 	case 0: // CP_ACP
 	case 1: // CP_OEMCP
 	case 2: // CP_MACCP
 	case 3: // CP_THREAD_ACP
 	default:
-		wibo::lastError = ERROR_SUCCESS;
 		return FALSE;
 	}
 }
@@ -313,7 +297,6 @@ int WIN_FUNC LCMapStringW(LCID Locale, DWORD dwMapFlags, LPCWCH lpSrcStr, int cc
 	}
 
 	if (!lpDestStr || cchDest == 0) {
-		wibo::lastError = ERROR_SUCCESS;
 		return static_cast<int>(srcLen);
 	}
 	if (cchDest < static_cast<int>(srcLen)) {
@@ -341,7 +324,6 @@ int WIN_FUNC LCMapStringW(LCID Locale, DWORD dwMapFlags, LPCWCH lpSrcStr, int cc
 	}
 
 	std::memcpy(lpDestStr, buffer.data(), srcLen * sizeof(uint16_t));
-	wibo::lastError = ERROR_SUCCESS;
 	return static_cast<int>(srcLen);
 }
 
@@ -362,6 +344,7 @@ int WIN_FUNC LCMapStringA(LCID Locale, DWORD dwMapFlags, LPCCH lpSrcStr, int cch
 	int wideResult =
 		LCMapStringW(Locale, dwMapFlags, wideSrc.data(), length, wideDest.empty() ? nullptr : wideDest.data(), cchDest);
 	if (wideResult == 0) {
+		wibo::lastError = ERROR_SUCCESS;
 		return 0;
 	}
 
@@ -376,7 +359,6 @@ int WIN_FUNC LCMapStringA(LCID Locale, DWORD dwMapFlags, LPCCH lpSrcStr, int cch
 		return 0;
 	}
 	std::memcpy(lpDestStr, mapped.c_str(), bytesToCopy);
-	wibo::lastError = ERROR_SUCCESS;
 	return wideResult;
 }
 

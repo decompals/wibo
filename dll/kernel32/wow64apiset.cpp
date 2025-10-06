@@ -14,7 +14,6 @@ BOOL WIN_FUNC Wow64DisableWow64FsRedirection(PVOID *OldValue) {
 	if (OldValue) {
 		*OldValue = nullptr;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -22,7 +21,6 @@ BOOL WIN_FUNC Wow64RevertWow64FsRedirection(PVOID OldValue) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: Wow64RevertWow64FsRedirection(%p)\n", OldValue);
 	(void)OldValue;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -47,7 +45,6 @@ BOOL WIN_FUNC IsWow64Process(HANDLE hProcess, PBOOL Wow64Process) {
 	}
 
 	*Wow64Process = FALSE;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 

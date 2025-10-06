@@ -557,6 +557,9 @@ int main(int argc, char **argv) {
 		abort();
 	}
 
+	// Reset last error
+	wibo::lastError = 0;
+
 	// Invoke the damn thing
 	{
 		GUEST_CONTEXT_GUARD(&tib);

@@ -29,7 +29,6 @@ BOOL WIN_FUNC OpenProcessToken(HANDLE ProcessHandle, DWORD DesiredAccess, PHANDL
 	}
 	auto token = make_pin<TokenObject>(std::move(obj), DesiredAccess);
 	*TokenHandle = wibo::handles().alloc(std::move(token), 0, 0);
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 

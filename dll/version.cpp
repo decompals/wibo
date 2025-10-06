@@ -192,7 +192,6 @@ static bool loadVersionResource(const char *fileName, std::vector<uint8_t> &buff
 
 	const uint8_t *start = static_cast<const uint8_t *>(loc.data);
 	buffer.assign(start, start + loc.size);
-	wibo::lastError = ERROR_SUCCESS;
 	return true;
 }
 
@@ -235,7 +234,6 @@ unsigned int WIN_FUNC GetFileVersionInfoA(const char *lptstrFilename, unsigned i
 	if (buffer.size() < dwLen) {
 		std::memset(static_cast<uint8_t *>(lpData) + buffer.size(), 0, dwLen - buffer.size());
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return 1;
 }
 

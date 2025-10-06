@@ -14,7 +14,6 @@ BOOL WIN_FUNC QueryPerformanceCounter(LARGE_INTEGER *lpPerformanceCount) {
 		return FALSE;
 	}
 	*lpPerformanceCount = 0;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -26,7 +25,6 @@ BOOL WIN_FUNC QueryPerformanceFrequency(LARGE_INTEGER *lpFrequency) {
 		return FALSE;
 	}
 	*lpFrequency = 1;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 

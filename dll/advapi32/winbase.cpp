@@ -111,7 +111,6 @@ BOOL WIN_FUNC LookupAccountSidW(LPCWSTR lpSystemName, PSID Sid, LPWSTR Name, LPD
 	*peUse = SidTypeWellKnownGroup;
 	*cchName = requiredAccount;
 	*cchReferencedDomainName = requiredDomain;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -127,7 +126,6 @@ BOOL WIN_FUNC LookupPrivilegeValueA(LPCSTR lpSystemName, LPCSTR lpName, PLUID lp
 	std::string normalized = normalizePrivilegeName(lpName);
 	LUID luid = lookupOrGeneratePrivilegeLuid(normalized);
 	*lpLuid = luid;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -143,7 +141,6 @@ BOOL WIN_FUNC LookupPrivilegeValueW(LPCWSTR lpSystemName, LPCWSTR lpName, PLUID 
 	std::string normalized = normalizePrivilegeName(ansiName);
 	LUID luid = lookupOrGeneratePrivilegeLuid(normalized);
 	*lpLuid = luid;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -163,7 +160,6 @@ BOOL WIN_FUNC GetUserNameA(LPSTR lpBuffer, LPDWORD pcbBuffer) {
 	}
 	std::memcpy(lpBuffer, name, needed);
 	*pcbBuffer = static_cast<DWORD>(needed);
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -182,7 +178,6 @@ BOOL WIN_FUNC GetUserNameW(LPWSTR lpBuffer, LPDWORD pcbBuffer) {
 	}
 	std::memcpy(lpBuffer, kAccountSystem, needed * sizeof(WCHAR));
 	*pcbBuffer = static_cast<DWORD>(needed);
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 

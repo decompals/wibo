@@ -22,13 +22,10 @@ static BOOL isRunningUnderWine(void) {
 }
 
 static void check_success_w(void) {
-	ACTCTX_SECTION_KEYED_DATA data = { 0 };
+	ACTCTX_SECTION_KEYED_DATA data = {0};
 	data.cbSize = sizeof(data);
 	SetLastError(0);
-	BOOL ok = FindActCtxSectionStringW(0, NULL, ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION,
-									 L"msvcr80.dll", &data);
-	TEST_CHECK(ok);
-	TEST_CHECK_EQ(ERROR_SUCCESS, GetLastError());
+	TEST_CHECK(FindActCtxSectionStringW(0, NULL, ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION, L"msvcr80.dll", &data));
 	TEST_CHECK_EQ(1u, data.ulDataFormatVersion);
 	TEST_CHECK((data.ulFlags & ACTCTX_SECTION_KEYED_DATA_FLAG_FOUND_IN_ACTCTX) != 0);
 	TEST_CHECK(data.lpData != NULL);
@@ -38,14 +35,11 @@ static void check_success_w(void) {
 }
 
 static void check_success_a(void) {
-	ACTCTX_SECTION_KEYED_DATA data = { 0 };
+	ACTCTX_SECTION_KEYED_DATA data = {0};
 	data.cbSize = sizeof(data);
 	SetLastError(0);
-	BOOL ok = FindActCtxSectionStringA(FIND_ACTCTX_SECTION_KEY_RETURN_HACTCTX, NULL,
-									 ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION,
-									 "msvcp80.dll", &data);
-	TEST_CHECK(ok);
-	TEST_CHECK_EQ(ERROR_SUCCESS, GetLastError());
+	TEST_CHECK(FindActCtxSectionStringA(FIND_ACTCTX_SECTION_KEY_RETURN_HACTCTX, NULL,
+										ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION, "msvcp80.dll", &data));
 	TEST_CHECK((data.ulFlags & ACTCTX_SECTION_KEYED_DATA_FLAG_FOUND_IN_ACTCTX) != 0);
 	TEST_CHECK(data.lpData != NULL);
 	TEST_CHECK(data.hActCtx != NULL);
@@ -53,46 +47,43 @@ static void check_success_a(void) {
 }
 
 static void check_invalid_parameters(void) {
-	ACTCTX_SECTION_KEYED_DATA data = { 0 };
+	ACTCTX_SECTION_KEYED_DATA data = {0};
 	data.cbSize = sizeof(data);
 	GUID fakeGuid = {0};
 	SetLastError(0);
-	BOOL ok = FindActCtxSectionStringW(0, &fakeGuid, ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION,
-									 L"msvcr80.dll", &data);
+	BOOL ok = FindActCtxSectionStringW(0, &fakeGuid, ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION, L"msvcr80.dll", &data);
 	TEST_CHECK(!ok);
 	TEST_CHECK_EQ(ERROR_INVALID_PARAMETER, GetLastError());
 
-	ACTCTX_SECTION_KEYED_DATA sized = { 0 };
+	ACTCTX_SECTION_KEYED_DATA sized = {0};
 	sized.cbSize = sizeof(data) - 4;
 	SetLastError(0);
-	ok = FindActCtxSectionStringW(0, NULL, ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION,
-							L"msvcr80.dll", &sized);
+	ok = FindActCtxSectionStringW(0, NULL, ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION, L"msvcr80.dll", &sized);
 	TEST_CHECK(!ok);
 	TEST_CHECK_EQ(ERROR_INSUFFICIENT_BUFFER, GetLastError());
 
-	ACTCTX_SECTION_KEYED_DATA flags = { 0 };
+	ACTCTX_SECTION_KEYED_DATA flags = {0};
 	flags.cbSize = sizeof(flags);
 	SetLastError(0);
-	ok = FindActCtxSectionStringW(0x2, NULL, ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION,
-							L"msvcr80.dll", &flags);
+	ok = FindActCtxSectionStringW(0x2, NULL, ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION, L"msvcr80.dll", &flags);
 	TEST_CHECK(!ok);
 	TEST_CHECK_EQ(ERROR_INVALID_PARAMETER, GetLastError());
 }
 
 static void check_missing_entries(void) {
-	ACTCTX_SECTION_KEYED_DATA data = { 0 };
+	ACTCTX_SECTION_KEYED_DATA data = {0};
 	data.cbSize = sizeof(data);
 	SetLastError(0);
-	BOOL ok = FindActCtxSectionStringW(0, NULL, ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION,
-									 L"totally_missing.dll", &data);
+	BOOL ok =
+		FindActCtxSectionStringW(0, NULL, ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION, L"totally_missing.dll", &data);
 	TEST_CHECK(!ok);
 	TEST_CHECK_EQ(ERROR_SXS_KEY_NOT_FOUND, GetLastError());
 
-	ACTCTX_SECTION_KEYED_DATA wrongSection = { 0 };
+	ACTCTX_SECTION_KEYED_DATA wrongSection = {0};
 	wrongSection.cbSize = sizeof(wrongSection);
 	SetLastError(0);
-	ok = FindActCtxSectionStringW(0, NULL, ACTIVATION_CONTEXT_SECTION_ASSEMBLY_INFORMATION,
-							L"msvcr80.dll", &wrongSection);
+	ok = FindActCtxSectionStringW(0, NULL, ACTIVATION_CONTEXT_SECTION_ASSEMBLY_INFORMATION, L"msvcr80.dll",
+								  &wrongSection);
 	TEST_CHECK(!ok);
 	TEST_CHECK_EQ(ERROR_SXS_KEY_NOT_FOUND, GetLastError());
 }

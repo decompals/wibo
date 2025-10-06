@@ -109,7 +109,6 @@ BOOL WIN_FUNC ReleaseMutex(HANDLE hMutex) {
 	if (notify) {
 		mu->cv.notify_one();
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -220,7 +219,6 @@ BOOL WIN_FUNC ReleaseSemaphore(HANDLE hSemaphore, LONG lReleaseCount, PLONG lpPr
 	if (lpPreviousCount) {
 		*lpPreviousCount = prev;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -233,7 +231,6 @@ BOOL WIN_FUNC SetEvent(HANDLE hEvent) {
 		return FALSE;
 	}
 	ev->set();
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -246,7 +243,6 @@ BOOL WIN_FUNC ResetEvent(HANDLE hEvent) {
 		return FALSE;
 	}
 	ev->reset();
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -380,7 +376,6 @@ BOOL WIN_FUNC InitializeCriticalSectionEx(LPCRITICAL_SECTION lpCriticalSection, 
 	}
 	std::memset(lpCriticalSection, 0, sizeof(*lpCriticalSection));
 	lpCriticalSection->SpinCount = dwSpinCount;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -393,7 +388,6 @@ BOOL WIN_FUNC InitializeCriticalSectionAndSpinCount(LPCRITICAL_SECTION lpCritica
 	}
 	std::memset(lpCriticalSection, 0, sizeof(*lpCriticalSection));
 	lpCriticalSection->SpinCount = dwSpinCount;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -432,7 +426,6 @@ BOOL WIN_FUNC InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBO
 	if (lpContext) {
 		*lpContext = nullptr;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -447,7 +440,6 @@ BOOL WIN_FUNC InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpC
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	(void)lpContext;
 	return TRUE;
 }

@@ -511,7 +511,6 @@ HANDLE WIN_FUNC CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMap
 		mapping->maxSize = size;
 	}
 
-	wibo::lastError = ERROR_SUCCESS;
 	return wibo::handles().alloc(std::move(mapping), 0, 0);
 }
 
@@ -658,7 +657,6 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 		std::lock_guard guard(g_viewInfoMutex);
 		g_viewInfo.emplace(view.viewBase, std::move(view));
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return viewPtr;
 }
 
@@ -708,7 +706,6 @@ BOOL WIN_FUNC UnmapViewOfFile(LPCVOID lpBaseAddress) {
 	if (length != 0) {
 		munmap(base, length);
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -766,10 +763,9 @@ LPVOID WIN_FUNC VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocation
 		int advice = MADV_DONTNEED;
 #endif
 		if (madvise(reinterpret_cast<void *>(start), length, advice) != 0) {
-			wibo::lastError = wibo::winErrorFromErrno(errno);
+			setLastErrorFromErrno();
 			return nullptr;
 		}
-		wibo::lastError = ERROR_SUCCESS;
 		return reinterpret_cast<LPVOID>(start);
 	}
 
@@ -828,7 +824,7 @@ LPVOID WIN_FUNC VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocation
 			result = alignedReserve(length, prot, flags);
 		}
 		if (result == MAP_FAILED) {
-			wibo::lastError = wibo::winErrorFromErrno(errno);
+			setLastErrorFromErrno();
 			return nullptr;
 		}
 		if (reinterpret_cast<uintptr_t>(result) >= 0x80000000) {
@@ -843,7 +839,6 @@ LPVOID WIN_FUNC VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocation
 		allocation.allocationProtect = flProtect;
 		allocation.pageProtect.assign(length / pageSize, commit ? flProtect : 0);
 		g_virtualAllocations[actualBase] = std::move(allocation);
-		wibo::lastError = ERROR_SUCCESS;
 		return result;
 	}
 
@@ -892,12 +887,11 @@ LPVOID WIN_FUNC VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocation
 		void *result = mmap(reinterpret_cast<void *>(run.first), run.second, translateProtect(flProtect),
 							MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
 		if (result == MAP_FAILED) {
-			wibo::lastError = wibo::winErrorFromErrno(errno);
+			setLastErrorFromErrno();
 			return nullptr;
 		}
 		markCommitted(*region, run.first, run.second, flProtect);
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	DEBUG_LOG("VirtualAlloc commit success -> %p\n", reinterpret_cast<void *>(start));
 	return reinterpret_cast<LPVOID>(start);
 }
@@ -945,10 +939,9 @@ BOOL WIN_FUNC VirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType) {
 		g_virtualAllocations.erase(exact);
 		lk.unlock();
 		if (munmap(lpAddress, length) != 0) {
-			wibo::lastError = wibo::winErrorFromErrno(errno);
+			setLastErrorFromErrno();
 			return FALSE;
 		}
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 
@@ -987,11 +980,10 @@ BOOL WIN_FUNC VirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType) {
 	void *result = mmap(reinterpret_cast<void *>(start), length, PROT_NONE,
 						MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED | MAP_NORESERVE, -1, 0);
 	if (result == MAP_FAILED) {
-		wibo::lastError = wibo::winErrorFromErrno(errno);
+		setLastErrorFromErrno();
 		return FALSE;
 	}
 	markDecommitted(region, start, length);
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -1040,7 +1032,7 @@ BOOL WIN_FUNC VirtualProtect(LPVOID lpAddress, SIZE_T dwSize, DWORD flNewProtect
 
 	int prot = translateProtect(flNewProtect);
 	if (mprotect(reinterpret_cast<void *>(start), end - start, prot) != 0) {
-		wibo::lastError = wibo::winErrorFromErrno(errno);
+		setLastErrorFromErrno();
 		return FALSE;
 	}
 	for (size_t i = 0; i < pageCount; ++i) {
@@ -1051,7 +1043,6 @@ BOOL WIN_FUNC VirtualProtect(LPVOID lpAddress, SIZE_T dwSize, DWORD flNewProtect
 	if (lpflOldProtect) {
 		*lpflOldProtect = previousProtect;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -1077,17 +1068,14 @@ SIZE_T WIN_FUNC VirtualQuery(LPCVOID lpAddress, PMEMORY_BASIC_INFORMATION lpBuff
 	MEMORY_BASIC_INFORMATION info{};
 	if (moduleRegionForAddress(pageBase, info)) {
 		*lpBuffer = info;
-		wibo::lastError = ERROR_SUCCESS;
 		return sizeof(MEMORY_BASIC_INFORMATION);
 	}
 	if (mappedViewRegionForAddress(request, pageBase, info)) {
 		*lpBuffer = info;
-		wibo::lastError = ERROR_SUCCESS;
 		return sizeof(MEMORY_BASIC_INFORMATION);
 	}
 	if (virtualAllocationRegionForAddress(pageBase, info)) {
 		*lpBuffer = info;
-		wibo::lastError = ERROR_SUCCESS;
 		return sizeof(MEMORY_BASIC_INFORMATION);
 	}
 
@@ -1107,7 +1095,6 @@ BOOL WIN_FUNC GetProcessWorkingSetSize(HANDLE hProcess, PSIZE_T lpMinimumWorking
 	}
 	*lpMinimumWorkingSetSize = 32 * 1024 * 1024;  // 32 MiB stub
 	*lpMaximumWorkingSetSize = 128 * 1024 * 1024; // 128 MiB stub
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -1118,7 +1105,6 @@ BOOL WIN_FUNC SetProcessWorkingSetSize(HANDLE hProcess, SIZE_T dwMinimumWorkingS
 	(void)hProcess;
 	(void)dwMinimumWorkingSetSize;
 	(void)dwMaximumWorkingSetSize;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 

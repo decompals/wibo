@@ -33,7 +33,6 @@ BOOL WIN_FUNC SystemTimeToFileTime(const SYSTEMTIME *lpSystemTime, LPFILETIME lp
 		return FALSE;
 	}
 	*lpFileTime = result;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -63,7 +62,6 @@ BOOL WIN_FUNC FileTimeToSystemTime(const FILETIME *lpFileTime, LPSYSTEMTIME lpSy
 	lpSystemTime->wMinute = static_cast<WORD>((secondsOfDay % 3600U) / 60U);
 	lpSystemTime->wSecond = static_cast<WORD>(secondsOfDay % 60U);
 	lpSystemTime->wMilliseconds = static_cast<WORD>(hundredNs / HUNDRED_NS_PER_MILLISECOND);
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -113,7 +111,6 @@ BOOL WIN_FUNC FileTimeToLocalFileTime(const FILETIME *lpFileTime, LPFILETIME lpL
 		return FALSE;
 	}
 	*lpLocalFileTime = result;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -156,7 +153,6 @@ BOOL WIN_FUNC LocalFileTimeToFileTime(const FILETIME *lpLocalFileTime, LPFILETIM
 		return FALSE;
 	}
 	*lpFileTime = result;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -192,7 +188,6 @@ BOOL WIN_FUNC DosDateTimeToFileTime(WORD wFatDate, WORD wFatTime, LPFILETIME lpF
 	}
 	uint64_t ticks = (static_cast<uint64_t>(localSeconds) + UNIX_TIME_ZERO / HUNDRED_NS_PER_SECOND) * 10000000ULL;
 	*lpFileTime = fileTimeFromDuration(ticks);
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -222,7 +217,6 @@ BOOL WIN_FUNC FileTimeToDosDateTime(const FILETIME *lpFileTime, LPWORD lpFatDate
 	*lpFatDate = static_cast<WORD>(((year - 1980) << 9) | ((tmValue.tm_mon + 1) << 5) | tmValue.tm_mday);
 	*lpFatTime = static_cast<WORD>(((tmValue.tm_hour & 0x1F) << 11) | ((tmValue.tm_min & 0x3F) << 5) |
 								   ((tmValue.tm_sec / 2) & 0x1F));
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -279,7 +273,6 @@ DWORD WIN_FUNC GetTimeZoneInformation(LPTIME_ZONE_INFORMATION lpTimeZoneInformat
 	} else {
 		result = TIME_ZONE_ID_STANDARD;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return result;
 }
 

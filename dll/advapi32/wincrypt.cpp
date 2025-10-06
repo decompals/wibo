@@ -211,7 +211,6 @@ BOOL WIN_FUNC CryptReleaseContext(HCRYPTPROV hProv, DWORD dwFlags) {
 	DEBUG_LOG("STUB: CryptReleaseContext(%p, %u)\n", reinterpret_cast<void *>(static_cast<uintptr_t>(hProv)), dwFlags);
 	(void)hProv;
 	(void)dwFlags;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -227,7 +226,6 @@ BOOL WIN_FUNC CryptAcquireContextW(HCRYPTPROV *phProv, LPCWSTR pszContainer, LPC
 		return FALSE;
 	}
 	*phProv = static_cast<HCRYPTPROV>(reinterpret_cast<uintptr_t>(&dummyProvider));
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -246,7 +244,6 @@ BOOL WIN_FUNC CryptGenRandom(HCRYPTPROV hProv, DWORD dwLen, BYTE *pbBuffer) {
 		return FALSE;
 	}
 
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -277,7 +274,6 @@ BOOL WIN_FUNC CryptCreateHash(HCRYPTPROV hProv, ALG_ID Algid, HCRYPTKEY hKey, DW
 	hash->data.clear();
 	hash->digest.clear();
 	*phHash = hashHandleFromObject(hash);
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -299,7 +295,6 @@ BOOL WIN_FUNC CryptHashData(HCRYPTHASH hHash, const BYTE *pbData, DWORD dwDataLe
 		hash->digestComputed = false;
 		hash->digest.clear();
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -321,7 +316,6 @@ BOOL WIN_FUNC CryptGetHashParam(HCRYPTHASH hHash, DWORD dwParam, BYTE *pbData, D
 		DWORD required = sizeof(ALG_ID);
 		if (!pbData) {
 			*pdwDataLen = required;
-			wibo::lastError = ERROR_SUCCESS;
 			return TRUE;
 		}
 		if (*pdwDataLen < required) {
@@ -331,7 +325,6 @@ BOOL WIN_FUNC CryptGetHashParam(HCRYPTHASH hHash, DWORD dwParam, BYTE *pbData, D
 		}
 		memcpy(pbData, &hash->algid, required);
 		*pdwDataLen = required;
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 	case HP_HASHSIZE: {
@@ -349,7 +342,6 @@ BOOL WIN_FUNC CryptGetHashParam(HCRYPTHASH hHash, DWORD dwParam, BYTE *pbData, D
 		}
 		if (!pbData) {
 			*pdwDataLen = sizeof(DWORD);
-			wibo::lastError = ERROR_SUCCESS;
 			return TRUE;
 		}
 		if (*pdwDataLen < sizeof(DWORD)) {
@@ -359,7 +351,6 @@ BOOL WIN_FUNC CryptGetHashParam(HCRYPTHASH hHash, DWORD dwParam, BYTE *pbData, D
 		}
 		memcpy(pbData, &size, sizeof(DWORD));
 		*pdwDataLen = sizeof(DWORD);
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 	case HP_HASHVAL: {
@@ -370,7 +361,6 @@ BOOL WIN_FUNC CryptGetHashParam(HCRYPTHASH hHash, DWORD dwParam, BYTE *pbData, D
 		DWORD required = static_cast<DWORD>(hash->digest.size());
 		if (!pbData) {
 			*pdwDataLen = required;
-			wibo::lastError = ERROR_SUCCESS;
 			return TRUE;
 		}
 		if (*pdwDataLen < required) {
@@ -380,7 +370,6 @@ BOOL WIN_FUNC CryptGetHashParam(HCRYPTHASH hHash, DWORD dwParam, BYTE *pbData, D
 		}
 		memcpy(pbData, hash->digest.data(), required);
 		*pdwDataLen = required;
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 	default:
@@ -398,7 +387,6 @@ BOOL WIN_FUNC CryptDestroyHash(HCRYPTHASH hHash) {
 		return FALSE;
 	}
 	delete hash;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 

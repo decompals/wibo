@@ -63,7 +63,6 @@ BOOL WIN_FUNC CreatePipe(PHANDLE hReadPipe, PHANDLE hWritePipe, LPSECURITY_ATTRI
 	writeObj->shareAccess = FILE_SHARE_READ | FILE_SHARE_WRITE;
 	*hReadPipe = wibo::handles().alloc(std::move(readObj), FILE_GENERIC_READ, 0);
 	*hWritePipe = wibo::handles().alloc(std::move(writeObj), FILE_GENERIC_WRITE, 0);
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 

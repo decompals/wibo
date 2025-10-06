@@ -111,8 +111,7 @@ bool computeFullPath(const std::string &input, FullPathInfo &outInfo) {
 	std::error_code ec;
 	std::filesystem::path absPath = std::filesystem::absolute(hostPath, ec);
 	if (ec) {
-		errno = ec.value();
-		kernel32::setLastErrorFromErrno();
+		wibo::lastError = wibo::winErrorFromErrno(ec.value());
 		return false;
 	}
 
@@ -266,7 +265,6 @@ bool tryOpenConsoleDevice(DWORD dwDesiredAccess, DWORD dwShareMode, DWORD dwCrea
 		outHandle = INVALID_HANDLE_VALUE;
 		return true;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return true;
 }
 
@@ -306,19 +304,16 @@ DWORD WIN_FUNC GetFileAttributesA(LPCSTR lpFileName) {
 
 	if (endsWith(pathStr, "/license.dat")) {
 		DEBUG_LOG("MWCC license override\n");
-		wibo::lastError = ERROR_SUCCESS;
 		return FILE_ATTRIBUTE_NORMAL;
 	}
 
 	std::error_code ec;
 	auto status = std::filesystem::status(path, ec);
 	if (ec) {
-		errno = ec.value();
-		setLastErrorFromErrno();
+		wibo::lastError = wibo::winErrorFromErrno(ec.value());
 		return INVALID_FILE_ATTRIBUTES;
 	}
 
-	wibo::lastError = ERROR_SUCCESS;
 	switch (status.type()) {
 	case std::filesystem::file_type::regular:
 		DEBUG_LOG("File exists\n");
@@ -348,7 +343,6 @@ UINT WIN_FUNC GetDriveTypeA(LPCSTR lpRootPathName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: GetDriveTypeA(%s)\n", lpRootPathName ? lpRootPathName : "(null)");
 	(void)lpRootPathName;
-	wibo::lastError = ERROR_SUCCESS;
 	return DRIVE_FIXED;
 }
 
@@ -356,7 +350,6 @@ UINT WIN_FUNC GetDriveTypeW(LPCWSTR lpRootPathName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: GetDriveTypeW(%p)\n", lpRootPathName);
 	(void)lpRootPathName;
-	wibo::lastError = ERROR_SUCCESS;
 	return DRIVE_FIXED;
 }
 
@@ -386,7 +379,6 @@ BOOL WIN_FUNC GetVolumeInformationA(LPCSTR lpRootPathName, LPSTR lpVolumeNameBuf
 			lpFileSystemNameBuffer[copyLen] = '\0';
 		}
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -418,7 +410,6 @@ BOOL WIN_FUNC GetVolumeInformationW(LPCWSTR lpRootPathName, LPWSTR lpVolumeNameB
 			lpFileSystemNameBuffer[copyLen] = 0;
 		}
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -448,7 +439,6 @@ BOOL WIN_FUNC WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWr
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("WriteFile(%p, %p, %u, %p, %p)\n", hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten,
 			  lpOverlapped);
-	wibo::lastError = ERROR_SUCCESS;
 
 	HandleMeta meta{};
 	auto file = wibo::handles().getAs<FileObject>(hFile, &meta);
@@ -514,7 +504,6 @@ BOOL WIN_FUNC FlushFileBuffers(HANDLE hFile) {
 		setLastErrorFromErrno();
 		return FALSE;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -523,7 +512,6 @@ BOOL WIN_FUNC ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("ReadFile(%p, %p, %u, %p, %p)\n", hFile, lpBuffer, nNumberOfBytesToRead, lpNumberOfBytesRead,
 			  lpOverlapped);
-	wibo::lastError = ERROR_SUCCESS;
 
 	HandleMeta meta{};
 	auto file = wibo::handles().getAs<FileObject>(hFile, &meta);
@@ -806,8 +794,6 @@ HANDLE WIN_FUNC CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwSh
 	if ((dwCreationDisposition == OPEN_ALWAYS && existedBefore) ||
 		(dwCreationDisposition == CREATE_ALWAYS && existedBefore)) {
 		wibo::lastError = ERROR_ALREADY_EXISTS;
-	} else {
-		wibo::lastError = ERROR_SUCCESS;
 	}
 
 	DEBUG_LOG("-> %p (createdNew=%d, truncate=%d)\n", handle, createdNew ? 1 : 0, truncateExisting ? 1 : 0);
@@ -837,12 +823,11 @@ BOOL WIN_FUNC DeleteFileA(LPCSTR lpFileName) {
 	}
 	std::string path = files::pathFromWindows(lpFileName);
 	DEBUG_LOG("DeleteFileA(%s) -> %s\n", lpFileName, path.c_str());
-	if (unlink(path.c_str()) == 0) {
-		wibo::lastError = ERROR_SUCCESS;
-		return TRUE;
+	if (unlink(path.c_str()) != 0) {
+		setLastErrorFromErrno();
+		return FALSE;
 	}
-	setLastErrorFromErrno();
-	return FALSE;
+	return TRUE;
 }
 
 BOOL WIN_FUNC DeleteFileW(LPCWSTR lpFileName) {
@@ -872,17 +857,14 @@ BOOL WIN_FUNC MoveFileA(LPCSTR lpExistingFileName, LPCSTR lpNewFileName) {
 		return FALSE;
 	}
 	if (ec) {
-		errno = ec.value();
-		setLastErrorFromErrno();
+		wibo::lastError = wibo::winErrorFromErrno(ec.value());
 		return FALSE;
 	}
 	std::filesystem::rename(fromPath, toPath, ec);
 	if (ec) {
-		errno = ec.value();
-		setLastErrorFromErrno();
+		wibo::lastError = wibo::winErrorFromErrno(ec.value());
 		return FALSE;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -935,7 +917,6 @@ DWORD WIN_FUNC SetFilePointer(HANDLE hFile, LONG lDistanceToMove, PLONG lpDistan
 	if (lpDistanceToMoveHigh) {
 		*lpDistanceToMoveHigh = static_cast<LONG>(static_cast<uint64_t>(position) >> 32);
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return static_cast<DWORD>(static_cast<uint64_t>(position) & 0xFFFFFFFFu);
 }
 
@@ -1005,7 +986,6 @@ BOOL WIN_FUNC SetEndOfFile(HANDLE hFile) {
 		setLastErrorFromErrno();
 		return FALSE;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -1018,12 +998,11 @@ BOOL WIN_FUNC CreateDirectoryA(LPCSTR lpPathName, LPSECURITY_ATTRIBUTES lpSecuri
 	}
 	std::string path = files::pathFromWindows(lpPathName);
 	DEBUG_LOG("CreateDirectoryA(%s, %p)\n", path.c_str(), lpSecurityAttributes);
-	if (mkdir(path.c_str(), 0755) == 0) {
-		wibo::lastError = ERROR_SUCCESS;
-		return TRUE;
+	if (mkdir(path.c_str(), 0755) != 0) {
+		setLastErrorFromErrno();
+		return FALSE;
 	}
-	setLastErrorFromErrno();
-	return FALSE;
+	return TRUE;
 }
 
 BOOL WIN_FUNC RemoveDirectoryA(LPCSTR lpPathName) {
@@ -1034,12 +1013,11 @@ BOOL WIN_FUNC RemoveDirectoryA(LPCSTR lpPathName) {
 	}
 	std::string path = files::pathFromWindows(lpPathName);
 	DEBUG_LOG("RemoveDirectoryA(%s)\n", path.c_str());
-	if (rmdir(path.c_str()) == 0) {
-		wibo::lastError = ERROR_SUCCESS;
-		return TRUE;
+	if (rmdir(path.c_str()) != 0) {
+		setLastErrorFromErrno();
+		return FALSE;
 	}
-	setLastErrorFromErrno();
-	return FALSE;
+	return TRUE;
 }
 
 BOOL WIN_FUNC SetFileAttributesA(LPCSTR lpFileName, DWORD dwFileAttributes) {
@@ -1050,7 +1028,6 @@ BOOL WIN_FUNC SetFileAttributesA(LPCSTR lpFileName, DWORD dwFileAttributes) {
 		return FALSE;
 	}
 	DEBUG_LOG("STUB: SetFileAttributesA(%s, %u)\n", lpFileName, dwFileAttributes);
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -1077,7 +1054,6 @@ DWORD WIN_FUNC GetFileSize(HANDLE hFile, LPDWORD lpFileSizeHigh) {
 	if (lpFileSizeHigh) {
 		*lpFileSizeHigh = static_cast<DWORD>(uSize >> 32);
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return static_cast<DWORD>(uSize & 0xFFFFFFFFu);
 }
 
@@ -1120,7 +1096,6 @@ BOOL WIN_FUNC GetFileTime(HANDLE hFile, LPFILETIME lpCreationTime, LPFILETIME lp
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -1144,7 +1119,6 @@ BOOL WIN_FUNC SetFileTime(HANDLE hFile, const FILETIME *lpCreationTime, const FI
 	bool changeAccess = !shouldIgnoreFileTimeParam(lpLastAccessTime);
 	bool changeWrite = !shouldIgnoreFileTimeParam(lpLastWriteTime);
 	if (!changeAccess && !changeWrite) {
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 	struct stat st{};
@@ -1192,7 +1166,6 @@ BOOL WIN_FUNC SetFileTime(HANDLE hFile, const FILETIME *lpCreationTime, const FI
 	if (!shouldIgnoreFileTimeParam(lpCreationTime) && lpCreationTime) {
 		DEBUG_LOG("SetFileTime: creation time not supported\n");
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -1231,7 +1204,6 @@ BOOL WIN_FUNC GetFileInformationByHandle(HANDLE hFile, LPBY_HANDLE_FILE_INFORMAT
 	lpFileInformation->nNumberOfLinks = 0;
 	lpFileInformation->nFileIndexHigh = 0;
 	lpFileInformation->nFileIndexLow = 0;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -1250,7 +1222,6 @@ DWORD WIN_FUNC GetFileType(HANDLE hFile) {
 		DEBUG_LOG("-> fstat error\n");
 		return FILE_TYPE_UNKNOWN;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	DWORD type = FILE_TYPE_UNKNOWN;
 	if (S_ISREG(st.st_mode) || S_ISDIR(st.st_mode) || S_ISBLK(st.st_mode)) {
 		type = FILE_TYPE_DISK;
@@ -1314,7 +1285,6 @@ DWORD WIN_FUNC GetFullPathNameA(LPCSTR lpFileName, DWORD nBufferLength, LPSTR lp
 		}
 	}
 
-	wibo::lastError = ERROR_SUCCESS;
 	return static_cast<DWORD>(pathLen);
 }
 
@@ -1368,7 +1338,6 @@ DWORD WIN_FUNC GetFullPathNameW(LPCWSTR lpFileName, DWORD nBufferLength, LPWSTR 
 		}
 	}
 
-	wibo::lastError = ERROR_SUCCESS;
 	return static_cast<DWORD>(wideLen - 1);
 }
 
@@ -1389,7 +1358,6 @@ DWORD WIN_FUNC GetShortPathNameA(LPCSTR lpszLongPath, LPSTR lpszShortPath, DWORD
 	}
 
 	strcpy(lpszShortPath, absStr.c_str());
-	wibo::lastError = ERROR_SUCCESS;
 	return required - 1;
 }
 
@@ -1411,7 +1379,6 @@ DWORD WIN_FUNC GetShortPathNameW(LPCWSTR lpszLongPath, LPWSTR lpszShortPath, DWO
 		return required;
 	}
 	wstrncpy(lpszShortPath, absStrW.data(), len + 1);
-	wibo::lastError = ERROR_SUCCESS;
 	return static_cast<DWORD>(len);
 }
 
@@ -1454,7 +1421,6 @@ UINT WIN_FUNC GetTempFileNameA(LPCSTR lpPathName, LPCSTR lpPrefixString, UINT uU
 	DEBUG_LOG(" -> %s\n", str.c_str());
 	strncpy(lpTempFileName, str.c_str(), MAX_PATH);
 	lpTempFileName[MAX_PATH - 1] = '\0';
-	wibo::lastError = ERROR_SUCCESS;
 	return uUnique;
 }
 
@@ -1482,7 +1448,6 @@ DWORD WIN_FUNC GetTempPathA(DWORD nBufferLength, LPSTR lpBuffer) {
 	DEBUG_LOG(" -> %s\n", path);
 	strncpy(lpBuffer, path, nBufferLength);
 	lpBuffer[nBufferLength - 1] = '\0';
-	wibo::lastError = ERROR_SUCCESS;
 	return static_cast<DWORD>(len);
 }
 
@@ -1503,7 +1468,6 @@ HANDLE WIN_FUNC FindFirstFileA(LPCSTR lpFileName, LPWIN32_FIND_DATAA lpFindFileD
 	setCommonFindDataFields(*lpFindFileData);
 	if (status.type() == std::filesystem::file_type::regular) {
 		setFindFileDataFromPath(hostPath, *lpFindFileData);
-		wibo::lastError = ERROR_SUCCESS;
 		return kPseudoFindHandle;
 	}
 
@@ -1525,7 +1489,6 @@ HANDLE WIN_FUNC FindFirstFileA(LPCSTR lpFileName, LPWIN32_FIND_DATAA lpFindFileD
 	}
 
 	setFindFileDataFromPath(match, *lpFindFileData);
-	wibo::lastError = ERROR_SUCCESS;
 	return reinterpret_cast<HANDLE>(handle);
 }
 
@@ -1547,7 +1510,6 @@ HANDLE WIN_FUNC FindFirstFileW(LPCWSTR lpFileName, LPWIN32_FIND_DATAW lpFindFile
 	setCommonFindDataFields(*lpFindFileData);
 	if (status.type() == std::filesystem::file_type::regular) {
 		setFindFileDataFromPath(hostPath, *lpFindFileData);
-		wibo::lastError = ERROR_SUCCESS;
 		return kPseudoFindHandle;
 	}
 
@@ -1569,7 +1531,6 @@ HANDLE WIN_FUNC FindFirstFileW(LPCWSTR lpFileName, LPWIN32_FIND_DATAW lpFindFile
 	}
 
 	setFindFileDataFromPath(match, *lpFindFileData);
-	wibo::lastError = ERROR_SUCCESS;
 	return reinterpret_cast<HANDLE>(handle);
 }
 
@@ -1610,7 +1571,6 @@ BOOL WIN_FUNC FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileData)
 	}
 
 	setFindFileDataFromPath(match, *lpFindFileData);
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -1639,7 +1599,6 @@ BOOL WIN_FUNC FindNextFileW(HANDLE hFindFile, LPWIN32_FIND_DATAW lpFindFileData)
 	}
 
 	setFindFileDataFromPath(match, *lpFindFileData);
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -1647,7 +1606,6 @@ BOOL WIN_FUNC FindClose(HANDLE hFindFile) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FindClose(%p)\n", hFindFile);
 	if (isPseudoHandle(hFindFile) || hFindFile == nullptr) {
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 
@@ -1657,7 +1615,6 @@ BOOL WIN_FUNC FindClose(HANDLE hFindFile) {
 		return FALSE;
 	}
 	delete handle;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 

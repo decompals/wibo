@@ -42,14 +42,12 @@ BOOL WIN_FUNC DuplicateHandle(HANDLE hSourceProcessHandle, HANDLE hSourceHandle,
 		auto handle = wibo::handles().alloc(std::move(po), 0, 0);
 		DEBUG_LOG("DuplicateHandle: created process handle for current process -> %p\n", handle);
 		*lpTargetHandle = handle;
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	} else if (isPseudoCurrentThreadHandle(hSourceHandle)) {
 		auto th = make_pin<ThreadObject>(pthread_self());
 		auto handle = wibo::handles().alloc(std::move(th), 0, 0);
 		DEBUG_LOG("DuplicateHandle: created thread handle for current thread -> %p\n", handle);
 		*lpTargetHandle = handle;
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 
@@ -58,7 +56,6 @@ BOOL WIN_FUNC DuplicateHandle(HANDLE hSourceProcessHandle, HANDLE hSourceHandle,
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -69,7 +66,6 @@ BOOL WIN_FUNC CloseHandle(HANDLE hObject) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 

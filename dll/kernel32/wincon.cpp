@@ -14,7 +14,6 @@ BOOL WIN_FUNC GetConsoleMode(HANDLE hConsoleHandle, LPDWORD lpMode) {
 	if (lpMode) {
 		*lpMode = 0;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -23,21 +22,18 @@ BOOL WIN_FUNC SetConsoleMode(HANDLE hConsoleHandle, DWORD dwMode) {
 	DEBUG_LOG("STUB: SetConsoleMode(%p, 0x%x)\n", hConsoleHandle, dwMode);
 	(void)hConsoleHandle;
 	(void)dwMode;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
 UINT WIN_FUNC GetConsoleCP() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: GetConsoleCP() -> 65001\n");
-	wibo::lastError = ERROR_SUCCESS;
 	return 65001; // UTF-8
 }
 
 UINT WIN_FUNC GetConsoleOutputCP() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: GetConsoleOutputCP() -> 65001\n");
-	wibo::lastError = ERROR_SUCCESS;
 	return 65001; // UTF-8
 }
 
@@ -46,7 +42,6 @@ BOOL WIN_FUNC SetConsoleCtrlHandler(PHANDLER_ROUTINE HandlerRoutine, BOOL Add) {
 	DEBUG_LOG("STUB: SetConsoleCtrlHandler(%p, %u)\n", reinterpret_cast<const void *>(HandlerRoutine), Add);
 	(void)HandlerRoutine;
 	(void)Add;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -63,7 +58,6 @@ BOOL WIN_FUNC GetConsoleScreenBufferInfo(HANDLE hConsoleOutput, CONSOLE_SCREEN_B
 	lpConsoleScreenBufferInfo->wAttributes = 0;
 	lpConsoleScreenBufferInfo->srWindow = {0, 0, 79, 24};
 	lpConsoleScreenBufferInfo->dwMaximumWindowSize = {80, 25};
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -88,7 +82,6 @@ BOOL WIN_FUNC WriteConsoleW(HANDLE hConsoleOutput, LPCVOID lpBuffer, DWORD nNumb
 		if (lpNumberOfCharsWritten) {
 			*lpNumberOfCharsWritten = nNumberOfCharsToWrite;
 		}
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 
@@ -126,7 +119,6 @@ BOOL WIN_FUNC PeekConsoleInputA(HANDLE hConsoleInput, INPUT_RECORD *lpBuffer, DW
 	if (lpNumberOfEventsRead) {
 		*lpNumberOfEventsRead = 0;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -140,7 +132,6 @@ BOOL WIN_FUNC ReadConsoleInputA(HANDLE hConsoleInput, INPUT_RECORD *lpBuffer, DW
 	if (lpNumberOfEventsRead) {
 		*lpNumberOfEventsRead = 0;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 

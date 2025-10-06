@@ -30,7 +30,6 @@ BOOL WIN_FUNC GetOverlappedResult(HANDLE hFile, LPOVERLAPPED lpOverlapped, LPDWO
 	}
 
 	if (status == STATUS_SUCCESS) {
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 	if (status == STATUS_END_OF_FILE) {

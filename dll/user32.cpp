@@ -129,14 +129,12 @@ namespace user32 {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("GetKeyboardLayout(%u)\n", idThread);
 		(void)idThread;
-		wibo::lastError = ERROR_SUCCESS;
 		return reinterpret_cast<HKL>(kDefaultKeyboardLayout);
 	}
 
 	HWINSTA WIN_FUNC GetProcessWindowStation() {
 		DEBUG_LOG("GetProcessWindowStation()\n");
 		static int kWindowStationStub;
-		wibo::lastError = ERROR_SUCCESS;
 		return reinterpret_cast<HWINSTA>(&kWindowStationStub);
 	}
 
@@ -164,14 +162,11 @@ namespace user32 {
 		flags->fInherit = FALSE;
 		flags->fReserved = FALSE;
 		flags->dwFlags = WSF_VISIBLE;
-
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 
 	HWND WIN_FUNC GetActiveWindow() {
 		DEBUG_LOG("GetActiveWindow()\n");
-		wibo::lastError = ERROR_SUCCESS;
 		return nullptr;
 	}
 }

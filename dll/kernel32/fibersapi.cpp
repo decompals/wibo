@@ -27,7 +27,7 @@ DWORD WIN_FUNC FlsAlloc(PFLS_CALLBACK_FUNCTION lpCallback) {
 		}
 	}
 	DEBUG_LOG(" -> -1\n");
-	wibo::lastError = 1;
+	wibo::lastError = FLS_OUT_OF_INDEXES;
 	return FLS_OUT_OF_INDEXES;
 }
 
@@ -38,7 +38,7 @@ BOOL WIN_FUNC FlsFree(DWORD dwFlsIndex) {
 		g_flsValuesUsed[dwFlsIndex] = false;
 		return TRUE;
 	} else {
-		wibo::lastError = 1;
+		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
 }
@@ -52,7 +52,7 @@ PVOID WIN_FUNC FlsGetValue(DWORD dwFlsIndex) {
 		// See https://learn.microsoft.com/en-us/windows/win32/api/fibersapi/nf-fibersapi-flsgetvalue
 		wibo::lastError = ERROR_SUCCESS;
 	} else {
-		wibo::lastError = 1;
+		wibo::lastError = ERROR_INVALID_PARAMETER;
 	}
 	// DEBUG_LOG(" -> %p\n", result);
 	return result;
@@ -65,7 +65,7 @@ BOOL WIN_FUNC FlsSetValue(DWORD dwFlsIndex, PVOID lpFlsData) {
 		g_flsValues[dwFlsIndex] = lpFlsData;
 		return TRUE;
 	} else {
-		wibo::lastError = 1;
+		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
 }

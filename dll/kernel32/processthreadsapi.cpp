@@ -252,7 +252,6 @@ BOOL WIN_FUNC GetProcessAffinityMask(HANDLE hProcess, PDWORD_PTR lpProcessAffini
 
 	*lpProcessAffinityMask = processMask;
 	*lpSystemAffinityMask = systemMask == 0 ? 1 : systemMask;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -280,7 +279,6 @@ BOOL WIN_FUNC SetProcessAffinityMask(HANDLE hProcess, DWORD_PTR dwProcessAffinit
 
 	g_processAffinityMask = dwProcessAffinityMask & systemMask;
 	g_processAffinityMaskInitialized = true;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -310,7 +308,6 @@ DWORD_PTR WIN_FUNC SetThreadAffinityMask(HANDLE hThread, DWORD_PTR dwThreadAffin
 		return 0;
 	}
 
-	wibo::lastError = ERROR_SUCCESS;
 	return processMask;
 }
 
@@ -332,7 +329,6 @@ BOOL WIN_FUNC TerminateProcess(HANDLE hProcess, UINT uExitCode) {
 		return FALSE;
 	}
 	if (process->signaled.load(std::memory_order_acquire)) {
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 	std::lock_guard lk(process->m);
@@ -352,7 +348,6 @@ BOOL WIN_FUNC TerminateProcess(HANDLE hProcess, UINT uExitCode) {
 	}
 	process->exitCode = uExitCode;
 	process->forcedExitCode = true;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -365,7 +360,6 @@ BOOL WIN_FUNC GetExitCodeProcess(HANDLE hProcess, LPDWORD lpExitCode) {
 	}
 	if (isPseudoCurrentProcessHandle(hProcess)) {
 		*lpExitCode = STILL_ACTIVE;
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 	auto process = wibo::handles().getAs<ProcessObject>(hProcess);
@@ -379,7 +373,6 @@ BOOL WIN_FUNC GetExitCodeProcess(HANDLE hProcess, LPDWORD lpExitCode) {
 		exitCode = process->exitCode;
 	}
 	*lpExitCode = exitCode;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -390,7 +383,6 @@ DWORD WIN_FUNC TlsAlloc() {
 		if (!g_tlsSlotsUsed[i]) {
 			g_tlsSlotsUsed[i] = true;
 			g_tlsSlots[i] = nullptr;
-			wibo::lastError = ERROR_SUCCESS;
 			return i;
 		}
 	}
@@ -407,7 +399,6 @@ BOOL WIN_FUNC TlsFree(DWORD dwTlsIndex) {
 	}
 	g_tlsSlotsUsed[dwTlsIndex] = false;
 	g_tlsSlots[dwTlsIndex] = nullptr;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -418,7 +409,6 @@ LPVOID WIN_FUNC TlsGetValue(DWORD dwTlsIndex) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return nullptr;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return g_tlsSlots[dwTlsIndex];
 }
 
@@ -430,7 +420,6 @@ BOOL WIN_FUNC TlsSetValue(DWORD dwTlsIndex, LPVOID lpTlsValue) {
 		return FALSE;
 	}
 	g_tlsSlots[dwTlsIndex] = lpTlsValue;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -458,7 +447,6 @@ DWORD WIN_FUNC ResumeThread(HANDLE hThread) {
 	if (notify) {
 		obj->cv.notify_all();
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return previous;
 }
 
@@ -519,7 +507,6 @@ HANDLE WIN_FUNC CreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dw
 		*lpThreadId = static_cast<DWORD>(hashed & 0xffffffffu);
 	}
 
-	wibo::lastError = ERROR_SUCCESS;
 	return wibo::handles().alloc(std::move(obj), 0 /* TODO */, 0);
 }
 
@@ -546,7 +533,6 @@ BOOL WIN_FUNC GetExitCodeThread(HANDLE hThread, LPDWORD lpExitCode) {
 	}
 	if (isPseudoCurrentThreadHandle(hThread)) {
 		*lpExitCode = STILL_ACTIVE;
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 	auto obj = wibo::handles().getAs<ThreadObject>(hThread);
@@ -556,7 +542,6 @@ BOOL WIN_FUNC GetExitCodeThread(HANDLE hThread, LPDWORD lpExitCode) {
 	}
 	std::lock_guard lk(obj->m);
 	*lpExitCode = obj->exitCode;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -565,7 +550,6 @@ BOOL WIN_FUNC SetThreadPriority(HANDLE hThread, int nPriority) {
 	DEBUG_LOG("STUB: SetThreadPriority(%p, %d)\n", hThread, nPriority);
 	(void)hThread;
 	(void)nPriority;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -573,7 +557,6 @@ int WIN_FUNC GetThreadPriority(HANDLE hThread) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: GetThreadPriority(%p)\n", hThread);
 	(void)hThread;
-	wibo::lastError = ERROR_SUCCESS;
 	return 0;
 }
 
@@ -581,7 +564,6 @@ DWORD WIN_FUNC GetPriorityClass(HANDLE hProcess) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetPriorityClass(%p)\n", hProcess);
 	(void)hProcess;
-	wibo::lastError = ERROR_SUCCESS;
 	return NORMAL_PRIORITY_CLASS;
 }
 
@@ -613,7 +595,6 @@ BOOL WIN_FUNC GetThreadTimes(HANDLE hThread, FILETIME *lpCreationTime, FILETIME 
 	if (getrusage(RUSAGE_THREAD, &usage) == 0) {
 		*lpKernelTime = fileTimeFromTimeval(usage.ru_stime);
 		*lpUserTime = fileTimeFromTimeval(usage.ru_utime);
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 
@@ -621,7 +602,6 @@ BOOL WIN_FUNC GetThreadTimes(HANDLE hThread, FILETIME *lpCreationTime, FILETIME 
 	if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpuTime) == 0) {
 		*lpKernelTime = fileTimeFromDuration(0);
 		*lpUserTime = fileTimeFromTimespec(cpuTime);
-		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
 	}
 
@@ -675,7 +655,6 @@ BOOL WIN_FUNC CreateProcessA(LPCSTR lpApplicationName, LPSTR lpCommandLine, LPSE
 		lpProcessInformation->dwProcessId = static_cast<DWORD>(pid);
 		lpProcessInformation->dwThreadId = 0;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	(void)lpProcessAttributes;
 	(void)lpThreadAttributes;
 	(void)bInheritHandles;

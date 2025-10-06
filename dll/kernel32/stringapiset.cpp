@@ -100,7 +100,6 @@ BOOL WIN_FUNC GetStringTypeW(DWORD dwInfoType, LPCWCH lpSrcStr, int cchSrc, LPWO
 						(cntrl ? 0x20 : 0) | (blank ? 0x40 : 0) | (hex ? 0x80 : 0) | (alpha ? 0x100 : 0);
 	}
 
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -132,15 +131,10 @@ BOOL WIN_FUNC GetStringTypeA(LCID Locale, DWORD dwInfoType, LPCSTR lpSrcStr, int
 		wide.push_back(static_cast<unsigned char>(lpSrcStr[i]));
 	}
 
-	BOOL result = TRUE;
 	if (length > 0) {
-		result = GetStringTypeW(dwInfoType, wide.data(), length, lpCharType);
-	} else {
-		result = TRUE;
-	}
-
-	wibo::lastError = result ? ERROR_SUCCESS : wibo::lastError;
-	return result;
+		return GetStringTypeW(dwInfoType, wide.data(), length, lpCharType);
+	} 
+	return TRUE;
 }
 
 } // namespace kernel32

@@ -202,7 +202,6 @@ BOOL WIN_FUNC GetVersionExA(LPOSVERSIONINFOA lpVersionInformation) {
 	lpVersionInformation->dwMinorVersion = kMinorVersion;
 	lpVersionInformation->dwBuildNumber = kBuildNumber;
 	lpVersionInformation->dwPlatformId = 2;
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 

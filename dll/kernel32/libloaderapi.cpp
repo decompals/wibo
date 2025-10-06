@@ -48,7 +48,6 @@ BOOL WIN_FUNC DisableThreadLibraryCalls(HMODULE hLibModule) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
@@ -60,7 +59,6 @@ HMODULE WIN_FUNC GetModuleHandleA(LPCSTR lpModuleName) {
 		wibo::lastError = ERROR_MOD_NOT_FOUND;
 		return nullptr;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return module->handle;
 }
 
@@ -107,7 +105,6 @@ DWORD WIN_FUNC GetModuleFileNameA(HMODULE hModule, LPSTR lpFilename, DWORD nSize
 		wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
 		return nSize;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return static_cast<DWORD>(copyLen);
 }
 
@@ -149,7 +146,6 @@ DWORD WIN_FUNC GetModuleFileNameW(HMODULE hModule, LPWSTR lpFilename, DWORD nSiz
 		wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
 		return nSize;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return static_cast<DWORD>(copyLen);
 }
 
@@ -239,7 +235,6 @@ HMODULE WIN_FUNC LoadLibraryA(LPCSTR lpLibFileName) {
 		// lastError is set by loadModule
 		return nullptr;
 	}
-	wibo::lastError = ERROR_SUCCESS;
 	return info->handle;
 }
 
@@ -293,8 +288,6 @@ FARPROC WIN_FUNC GetProcAddress(HMODULE hModule, LPCSTR lpProcName) {
 	DEBUG_LOG("-> %p\n", result);
 	if (!result) {
 		wibo::lastError = ERROR_PROC_NOT_FOUND;
-	} else {
-		wibo::lastError = ERROR_SUCCESS;
 	}
 	return result;
 }

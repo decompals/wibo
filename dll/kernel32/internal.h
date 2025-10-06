@@ -29,13 +29,13 @@ struct FileObject final : FsObject {
 	off64_t filePos = 0;
 	bool overlapped = false;
 	bool appendOnly = false;
-	bool seekable = true;
+	bool isPipe = false;
 
 	explicit FileObject(int fd) : FsObject(kType, fd) {
 		if (fd >= 0) {
 			off64_t pos = lseek64(fd, 0, SEEK_CUR);
 			if (pos == -1 && errno == ESPIPE) {
-				seekable = false;
+				isPipe = true;
 			} else if (pos >= 0) {
 				filePos = pos;
 			}

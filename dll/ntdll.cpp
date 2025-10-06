@@ -121,6 +121,9 @@ BOOL WIN_FUNC ResetEvent(HANDLE hEvent);
 
 namespace ntdll {
 
+constexpr LARGE_INTEGER FILE_WRITE_TO_END_OF_FILE = static_cast<LARGE_INTEGER>(-1);
+constexpr LARGE_INTEGER FILE_USE_FILE_POINTER_POSITION = static_cast<LARGE_INTEGER>(-2);
+
 NTSTATUS WIN_FUNC NtReadFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext,
 							 PIO_STATUS_BLOCK IoStatusBlock, PVOID Buffer, ULONG Length, PLARGE_INTEGER ByteOffset,
 							 PULONG Key) {
@@ -132,48 +135,59 @@ NTSTATUS WIN_FUNC NtReadFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE Ap
 	(void)Key;
 
 	if (!IoStatusBlock) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return STATUS_INVALID_PARAMETER;
 	}
+	IoStatusBlock->Information = 0;
 
 	auto file = wibo::handles().getAs<FileObject>(FileHandle);
 	if (!file || !file->valid()) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
 		IoStatusBlock->Status = STATUS_INVALID_HANDLE;
 		IoStatusBlock->Information = 0;
 		return STATUS_INVALID_HANDLE;
 	}
 
-	bool handleOverlapped = file->overlapped;
-	std::optional<uint64_t> offset;
-	bool updateFilePointer = !handleOverlapped;
-	if (ByteOffset) {
-		offset = static_cast<uint64_t>(*ByteOffset);
-	} else if (handleOverlapped) {
-		updateFilePointer = false;
+	bool useOverlapped = file->overlapped;
+	bool useCurrentFilePosition = (ByteOffset == nullptr);
+	if (!useCurrentFilePosition && *ByteOffset == FILE_USE_FILE_POINTER_POSITION) {
+		useCurrentFilePosition = true;
 	}
 
+	std::optional<off64_t> offset;
+	if (!useCurrentFilePosition) {
+		offset = static_cast<off64_t>(*ByteOffset);
+	}
+
+	if (useOverlapped && useCurrentFilePosition) {
+		IoStatusBlock->Status = STATUS_INVALID_PARAMETER;
+		IoStatusBlock->Information = 0;
+		return STATUS_INVALID_PARAMETER;
+	}
+
+	Pin<kernel32::EventObject> ev;
 	if (Event) {
-		kernel32::ResetEvent(Event);
+		ev = wibo::handles().getAs<kernel32::EventObject>(Event);
+		if (!ev) {
+			IoStatusBlock->Status = STATUS_INVALID_HANDLE;
+			IoStatusBlock->Information = 0;
+			return STATUS_INVALID_HANDLE;
+		}
+		ev->reset();
 	}
 
+	bool updateFilePointer = !useOverlapped;
 	auto io = files::read(file.get(), Buffer, Length, offset, updateFilePointer);
-	DWORD winError = ERROR_SUCCESS;
 	NTSTATUS status = STATUS_SUCCESS;
 	if (io.unixError != 0) {
-		winError = wibo::winErrorFromErrno(io.unixError);
-		status = wibo::statusFromWinError(winError);
+		status = wibo::statusFromErrno(io.unixError);
 	} else if (io.reachedEnd && io.bytesTransferred == 0) {
-		winError = ERROR_HANDLE_EOF;
-		status = STATUS_END_OF_FILE;
+		status = file->isPipe ? STATUS_PIPE_BROKEN : STATUS_END_OF_FILE;
 	}
 
 	IoStatusBlock->Status = status;
 	IoStatusBlock->Information = static_cast<ULONG_PTR>(io.bytesTransferred);
-	wibo::lastError = winError;
 
-	if (Event) {
-		kernel32::SetEvent(Event);
+	if (ev && (status == STATUS_SUCCESS || status == STATUS_END_OF_FILE)) {
+		ev->set();
 	}
 
 	DEBUG_LOG("-> 0x%x\n", status);

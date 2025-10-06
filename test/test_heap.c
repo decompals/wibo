@@ -29,7 +29,7 @@ int main(void) {
     }
 
     SetLastError(0);
-    void *inPlace = HeapReAlloc(processHeap, HEAP_REALLOC_IN_PLACE_ONLY, grown, 128);
+    void *inPlace = HeapReAlloc(processHeap, HEAP_REALLOC_IN_PLACE_ONLY, grown, 2048);
     TEST_CHECK(inPlace == NULL);
     TEST_CHECK_EQ(ERROR_NOT_ENOUGH_MEMORY, GetLastError());
 

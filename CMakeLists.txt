@@ -299,6 +299,28 @@ if(BUILD_TESTING)
                     ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
 
             add_custom_command(
+                OUTPUT ${WIBO_TEST_BIN_DIR}/test_ntreadfile.exe
+                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
+                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
+                        -o test_ntreadfile.exe
+                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_ntreadfile.c
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_ntreadfile.c
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
+
+            add_custom_command(
+                OUTPUT ${WIBO_TEST_BIN_DIR}/test_pipe_io.exe
+                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
+                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
+                        -o test_pipe_io.exe
+                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_pipe_io.c
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_pipe_io.c
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
+
+            add_custom_command(
                 OUTPUT ${WIBO_TEST_BIN_DIR}/test_sysdir.exe
                 COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
                         -I${CMAKE_CURRENT_SOURCE_DIR}/test
@@ -328,6 +350,8 @@ if(BUILD_TESTING)
                     ${WIBO_TEST_BIN_DIR}/test_virtualquery.exe
                     ${WIBO_TEST_BIN_DIR}/test_rtl.exe
                     ${WIBO_TEST_BIN_DIR}/test_ntquery.exe
+                    ${WIBO_TEST_BIN_DIR}/test_ntreadfile.exe
+                    ${WIBO_TEST_BIN_DIR}/test_pipe_io.exe
                     ${WIBO_TEST_BIN_DIR}/test_sysdir.exe)
 
             if(CMAKE_CONFIGURATION_TYPES)
@@ -409,6 +433,18 @@ if(BUILD_TESTING)
             add_test(NAME wibo.test_ntquery
                 COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_ntquery.exe)
             set_tests_properties(wibo.test_ntquery PROPERTIES
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS wibo.build_fixtures)
+
+            add_test(NAME wibo.test_ntreadfile
+                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_ntreadfile.exe)
+            set_tests_properties(wibo.test_ntreadfile PROPERTIES
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS wibo.build_fixtures)
+
+            add_test(NAME wibo.test_pipe_io
+                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_pipe_io.exe)
+            set_tests_properties(wibo.test_pipe_io PROPERTIES
                 WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
                 DEPENDS wibo.build_fixtures)
 

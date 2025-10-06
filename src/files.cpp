@@ -156,6 +156,30 @@ IOResult read(FileObject *file, void *buffer, size_t bytesToRead, const std::opt
 	// Sanity check: if no offset is given, we must update the file pointer
 	assert(offset.has_value() || updateFilePointer);
 
+	if (file->isPipe) {
+		std::lock_guard lk(file->m);
+		size_t chunk = bytesToRead > SSIZE_MAX ? SSIZE_MAX : bytesToRead;
+		uint8_t *in = static_cast<uint8_t *>(buffer);
+		ssize_t rc;
+		while (true) {
+			rc = ::read(file->fd, in, chunk);
+			if (rc == -1 && errno == EINTR) {
+				continue;
+			}
+			break;
+		}
+		if (rc == -1) {
+			result.unixError = errno ? errno : EIO;
+			return result;
+		}
+		if (rc == 0) {
+			result.reachedEnd = true;
+			return result;
+		}
+		result.bytesTransferred = static_cast<size_t>(rc);
+		return result;
+	}
+
 	const auto doRead = [&](off64_t pos) {
 		size_t total = 0;
 		size_t remaining = bytesToRead;
@@ -167,14 +191,12 @@ IOResult read(FileObject *file, void *buffer, size_t bytesToRead, const std::opt
 				if (errno == EINTR) {
 					continue;
 				}
-				result.bytesTransferred = total;
 				result.unixError = errno ? errno : EIO;
-				return;
+				break;
 			}
 			if (rc == 0) {
-				result.bytesTransferred = total;
 				result.reachedEnd = true;
-				return;
+				break;
 			}
 			total += static_cast<size_t>(rc);
 			remaining -= static_cast<size_t>(rc);
@@ -185,7 +207,7 @@ IOResult read(FileObject *file, void *buffer, size_t bytesToRead, const std::opt
 
 	if (updateFilePointer || !offset.has_value()) {
 		std::lock_guard lk(file->m);
-		off64_t pos = offset.value_or(file->filePos);
+		const off64_t pos = offset.value_or(file->filePos);
 		doRead(pos);
 		if (updateFilePointer) {
 			file->filePos = pos + static_cast<off64_t>(result.bytesTransferred);
@@ -211,7 +233,7 @@ IOResult write(FileObject *file, const void *buffer, size_t bytesToWrite, const 
 	// Sanity check: if no offset is given, we must update the file pointer
 	assert(offset.has_value() || updateFilePointer);
 
-	if (file->appendOnly || !file->seekable) {
+	if (file->appendOnly || file->isPipe) {
 		std::lock_guard lk(file->m);
 		size_t total = 0;
 		size_t remaining = bytesToWrite;
@@ -234,7 +256,7 @@ IOResult write(FileObject *file, const void *buffer, size_t bytesToWrite, const 
 		}
 		result.bytesTransferred = total;
 		if (updateFilePointer) {
-			off64_t pos = file->seekable ? lseek64(file->fd, 0, SEEK_CUR) : 0;
+			off64_t pos = file->isPipe ? 0 : lseek64(file->fd, 0, SEEK_CUR);
 			if (pos >= 0) {
 				file->filePos = pos;
 			} else if (result.unixError == 0) {

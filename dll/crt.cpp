@@ -279,10 +279,10 @@ void WIN_ENTRY exit(int status) {
 			(*it)();
 		}
 	}
-	::exit(status);
+	::_exit(status);
 }
 
-void WIN_ENTRY _cexit(void) {
+void WIN_ENTRY _cexit() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("_cexit()\n");
 	TIB *tib = wibo::getThreadTibForHost();

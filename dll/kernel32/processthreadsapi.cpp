@@ -175,11 +175,6 @@ void *threadTrampoline(void *param) {
 	return nullptr;
 }
 
-inline bool isPseudoCurrentThreadHandle(HANDLE h) {
-	uintptr_t rawHandle = reinterpret_cast<uintptr_t>(h);
-	return rawHandle == kernel32::kPseudoCurrentThreadHandleValue;
-}
-
 } // namespace
 
 namespace kernel32 {
@@ -237,9 +232,7 @@ BOOL WIN_FUNC GetProcessAffinityMask(HANDLE hProcess, PDWORD_PTR lpProcessAffini
 		return FALSE;
 	}
 
-	uintptr_t rawHandle = reinterpret_cast<uintptr_t>(hProcess);
-	bool isPseudoHandle = rawHandle == 0 || rawHandle == kPseudoCurrentProcessHandleValue;
-	if (!isPseudoHandle) {
+	if (!isPseudoCurrentProcessHandle(hProcess)) {
 		auto obj = wibo::handles().getAs<ProcessObject>(hProcess);
 		if (!obj) {
 			wibo::lastError = ERROR_INVALID_HANDLE;
@@ -271,9 +264,7 @@ BOOL WIN_FUNC SetProcessAffinityMask(HANDLE hProcess, DWORD_PTR dwProcessAffinit
 		return FALSE;
 	}
 
-	uintptr_t rawHandle = reinterpret_cast<uintptr_t>(hProcess);
-	bool isPseudoHandle = rawHandle == 0 || rawHandle == kPseudoCurrentProcessHandleValue;
-	if (!isPseudoHandle) {
+	if (!isPseudoCurrentProcessHandle(hProcess)) {
 		auto obj = wibo::handles().getAs<ProcessObject>(hProcess);
 		if (!obj) {
 			wibo::lastError = ERROR_INVALID_HANDLE;
@@ -332,7 +323,7 @@ void WIN_FUNC ExitProcess(UINT uExitCode) {
 BOOL WIN_FUNC TerminateProcess(HANDLE hProcess, UINT uExitCode) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("TerminateProcess(%p, %u)\n", hProcess, uExitCode);
-	if (hProcess == reinterpret_cast<HANDLE>(static_cast<uintptr_t>(-1))) {
+	if (isPseudoCurrentProcessHandle(hProcess)) {
 		exit(static_cast<int>(uExitCode));
 	}
 	auto process = wibo::handles().getAs<ProcessObject>(hProcess);
@@ -371,6 +362,11 @@ BOOL WIN_FUNC GetExitCodeProcess(HANDLE hProcess, LPDWORD lpExitCode) {
 	if (!lpExitCode) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
+	}
+	if (isPseudoCurrentProcessHandle(hProcess)) {
+		*lpExitCode = STILL_ACTIVE;
+		wibo::lastError = ERROR_SUCCESS;
+		return TRUE;
 	}
 	auto process = wibo::handles().getAs<ProcessObject>(hProcess);
 	if (!process) {
@@ -599,9 +595,7 @@ BOOL WIN_FUNC GetThreadTimes(HANDLE hThread, FILETIME *lpCreationTime, FILETIME 
 		return FALSE;
 	}
 
-	bool isPseudoCurrentThread = reinterpret_cast<uintptr_t>(hThread) == kernel32::kPseudoCurrentThreadHandleValue ||
-								 hThread == nullptr || hThread == reinterpret_cast<HANDLE>(static_cast<uintptr_t>(-1));
-	if (!isPseudoCurrentThread) {
+	if (!isPseudoCurrentThreadHandle(hThread)) {
 		DEBUG_LOG("GetThreadTimes: unsupported handle %p\n", hThread);
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;

@@ -166,6 +166,16 @@ struct HeapObject : public ObjectBase {
 inline constexpr uintptr_t kPseudoCurrentProcessHandleValue = static_cast<uintptr_t>(-1);
 inline constexpr uintptr_t kPseudoCurrentThreadHandleValue = static_cast<uintptr_t>(-2);
 
+inline bool isPseudoCurrentProcessHandle(HANDLE h) {
+	uintptr_t rawHandle = reinterpret_cast<uintptr_t>(h);
+	return rawHandle == kPseudoCurrentProcessHandleValue;
+}
+
+inline bool isPseudoCurrentThreadHandle(HANDLE h) {
+	uintptr_t rawHandle = reinterpret_cast<uintptr_t>(h);
+	return rawHandle == kPseudoCurrentThreadHandleValue;
+}
+
 void tryMarkExecutable(void *mem);
 void setLastErrorFromErrno();
 

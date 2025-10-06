@@ -78,8 +78,7 @@ constexpr ULONG kOsPlatformId = 2;			// VER_PLATFORM_WIN32_NT
 constexpr BYTE kProductTypeWorkstation = 1; // VER_NT_WORKSTATION
 
 bool resolveProcessDetails(HANDLE processHandle, ProcessHandleDetails &details) {
-	uintptr_t rawHandle = reinterpret_cast<uintptr_t>(processHandle);
-	if (rawHandle == static_cast<uintptr_t>(-1)) {
+	if (kernel32::isPseudoCurrentProcessHandle(processHandle)) {
 		details.pid = getpid();
 		details.exitCode = STILL_ACTIVE;
 		details.peb = wibo::processPeb;

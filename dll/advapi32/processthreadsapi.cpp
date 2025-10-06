@@ -5,6 +5,7 @@
 #include "errors.h"
 #include "handles.h"
 #include "internal.h"
+#include "kernel32/internal.h"
 #include "processes.h"
 
 namespace advapi32 {
@@ -16,7 +17,12 @@ BOOL WIN_FUNC OpenProcessToken(HANDLE ProcessHandle, DWORD DesiredAccess, PHANDL
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
-	auto obj = wibo::handles().getAs<ProcessObject>(ProcessHandle);
+	Pin<ProcessObject> obj;
+	if (kernel32::isPseudoCurrentProcessHandle(ProcessHandle)) {
+		obj = make_pin<ProcessObject>(getpid(), -1);
+	} else {
+		obj = wibo::handles().getAs<ProcessObject>(ProcessHandle);
+	}
 	if (!obj) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;

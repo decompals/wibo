@@ -23,7 +23,7 @@ BOOL WIN_FUNC DuplicateHandle(HANDLE hSourceProcessHandle, HANDLE hSourceHandle,
 	}
 
 	auto validateProcessHandle = [&](HANDLE handle) -> bool {
-		if (reinterpret_cast<uintptr_t>(handle) == kPseudoCurrentProcessHandleValue) {
+		if (isPseudoCurrentProcessHandle(handle)) {
 			return true;
 		}
 		auto proc = wibo::handles().getAs<ProcessObject>(handle);
@@ -37,15 +37,14 @@ BOOL WIN_FUNC DuplicateHandle(HANDLE hSourceProcessHandle, HANDLE hSourceHandle,
 		return FALSE;
 	}
 
-	uintptr_t sourceHandleRaw = reinterpret_cast<uintptr_t>(hSourceHandle);
-	if (sourceHandleRaw == kPseudoCurrentProcessHandleValue) {
+	if (isPseudoCurrentProcessHandle(hSourceHandle)) {
 		auto po = make_pin<ProcessObject>(getpid(), -1);
 		auto handle = wibo::handles().alloc(std::move(po), 0, 0);
 		DEBUG_LOG("DuplicateHandle: created process handle for current process -> %p\n", handle);
 		*lpTargetHandle = handle;
 		wibo::lastError = ERROR_SUCCESS;
 		return TRUE;
-	} else if (sourceHandleRaw == kPseudoCurrentThreadHandleValue) {
+	} else if (isPseudoCurrentThreadHandle(hSourceHandle)) {
 		auto th = make_pin<ThreadObject>(pthread_self());
 		auto handle = wibo::handles().alloc(std::move(th), 0, 0);
 		DEBUG_LOG("DuplicateHandle: created thread handle for current thread -> %p\n", handle);

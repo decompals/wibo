@@ -34,9 +34,7 @@ BOOL WIN_FUNC IsWow64Process(HANDLE hProcess, PBOOL Wow64Process) {
 		return FALSE;
 	}
 
-	uintptr_t rawHandle = reinterpret_cast<uintptr_t>(hProcess);
-	bool isPseudoHandle = rawHandle == kPseudoCurrentProcessHandleValue;
-	if (!isPseudoHandle) {
+	if (!isPseudoCurrentProcessHandle(hProcess)) {
 		if (!hProcess) {
 			wibo::lastError = ERROR_INVALID_HANDLE;
 			return FALSE;

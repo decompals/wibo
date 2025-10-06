@@ -186,6 +186,13 @@ bool Handles::duplicateTo(HANDLE src, Handles &dst, HANDLE &out, uint32_t desire
 
 	uint32_t effAccess = (options & DUPLICATE_SAME_ACCESS) ? meta.grantedAccess : (desiredAccess & meta.grantedAccess);
 	const uint32_t flags = (inherit ? HANDLE_FLAG_INHERIT : 0);
+
+	// Reuse the same handle if duplicating within the same table and no changes
+	if (&dst == this && closeSource && effAccess == meta.grantedAccess && flags == meta.flags) {
+		out = src;
+		return true;
+	}
+
 	out = dst.alloc(std::move(obj), effAccess, flags);
 
 	if (closeSource) {

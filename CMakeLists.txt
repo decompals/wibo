@@ -211,6 +211,39 @@ if(BUILD_TESTING)
                     ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
 
             add_custom_command(
+                OUTPUT ${WIBO_TEST_BIN_DIR}/test_handleapi.exe
+                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
+                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
+                        -o test_handleapi.exe
+                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_handleapi.c
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_handleapi.c
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
+
+            add_custom_command(
+                OUTPUT ${WIBO_TEST_BIN_DIR}/test_synchapi.exe
+                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
+                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
+                        -o test_synchapi.exe
+                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_synchapi.c
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_synchapi.c
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
+
+            add_custom_command(
+                OUTPUT ${WIBO_TEST_BIN_DIR}/test_processes.exe
+                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
+                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
+                        -o test_processes.exe
+                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_processes.c
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_processes.c
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
+
+            add_custom_command(
                 OUTPUT ${WIBO_TEST_BIN_DIR}/test_heap.exe
                 COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
                         -I${CMAKE_CURRENT_SOURCE_DIR}/test
@@ -342,6 +375,9 @@ if(BUILD_TESTING)
                     ${WIBO_TEST_BIN_DIR}/test_bcrypt.exe
                     ${WIBO_TEST_BIN_DIR}/test_resources.exe
                     ${WIBO_TEST_BIN_DIR}/test_threading.exe
+                    ${WIBO_TEST_BIN_DIR}/test_handleapi.exe
+                    ${WIBO_TEST_BIN_DIR}/test_synchapi.exe
+                    ${WIBO_TEST_BIN_DIR}/test_processes.exe
                     ${WIBO_TEST_BIN_DIR}/test_heap.exe
                     ${WIBO_TEST_BIN_DIR}/test_actctx.exe
                     ${WIBO_TEST_BIN_DIR}/test_overlapped_io.exe
@@ -385,6 +421,24 @@ if(BUILD_TESTING)
             add_test(NAME wibo.test_threading
                 COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_threading.exe)
             set_tests_properties(wibo.test_threading PROPERTIES
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS wibo.build_fixtures)
+
+            add_test(NAME wibo.test_handleapi
+                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_handleapi.exe)
+            set_tests_properties(wibo.test_handleapi PROPERTIES
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS wibo.build_fixtures)
+
+            add_test(NAME wibo.test_synchapi
+                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_synchapi.exe)
+            set_tests_properties(wibo.test_synchapi PROPERTIES
+                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+                DEPENDS wibo.build_fixtures)
+
+            add_test(NAME wibo.test_processes
+                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_processes.exe)
+            set_tests_properties(wibo.test_processes PROPERTIES
                 WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
                 DEPENDS wibo.build_fixtures)
 

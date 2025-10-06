@@ -11,7 +11,7 @@ typedef struct {
 static DWORD WINAPI worker_main(LPVOID param) {
     WorkerContext *ctx = (WorkerContext *)param;
     TEST_CHECK(SetEvent(ctx->readyEvent));
-    DWORD waitResult = WaitForSingleObject(ctx->goEvent, INFINITE);
+    DWORD waitResult = WaitForSingleObject(ctx->goEvent, 1000);
     TEST_CHECK_EQ(WAIT_OBJECT_0, waitResult);
     return ctx->exitCode;
 }
@@ -37,14 +37,14 @@ int main(void) {
     HANDLE thread = CreateThread(NULL, 0, worker_main, &ctx, 0, NULL);
     TEST_CHECK(thread != NULL);
 
-    DWORD waitResult = WaitForSingleObject(readyEvent, INFINITE);
+    DWORD waitResult = WaitForSingleObject(readyEvent, 1000);
     TEST_CHECK_EQ(WAIT_OBJECT_0, waitResult);
 
     TEST_CHECK(ResetEvent(readyEvent));
 
     TEST_CHECK(SetEvent(goEvent));
 
-    waitResult = WaitForSingleObject(thread, INFINITE);
+    waitResult = WaitForSingleObject(thread, 1000);
     TEST_CHECK_EQ(WAIT_OBJECT_0, waitResult);
 
     DWORD exitCode = 0;
@@ -56,21 +56,21 @@ int main(void) {
     HANDLE autoEvent = CreateEventA(NULL, FALSE, FALSE, NULL);
     TEST_CHECK(autoEvent != NULL);
     TEST_CHECK(SetEvent(autoEvent));
-    waitResult = WaitForSingleObject(autoEvent, INFINITE);
+    waitResult = WaitForSingleObject(autoEvent, 0);
     TEST_CHECK_EQ(WAIT_OBJECT_0, waitResult);
     TEST_CHECK(SetEvent(autoEvent));
-    waitResult = WaitForSingleObject(autoEvent, INFINITE);
+    waitResult = WaitForSingleObject(autoEvent, 0);
     TEST_CHECK_EQ(WAIT_OBJECT_0, waitResult);
     TEST_CHECK(CloseHandle(autoEvent));
 
     HANDLE manualEvent = CreateEventA(NULL, TRUE, FALSE, NULL);
     TEST_CHECK(manualEvent != NULL);
     TEST_CHECK(SetEvent(manualEvent));
-    waitResult = WaitForSingleObject(manualEvent, INFINITE);
+    waitResult = WaitForSingleObject(manualEvent, 0);
     TEST_CHECK_EQ(WAIT_OBJECT_0, waitResult);
     TEST_CHECK(ResetEvent(manualEvent));
     TEST_CHECK(SetEvent(manualEvent));
-    waitResult = WaitForSingleObject(manualEvent, INFINITE);
+    waitResult = WaitForSingleObject(manualEvent, 0);
     TEST_CHECK_EQ(WAIT_OBJECT_0, waitResult);
     TEST_CHECK(CloseHandle(manualEvent));
 
@@ -80,7 +80,7 @@ int main(void) {
 
     HANDLE mutex = CreateMutexA(NULL, FALSE, NULL);
     TEST_CHECK(mutex != NULL);
-    waitResult = WaitForSingleObject(mutex, INFINITE);
+    waitResult = WaitForSingleObject(mutex, 0);
     TEST_CHECK_EQ(WAIT_OBJECT_0, waitResult);
     TEST_CHECK(ReleaseMutex(mutex));
     TEST_CHECK(CloseHandle(mutex));
@@ -88,7 +88,7 @@ int main(void) {
     DWORD secondExitCode = 0x55AA;
     HANDLE exitThread = CreateThread(NULL, 0, exit_thread_worker, &secondExitCode, 0, NULL);
     TEST_CHECK(exitThread != NULL);
-    waitResult = WaitForSingleObject(exitThread, INFINITE);
+    waitResult = WaitForSingleObject(exitThread, 1000);
     TEST_CHECK_EQ(WAIT_OBJECT_0, waitResult);
     exitCode = 0;
     TEST_CHECK(GetExitCodeThread(exitThread, &exitCode));

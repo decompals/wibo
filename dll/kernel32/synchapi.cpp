@@ -189,7 +189,7 @@ HANDLE WIN_FUNC CreateSemaphoreA(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LO
 BOOL WIN_FUNC ReleaseSemaphore(HANDLE hSemaphore, LONG lReleaseCount, PLONG lpPreviousCount) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("ReleaseSemaphore(%p, %ld, %p)\n", hSemaphore, lReleaseCount, lpPreviousCount);
-	if (lReleaseCount <= 0) {
+	if (lReleaseCount < 0) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
@@ -330,9 +330,8 @@ DWORD WIN_FUNC WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds) {
 		pthread_t self = pthread_self();
 		std::unique_lock lk(th->m);
 		if (pthread_equal(th->thread, self)) {
-			// Cannot wait on self
-			wibo::lastError = ERROR_INVALID_HANDLE;
-			return WAIT_FAILED;
+			// Windows actually allows you to wait on your own thread, but why bother?
+			return WAIT_TIMEOUT;
 		}
 		bool ok = doWait(lk, th->cv, [&] { return th->signaled.load(std::memory_order_acquire); });
 		return ok ? WAIT_OBJECT_0 : WAIT_TIMEOUT;
@@ -341,9 +340,8 @@ DWORD WIN_FUNC WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds) {
 		auto po = std::move(obj).downcast<ProcessObject>();
 		std::unique_lock lk(po->m);
 		if (po->pidfd == -1) {
-			// Cannot wait on self
-			wibo::lastError = ERROR_INVALID_HANDLE;
-			return WAIT_FAILED;
+			// Windows actually allows you to wait on your own process, but why bother?
+			return WAIT_TIMEOUT;
 		}
 		bool ok = doWait(lk, po->cv, [&] { return po->signaled.load(std::memory_order_acquire); });
 		return ok ? WAIT_OBJECT_0 : WAIT_TIMEOUT;

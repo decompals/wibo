@@ -52,9 +52,9 @@ int main(void) {
 
 	HANDLE thread = CreateThread(NULL, 0, workerProc, NULL, 0, NULL);
 	TEST_CHECK_MSG(thread != NULL, "CreateThread failed: %lu", (unsigned long)GetLastError());
-	DWORD wait_result = WaitForSingleObject(thread, INFINITE);
+	DWORD wait_result = WaitForSingleObject(thread, 1000);
 	TEST_CHECK_EQ(WAIT_OBJECT_0, wait_result);
-	TEST_CHECK_MSG(CloseHandle(thread) != 0, "CloseHandle(thread) failed: %lu", (unsigned long)GetLastError());
+	TEST_CHECK(CloseHandle(thread));
 
 	TEST_CHECK_EQ(1, getAttach());
 	TEST_CHECK_EQ(1, getDetach());
@@ -68,9 +68,9 @@ int main(void) {
 
 	thread = CreateThread(NULL, 0, workerProc, NULL, 0, NULL);
 	TEST_CHECK_MSG(thread != NULL, "CreateThread after disable failed: %lu", (unsigned long)GetLastError());
-	wait_result = WaitForSingleObject(thread, INFINITE);
+	wait_result = WaitForSingleObject(thread, 1000);
 	TEST_CHECK_EQ(WAIT_OBJECT_0, wait_result);
-	TEST_CHECK_MSG(CloseHandle(thread) != 0, "CloseHandle(second thread) failed: %lu", (unsigned long)GetLastError());
+	TEST_CHECK(CloseHandle(thread));
 
 	if (!isRunningUnderWine()) {
 		TEST_CHECK_EQ(0, getAttach());
@@ -80,7 +80,7 @@ int main(void) {
 	LONG final_attach = getAttach();
 	LONG final_detach = getDetach();
 
-	TEST_CHECK_MSG(FreeLibrary(mod) != 0, "FreeLibrary failed: %lu", (unsigned long)GetLastError());
+	TEST_CHECK(FreeLibrary(mod));
 
 	printf("thread_notifications: attach=%ld detach=%ld\n", (long)final_attach, (long)final_detach);
 	return EXIT_SUCCESS;

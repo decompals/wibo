@@ -63,7 +63,7 @@ static void test_overlapped_read_with_event(void) {
         TEST_CHECK_EQ(ERROR_IO_PENDING, GetLastError());
     }
 
-    TEST_CHECK(WaitForSingleObject(ov.hEvent, INFINITE) == WAIT_OBJECT_0);
+    TEST_CHECK(WaitForSingleObject(ov.hEvent, 1000) == WAIT_OBJECT_0);
 
     DWORD transferred = 0;
     TEST_CHECK(GetOverlappedResult(file, &ov, &transferred, FALSE));
@@ -91,7 +91,7 @@ static void test_overlapped_eof(void) {
         TEST_CHECK_EQ(ERROR_IO_PENDING, GetLastError());
     }
 
-    TEST_CHECK(WaitForSingleObject(ov.hEvent, INFINITE) == WAIT_OBJECT_0);
+    TEST_CHECK(WaitForSingleObject(ov.hEvent, 1000) == WAIT_OBJECT_0);
 
     DWORD transferred = 1234;
     TEST_CHECK(!GetOverlappedResult(file, &ov, &transferred, FALSE));
@@ -127,7 +127,7 @@ static void test_overlapped_write(void) {
     if (!issued) {
         TEST_CHECK_EQ(ERROR_IO_PENDING, GetLastError());
     }
-    TEST_CHECK(WaitForSingleObject(ov.hEvent, INFINITE) == WAIT_OBJECT_0);
+    TEST_CHECK(WaitForSingleObject(ov.hEvent, 1000) == WAIT_OBJECT_0);
 
     DWORD transferred = 0;
     TEST_CHECK(GetOverlappedResult(file, &ov, &transferred, FALSE));

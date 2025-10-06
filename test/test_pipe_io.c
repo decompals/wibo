@@ -75,8 +75,7 @@ int main(void) {
 
     bytesRead = 123;
     SetLastError(ERROR_GEN_FAILURE);
-    BOOL ok = ReadFile(readPipe, buffer, sizeof(buffer), &bytesRead, NULL);
-    TEST_CHECK(!ok);
+    TEST_CHECK(!ReadFile(readPipe, buffer, sizeof(buffer), &bytesRead, NULL));
     TEST_CHECK_EQ(0u, (unsigned int)bytesRead);
     TEST_CHECK_EQ(ERROR_BROKEN_PIPE, GetLastError());
     TEST_CHECK(ResetEvent(event));

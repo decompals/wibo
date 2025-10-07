@@ -8,7 +8,8 @@ on:
   pull_request:
 
 env:
-  DOCKER_BUILDKIT: 1
+  DOCKER_BUILD_CHECKS_ANNOTATIONS: false
+  DOCKER_BUILD_SUMMARY: false
 
 jobs:
   build:
@@ -22,47 +23,81 @@ jobs:
             display: Debug
             dockerfile: Dockerfile.ubuntu
             build_type: Debug
-            image: wibo-host-debug
+            default: false
+            suffix: -ubuntu-debug
           - id: ubuntu-release
             display: Release
             dockerfile: Dockerfile.ubuntu
             build_type: Release
-            image: wibo-host-release
+            default: false
+            suffix: -ubuntu
           - id: static-debug
             display: Static, Debug
             dockerfile: Dockerfile
             build_type: Debug
-            image: wibo-static-debug
+            default: false
+            suffix: -alpine-debug
           - id: static-release
             display: Static, Release
             dockerfile: Dockerfile
             build_type: Release
-            image: wibo-static-release
+            default: true
+            suffix: -alpine
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build
-        run: >-
-          docker build
-          -f ${{ matrix.dockerfile }}
-          --build-arg BUILD_TYPE=${{ matrix.build_type }}
-          --target build
-          -t ${{ matrix.image }}
-          .
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/decompals/wibo
+          tags: |
+            type=raw,value=latest,enable=${{ matrix.default && github.ref_type == 'tag' }}
+            type=raw,value=latest${{ matrix.suffix }},enable=${{ github.ref_type == 'tag' }}
+            type=ref,event=tag,enable=${{ matrix.default }}
+            type=ref,event=tag,suffix=${{ matrix.suffix }}
+            type=ref,event=branch,enable=${{ matrix.default }}
+            type=ref,event=branch,suffix=${{ matrix.suffix }}
+            type=sha,enable=${{ matrix.default }}
+            type=sha,suffix=${{ matrix.suffix }}
+          flavor: |
+            latest=false
+
+      - name: Build Docker image
+        id: docker-build
+        uses: docker/build-push-action@v6
+        with:
+          file: ${{ matrix.dockerfile }}
+          build-args: |
+            BUILD_TYPE=${{ matrix.build_type }}
+          target: build
 
       - name: Tests
-        run: docker run --rm ${{ matrix.image }} ctest --test-dir /wibo/build --output-on-failure
+        run: >
+          docker run --rm ${{ steps.docker-build.outputs.imageid }}
+          ctest --test-dir /wibo/build --output-on-failure
 
       - name: Export binary
-        run: |
-          rm -rf dist
-          docker build \
-            -f ${{ matrix.dockerfile }} \
-            --build-arg BUILD_TYPE=${{ matrix.build_type }} \
-            --target export \
-            --output dist \
-            .
+        uses: docker/build-push-action@v6
+        with:
+          file: ${{ matrix.dockerfile }}
+          build-args: |
+            BUILD_TYPE=${{ matrix.build_type }}
+          target: export
+          outputs: |
+            type=local,dest=dist
+
+      - name: Push Docker image
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          file: ${{ matrix.dockerfile }}
+          build-args: |
+            BUILD_TYPE=${{ matrix.build_type }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

@@ -2600,6 +2600,7 @@ namespace msvcrt {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_itow_s(%d, %p, %zu, %d)\n", value, buffer, size, radix);
 		if (!buffer || size == 0) return 22;
+		(void)radix;
 		assert(radix == 10); // only base 10 supported for now
 
 		std::string str = std::to_string(value);
@@ -3222,7 +3223,7 @@ static void *resolveByName(const char *name) {
 	return nullptr;
 }
 
-wibo::ModuleStub lib_msvcrt = {
+extern const wibo::ModuleStub lib_msvcrt = {
 	(const char *[]){
 		"msvcrt",
 		"msvcrt40",

@@ -26,14 +26,14 @@ struct FsObject : ObjectBase {
 struct FileObject final : FsObject {
 	static constexpr ObjectType kType = ObjectType::File;
 
-	off64_t filePos = 0;
+	off_t filePos = 0;
 	bool overlapped = false;
 	bool appendOnly = false;
 	bool isPipe = false;
 
 	explicit FileObject(int fd) : FsObject(kType, fd) {
 		if (fd >= 0) {
-			off64_t pos = lseek64(fd, 0, SEEK_CUR);
+			off_t pos = lseek(fd, 0, SEEK_CUR);
 			if (pos == -1 && errno == ESPIPE) {
 				isPipe = true;
 			} else if (pos >= 0) {

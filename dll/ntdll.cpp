@@ -152,9 +152,9 @@ NTSTATUS WIN_FUNC NtReadFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE Ap
 		useCurrentFilePosition = true;
 	}
 
-	std::optional<off64_t> offset;
+	std::optional<off_t> offset;
 	if (!useCurrentFilePosition) {
-		offset = static_cast<off64_t>(*ByteOffset);
+		offset = static_cast<off_t>(*ByteOffset);
 	}
 
 	if (useOverlapped && useCurrentFilePosition) {
@@ -423,7 +423,7 @@ static void *resolveByName(const char *name) {
 	return nullptr;
 }
 
-wibo::ModuleStub lib_ntdll = {
+extern const wibo::ModuleStub lib_ntdll = {
 	(const char *[]){
 		"ntdll",
 		nullptr,

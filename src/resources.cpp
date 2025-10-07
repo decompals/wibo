@@ -99,9 +99,8 @@ const wibo::ImageResourceDataEntry *entryAsData(const uint8_t *base, const Image
 
 uint16_t primaryLang(uint16_t lang) { return lang & 0x3FFu; }
 
-const ImageResourceDirectoryEntry *selectLanguageEntry(const ImageResourceDirectory *dir, const uint8_t *base,
-													   uint32_t rsrcSize, std::optional<uint16_t> desired,
-													   uint16_t &chosenLang) {
+const ImageResourceDirectoryEntry *selectLanguageEntry(const ImageResourceDirectory *dir,
+													   std::optional<uint16_t> desired, uint16_t &chosenLang) {
 	const auto *entries = resourceEntries(dir);
 	uint16_t total = dir->numberOfNamedEntries + dir->numberOfIdEntries;
 	const ImageResourceDirectoryEntry *primaryMatch = nullptr;
@@ -172,7 +171,7 @@ bool Executable::findResource(const ResourceIdentifier &type, const ResourceIden
 		return false;
 	}
 	uint16_t chosenLang = language.value_or(0);
-	const auto *langEntry = selectLanguageEntry(langDir, base, rsrcSize, language, chosenLang);
+	const auto *langEntry = selectLanguageEntry(langDir, language, chosenLang);
 	if (!langEntry) {
 		wibo::lastError = ERROR_RESOURCE_LANG_NOT_FOUND;
 		return false;

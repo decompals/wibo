@@ -1,5 +1,5 @@
-#include "common.h"
 #include "async_io.h"
+#include "common.h"
 #include "context.h"
 #include "files.h"
 #include "modules.h"
@@ -408,14 +408,13 @@ int main(int argc, char **argv) {
 
 	blockUpper2GB();
 	files::init();
-	wibo::processes().init();
-	async_io::initialize();
 
 	// Create TIB
 	memset(&tib, 0, sizeof(tib));
 	tib.tib = &tib;
-	tib.peb = (PEB *)calloc(sizeof(PEB), 1);
-	tib.peb->ProcessParameters = (RTL_USER_PROCESS_PARAMETERS *)calloc(sizeof(RTL_USER_PROCESS_PARAMETERS), 1);
+	tib.peb = static_cast<PEB *>(calloc(1, sizeof(PEB)));
+	tib.peb->ProcessParameters =
+		static_cast<RTL_USER_PROCESS_PARAMETERS *>(calloc(1, sizeof(RTL_USER_PROCESS_PARAMETERS)));
 	wibo::processPeb = tib.peb;
 	wibo::initializeTibStackInfo(&tib);
 	if (!wibo::installTibForCurrentThread(&tib)) {

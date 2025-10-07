@@ -13,11 +13,7 @@
 
 // On Windows, the incoming stack is aligned to a 4 byte boundary.
 // force_align_arg_pointer will realign the stack to match GCC's 16 byte alignment.
-#ifdef __clang__
-#define WIN_ENTRY __attribute__((force_align_arg_pointer))
-#else
-#define WIN_ENTRY __attribute__((force_align_arg_pointer, callee_pop_aggregate_return(0)))
-#endif
+#define WIN_ENTRY __attribute__((ms_abi, force_align_arg_pointer))
 #define WIN_FUNC WIN_ENTRY __attribute__((stdcall))
 
 #define DEBUG_LOG(...)                                                                                                 \

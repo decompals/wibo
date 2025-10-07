@@ -74,6 +74,7 @@ bool ProcessManager::init() {
 
 	mRunning.store(true, std::memory_order_release);
 	mThread = std::thread(&ProcessManager::runLoop, this);
+	DEBUG_LOG("ProcessManager initialized\n");
 	return true;
 }
 
@@ -159,7 +160,7 @@ void ProcessManager::wake() const {
 		return;
 	}
 	uint64_t n = 1;
-	write(mWakeFd, &n, sizeof(n));
+	ssize_t r [[maybe_unused]] = write(mWakeFd, &n, sizeof(n));
 }
 
 void ProcessManager::checkPidfd(int pidfd) {
@@ -212,6 +213,10 @@ void ProcessManager::checkPidfd(int pidfd) {
 
 ProcessManager &processes() {
 	static ProcessManager mgr;
+	if (!mgr.init()) {
+		fprintf(stderr, "Failed to initialize ProcessManager\n");
+		abort();
+	}
 	return mgr;
 }
 

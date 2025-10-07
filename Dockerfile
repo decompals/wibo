@@ -6,6 +6,7 @@ RUN apk add --no-cache \
     bash \
     binutils \
     cmake \
+    coreutils \
     g++ \
     git \
     linux-headers \
@@ -19,18 +20,21 @@ WORKDIR /wibo
 COPY . /wibo
 
 # Build type (Release, Debug, RelWithDebInfo, MinSizeRel)
-ARG build_type=Release
+ARG BUILD_TYPE=Release
+
+# Enable link-time optimization (LTO) (AUTO, ON, OFF)
+ARG ENABLE_LTO=AUTO
 
 # Build static binary
 RUN cmake -S /wibo -B /wibo/build -G Ninja \
-        -DCMAKE_BUILD_TYPE="$build_type" \
-        -DCMAKE_C_FLAGS="-static" \
-        -DCMAKE_CXX_FLAGS="-static" \
-        -DBUILD_TESTING=ON \
-        -DWIBO_ENABLE_FIXTURE_TESTS=ON \
-        -DMI_LIBC_MUSL=ON \
-    && cmake --build /wibo/build \
-    && ( [ "$build_type" != "Release" ] || strip -g /wibo/build/wibo )
+        -DCMAKE_BUILD_TYPE:STRING="$BUILD_TYPE" \
+        -DCMAKE_C_FLAGS:STRING="-static" \
+        -DCMAKE_CXX_FLAGS:STRING="-static" \
+        -DMI_LIBC_MUSL:BOOL=ON \
+        -DWIBO_ENABLE_LIBURING:BOOL=ON \
+        -DWIBO_ENABLE_LTO:STRING="$ENABLE_LTO" \
+    && cmake --build /wibo/build --verbose \
+    && ( [ "$BUILD_TYPE" != "Release" ] || strip -g /wibo/build/wibo )
 
 # Export binary (usage: docker build --target export --output build .)
 FROM scratch AS export

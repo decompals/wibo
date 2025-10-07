@@ -502,7 +502,7 @@ HANDLE WIN_FUNC CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMap
 		}
 		mapping->fd = dupFd;
 		if (size == 0) {
-			off64_t fileSize = lseek64(dupFd, 0, SEEK_END);
+			off_t fileSize = lseek(dupFd, 0, SEEK_END);
 			if (fileSize < 0) {
 				return nullptr;
 			}

@@ -39,7 +39,7 @@ static void *resolveByName(const char *name) {
 	return nullptr;
 }
 
-wibo::ModuleStub lib_ole32 = {
+extern const wibo::ModuleStub lib_ole32 = {
 	(const char *[]){
 		"ole32",
 		nullptr,

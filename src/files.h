@@ -21,9 +21,9 @@ struct IOResult {
 void init();
 std::filesystem::path pathFromWindows(const char *inStr);
 std::string pathToWindows(const std::filesystem::path &path);
-IOResult read(FileObject *file, void *buffer, size_t bytesToRead, const std::optional<off64_t> &offset,
+IOResult read(FileObject *file, void *buffer, size_t bytesToRead, const std::optional<off_t> &offset,
 			  bool updateFilePointer);
-IOResult write(FileObject *file, const void *buffer, size_t bytesToWrite, const std::optional<off64_t> &offset,
+IOResult write(FileObject *file, const void *buffer, size_t bytesToWrite, const std::optional<off_t> &offset,
 			   bool updateFilePointer);
 HANDLE getStdHandle(DWORD nStdHandle);
 BOOL setStdHandle(DWORD nStdHandle, HANDLE hHandle);

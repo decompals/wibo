@@ -106,7 +106,7 @@ void *resolveByName(const char *name) {
 
 } // namespace
 
-wibo::ModuleStub lib_advapi32 = {
+extern const wibo::ModuleStub lib_advapi32 = {
 	(const char *[]){
 		"advapi32",
 		nullptr,

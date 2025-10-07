@@ -46,7 +46,7 @@ jobs:
         run: >-
           docker build
           -f ${{ matrix.dockerfile }}
-          --build-arg build_type=${{ matrix.build_type }}
+          --build-arg BUILD_TYPE=${{ matrix.build_type }}
           --target build
           -t ${{ matrix.image }}
           .
@@ -59,7 +59,7 @@ jobs:
           rm -rf dist
           docker build \
             -f ${{ matrix.dockerfile }} \
-            --build-arg build_type=${{ matrix.build_type }} \
+            --build-arg BUILD_TYPE=${{ matrix.build_type }} \
             --target export \
             --output dist \
             .

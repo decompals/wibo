@@ -74,7 +74,7 @@ static void *resolveByName(const char *name) {
 	return nullptr;
 }
 
-wibo::ModuleStub lib_bcrypt = {
+extern const wibo::ModuleStub lib_bcrypt = {
 	(const char *[]){
 		"bcrypt",
 		nullptr,

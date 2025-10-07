@@ -27,7 +27,7 @@ static void *resolveByOrdinal(uint16_t ordinal) {
 	return 0;
 }
 
-wibo::ModuleStub lib_lmgr = {
+extern const wibo::ModuleStub lib_lmgr = {
 	(const char *[]){
 		"lmgr11",
 		"lmgr326b",

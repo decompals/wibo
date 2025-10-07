@@ -1,10 +1,5 @@
 cmake_minimum_required(VERSION 3.13)
 
-if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE "Debug" CACHE STRING
-        "Build type options: Debug Release RelWithDebInfo MinSizeRel" FORCE)
-endif()
-
 set(CMAKE_C_FLAGS_INIT "-m32")
 set(CMAKE_CXX_FLAGS_INIT "-m32")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "-m32")
@@ -12,15 +7,35 @@ set(CMAKE_SHARED_LINKER_FLAGS_INIT "-m32")
 
 project(wibo LANGUAGES C CXX)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+option(WIBO_ENABLE_FIXTURE_TESTS "Enable Win32 fixture tests (requires i686-w64-mingw32)" ON)
+option(WIBO_ENABLE_LIBURING "Enable liburing for asynchronous I/O" OFF)
+set(WIBO_ENABLE_LTO "AUTO" CACHE STRING "Enable link-time optimization (LTO)")
+set_property(CACHE WIBO_ENABLE_LTO PROPERTY STRINGS "AUTO" "ON" "OFF")
 
-set(CMAKE_C_STANDARD 11)
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -fno-pie -no-pie -D_LARGEFILE64_SOURCE")
+if (WIBO_ENABLE_LTO STREQUAL "AUTO")
+    if (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
+        include(CheckIPOSupported)
+        check_ipo_supported(RESULT ipo_supported OUTPUT ipo_error)
+        if (ipo_supported)
+            message(STATUS "Enabling LTO")
+            set(WIBO_ENABLE_LTO ON)
+        else()
+            message(STATUS "LTO not supported: ${ipo_error}")
+            set(WIBO_ENABLE_LTO OFF)
+        endif()
+    else()
+        message(STATUS "Disabling LTO")
+        set(WIBO_ENABLE_LTO OFF)
+    endif()
+elseif (NOT (WIBO_ENABLE_LTO STREQUAL "ON" OR WIBO_ENABLE_LTO STREQUAL "OFF"))
+    message(FATAL_ERROR "WIBO_ENABLE_LTO must be ON, OFF, or AUTO")
+endif()
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ${WIBO_ENABLE_LTO})
 
-find_package(Filesystem REQUIRED)
-
-# Disable mimalloc tests
+# Fetch and configure mimalloc
+set(MI_BUILD_SHARED OFF CACHE BOOL "Build shared library" FORCE)
+set(MI_BUILD_STATIC OFF CACHE BOOL "Build static library" FORCE)
+set(MI_BUILD_OBJECT ON CACHE BOOL "Build object library" FORCE)
 set(MI_BUILD_TESTS OFF CACHE BOOL "Build test executables" FORCE)
 
 include(FetchContent)
@@ -31,35 +46,43 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(mimalloc)
 
-FetchContent_Declare(
-    liburing
-    GIT_REPOSITORY https://github.com/axboe/liburing.git
-    GIT_TAG        liburing-2.4
-)
-FetchContent_MakeAvailable(liburing)
+# Disable `note: the alignment of '_Atomic long long int' fields changed in GCC 11.1`
+target_compile_options(mimalloc-obj PRIVATE -Wno-psabi)
 
-set(LIBURING_COMPAT ${liburing_SOURCE_DIR}/src/include/liburing/compat.h)
-add_custom_command(
-  OUTPUT  ${LIBURING_COMPAT}
-  COMMAND ${CMAKE_COMMAND} -E env
-          CC=${CMAKE_C_COMPILER}
-          AR=${CMAKE_AR}
-          RANLIB=${CMAKE_RANLIB}
-          ./configure --cc=${CMAKE_C_COMPILER}
-  WORKING_DIRECTORY ${liburing_SOURCE_DIR}
-  COMMENT "Running liburing configure"
-  VERBATIM
-)
-add_custom_target(liburing_configure DEPENDS ${LIBURING_COMPAT})
-add_library(liburing STATIC
-  ${liburing_SOURCE_DIR}/src/queue.c
-  ${liburing_SOURCE_DIR}/src/register.c
-  ${liburing_SOURCE_DIR}/src/setup.c
-  ${liburing_SOURCE_DIR}/src/syscall.c
-  ${liburing_SOURCE_DIR}/src/version.c)
-add_dependencies(liburing liburing_configure)
-target_include_directories(liburing PUBLIC ${liburing_SOURCE_DIR}/src/include)
-target_compile_definitions(liburing PRIVATE _GNU_SOURCE)
+if (WIBO_ENABLE_LIBURING)
+    FetchContent_Declare(
+        liburing
+        GIT_REPOSITORY https://github.com/axboe/liburing.git
+        GIT_TAG        e907d6a342e80b70874f93abd440b92b8a40b7bc  # liburing-2.12
+    )
+    FetchContent_MakeAvailable(liburing)
+
+    add_custom_command(
+        OUTPUT  ${liburing_SOURCE_DIR}/config-host.h
+                ${liburing_SOURCE_DIR}/src/include/liburing/compat.h
+        COMMAND ${CMAKE_COMMAND} -E env
+                CC=${CMAKE_C_COMPILER}
+                CXX=${CMAKE_CXX_COMPILER}
+                ./configure --prefix=${liburing_BINARY_DIR}
+        WORKING_DIRECTORY ${liburing_SOURCE_DIR}
+        DEPENDS ${liburing_SOURCE_DIR}/configure
+        COMMENT "Running liburing configure"
+        VERBATIM
+    )
+    add_library(liburing STATIC
+        ${liburing_SOURCE_DIR}/config-host.h
+        ${liburing_SOURCE_DIR}/src/nolibc.c
+        ${liburing_SOURCE_DIR}/src/queue.c
+        ${liburing_SOURCE_DIR}/src/register.c
+        ${liburing_SOURCE_DIR}/src/setup.c
+        ${liburing_SOURCE_DIR}/src/syscall.c
+        ${liburing_SOURCE_DIR}/src/version.c
+        ${liburing_SOURCE_DIR}/src/include/liburing/compat.h)
+    target_compile_definitions(liburing PRIVATE _GNU_SOURCE _FILE_OFFSET_BITS=64 _TIME_BITS=64)
+    target_compile_options(liburing PRIVATE -include config-host.h)
+    target_include_directories(liburing PUBLIC ${liburing_SOURCE_DIR}/src/include)
+    target_include_directories(liburing PRIVATE ${liburing_SOURCE_DIR})
+endif()
 
 add_executable(wibo
     dll/advapi32.cpp
@@ -116,14 +139,24 @@ add_executable(wibo
     src/resources.cpp
     src/strutil.cpp
 )
-target_include_directories(wibo PRIVATE dll src)
+target_compile_definitions(wibo PRIVATE _GNU_SOURCE _FILE_OFFSET_BITS=64 _TIME_BITS=64)
 target_compile_features(wibo PRIVATE cxx_std_20)
-target_link_libraries(wibo PRIVATE std::filesystem mimalloc-static liburing)
+target_compile_options(wibo PRIVATE -Wall -Wextra -fno-pie -maccumulate-outgoing-args)
+target_include_directories(wibo PRIVATE dll src)
+target_link_libraries(wibo PRIVATE mimalloc-obj)
+target_link_options(wibo PRIVATE -no-pie)
+if (WIBO_ENABLE_LIBURING)
+    target_compile_definitions(wibo PRIVATE WIBO_ENABLE_LIBURING=1)
+    target_link_libraries(wibo PRIVATE liburing)
+    target_sources(wibo PRIVATE src/async_io_uring.cpp)
+else()
+    target_compile_definitions(wibo PRIVATE WIBO_ENABLE_LIBURING=0)
+endif()
 install(TARGETS wibo DESTINATION bin)
 
-include(CTest)
+if (WIBO_ENABLE_FIXTURE_TESTS)
+    include(CTest)
 
-if(BUILD_TESTING)
     find_program(WIBO_MINGW_CC i686-w64-mingw32-gcc)
     find_program(WIBO_MINGW_WINDRES i686-w64-mingw32-windres)
 
@@ -132,443 +165,105 @@ if(BUILD_TESTING)
         set(WIBO_HAVE_MINGW_TOOLCHAIN TRUE)
     endif()
 
-    option(WIBO_ENABLE_FIXTURE_TESTS "Build and run Windows fixture binaries through wibo" ${WIBO_HAVE_MINGW_TOOLCHAIN})
+    if(NOT WIBO_HAVE_MINGW_TOOLCHAIN)
+        message(WARNING "MinGW toolchain not found; skipping fixture tests")
+    else()
+        set(WIBO_TEST_BIN_DIR ${CMAKE_CURRENT_BINARY_DIR}/test)
+        file(MAKE_DIRECTORY ${WIBO_TEST_BIN_DIR})
 
-    if(WIBO_ENABLE_FIXTURE_TESTS)
-        if(NOT WIBO_HAVE_MINGW_TOOLCHAIN)
-            message(WARNING "MinGW toolchain not found; skipping fixture tests")
+        function(wibo_add_fixture_dll)
+            set(options)
+            set(oneValueArgs NAME)
+            set(multiValueArgs SOURCES COMPILE_OPTIONS DEPENDS)
+            cmake_parse_arguments(PARSE_ARGV 0 fixture "${options}" "${oneValueArgs}" "${multiValueArgs}")
+
+            set(fixture_OUTPUT ${WIBO_TEST_BIN_DIR}/${fixture_NAME}.dll)
+            add_custom_command(
+                OUTPUT ${fixture_OUTPUT}
+                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2 -shared
+                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
+                        -o ${fixture_OUTPUT}
+                        ${fixture_SOURCES}
+                        ${fixture_COMPILE_OPTIONS}
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                DEPENDS ${fixture_SOURCES} ${fixture_DEPENDS})
+            list(APPEND WIBO_TEST_FIXTURES ${fixture_OUTPUT})
+            set(WIBO_TEST_FIXTURES ${WIBO_TEST_FIXTURES} PARENT_SCOPE)
+        endfunction(wibo_add_fixture_dll)
+
+        function(wibo_add_fixture_bin)
+            set(options)
+            set(oneValueArgs NAME)
+            set(multiValueArgs SOURCES COMPILE_OPTIONS DEPENDS)
+            cmake_parse_arguments(PARSE_ARGV 0 fixture "${options}" "${oneValueArgs}" "${multiValueArgs}")
+
+            set(fixture_OUTPUT ${WIBO_TEST_BIN_DIR}/${fixture_NAME}.exe)
+            add_custom_command(
+                OUTPUT ${fixture_OUTPUT}
+                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
+                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
+                        -o ${fixture_OUTPUT}
+                        ${fixture_SOURCES}
+                        ${fixture_COMPILE_OPTIONS}
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                DEPENDS ${fixture_SOURCES} ${fixture_DEPENDS})
+            list(APPEND WIBO_TEST_FIXTURES ${fixture_OUTPUT})
+            set(WIBO_TEST_FIXTURES ${WIBO_TEST_FIXTURES} PARENT_SCOPE)
+
+            add_test(NAME wibo.${fixture_NAME}
+                COMMAND $<TARGET_FILE:wibo> ${fixture_OUTPUT})
+            set_tests_properties(wibo.${fixture_NAME} PROPERTIES
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test
+                DEPENDS wibo.build_fixtures)
+        endfunction(wibo_add_fixture_bin)
+
+        # Define fixture tests
+        wibo_add_fixture_bin(NAME test_external_dll SOURCES test/test_external_dll.c)
+        wibo_add_fixture_bin(NAME test_dll_attach_failure SOURCES test/test_dll_attach_failure.c)
+        wibo_add_fixture_bin(NAME test_thread_notifications SOURCES test/test_thread_notifications.c)
+        wibo_add_fixture_bin(NAME test_bcrypt SOURCES test/test_bcrypt.c COMPILE_OPTIONS -lbcrypt)
+        wibo_add_fixture_bin(NAME test_resources SOURCES test/test_resources.c ${WIBO_TEST_BIN_DIR}/test_resources_res.o COMPILE_OPTIONS -lversion)
+        wibo_add_fixture_bin(NAME test_threading SOURCES test/test_threading.c)
+        wibo_add_fixture_bin(NAME test_handleapi SOURCES test/test_handleapi.c)
+        wibo_add_fixture_bin(NAME test_findfile SOURCES test/test_findfile.c)
+        wibo_add_fixture_bin(NAME test_synchapi SOURCES test/test_synchapi.c)
+        wibo_add_fixture_bin(NAME test_processes SOURCES test/test_processes.c)
+        wibo_add_fixture_bin(NAME test_heap SOURCES test/test_heap.c)
+        wibo_add_fixture_bin(NAME test_actctx SOURCES test/test_actctx.c)
+        wibo_add_fixture_bin(NAME test_overlapped_io SOURCES test/test_overlapped_io.c)
+        wibo_add_fixture_bin(NAME test_time SOURCES test/test_time.c)
+        wibo_add_fixture_bin(NAME test_virtualalloc SOURCES test/test_virtualalloc.c)
+        wibo_add_fixture_bin(NAME test_virtualquery SOURCES test/test_virtualquery.c)
+        wibo_add_fixture_bin(NAME test_rtl SOURCES test/test_rtl.c)
+        wibo_add_fixture_bin(NAME test_ntquery SOURCES test/test_ntquery.c)
+        wibo_add_fixture_bin(NAME test_ntreadfile SOURCES test/test_ntreadfile.c)
+        wibo_add_fixture_bin(NAME test_pipe_io SOURCES test/test_pipe_io.c)
+        wibo_add_fixture_bin(NAME test_sysdir SOURCES test/test_sysdir.c)
+
+        # DLLs for fixture tests
+        wibo_add_fixture_dll(NAME external_exports SOURCES test/external_exports.c)
+        wibo_add_fixture_dll(NAME dll_attach_failure SOURCES test/dll_attach_failure.c)
+        wibo_add_fixture_dll(NAME thread_notifications SOURCES test/thread_notifications.c)
+
+        # Resources for test_resources
+        add_custom_command(
+            OUTPUT ${WIBO_TEST_BIN_DIR}/test_resources_res.o
+            COMMAND ${WIBO_MINGW_WINDRES}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_resources.rc
+                    -O coff -o test_resources_res.o
+            WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
+            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/test/test_resources.rc)
+
+        add_custom_target(wibo_test_fixtures DEPENDS ${WIBO_TEST_FIXTURES})
+
+        if(CMAKE_CONFIGURATION_TYPES)
+            set(_wibo_fixture_build_command
+                ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --config $<CONFIG> --target wibo_test_fixtures)
         else()
-            set(WIBO_TEST_BIN_DIR ${CMAKE_CURRENT_BINARY_DIR}/test)
-            file(MAKE_DIRECTORY ${WIBO_TEST_BIN_DIR})
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/external_exports.dll
-                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2 -shared
-                        -o external_exports.dll
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/external_exports.c
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/test/external_exports.c)
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/dll_attach_failure.dll
-                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2 -shared
-                        -o dll_attach_failure.dll
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/dll_attach_failure.c
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/test/dll_attach_failure.c)
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/thread_notifications.dll
-                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2 -shared
-                        -o thread_notifications.dll
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/thread_notifications.c
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/test/thread_notifications.c)
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/test_external_dll.exe
-                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
-                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
-                        -o test_external_dll.exe
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_external_dll.c
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_external_dll.c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/test_dll_attach_failure.exe
-                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
-                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
-                        -o test_dll_attach_failure.exe
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_dll_attach_failure.c
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_dll_attach_failure.c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/test_thread_notifications.exe
-                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
-                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
-                        -o test_thread_notifications.exe
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_thread_notifications.c
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_thread_notifications.c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/test_bcrypt.exe
-                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
-                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
-                        -o test_bcrypt.exe
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_bcrypt.c
-                        -lbcrypt
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_bcrypt.c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/test_resources_res.o
-                COMMAND ${WIBO_MINGW_WINDRES}
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_resources.rc
-                        -O coff -o test_resources_res.o
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/test/test_resources.rc)
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/test_resources.exe
-                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
-                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
-                        -o test_resources.exe
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_resources.c
-                        test_resources_res.o -lversion
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_resources.c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h
-                    ${WIBO_TEST_BIN_DIR}/test_resources_res.o)
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/test_threading.exe
-                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
-                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
-                        -o test_threading.exe
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_threading.c
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_threading.c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/test_handleapi.exe
-                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
-                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
-                        -o test_handleapi.exe
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_handleapi.c
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_handleapi.c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/test_findfile.exe
-                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
-                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
-                        -o test_findfile.exe
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_findfile.c
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_findfile.c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/test_synchapi.exe
-                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
-                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
-                        -o test_synchapi.exe
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_synchapi.c
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_synchapi.c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/test_processes.exe
-                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
-                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
-                        -o test_processes.exe
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_processes.c
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_processes.c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/test_heap.exe
-                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
-                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
-                        -o test_heap.exe
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_heap.c
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_heap.c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/test_actctx.exe
-                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
-                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
-                        -o test_actctx.exe
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_actctx.c
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_actctx.c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/test_overlapped_io.exe
-                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
-                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
-                        -o test_overlapped_io.exe
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_overlapped_io.c
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_overlapped_io.c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/test_time.exe
-                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
-                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
-                        -o test_time.exe
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_time.c
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_time.c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/test_virtualalloc.exe
-                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
-                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
-                        -o test_virtualalloc.exe
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_virtualalloc.c
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_virtualalloc.c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/test_virtualquery.exe
-                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
-                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
-                        -o test_virtualquery.exe
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_virtualquery.c
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_virtualquery.c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/test_rtl.exe
-                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
-                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
-                        -o test_rtl.exe
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_rtl.c
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_rtl.c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/test_ntquery.exe
-                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
-                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
-                        -o test_ntquery.exe
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_ntquery.c
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_ntquery.c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/test_ntreadfile.exe
-                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
-                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
-                        -o test_ntreadfile.exe
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_ntreadfile.c
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_ntreadfile.c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/test_pipe_io.exe
-                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
-                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
-                        -o test_pipe_io.exe
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_pipe_io.c
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_pipe_io.c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
-
-            add_custom_command(
-                OUTPUT ${WIBO_TEST_BIN_DIR}/test_sysdir.exe
-                COMMAND ${WIBO_MINGW_CC} -Wall -Wextra -O2
-                        -I${CMAKE_CURRENT_SOURCE_DIR}/test
-                        -o test_sysdir.exe
-                        ${CMAKE_CURRENT_SOURCE_DIR}/test/test_sysdir.c
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_sysdir.c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/test/test_assert.h)
-
-            add_custom_target(wibo_test_fixtures
-                DEPENDS
-                    ${WIBO_TEST_BIN_DIR}/external_exports.dll
-                    ${WIBO_TEST_BIN_DIR}/dll_attach_failure.dll
-                    ${WIBO_TEST_BIN_DIR}/thread_notifications.dll
-                    ${WIBO_TEST_BIN_DIR}/test_external_dll.exe
-                    ${WIBO_TEST_BIN_DIR}/test_dll_attach_failure.exe
-                    ${WIBO_TEST_BIN_DIR}/test_thread_notifications.exe
-                    ${WIBO_TEST_BIN_DIR}/test_bcrypt.exe
-                    ${WIBO_TEST_BIN_DIR}/test_resources.exe
-                    ${WIBO_TEST_BIN_DIR}/test_threading.exe
-                    ${WIBO_TEST_BIN_DIR}/test_handleapi.exe
-                    ${WIBO_TEST_BIN_DIR}/test_findfile.exe
-                    ${WIBO_TEST_BIN_DIR}/test_synchapi.exe
-                    ${WIBO_TEST_BIN_DIR}/test_processes.exe
-                    ${WIBO_TEST_BIN_DIR}/test_heap.exe
-                    ${WIBO_TEST_BIN_DIR}/test_actctx.exe
-                    ${WIBO_TEST_BIN_DIR}/test_overlapped_io.exe
-                    ${WIBO_TEST_BIN_DIR}/test_time.exe
-                    ${WIBO_TEST_BIN_DIR}/test_virtualalloc.exe
-                    ${WIBO_TEST_BIN_DIR}/test_virtualquery.exe
-                    ${WIBO_TEST_BIN_DIR}/test_rtl.exe
-                    ${WIBO_TEST_BIN_DIR}/test_ntquery.exe
-                    ${WIBO_TEST_BIN_DIR}/test_ntreadfile.exe
-                    ${WIBO_TEST_BIN_DIR}/test_pipe_io.exe
-                    ${WIBO_TEST_BIN_DIR}/test_sysdir.exe)
-
-            if(CMAKE_CONFIGURATION_TYPES)
-                set(_wibo_fixture_build_command
-                    ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --config $<CONFIG> --target wibo_test_fixtures)
-            else()
-                set(_wibo_fixture_build_command
-                    ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target wibo_test_fixtures)
-            endif()
-
-            add_test(NAME wibo.build_fixtures COMMAND ${_wibo_fixture_build_command})
-
-            add_test(NAME wibo.test_external_dll
-                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_external_dll.exe)
-            set_tests_properties(wibo.test_external_dll PROPERTIES
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS wibo.build_fixtures)
-
-            add_test(NAME wibo.test_bcrypt
-                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_bcrypt.exe)
-            set_tests_properties(wibo.test_bcrypt PROPERTIES
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS wibo.build_fixtures)
-
-            add_test(NAME wibo.test_resources
-                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_resources.exe)
-            set_tests_properties(wibo.test_resources PROPERTIES
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS wibo.build_fixtures)
-
-            add_test(NAME wibo.test_threading
-                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_threading.exe)
-            set_tests_properties(wibo.test_threading PROPERTIES
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS wibo.build_fixtures)
-
-            add_test(NAME wibo.test_handleapi
-                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_handleapi.exe)
-            set_tests_properties(wibo.test_handleapi PROPERTIES
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS wibo.build_fixtures)
-
-            add_test(NAME wibo.test_findfile
-                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_findfile.exe)
-            set_tests_properties(wibo.test_findfile PROPERTIES
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS wibo.build_fixtures)
-
-            add_test(NAME wibo.test_synchapi
-                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_synchapi.exe)
-            set_tests_properties(wibo.test_synchapi PROPERTIES
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS wibo.build_fixtures)
-
-            add_test(NAME wibo.test_processes
-                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_processes.exe)
-            set_tests_properties(wibo.test_processes PROPERTIES
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS wibo.build_fixtures)
-
-            add_test(NAME wibo.test_heap
-                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_heap.exe)
-            set_tests_properties(wibo.test_heap PROPERTIES
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS wibo.build_fixtures)
-
-            add_test(NAME wibo.test_actctx
-                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_actctx.exe)
-            set_tests_properties(wibo.test_actctx PROPERTIES
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS wibo.build_fixtures)
-
-            add_test(NAME wibo.test_overlapped_io
-                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_overlapped_io.exe)
-            set_tests_properties(wibo.test_overlapped_io PROPERTIES
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS wibo.build_fixtures)
-
-            add_test(NAME wibo.test_time
-                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_time.exe)
-            set_tests_properties(wibo.test_time PROPERTIES
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS wibo.build_fixtures)
-
-            add_test(NAME wibo.test_virtualalloc
-                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_virtualalloc.exe)
-            set_tests_properties(wibo.test_virtualalloc PROPERTIES
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS wibo.build_fixtures)
-
-            add_test(NAME wibo.test_virtualquery
-                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_virtualquery.exe)
-            set_tests_properties(wibo.test_virtualquery PROPERTIES
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS wibo.build_fixtures)
-
-            add_test(NAME wibo.test_rtl
-                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_rtl.exe)
-            set_tests_properties(wibo.test_rtl PROPERTIES
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS wibo.build_fixtures)
-
-            add_test(NAME wibo.test_ntquery
-                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_ntquery.exe)
-            set_tests_properties(wibo.test_ntquery PROPERTIES
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS wibo.build_fixtures)
-
-            add_test(NAME wibo.test_ntreadfile
-                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_ntreadfile.exe)
-            set_tests_properties(wibo.test_ntreadfile PROPERTIES
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS wibo.build_fixtures)
-
-            add_test(NAME wibo.test_pipe_io
-                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_pipe_io.exe)
-            set_tests_properties(wibo.test_pipe_io PROPERTIES
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS wibo.build_fixtures)
-
-            add_test(NAME wibo.test_sysdir
-                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_sysdir.exe)
-            set_tests_properties(wibo.test_sysdir PROPERTIES
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS wibo.build_fixtures)
-
-            add_test(NAME wibo.test_dll_attach_failure
-                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_dll_attach_failure.exe)
-            set_tests_properties(wibo.test_dll_attach_failure PROPERTIES
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS wibo.build_fixtures)
-
-            add_test(NAME wibo.test_thread_notifications
-                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/test_thread_notifications.exe)
-            set_tests_properties(wibo.test_thread_notifications PROPERTIES
-                WORKING_DIRECTORY ${WIBO_TEST_BIN_DIR}
-                DEPENDS wibo.build_fixtures)
+            set(_wibo_fixture_build_command
+                ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target wibo_test_fixtures)
         endif()
+
+        add_test(NAME wibo.build_fixtures COMMAND ${_wibo_fixture_build_command})
     endif()
 endif()

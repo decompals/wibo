@@ -6,7 +6,7 @@
 - Sample fixtures for exercising the loader live in `test/`.
 
 ## Build, Test, and Development Commands
-- `cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBUILD_TESTING=ON` configures a 32-bit toolchain; ensure multilib packages are present.
+- `cmake -B build -GNinja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` configures a 32-bit toolchain; ensure multilib packages are present.
 - `cmake --build build --target wibo` compiles the program and tests.
 - `./build/wibo /path/to/program.exe` runs a Windows binary. Use `WIBO_DEBUG=1` (or `--debug`/`-D`) for verbose logging. Use `--chdir`/`-C` to set the working directory.
 - `cmake -B build -DBUILD_TESTING=ON` + `ctest --test-dir build --output-on-failure` runs the self-checking WinAPI fixtures (requires `i686-w64-mingw32-gcc` and `i686-w64-mingw32-windres`).
@@ -25,7 +25,7 @@
 - Add `DEBUG_LOG` calls to trace execution and parameter values; these are invaluable when diagnosing issues with real-world binaries.
 
 ## Testing Guidelines
-- Fixture tests live in `test/` and are compiled automatically with `i686-w64-mingw32-gcc` when `BUILD_TESTING` is enabled.
+- Fixture tests live in `test/` and are compiled automatically with `i686-w64-mingw32-gcc`.
 - Keep new repros small and self-contained (`test_<feature>.c`).
 - All fixtures must self-assert; use `test_assert.h` helpers so `ctest` fails on mismatched WinAPI behaviour.
 - Update `CMakeLists.txt` to add new fixture sources.

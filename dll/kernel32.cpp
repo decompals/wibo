@@ -9,8 +9,8 @@
 #include "kernel32/interlockedapi.h"
 #include "kernel32/ioapiset.h"
 #include "kernel32/libloaderapi.h"
-#include "kernel32/namedpipeapi.h"
 #include "kernel32/memoryapi.h"
+#include "kernel32/namedpipeapi.h"
 #include "kernel32/processenv.h"
 #include "kernel32/processthreadsapi.h"
 #include "kernel32/profileapi.h"
@@ -602,7 +602,7 @@ void *resolveByName(const char *name) {
 
 } // namespace
 
-wibo::ModuleStub lib_kernel32 = {
+extern const wibo::ModuleStub lib_kernel32 = {
 	(const char *[]){
 		"kernel32",
 		nullptr,

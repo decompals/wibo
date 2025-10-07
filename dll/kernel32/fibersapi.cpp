@@ -34,7 +34,7 @@ DWORD WIN_FUNC FlsAlloc(PFLS_CALLBACK_FUNCTION lpCallback) {
 BOOL WIN_FUNC FlsFree(DWORD dwFlsIndex) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FlsFree(%u)\n", dwFlsIndex);
-	if (dwFlsIndex >= 0 && dwFlsIndex < kMaxFlsValues && g_flsValuesUsed[dwFlsIndex]) {
+	if (dwFlsIndex < kMaxFlsValues && g_flsValuesUsed[dwFlsIndex]) {
 		g_flsValuesUsed[dwFlsIndex] = false;
 		return TRUE;
 	} else {
@@ -47,7 +47,7 @@ PVOID WIN_FUNC FlsGetValue(DWORD dwFlsIndex) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("FlsGetValue(%u)\n", dwFlsIndex);
 	PVOID result = nullptr;
-	if (dwFlsIndex >= 0 && dwFlsIndex < kMaxFlsValues && g_flsValuesUsed[dwFlsIndex]) {
+	if (dwFlsIndex < kMaxFlsValues && g_flsValuesUsed[dwFlsIndex]) {
 		result = g_flsValues[dwFlsIndex];
 		// See https://learn.microsoft.com/en-us/windows/win32/api/fibersapi/nf-fibersapi-flsgetvalue
 		wibo::lastError = ERROR_SUCCESS;
@@ -61,7 +61,7 @@ PVOID WIN_FUNC FlsGetValue(DWORD dwFlsIndex) {
 BOOL WIN_FUNC FlsSetValue(DWORD dwFlsIndex, PVOID lpFlsData) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("FlsSetValue(%u, %p)\n", dwFlsIndex, lpFlsData);
-	if (dwFlsIndex >= 0 && dwFlsIndex < kMaxFlsValues && g_flsValuesUsed[dwFlsIndex]) {
+	if (dwFlsIndex < kMaxFlsValues && g_flsValuesUsed[dwFlsIndex]) {
 		g_flsValues[dwFlsIndex] = lpFlsData;
 		return TRUE;
 	} else {

@@ -120,6 +120,8 @@ namespace user32 {
 
 	int WIN_FUNC MessageBoxA(void *hwnd, const char *lpText, const char *lpCaption, unsigned int uType) {
 		HOST_CONTEXT_GUARD();
+		(void)hwnd;
+		(void)uType;
 		printf("MESSAGE BOX: [%s] %s\n", lpCaption, lpText);
 		fflush(stdout);
 		return 1;
@@ -183,7 +185,7 @@ static void *resolveByName(const char *name) {
 	return nullptr;
 }
 
-wibo::ModuleStub lib_user32 = {
+extern const wibo::ModuleStub lib_user32 = {
 	(const char *[]){
 		"user32",
 		nullptr,

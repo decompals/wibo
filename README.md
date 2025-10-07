@@ -5,7 +5,7 @@ A minimal, low-fuss wrapper that can run simple command-line 32-bit Windows bina
 ## Building
 
 ```sh
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBUILD_TESTING=ON
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build build
 ```
 

@@ -18,7 +18,7 @@ static void *resolveByName(const char *name) {
 	return nullptr;
 }
 
-wibo::ModuleStub lib_mscoree = {
+extern const wibo::ModuleStub lib_mscoree = {
 	(const char *[]){
 		"mscoree",
 		nullptr,

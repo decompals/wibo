@@ -38,7 +38,7 @@ static void *resolveByName(const char *name) {
 	return nullptr;
 }
 
-wibo::ModuleStub lib_vcruntime = {
+extern const wibo::ModuleStub lib_vcruntime = {
 	(const char *[]){
 		"vcruntime140",
 		nullptr,

@@ -5,15 +5,28 @@
 
 #include <optional>
 
-namespace async_io {
+namespace wibo {
 
-bool initialize();
-void shutdown();
-bool running();
+class AsyncIOBackend {
+  public:
+	virtual ~AsyncIOBackend() = default;
+	virtual bool init() = 0;
+	virtual void shutdown() = 0;
+	[[nodiscard]] virtual bool running() const noexcept = 0;
+	virtual bool queueRead(Pin<kernel32::FileObject> file, OVERLAPPED *ov, void *buffer, DWORD length,
+						   const std::optional<off_t> &offset, bool isPipe) = 0;
+	virtual bool queueWrite(Pin<kernel32::FileObject> file, OVERLAPPED *ov, const void *buffer, DWORD length,
+							const std::optional<off_t> &offset, bool isPipe) = 0;
+};
 
-bool queueRead(Pin<kernel32::FileObject> file, OVERLAPPED *ov, void *buffer, DWORD length,
-			   const std::optional<off64_t> &offset, bool isPipe);
-bool queueWrite(Pin<kernel32::FileObject> file, OVERLAPPED *ov, const void *buffer, DWORD length,
-				const std::optional<off64_t> &offset, bool isPipe);
+namespace detail {
 
-} // namespace async_io
+#if WIBO_ENABLE_LIBURING
+std::unique_ptr<AsyncIOBackend> createIoUringBackend();
+#endif
+
+} // namespace detail
+
+AsyncIOBackend &asyncIO();
+
+} // namespace wibo

@@ -327,7 +327,7 @@ static void *resolveByName(const char *name) {
 	return nullptr;
 }
 
-wibo::ModuleStub lib_version = {
+extern const wibo::ModuleStub lib_version = {
 	(const char *[]){
 		"version",
 		nullptr,

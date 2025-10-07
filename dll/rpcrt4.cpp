@@ -285,7 +285,7 @@ void *resolveByName(const char *name) {
 
 } // namespace
 
-wibo::ModuleStub lib_rpcrt4 = {
+extern const wibo::ModuleStub lib_rpcrt4 = {
 	(const char *[]){"rpcrt4", nullptr},
 	resolveByName,
 	nullptr,

@@ -142,7 +142,7 @@ std::string pathToWindows(const std::filesystem::path &path) {
 	return str;
 }
 
-IOResult read(FileObject *file, void *buffer, size_t bytesToRead, const std::optional<off64_t> &offset,
+IOResult read(FileObject *file, void *buffer, size_t bytesToRead, const std::optional<off_t> &offset,
 			  bool updateFilePointer) {
 	IOResult result{};
 	if (!file || !file->valid()) {
@@ -180,13 +180,13 @@ IOResult read(FileObject *file, void *buffer, size_t bytesToRead, const std::opt
 		return result;
 	}
 
-	const auto doRead = [&](off64_t pos) {
+	const auto doRead = [&](off_t pos) {
 		size_t total = 0;
 		size_t remaining = bytesToRead;
 		uint8_t *in = static_cast<uint8_t *>(buffer);
 		while (remaining > 0) {
 			size_t chunk = remaining > SSIZE_MAX ? SSIZE_MAX : remaining;
-			ssize_t rc = pread64(file->fd, in + total, chunk, pos);
+			ssize_t rc = pread(file->fd, in + total, chunk, pos);
 			if (rc == -1) {
 				if (errno == EINTR) {
 					continue;
@@ -207,10 +207,10 @@ IOResult read(FileObject *file, void *buffer, size_t bytesToRead, const std::opt
 
 	if (updateFilePointer || !offset.has_value()) {
 		std::lock_guard lk(file->m);
-		const off64_t pos = offset.value_or(file->filePos);
+		const off_t pos = offset.value_or(file->filePos);
 		doRead(pos);
 		if (updateFilePointer) {
-			file->filePos = pos + static_cast<off64_t>(result.bytesTransferred);
+			file->filePos = pos + static_cast<off_t>(result.bytesTransferred);
 		}
 	} else {
 		doRead(*offset);
@@ -219,7 +219,7 @@ IOResult read(FileObject *file, void *buffer, size_t bytesToRead, const std::opt
 	return result;
 }
 
-IOResult write(FileObject *file, const void *buffer, size_t bytesToWrite, const std::optional<off64_t> &offset,
+IOResult write(FileObject *file, const void *buffer, size_t bytesToWrite, const std::optional<off_t> &offset,
 			   bool updateFilePointer) {
 	IOResult result{};
 	if (!file || !file->valid()) {
@@ -256,7 +256,7 @@ IOResult write(FileObject *file, const void *buffer, size_t bytesToWrite, const 
 		}
 		result.bytesTransferred = total;
 		if (updateFilePointer) {
-			off64_t pos = file->isPipe ? 0 : lseek64(file->fd, 0, SEEK_CUR);
+			off_t pos = file->isPipe ? 0 : lseek(file->fd, 0, SEEK_CUR);
 			if (pos >= 0) {
 				file->filePos = pos;
 			} else if (result.unixError == 0) {
@@ -266,13 +266,13 @@ IOResult write(FileObject *file, const void *buffer, size_t bytesToWrite, const 
 		return result;
 	}
 
-	auto doWrite = [&](off64_t pos) {
+	auto doWrite = [&](off_t pos) {
 		size_t total = 0;
 		size_t remaining = bytesToWrite;
 		const uint8_t *in = static_cast<const uint8_t *>(buffer);
 		while (remaining > 0) {
 			size_t chunk = remaining > SSIZE_MAX ? SSIZE_MAX : remaining;
-			ssize_t rc = pwrite64(file->fd, in + total, chunk, pos);
+			ssize_t rc = pwrite(file->fd, in + total, chunk, pos);
 			if (rc == -1) {
 				if (errno == EINTR) {
 					continue;
@@ -292,10 +292,10 @@ IOResult write(FileObject *file, const void *buffer, size_t bytesToWrite, const 
 
 	if (updateFilePointer || !offset.has_value()) {
 		std::lock_guard lk(file->m);
-		const off64_t pos = offset.value_or(file->filePos);
+		const off_t pos = offset.value_or(file->filePos);
 		doWrite(pos);
 		if (updateFilePointer) {
-			file->filePos = pos + static_cast<off64_t>(result.bytesTransferred);
+			file->filePos = pos + static_cast<off_t>(result.bytesTransferred);
 		}
 	} else {
 		doWrite(*offset);

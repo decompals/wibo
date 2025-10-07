@@ -717,11 +717,11 @@ BOOL WIN_FUNC WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWr
 		return FALSE;
 	}
 
-	std::optional<off64_t> offset;
+	std::optional<off_t> offset;
 	bool updateFilePointer = true;
 	if (lpOverlapped != nullptr) {
-		offset = static_cast<off64_t>((static_cast<uint64_t>(lpOverlapped->Offset)) |
-									  (static_cast<uint64_t>(lpOverlapped->OffsetHigh) << 32));
+		offset = static_cast<off_t>((static_cast<uint64_t>(lpOverlapped->Offset)) |
+									(static_cast<uint64_t>(lpOverlapped->OffsetHigh) << 32));
 		lpOverlapped->Internal = STATUS_PENDING;
 		lpOverlapped->InternalHigh = 0;
 		updateFilePointer = !file->overlapped;
@@ -736,9 +736,8 @@ BOOL WIN_FUNC WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWr
 				}
 				return TRUE;
 			}
-			auto asyncFile = file.clone();
-			if (async_io::queueWrite(std::move(asyncFile), lpOverlapped, lpBuffer, nNumberOfBytesToWrite, offset,
-									 file->isPipe)) {
+			if (wibo::asyncIO().queueWrite(file.clone(), lpOverlapped, lpBuffer, nNumberOfBytesToWrite, offset,
+										   file->isPipe)) {
 				if (lpNumberOfBytesWritten) {
 					*lpNumberOfBytesWritten = 0;
 				}
@@ -814,11 +813,11 @@ BOOL WIN_FUNC ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead
 		*lpNumberOfBytesRead = 0;
 	}
 
-	std::optional<off64_t> offset;
+	std::optional<off_t> offset;
 	bool updateFilePointer = true;
 	if (lpOverlapped != nullptr) {
-		offset = static_cast<off64_t>((static_cast<uint64_t>(lpOverlapped->Offset)) |
-									  (static_cast<uint64_t>(lpOverlapped->OffsetHigh) << 32));
+		offset = static_cast<off_t>((static_cast<uint64_t>(lpOverlapped->Offset)) |
+									(static_cast<uint64_t>(lpOverlapped->OffsetHigh) << 32));
 		lpOverlapped->Internal = STATUS_PENDING;
 		lpOverlapped->InternalHigh = 0;
 		updateFilePointer = !file->overlapped;
@@ -833,7 +832,8 @@ BOOL WIN_FUNC ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead
 				}
 				return TRUE;
 			}
-			if (async_io::queueRead(file.clone(), lpOverlapped, lpBuffer, nNumberOfBytesToRead, offset, file->isPipe)) {
+			if (wibo::asyncIO().queueRead(file.clone(), lpOverlapped, lpBuffer, nNumberOfBytesToRead, offset,
+										  file->isPipe)) {
 				if (lpNumberOfBytesRead) {
 					*lpNumberOfBytesRead = 0;
 				}
@@ -1193,14 +1193,14 @@ DWORD WIN_FUNC SetFilePointer(HANDLE hFile, LONG lDistanceToMove, PLONG lpDistan
 	}
 	// TODO access check
 	std::lock_guard lk(file->m);
-	off64_t position = 0;
-	off64_t offset = static_cast<off64_t>(lDistanceToMove);
+	off_t position = 0;
+	off_t offset = static_cast<off_t>(lDistanceToMove);
 	if (dwMoveMethod == FILE_BEGIN) {
 		position = offset;
 	} else if (dwMoveMethod == FILE_CURRENT) {
 		position = file->filePos + offset;
 	} else if (dwMoveMethod == FILE_END) {
-		position = lseek64(file->fd, offset, SEEK_END);
+		position = lseek(file->fd, offset, SEEK_END);
 	}
 	if (position < 0) {
 		if (errno == EINVAL) {
@@ -1232,14 +1232,14 @@ BOOL WIN_FUNC SetFilePointerEx(HANDLE hFile, LARGE_INTEGER liDistanceToMove, PLA
 	}
 	// TODO access check
 	std::lock_guard lk(file->m);
-	off64_t position = 0;
-	off64_t offset = static_cast<off64_t>(liDistanceToMove);
+	off_t position = 0;
+	off_t offset = static_cast<off_t>(liDistanceToMove);
 	if (dwMoveMethod == FILE_BEGIN) {
 		position = offset;
 	} else if (dwMoveMethod == FILE_CURRENT) {
 		position = file->filePos + offset;
 	} else if (dwMoveMethod == FILE_END) {
-		position = lseek64(file->fd, offset, SEEK_END);
+		position = lseek(file->fd, offset, SEEK_END);
 	}
 	if (position < 0) {
 		if (errno == EINVAL) {
@@ -1279,7 +1279,7 @@ BOOL WIN_FUNC SetEndOfFile(HANDLE hFile) {
 		setLastErrorFromErrno();
 		return FALSE;
 	}
-	if (ftruncate64(file->fd, file->filePos) != 0) {
+	if (ftruncate(file->fd, file->filePos) != 0) {
 		setLastErrorFromErrno();
 		return FALSE;
 	}
@@ -1338,7 +1338,7 @@ DWORD WIN_FUNC GetFileSize(HANDLE hFile, LPDWORD lpFileSizeHigh) {
 		DEBUG_LOG("-> INVALID_FILE_SIZE (ERROR_INVALID_HANDLE)\n");
 		return INVALID_FILE_SIZE;
 	}
-	const auto size = lseek64(file->fd, 0, SEEK_END);
+	const auto size = lseek(file->fd, 0, SEEK_END);
 	if (size < 0) {
 		if (lpFileSizeHigh) {
 			*lpFileSizeHigh = 0;
@@ -1480,8 +1480,8 @@ BOOL WIN_FUNC GetFileInformationByHandle(HANDLE hFile, LPBY_HANDLE_FILE_INFORMAT
 		return FALSE;
 	}
 	// TODO access check
-	struct stat64 st{};
-	if (fstat64(file->fd, &st) != 0) {
+	struct stat st{};
+	if (fstat(file->fd, &st) != 0) {
 		setLastErrorFromErrno();
 		return FALSE;
 	}

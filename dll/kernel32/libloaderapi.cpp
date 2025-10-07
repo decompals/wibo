@@ -250,7 +250,8 @@ HMODULE WIN_FUNC LoadLibraryW(LPCWSTR lpLibFileName) {
 
 HMODULE WIN_FUNC LoadLibraryExW(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwFlags) {
 	HOST_CONTEXT_GUARD();
-	assert(!hFile);
+	(void)hFile;
+	// TOOD: handle dwFlags properly
 	DEBUG_LOG("LoadLibraryExW(%x) -> ", dwFlags);
 	auto filename = wideStringToString(lpLibFileName);
 	return LoadLibraryA(filename.c_str());

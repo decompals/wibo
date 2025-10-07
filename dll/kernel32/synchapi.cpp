@@ -635,26 +635,31 @@ BOOL WIN_FUNC InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpC
 
 void WIN_FUNC AcquireSRWLockShared(PSRWLOCK SRWLock) {
 	HOST_CONTEXT_GUARD();
+	(void)SRWLock;
 	VERBOSE_LOG("STUB: AcquireSRWLockShared(%p)\n", SRWLock);
 }
 
 void WIN_FUNC ReleaseSRWLockShared(PSRWLOCK SRWLock) {
 	HOST_CONTEXT_GUARD();
+	(void)SRWLock;
 	VERBOSE_LOG("STUB: ReleaseSRWLockShared(%p)\n", SRWLock);
 }
 
 void WIN_FUNC AcquireSRWLockExclusive(PSRWLOCK SRWLock) {
 	HOST_CONTEXT_GUARD();
+	(void)SRWLock;
 	VERBOSE_LOG("STUB: AcquireSRWLockExclusive(%p)\n", SRWLock);
 }
 
 void WIN_FUNC ReleaseSRWLockExclusive(PSRWLOCK SRWLock) {
 	HOST_CONTEXT_GUARD();
+	(void)SRWLock;
 	VERBOSE_LOG("STUB: ReleaseSRWLockExclusive(%p)\n", SRWLock);
 }
 
 BOOLEAN WIN_FUNC TryAcquireSRWLockExclusive(PSRWLOCK SRWLock) {
 	HOST_CONTEXT_GUARD();
+	(void)SRWLock;
 	VERBOSE_LOG("STUB: TryAcquireSRWLockExclusive(%p)\n", SRWLock);
 	return TRUE;
 }

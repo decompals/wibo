@@ -72,16 +72,16 @@ inline bool validateSystemTime(const SYSTEMTIME &st) {
 	if (st.wDay < 1 || st.wDay > static_cast<short>(daysInMonth(st.wYear, static_cast<unsigned>(st.wMonth)))) {
 		return false;
 	}
-	if (st.wHour < 0 || st.wHour > 23) {
+	if (st.wHour > 23) {
 		return false;
 	}
-	if (st.wMinute < 0 || st.wMinute > 59) {
+	if (st.wMinute > 59) {
 		return false;
 	}
-	if (st.wSecond < 0 || st.wSecond > 59) {
+	if (st.wSecond > 59) {
 		return false;
 	}
-	if (st.wMilliseconds < 0 || st.wMilliseconds > 999) {
+	if (st.wMilliseconds > 999) {
 		return false;
 	}
 	return true;

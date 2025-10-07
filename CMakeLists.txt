@@ -7,6 +7,40 @@ set(CMAKE_SHARED_LINKER_FLAGS_INIT "-m32")
 
 project(wibo LANGUAGES C CXX)
 
+set(WIBO_VERSION "" CACHE STRING "Version string for the wibo binary; if empty, attempts to use git describe")
+
+if(NOT "${WIBO_VERSION}" STREQUAL "")
+    set(WIBO_VERSION_STRING "${WIBO_VERSION}")
+elseif(DEFINED ENV{WIBO_VERSION} AND NOT "$ENV{WIBO_VERSION}" STREQUAL "")
+    set(WIBO_VERSION_STRING "$ENV{WIBO_VERSION}")
+else()
+    find_package(Git QUIET)
+    if(GIT_FOUND)
+        execute_process(
+            COMMAND ${GIT_EXECUTABLE} describe --tags --dirty --always
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            RESULT_VARIABLE WIBO_GIT_DESCRIBE_RESULT
+            OUTPUT_VARIABLE WIBO_GIT_DESCRIBE_OUTPUT
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        if(WIBO_GIT_DESCRIBE_RESULT EQUAL 0 AND NOT "${WIBO_GIT_DESCRIBE_OUTPUT}" STREQUAL "")
+            set(WIBO_VERSION_STRING "${WIBO_GIT_DESCRIBE_OUTPUT}")
+        endif()
+    endif()
+endif()
+
+if(NOT DEFINED WIBO_VERSION_STRING OR "${WIBO_VERSION_STRING}" STREQUAL "")
+    set(WIBO_VERSION_STRING "unknown")
+endif()
+
+set(WIBO_GENERATED_HEADER_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
+file(MAKE_DIRECTORY ${WIBO_GENERATED_HEADER_DIR})
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/version_info.h.in
+    ${WIBO_GENERATED_HEADER_DIR}/version_info.h
+    @ONLY
+)
+
 option(WIBO_ENABLE_FIXTURE_TESTS "Enable Win32 fixture tests (requires i686-w64-mingw32)" ON)
 option(WIBO_ENABLE_LIBURING "Enable liburing for asynchronous I/O" OFF)
 set(WIBO_ENABLE_LTO "AUTO" CACHE STRING "Enable link-time optimization (LTO)")
@@ -142,7 +176,7 @@ add_executable(wibo
 target_compile_definitions(wibo PRIVATE _GNU_SOURCE _FILE_OFFSET_BITS=64 _TIME_BITS=64)
 target_compile_features(wibo PRIVATE cxx_std_20)
 target_compile_options(wibo PRIVATE -Wall -Wextra -fno-pie -maccumulate-outgoing-args)
-target_include_directories(wibo PRIVATE dll src)
+target_include_directories(wibo PRIVATE dll src ${WIBO_GENERATED_HEADER_DIR})
 target_link_libraries(wibo PRIVATE mimalloc-obj)
 target_link_options(wibo PRIVATE -no-pie)
 if (WIBO_ENABLE_LIBURING)

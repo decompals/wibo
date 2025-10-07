@@ -25,6 +25,9 @@ ARG BUILD_TYPE=Release
 # Enable link-time optimization (LTO) (AUTO, ON, OFF)
 ARG ENABLE_LTO=AUTO
 
+# Version string (if not provided, defaults to "unknown")
+ARG WIBO_VERSION
+
 # Build static binary
 RUN cmake -S /wibo -B /wibo/build -G Ninja \
         -DCMAKE_BUILD_TYPE:STRING="$BUILD_TYPE" \
@@ -33,6 +36,7 @@ RUN cmake -S /wibo -B /wibo/build -G Ninja \
         -DMI_LIBC_MUSL:BOOL=ON \
         -DWIBO_ENABLE_LIBURING:BOOL=ON \
         -DWIBO_ENABLE_LTO:STRING="$ENABLE_LTO" \
+        -DWIBO_VERSION:STRING="$WIBO_VERSION" \
     && cmake --build /wibo/build --verbose \
     && ( [ "$BUILD_TYPE" != "Release" ] || strip -g /wibo/build/wibo )
 

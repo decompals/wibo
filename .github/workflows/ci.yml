@@ -46,6 +46,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Docker meta
         id: meta
@@ -64,6 +66,10 @@ jobs:
           flavor: |
             latest=false
 
+      - name: Compute version
+        id: version
+        run: echo "wibo_version=$(git describe --tags --always)" >> "$GITHUB_OUTPUT"
+
       - name: Build Docker image
         id: docker-build
         uses: docker/build-push-action@v6
@@ -71,6 +77,7 @@ jobs:
           file: ${{ matrix.dockerfile }}
           build-args: |
             BUILD_TYPE=${{ matrix.build_type }}
+            WIBO_VERSION=${{ steps.version.outputs.wibo_version }}
           target: build
 
       - name: Tests
@@ -84,6 +91,7 @@ jobs:
           file: ${{ matrix.dockerfile }}
           build-args: |
             BUILD_TYPE=${{ matrix.build_type }}
+            WIBO_VERSION=${{ steps.version.outputs.wibo_version }}
           target: export
           outputs: |
             type=local,dest=dist
@@ -102,6 +110,7 @@ jobs:
           file: ${{ matrix.dockerfile }}
           build-args: |
             BUILD_TYPE=${{ matrix.build_type }}
+            WIBO_VERSION=${{ steps.version.outputs.wibo_version }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

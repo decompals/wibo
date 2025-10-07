@@ -5,6 +5,7 @@
 #include "modules.h"
 #include "processes.h"
 #include "strutil.h"
+#include "version_info.h"
 
 #include <asm/ldt.h>
 #include <charconv>
@@ -124,33 +125,71 @@ TIB tib;
 
 const size_t MAPS_BUFFER_SIZE = 0x10000;
 
-static void printHelp(const char *argv0) {
+static std::string getExeName(const char *argv0) {
 	std::filesystem::path exePath(argv0 ? argv0 : "wibo");
-	std::string exeName = exePath.filename().string();
-	fprintf(stdout, "Usage: %s [options] <program.exe> [arguments...]\n", exeName.c_str());
-	fprintf(stdout, "       %s path [subcommand options] <path> [path...]\n", exeName.c_str());
-	fprintf(stdout, "\n");
-	fprintf(stdout, "Options:\n");
-	fprintf(stdout, "  --help\t\tShow this help message and exit\n");
-	fprintf(stdout, "  -C, --chdir DIR\tChange working directory before launching the program\n");
-	fprintf(stdout, "  -D, --debug\tEnable shim debug logging (same as WIBO_DEBUG=1)\n");
-	fprintf(stdout, "  --cmdline STRING\tUse STRING as the exact guest command line\n");
-	fprintf(stdout,
-			"  --\t\tStop option parsing; following arguments are interpreted as the exact guest command line\n");
-	fprintf(stdout, "\n");
-	fprintf(stdout, "Subcommands:\n");
-	fprintf(stdout, "  path\t\tConvert between host and Windows-style paths (see '%s path --help')\n", exeName.c_str());
+	return exePath.filename().string();
 }
 
-static void printPathHelp(const char *argv0) {
-	std::filesystem::path exePath(argv0 ? argv0 : "wibo");
-	std::string exeName = exePath.filename().string();
-	fprintf(stdout, "Usage: %s path (-u | --unix | -w | --windows) <path> [path...]\n", exeName.c_str());
-	fprintf(stdout, "\n");
-	fprintf(stdout, "Path Options:\n");
-	fprintf(stdout, "  -u, --unix\tConvert Windows paths to host paths\n");
-	fprintf(stdout, "  -w, --windows\tConvert host paths to Windows paths\n");
-	fprintf(stdout, "  -h, --help\tShow this help message and exit\n");
+static void printHelp(const char *argv0, bool error) {
+	const auto exeName = getExeName(argv0);
+	FILE *out = error ? stderr : stdout;
+	if (error) {
+		fprintf(out, "See '%s --help' for usage information.\n", exeName.c_str());
+		return;
+	}
+	fprintf(out, "wibo %s\n\n", wibo::kVersionString);
+	fprintf(out, "Usage:\n");
+	fprintf(out, "  %s [options] <program.exe> [arguments...]\n", exeName.c_str());
+	fprintf(out, "  %s path [subcommand options] <path> [path...]\n", exeName.c_str());
+	fprintf(out, "\n");
+	fprintf(out, "General Options:\n");
+	fprintf(out, "  -h, --help            Show this help message and exit\n");
+	fprintf(out, "  -V, --version         Show version information and exit\n");
+	fprintf(out, "\n");
+	fprintf(out, "Runtime Options:\n");
+	fprintf(out, "  -C, --chdir DIR       Change working directory before launching the program\n");
+	fprintf(out, "  -D, --debug           Enable debug logging (same as WIBO_DEBUG=1)\n");
+	fprintf(out, "      --cmdline STRING  Use STRING as the exact guest command line\n");
+	fprintf(out, "                        (includes the program name, e.g. \"test.exe a b c\")\n");
+	fprintf(out, "      --                Stop option parsing; following arguments are used\n");
+	fprintf(out, "                        verbatim as the guest command line, including the\n");
+	fprintf(out, "                        program name\n");
+	fprintf(out, "\n");
+	fprintf(out, "Subcommands:\n");
+	fprintf(out, "  path                  Convert between host and Windows-style paths\n");
+	fprintf(out, "                        (see '%s path --help' for details)\n", exeName.c_str());
+	fprintf(out, "\n");
+	fprintf(out, "Examples:\n");
+	fprintf(out, "  # Typical usage\n");
+	fprintf(out, "  %s path/to/test.exe a b c\n", exeName.c_str());
+	fprintf(out, "  %s -C path/to test.exe a b c\n", exeName.c_str());
+	fprintf(out, "\n");
+	fprintf(out, "  # Advanced forms: full control over the guest command line\n");
+	fprintf(out, "  %s path/to/test.exe -- test.exe a b c\n", exeName.c_str());
+	fprintf(out, "  %s --cmdline 'test.exe a b c' path/to/test.exe\n", exeName.c_str());
+	fprintf(out, "  %s -- test.exe a b c\n", exeName.c_str());
+}
+
+static void printPathHelp(const char *argv0, bool error) {
+	const auto exeName = getExeName(argv0);
+	FILE *out = error ? stderr : stdout;
+	if (error) {
+		fprintf(out, "See '%s path --help' for usage information.\n", exeName.c_str());
+		return;
+	}
+	fprintf(out, "Usage:\n");
+	fprintf(out, "  %s path [options] <path> [path...]\n", exeName.c_str());
+	fprintf(out, "\n");
+	fprintf(out, "Path Options (exactly one required):\n");
+	fprintf(out, "  -u, --unix       Convert Windows paths to host (Unix-style) paths\n");
+	fprintf(out, "  -w, --windows    Convert host (Unix-style) paths to Windows paths\n");
+	fprintf(out, "\n");
+	fprintf(out, "General Options:\n");
+	fprintf(out, "  -h, --help       Show this help message and exit\n");
+	fprintf(out, "\n");
+	fprintf(out, "Examples:\n");
+	fprintf(out, "  %s path -u 'Z:\\home\\user'\n", exeName.c_str());
+	fprintf(out, "  %s path -w /home/user\n", exeName.c_str());
 }
 
 static int handlePathCommand(int argc, char **argv, const char *argv0) {
@@ -169,25 +208,29 @@ static int handlePathCommand(int argc, char **argv, const char *argv0) {
 			continue;
 		}
 		if (strcmp(arg, "-h") == 0 || strcmp(arg, "--help") == 0) {
-			printPathHelp(argv0);
+			printPathHelp(argv0, false);
 			return 0;
 		}
 		if (arg[0] == '-' && arg[1] != '\0') {
-			fprintf(stderr, "Unknown option for 'path' subcommand: %s\n", arg);
-			printPathHelp(argv0);
+			fprintf(stderr, "Error: unknown option '%s'.\n", arg);
+			printPathHelp(argv0, true);
 			return 1;
 		}
 		inputs.push_back(arg);
 	}
 
 	if (convertToUnix == convertToWindows) {
-		fprintf(stderr, "Specify exactly one of --unix or --windows for the 'path' subcommand\n");
-		printPathHelp(argv0);
+		if (!convertToUnix) {
+			printPathHelp(argv0, false);
+		} else {
+			fprintf(stderr, "Error: cannot specify both --unix and --windows for path conversion.\n");
+			printPathHelp(argv0, true);
+		}
 		return 1;
 	}
 	if (inputs.empty()) {
-		fprintf(stderr, "No path specified for conversion\n");
-		printPathHelp(argv0);
+		fprintf(stderr, "Error: no paths specified for conversion.\n");
+		printPathHelp(argv0, true);
 		return 1;
 	}
 
@@ -325,21 +368,26 @@ int main(int argc, char **argv) {
 				parsingOptions = false;
 				continue;
 			}
+			if (strcmp(arg, "-h") == 0 || strcmp(arg, "--help") == 0) {
+				printHelp(argv[0], false);
+				return 0;
+			}
+			if (strcmp(arg, "-V") == 0 || strcmp(arg, "--version") == 0) {
+				fprintf(stdout, "wibo %s\n", wibo::kVersionString);
+				return 0;
+			}
 			if (strncmp(arg, "--cmdline=", 10) == 0) {
 				cmdLine = arg + 10;
 				continue;
 			}
 			if (strcmp(arg, "--cmdline") == 0) {
 				if (i + 1 >= argc) {
-					fprintf(stderr, "Option %s requires a command line argument\n", arg);
+					fprintf(stderr, "Error: '%s' requires a command line argument.\n", arg);
+					printHelp(argv[0], true);
 					return 1;
 				}
 				cmdLine = argv[++i];
 				continue;
-			}
-			if (strcmp(arg, "--help") == 0) {
-				printHelp(argv[0]);
-				return 0;
 			}
 			if (strcmp(arg, "-D") == 0 || strcmp(arg, "--debug") == 0) {
 				optionDebug = true;
@@ -351,7 +399,8 @@ int main(int argc, char **argv) {
 			}
 			if (strcmp(arg, "-C") == 0 || strcmp(arg, "--chdir") == 0) {
 				if (i + 1 >= argc) {
-					fprintf(stderr, "Option %s requires a directory argument\n", arg);
+					fprintf(stderr, "Error: '%s' requires a directory argument.\n", arg);
+					printHelp(argv[0], true);
 					return 1;
 				}
 				chdirPath = argv[++i];
@@ -362,9 +411,8 @@ int main(int argc, char **argv) {
 				continue;
 			}
 			if (arg[0] == '-' && arg[1] != '\0') {
-				fprintf(stderr, "Unknown option: %s\n", arg);
-				fprintf(stderr, "\n");
-				printHelp(argv[0]);
+				fprintf(stderr, "Error: unknown option '%s'.\n", arg);
+				printHelp(argv[0], true);
 				return 1;
 			}
 		}
@@ -374,8 +422,13 @@ int main(int argc, char **argv) {
 	}
 
 	if (programIndex == -1 && cmdLine.empty()) {
-		printHelp(argv[0]);
-		return argc <= 1 ? 0 : 1;
+		if (argc == 1) {
+			printHelp(argv[0], false);
+			return 0;
+		}
+		fprintf(stderr, "Error: no program or command line specified.\n");
+		printHelp(argv[0], true);
+		return 1;
 	}
 
 	// Try to resolve our own executable path

@@ -1,0 +1,7 @@
+#pragma once
+
+namespace wibo {
+
+constexpr const char kVersionString[] = "@WIBO_VERSION_STRING@";
+
+} // namespace wibo

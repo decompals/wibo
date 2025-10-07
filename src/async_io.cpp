@@ -20,7 +20,7 @@ class NoOpBackend : public wibo::AsyncIOBackend {
 		(void)length;
 		(void)offset;
 		(void)isPipe;
-		return false;
+		return false; // Force synchronous fallback
 	}
 	bool queueWrite(Pin<kernel32::FileObject> file, OVERLAPPED *ov, const void *buffer, DWORD length,
 					const std::optional<off_t> &offset, bool isPipe) override {
@@ -30,7 +30,7 @@ class NoOpBackend : public wibo::AsyncIOBackend {
 		(void)length;
 		(void)offset;
 		(void)isPipe;
-		return false;
+		return false; // Force synchronous fallback
 	}
 };
 

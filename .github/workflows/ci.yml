@@ -104,7 +104,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push Docker image
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.repository == 'decompals/wibo'
         uses: docker/build-push-action@v6
         with:
           file: ${{ matrix.dockerfile }}

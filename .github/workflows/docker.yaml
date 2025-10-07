@@ -3,41 +3,60 @@ on:
   push:
     branches: [ main ]
     tags: [ '*.*.*' ]
+  pull_request:
 
 jobs:
-  public_docker_image:
-    name: Publish Docker image to Github Registry
+  publish_docker_image:
+    name: Publish Docker image to Github Registry (${{ matrix.display }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: alpine
+            display: Alpine
+            dockerfile: Dockerfile
+            default: true
+          - id: ubuntu
+            display: Ubuntu
+            dockerfile: Dockerfile.ubuntu
+            default: false
     steps:
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v4
         with:
           images: ghcr.io/decompals/wibo
+          tags: |
+            type=raw,value=latest,enable=${{ matrix.default && github.ref_type == 'tag' }}
+            type=raw,value=latest-${{ matrix.id }},enable=${{ github.ref_type == 'tag' }}
+            type=ref,event=tag,enable=${{ matrix.default }}
+            type=ref,event=tag,suffix=-${{ matrix.id }}
+            type=ref,event=branch,enable=${{ matrix.default }}
+            type=ref,event=branch,suffix=-${{ matrix.id }}
+            type=sha,enable=${{ matrix.default }}
+            type=sha,suffix=-${{ matrix.id }}
+          flavor: |
+            latest=false
 
       - name: Check out the repo
         uses: actions/checkout@v4
 
       - name: Log in to GitHub Docker Registry
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push to Github registry (latest)
+      - name: Build and push to Github registry
         uses: docker/build-push-action@v4
         with:
-          push: true
-          tags: ghcr.io/decompals/wibo:latest
-        if: ${{ ! startsWith(github.ref, 'refs/tags/') }}
-
-      - name: Build and push to Github registry (versioned)
-        uses: docker/build-push-action@v4
-        with:
-          push: true
+          file: ${{ matrix.dockerfile }}
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
-        if: startsWith(github.ref, 'refs/tags/')
+          labels: ${{ steps.meta.outputs.labels }}

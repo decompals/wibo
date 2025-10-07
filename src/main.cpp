@@ -148,7 +148,7 @@ static void printHelp(const char *argv0, bool error) {
 	fprintf(out, "\n");
 	fprintf(out, "Runtime Options:\n");
 	fprintf(out, "  -C, --chdir DIR       Change working directory before launching the program\n");
-	fprintf(out, "  -D, --debug           Enable debug logging (same as WIBO_DEBUG=1)\n");
+	fprintf(out, "  -D, --debug           Enable debug logging (equivalent to WIBO_DEBUG=1)\n");
 	fprintf(out, "      --cmdline STRING  Use STRING as the exact guest command line\n");
 	fprintf(out, "                        (includes the program name, e.g. \"test.exe a b c\")\n");
 	fprintf(out, "      --                Stop option parsing; following arguments are used\n");
@@ -160,11 +160,11 @@ static void printHelp(const char *argv0, bool error) {
 	fprintf(out, "                        (see '%s path --help' for details)\n", exeName.c_str());
 	fprintf(out, "\n");
 	fprintf(out, "Examples:\n");
-	fprintf(out, "  # Typical usage\n");
+	fprintf(out, "  # Normal usage\n");
 	fprintf(out, "  %s path/to/test.exe a b c\n", exeName.c_str());
 	fprintf(out, "  %s -C path/to test.exe a b c\n", exeName.c_str());
 	fprintf(out, "\n");
-	fprintf(out, "  # Advanced forms: full control over the guest command line\n");
+	fprintf(out, "  # Advanced: full control over the guest command line\n");
 	fprintf(out, "  %s path/to/test.exe -- test.exe a b c\n", exeName.c_str());
 	fprintf(out, "  %s --cmdline 'test.exe a b c' path/to/test.exe\n", exeName.c_str());
 	fprintf(out, "  %s -- test.exe a b c\n", exeName.c_str());

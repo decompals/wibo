@@ -2,6 +2,8 @@
 
 A minimal, low-fuss wrapper that can run simple command-line 32-bit Windows binaries on 32-bit Linux - developed to run Windows compilers faster than Wine.
 
+Download the latest release from [GitHub releases](https://github.com/decompals/wibo/releases) or build from source.
+
 ## Building
 
 ```sh
@@ -11,19 +13,51 @@ cmake --build build
 
 Set `-DCMAKE_BUILD_TYPE=Release` to produce an optimized binary instead.
 
-## Running
+## Usage
 
 ```sh
-./build/wibo /path/to/program.exe [arguments...]
+wibo [options] <program.exe> [arguments...]
+wibo path [subcommand options] <path> [path...]
 ```
 
-Supported command line options:
+### General Options
 
-- `--help`: Print usage information.
-- `-D`, `--debug`: Enable shim debug logging (equivalent to `WIBO_DEBUG=1`).
-- `-C DIR`, `--chdir DIR`, `--chdir=DIR`: Change to `DIR` before running the guest program.
-- `--cmdline STRING`, `--cmdline=STRING`: Use `STRING` as the exact guest command line. (Including the program name as the first argument.)
-- `--`: Stop option parsing; following arguments are interpreted as the exact guest command line. (Including the program name as the first argument.)
+| Option          | Description                       |
+| --------------- | --------------------------------- |
+| `-h, --help`    | Show usage information and exit   |
+| `-V, --version` | Show version information and exit |
+
+### Runtime Options
+
+| Option             | Description                                                                                                      |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `-C, --chdir DIR`  | Change working directory before launching the program                                                            |
+| `-D, --debug`      | Enable debug logging (same as `WIBO_DEBUG=1`)                                                                    |
+| `--cmdline STRING` | Use `STRING` as the exact guest command line (must include the program name, e.g. `"test.exe a b c"`)            |
+| `--`               | Stop option parsing; following arguments are used verbatim as the guest command line, including the program name |
+
+### Subcommands
+
+| Subcommand | Description                                                                       |
+| ---------- | --------------------------------------------------------------------------------- |
+| `path`     | Convert between host and Windows-style paths (see `wibo path --help` for details) |
+
+### Examples
+
+#### Normal usage
+
+```sh
+wibo path/to/test.exe a b c
+wibo -C path/to test.exe a b c
+```
+
+#### Advanced: full control over the guest command line
+
+```sh
+wibo path/to/test.exe -- test.exe a b c
+wibo --cmdline 'test.exe a b c' path/to/test.exe
+wibo -- test.exe a b c
+```
 
 ## Tests
 
@@ -35,9 +69,12 @@ ctest --test-dir build --output-on-failure
 
 This will cross-compile the fixture executables, run them through `wibo`, and fail if any WinAPI expectations are not met.
 
----
+## Related Projects
 
-See also:
 * [taviso/loadlibrary](https://github.com/taviso/loadlibrary) - Initial inspiration for this project.
 * [evmar/retrowin32](https://github.com/evmar/retrowin32) - A similar project with different goals and architecture.
 * [decomp.me](https://decomp.me) - Collaborative decompilation website; uses wibo to run Windows compilers.
+
+## License
+
+wibo is licensed under the MIT License. See `LICENSE` for details.

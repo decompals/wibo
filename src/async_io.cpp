@@ -6,7 +6,7 @@ namespace {
 
 std::unique_ptr<wibo::AsyncIOBackend> g_backend;
 
-class DummyBackend : public wibo::AsyncIOBackend {
+class NoOpBackend : public wibo::AsyncIOBackend {
   public:
 	bool init() override { return true; }
 	void shutdown() override {}
@@ -43,12 +43,12 @@ AsyncIOBackend &asyncIO() {
 #if WIBO_ENABLE_LIBURING
 		g_backend = detail::createIoUringBackend();
 #else
-		g_backend = std::make_unique<DummyBackend>();
+		g_backend = std::make_unique<NoOpBackend>();
 #endif
 	}
 	if (!g_backend->init()) {
-		fprintf(stderr, "asyncIO: failed to initialize backend\n");
-		abort();
+		DEBUG_LOG("AsyncIOBackend initialization failed; using no-op backend\n");
+		g_backend = std::make_unique<NoOpBackend>();
 	}
 	return *g_backend;
 }

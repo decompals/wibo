@@ -192,13 +192,14 @@ void ProcessManager::checkPidfd(int pidfd) {
 	}
 	{
 		std::lock_guard lk(po->m);
-		po->signaled.store(true, std::memory_order_release);
+		po->signaled = true;
 		po->pidfd = -1;
 		if (!po->forcedExitCode) {
 			po->exitCode = decodeExitCode(si);
 		}
 	}
 	po->cv.notify_all();
+	po->notifyWaiters(false);
 
 	{
 		std::lock_guard lk(m);

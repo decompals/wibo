@@ -2,11 +2,11 @@
 
 #include "common.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <condition_variable>
 #include <cstdint>
-#include <cstdio>
 #include <deque>
 #include <functional>
 #include <shared_mutex>
@@ -27,111 +27,145 @@ enum class ObjectType : uint16_t {
 	RegistryKey,
 };
 
+enum ObjectFlags : uint16_t {
+	Of_None = 0x0,
+	Of_Waitable = 0x1,
+};
+
 struct ObjectBase {
 	const ObjectType type;
+	uint16_t flags = Of_None;
 	std::atomic<uint32_t> pointerCount{0};
 	std::atomic<uint32_t> handleCount{0};
 
-	explicit ObjectBase(ObjectType t) : type(t) {}
-	virtual ~ObjectBase() = default;
+	explicit ObjectBase(ObjectType t) noexcept : type(t) {}
+	virtual ~ObjectBase() noexcept = default;
+};
 
-	[[nodiscard]] virtual bool isWaitable() const { return false; }
+template <typename T>
+concept ObjectBaseType = std::is_base_of_v<ObjectBase, T>;
+
+struct WaitableObject : ObjectBase {
+	bool signaled = false; // protected by m
+	std::mutex m;
+	std::condition_variable cv;
+
+	using WaiterCallback = void (*)(void *, WaitableObject *, DWORD, bool);
+	struct Waiter {
+		WaiterCallback callback = nullptr;
+		void *context = nullptr;
+		DWORD index = 0;
+	};
+	std::mutex waitersMutex;
+	std::vector<Waiter> waiters;
+
+	explicit WaitableObject(ObjectType t) : ObjectBase(t) { flags |= Of_Waitable; }
+
+	void registerWaiter(void *context, DWORD index, WaiterCallback cb);
+	void unregisterWaiter(void *context);
+	void notifyWaiters(bool abandoned);
 };
 
 namespace detail {
 
-inline void ref(ObjectBase *o) { o->pointerCount.fetch_add(1, std::memory_order_acq_rel); }
-inline void deref(ObjectBase *o) {
-	if (o->pointerCount.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+inline void ref(ObjectBase *o) noexcept { o->pointerCount.fetch_add(1, std::memory_order_relaxed); }
+inline void deref(ObjectBase *o) noexcept {
+	if (o->pointerCount.fetch_sub(1, std::memory_order_release) == 1) {
+		std::atomic_thread_fence(std::memory_order_acquire);
 		delete o;
 	}
 }
 
+template <ObjectBaseType T> constexpr bool typeMatches(const ObjectBase *o) noexcept {
+	if constexpr (requires { T::kType; }) {
+		return o && o->type == T::kType;
+	} else {
+		static_assert(false, "No kType on U and no typeMatches<U> specialization provided");
+	}
+}
+template <> constexpr bool typeMatches<WaitableObject>(const ObjectBase *o) noexcept {
+	return o && (o->flags & Of_Waitable);
+}
+
+template <ObjectBaseType T> T *castTo(ObjectBase *o) noexcept {
+	return typeMatches<T>(o) ? static_cast<T *>(o) : nullptr;
+}
+
 } // namespace detail
 
-struct WaitableObject : ObjectBase {
-	std::atomic<bool> signaled{false};
-	std::mutex m;
-	std::condition_variable_any cv;
-
-	using ObjectBase::ObjectBase;
-	[[nodiscard]] bool isWaitable() const override { return true; }
-};
-
-template <class T = ObjectBase> struct Pin {
-	static_assert(std::is_base_of_v<ObjectBase, T> || std::is_same_v<ObjectBase, T>,
-				  "Pin<T>: T must be ObjectBase or derive from it");
-
-	T *obj = nullptr;
+template <ObjectBaseType T = ObjectBase> class Pin {
+  public:
+	enum class Tag { Acquire, Adopt };
 
 	Pin() = default;
-	enum class Tag { Acquire, Adopt };
-	template <class U, class = std::enable_if_t<std::is_convertible<U *, T *>::value>>
-	explicit Pin(U *p, Tag t) : obj(static_cast<T *>(p)) {
+	template <class U>
+		requires std::is_convertible_v<U *, T *>
+	explicit constexpr Pin(U *p, Tag t) noexcept : obj(static_cast<T *>(p)) {
 		if (obj && t == Tag::Acquire) {
 			detail::ref(obj);
 		}
 	}
 	Pin(const Pin &) = delete;
-	Pin(Pin &&other) noexcept : obj(std::exchange(other.obj, nullptr)) {}
-	template <class U, class = std::enable_if_t<std::is_base_of<T, U>::value>> Pin &operator=(Pin<U> &&other) noexcept {
+	Pin(Pin &&other) noexcept : obj(other.release()) {}
+	template <class U>
+		requires std::is_base_of_v<T, U>
+	Pin &operator=(Pin<U> &&other) noexcept {
 		reset();
-		obj = std::exchange(other.obj, nullptr);
+		obj = other.release();
 		return *this;
 	}
-	template <class U, class = std::enable_if_t<std::is_base_of<T, U>::value>>
-	Pin(Pin<U> &&other) noexcept : obj(std::exchange(other.obj, nullptr)) {} // NOLINT(google-explicit-constructor)
+	template <class U>
+		requires std::is_convertible_v<U *, T *>
+	Pin(Pin<U> &&other) noexcept : obj(other.release()) {} // NOLINT(google-explicit-constructor)
 	Pin &operator=(Pin &&other) noexcept {
 		if (this != &other) {
 			reset();
-			obj = std::exchange(other.obj, nullptr);
+			obj = other.release();
 		}
 		return *this;
 	}
 
-	~Pin() { reset(); }
+	~Pin() noexcept { reset(); }
 
-	static Pin acquire(T *o) { return Pin{o, Tag::Acquire}; }
-	static Pin adopt(T *o) { return Pin{o, Tag::Adopt}; }
+	static Pin acquire(T *o) noexcept { return Pin{o, Tag::Acquire}; }
+	static constexpr Pin adopt(T *o) noexcept { return Pin{o, Tag::Adopt}; }
 
-	[[nodiscard]] T *release() { return std::exchange(obj, nullptr); }
-	void reset() {
-		if (obj) {
+	[[nodiscard]] constexpr T *release() noexcept { return std::exchange(obj, nullptr); }
+	void reset() noexcept {
+		if (auto *obj = release()) {
 			detail::deref(obj);
-			obj = nullptr;
 		}
 	}
 
-	T *operator->() const {
+	constexpr T *operator->() const noexcept {
 		assert(obj);
 		return obj;
 	}
-	T &operator*() const {
+	constexpr T &operator*() const noexcept {
 		assert(obj);
 		return *obj;
 	}
-	[[nodiscard]] T *get() const { return obj; }
-	[[nodiscard]] Pin<T> clone() const { return Pin<T>::acquire(obj); }
-	explicit operator bool() const { return obj != nullptr; }
+	[[nodiscard]] constexpr T *get() const noexcept { return obj; }
+	[[nodiscard]] Pin<T> clone() const noexcept { return Pin<T>::acquire(obj); }
+	explicit constexpr operator bool() const noexcept { return obj != nullptr; }
 
-	template <typename U> Pin<U> downcast() && {
-		static_assert(std::is_base_of_v<ObjectBase, U>, "U must derive from ObjectBase");
-		if constexpr (std::is_same_v<T, U>) {
+	template <ObjectBaseType U> Pin<U> downcast() && noexcept {
+		if constexpr (std::is_convertible_v<T *, U *>) {
 			return std::move(*this);
-		}
-		if (obj && obj->type == U::kType) {
-			auto *u = static_cast<U *>(obj);
-			obj = nullptr;
-			return Pin<U>::adopt(u);
+		} else if (detail::typeMatches<U>(obj)) {
+			return Pin<U>::adopt(static_cast<U *>(std::exchange(obj, nullptr)));
 		}
 		return Pin<U>{};
 	}
+
+  private:
+	T *obj = nullptr;
 };
 
-template <class T, class... Args>
-Pin<T> make_pin(Args &&...args) noexcept(std::is_nothrow_constructible_v<T, Args...>) {
-	T *p = new T(std::forward<Args>(args)...);
-	return Pin<T>::acquire(p);
+template <ObjectBaseType T, class... Args>
+	requires std::is_constructible_v<T, Args...>
+inline Pin<T> make_pin(Args &&...args) noexcept(std::is_nothrow_constructible_v<T, Args...>) {
+	return Pin<T>::acquire(new T(std::forward<Args>(args)...));
 }
 
 constexpr DWORD HANDLE_FLAG_INHERIT = 0x1;
@@ -159,8 +193,7 @@ class Handles {
 	HANDLE alloc(Pin<> obj, uint32_t grantedAccess, uint32_t flags);
 	bool release(HANDLE h);
 	Pin<> get(HANDLE h, HandleMeta *metaOut = nullptr);
-	template <typename T> Pin<T> getAs(HANDLE h, HandleMeta *metaOut = nullptr) {
-		static_assert(std::is_base_of_v<ObjectBase, T>, "T must derive from ObjectBase");
+	template <ObjectBaseType T> Pin<T> getAs(HANDLE h, HandleMeta *metaOut = nullptr) {
 		HandleMeta metaOutLocal{};
 		if (!metaOut) {
 			metaOut = &metaOutLocal;
@@ -169,13 +202,12 @@ class Handles {
 		if (!obj) {
 			return {};
 		}
-		if constexpr (std::is_same_v<T, ObjectBase>) {
-			return std::move(obj);
-		} else if (metaOut->typeCache != T::kType || obj->type != T::kType) {
-			return {};
-		} else {
-			return Pin<T>::adopt(static_cast<T *>(obj.release()));
+		if constexpr (requires { T::kType; }) {
+			if (metaOut->typeCache != T::kType) {
+				return {};
+			}
 		}
+		return std::move(obj).downcast<T>();
 	}
 	bool setInformation(HANDLE h, uint32_t mask, uint32_t value);
 	bool getInformation(HANDLE h, uint32_t *outFlags) const;
@@ -196,34 +228,37 @@ class Handles {
 	uint32_t nextIndex = 0;
 };
 
+template <class F> using factory_ptr_t = std::remove_cvref_t<std::invoke_result_t<F &>>;
+template <class F> using factory_obj_t = std::remove_pointer_t<factory_ptr_t<F>>;
+template <class F>
+concept ObjectFactoryFn =
+	std::invocable<F &> && std::is_pointer_v<factory_ptr_t<F>> && ObjectBaseType<factory_obj_t<F>>;
+
 class Namespace {
   public:
 	bool insert(const std::u16string &name, ObjectBase *obj, bool permanent = false);
 	void remove(ObjectBase *obj);
 	Pin<> get(const std::u16string &name);
 
-	template <typename T> Pin<T> getAs(const std::u16string &name) {
+	template <ObjectBaseType T> Pin<T> getAs(const std::u16string &name) {
 		if (auto pin = get(name)) {
 			return std::move(pin).downcast<T>();
 		}
 		return {};
 	}
 
-	template <typename F, typename Ptr = std::invoke_result_t<F &>,
-			  typename T = std::remove_pointer_t<std::decay_t<Ptr>>,
-			  std::enable_if_t<std::is_pointer<std::decay_t<Ptr>>::value, int> = 0>
-	std::pair<Pin<T>, bool> getOrCreate(const std::u16string &name, F &&make) {
+	auto getOrCreate(const std::u16string &name, ObjectFactoryFn auto &&make)
+		-> std::pair<Pin<factory_obj_t<decltype(make)>>, bool> {
+		using T = factory_obj_t<decltype(make)>;
 		if (name.empty()) {
 			// No name: create unconditionally
-			T *raw = std::invoke(std::forward<F>(make));
-			return {Pin<T>::acquire(raw), true};
+			return {Pin<T>::acquire(std::invoke(make)), true};
 		}
 		if (auto existing = get(name)) {
 			// Return even if downcast fails (don't use getAs<T>)
 			return {std::move(existing).downcast<T>(), false};
 		}
-		T *raw = std::invoke(std::forward<F>(make));
-		Pin<T> newObj = Pin<T>::acquire(raw);
+		auto newObj = Pin<T>::acquire(std::invoke(make));
 		if (!newObj) {
 			return {Pin<T>{}, false};
 		}

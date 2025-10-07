@@ -106,7 +106,7 @@ void threadCleanup(void *param) {
 	}
 	{
 		std::lock_guard lk(obj->m);
-		obj->signaled.store(true, std::memory_order_release);
+		obj->signaled = true;
 		// Exit code set before pthread_exit
 	}
 	g_currentThreadObject = nullptr;
@@ -114,6 +114,7 @@ void threadCleanup(void *param) {
 	wibo::setThreadTibForHost(nullptr);
 	// TODO: mark mutexes owned by this thread as abandoned
 	obj->cv.notify_all();
+	obj->notifyWaiters(false);
 	detail::deref(obj);
 }
 
@@ -328,10 +329,10 @@ BOOL WIN_FUNC TerminateProcess(HANDLE hProcess, UINT uExitCode) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
-	if (process->signaled.load(std::memory_order_acquire)) {
+	std::lock_guard lk(process->m);
+	if (process->signaled) {
 		return TRUE;
 	}
-	std::lock_guard lk(process->m);
 	if (syscall(SYS_pidfd_send_signal, process->pidfd, SIGKILL, nullptr, 0) != 0) {
 		int err = errno;
 		DEBUG_LOG("TerminateProcess: pidfd_send_signal(%d) failed: %s\n", process->pidfd, strerror(err));
@@ -368,8 +369,8 @@ BOOL WIN_FUNC GetExitCodeProcess(HANDLE hProcess, LPDWORD lpExitCode) {
 		return FALSE;
 	}
 	DWORD exitCode = STILL_ACTIVE;
-	if (process->signaled.load(std::memory_order_acquire)) {
-		std::lock_guard lk(process->m);
+	std::lock_guard lk(process->m);
+	if (process->signaled) {
 		exitCode = process->exitCode;
 	}
 	*lpExitCode = exitCode;

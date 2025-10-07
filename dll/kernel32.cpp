@@ -170,6 +170,8 @@ void *resolveByName(const char *name) {
 		return (void *)kernel32::TryAcquireSRWLockExclusive;
 	if (strcmp(name, "WaitForSingleObject") == 0)
 		return (void *)kernel32::WaitForSingleObject;
+	if (strcmp(name, "WaitForMultipleObjects") == 0)
+		return (void *)kernel32::WaitForMultipleObjects;
 	if (strcmp(name, "CreateMutexA") == 0)
 		return (void *)kernel32::CreateMutexA;
 	if (strcmp(name, "CreateMutexW") == 0)

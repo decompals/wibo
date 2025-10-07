@@ -10,11 +10,12 @@ set(CMAKE_CXX_FLAGS_INIT "-m32")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "-m32")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "-m32")
 
-project(wibo LANGUAGES CXX)
+project(wibo LANGUAGES C CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -fno-pie -no-pie -D_LARGEFILE64_SOURCE")
 
 find_package(Filesystem REQUIRED)
@@ -30,7 +31,36 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(mimalloc)
 
-include_directories(.)
+FetchContent_Declare(
+    liburing
+    GIT_REPOSITORY https://github.com/axboe/liburing.git
+    GIT_TAG        liburing-2.4
+)
+FetchContent_MakeAvailable(liburing)
+
+set(LIBURING_COMPAT ${liburing_SOURCE_DIR}/src/include/liburing/compat.h)
+add_custom_command(
+  OUTPUT  ${LIBURING_COMPAT}
+  COMMAND ${CMAKE_COMMAND} -E env
+          CC=${CMAKE_C_COMPILER}
+          AR=${CMAKE_AR}
+          RANLIB=${CMAKE_RANLIB}
+          ./configure --cc=${CMAKE_C_COMPILER}
+  WORKING_DIRECTORY ${liburing_SOURCE_DIR}
+  COMMENT "Running liburing configure"
+  VERBATIM
+)
+add_custom_target(liburing_configure DEPENDS ${LIBURING_COMPAT})
+add_library(liburing STATIC
+  ${liburing_SOURCE_DIR}/src/queue.c
+  ${liburing_SOURCE_DIR}/src/register.c
+  ${liburing_SOURCE_DIR}/src/setup.c
+  ${liburing_SOURCE_DIR}/src/syscall.c
+  ${liburing_SOURCE_DIR}/src/version.c)
+add_dependencies(liburing liburing_configure)
+target_include_directories(liburing PUBLIC ${liburing_SOURCE_DIR}/src/include)
+target_compile_definitions(liburing PRIVATE _GNU_SOURCE)
+
 add_executable(wibo
     dll/advapi32.cpp
     dll/advapi32/processthreadsapi.cpp
@@ -74,6 +104,7 @@ add_executable(wibo
     dll/vcruntime.cpp
     dll/version.cpp
     src/access.cpp
+    src/async_io.cpp
     src/context.cpp
     src/errors.cpp
     src/files.cpp
@@ -86,7 +117,8 @@ add_executable(wibo
     src/strutil.cpp
 )
 target_include_directories(wibo PRIVATE dll src)
-target_link_libraries(wibo PRIVATE std::filesystem mimalloc-static)
+target_compile_features(wibo PRIVATE cxx_std_20)
+target_link_libraries(wibo PRIVATE std::filesystem mimalloc-static liburing)
 install(TARGETS wibo DESTINATION bin)
 
 include(CTest)

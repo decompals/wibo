@@ -1,4 +1,5 @@
 #include "handles.h"
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 
@@ -10,7 +11,7 @@ constexpr uint32_t kCompatMaxIndex = (0xFFFFu >> kHandleAlignShift) - 1;
 // Delay reuse of small handles to avoid accidental stale aliasing
 constexpr uint32_t kQuarantineLen = 64;
 
-inline uint32_t indexOf(HANDLE h) {
+inline uint32_t indexOf(HANDLE h) noexcept {
 	uint32_t v = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(h));
 	if (v == 0 || (v & ((1U << kHandleAlignShift) - 1)) != 0) {
 		return UINT32_MAX;
@@ -18,12 +19,12 @@ inline uint32_t indexOf(HANDLE h) {
 	return (v >> kHandleAlignShift) - 1;
 }
 
-inline HANDLE makeHandle(uint32_t index) {
+inline HANDLE makeHandle(uint32_t index) noexcept {
 	uint32_t v = (index + 1) << kHandleAlignShift;
 	return reinterpret_cast<HANDLE>(static_cast<uintptr_t>(v));
 }
 
-inline bool isPseudo(HANDLE h) { return reinterpret_cast<int32_t>(h) < 0; }
+inline bool isPseudo(HANDLE h) noexcept { return reinterpret_cast<int32_t>(h) < 0; }
 
 } // namespace
 
@@ -63,7 +64,7 @@ HANDLE Handles::alloc(Pin<> obj, uint32_t grantedAccess, uint32_t flags) {
 	}
 
 	HANDLE h = makeHandle(idx);
-	e.obj->handleCount.fetch_add(1, std::memory_order_acq_rel);
+	e.obj->handleCount.fetch_add(1, std::memory_order_relaxed);
 	return h;
 }
 
@@ -107,7 +108,7 @@ bool Handles::release(HANDLE h) {
 	const auto generation = e.meta.generation + 1;
 	e = {}; // Clear entry
 	e.meta.generation = generation;
-	uint32_t handleCount = obj->handleCount.fetch_sub(1, std::memory_order_acq_rel) - 1;
+	uint32_t handleCount = obj->handleCount.fetch_sub(1, std::memory_order_relaxed) - 1;
 
 	if (idx <= kCompatMaxIndex) {
 		mQuarantine.push_back(idx);
@@ -232,6 +233,34 @@ Pin<> Namespace::get(const std::u16string &name) {
 	}
 	assert(it->second.obj);
 	return Pin<>::acquire(it->second.obj);
+}
+
+void WaitableObject::registerWaiter(void *context, DWORD index, WaiterCallback cb) {
+	if (!cb) {
+		return;
+	}
+	std::lock_guard lk(waitersMutex);
+	waiters.emplace_back(cb, context, index);
+}
+
+void WaitableObject::unregisterWaiter(void *context) {
+	std::lock_guard lk(waitersMutex);
+	waiters.erase(
+		std::remove_if(waiters.begin(), waiters.end(), [context](const Waiter &w) { return w.context == context; }),
+		waiters.end());
+}
+
+void WaitableObject::notifyWaiters(bool abandoned) {
+	std::vector<Waiter> snapshot;
+	{
+		std::lock_guard lk(waitersMutex);
+		snapshot = waiters;
+	}
+	for (const auto &w : snapshot) {
+		if (w.callback) {
+			w.callback(w.context, this, w.index, abandoned);
+		}
+	}
 }
 
 namespace wibo {

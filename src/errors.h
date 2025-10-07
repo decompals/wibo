@@ -65,4 +65,5 @@ namespace wibo {
 DWORD winErrorFromErrno(int err);
 NTSTATUS statusFromWinError(DWORD error);
 NTSTATUS statusFromErrno(int err);
+DWORD winErrorFromNtStatus(NTSTATUS status);
 } // namespace wibo

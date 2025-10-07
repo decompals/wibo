@@ -14,6 +14,7 @@ RUN apt-get update \
         gcc-mingw-w64-i686 \
         gdb \
         git \
+        make \
         ninja-build \
         unzip \
         wget \

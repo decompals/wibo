@@ -54,4 +54,23 @@ NTSTATUS statusFromErrno(int err) {
 	return statusFromWinError(winErrorFromErrno(err));
 }
 
+DWORD winErrorFromNtStatus(NTSTATUS status) {
+	switch (status) {
+	case STATUS_SUCCESS:
+		return ERROR_SUCCESS;
+	case STATUS_PENDING:
+		return ERROR_IO_PENDING;
+	case STATUS_END_OF_FILE:
+		return ERROR_HANDLE_EOF;
+	case STATUS_INVALID_HANDLE:
+		return ERROR_INVALID_HANDLE;
+	case STATUS_INVALID_PARAMETER:
+		return ERROR_INVALID_PARAMETER;
+	case STATUS_PIPE_BROKEN:
+		return ERROR_BROKEN_PIPE;
+	default:
+		return ERROR_NOT_SUPPORTED;
+	}
+}
+
 } // namespace wibo

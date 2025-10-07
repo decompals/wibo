@@ -112,6 +112,80 @@ static void test_getoverlappedresult_pending(void) {
     TEST_CHECK_EQ(0U, transferred); // No update if the operation is still pending
 }
 
+static void test_overlapped_multiple_reads(void) {
+    HANDLE file = CreateFileA(kFilename, GENERIC_READ, FILE_SHARE_READ, NULL,
+                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, NULL);
+    TEST_CHECK(file != INVALID_HANDLE_VALUE);
+
+    OVERLAPPED ov1 = {0};
+    OVERLAPPED ov2 = {0};
+    ov1.Offset = 0;
+    ov2.Offset = 16;
+    ov1.hEvent = CreateEventA(NULL, TRUE, FALSE, NULL);
+    ov2.hEvent = CreateEventA(NULL, TRUE, FALSE, NULL);
+    TEST_CHECK(ov1.hEvent != NULL);
+    TEST_CHECK(ov2.hEvent != NULL);
+
+    char head[8] = {0};
+    char tail[8] = {0};
+
+    BOOL issued1 = ReadFile(file, head, 5, NULL, &ov1);
+    if (!issued1) {
+        TEST_CHECK_EQ(ERROR_IO_PENDING, GetLastError());
+    }
+
+    BOOL issued2 = ReadFile(file, tail, 5, NULL, &ov2);
+    if (!issued2) {
+        TEST_CHECK_EQ(ERROR_IO_PENDING, GetLastError());
+    }
+
+    HANDLE events[2] = {ov1.hEvent, ov2.hEvent};
+    DWORD waitResult = WaitForMultipleObjects(2, events, TRUE, 1000);
+    TEST_CHECK_EQ(WAIT_OBJECT_0, waitResult);
+
+    DWORD transferred = 0;
+    TEST_CHECK(GetOverlappedResult(file, &ov1, &transferred, FALSE));
+    TEST_CHECK_EQ(5U, transferred);
+    head[5] = '\0';
+    TEST_CHECK_STR_EQ("01234", head);
+
+    transferred = 0;
+    TEST_CHECK(GetOverlappedResult(file, &ov2, &transferred, FALSE));
+    TEST_CHECK_EQ(5U, transferred);
+    tail[5] = '\0';
+    TEST_CHECK_STR_EQ("GHIJK", tail);
+
+    TEST_CHECK(CloseHandle(ov2.hEvent));
+    TEST_CHECK(CloseHandle(ov1.hEvent));
+    TEST_CHECK(CloseHandle(file));
+}
+
+static void test_getoverlappedresult_wait(void) {
+    HANDLE file = CreateFileA(kFilename, GENERIC_READ, FILE_SHARE_READ, NULL,
+                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, NULL);
+    TEST_CHECK(file != INVALID_HANDLE_VALUE);
+
+    OVERLAPPED ov = {0};
+    ov.Offset = 20;
+    ov.hEvent = CreateEventA(NULL, FALSE, FALSE, NULL);
+    TEST_CHECK(ov.hEvent != NULL);
+
+    char buffer[8] = {0};
+    BOOL issued = ReadFile(file, buffer, 6, NULL, &ov);
+    if (!issued) {
+        TEST_CHECK_EQ(ERROR_IO_PENDING, GetLastError());
+    }
+
+    DWORD transferred = 0;
+    TEST_CHECK(GetOverlappedResult(file, &ov, &transferred, TRUE));
+    TEST_CHECK_EQ(6U, transferred);
+    buffer[6] = '\0';
+    TEST_CHECK_STR_EQ("KLMNOP", buffer);
+
+    TEST_CHECK(CloseHandle(ov.hEvent));
+    TEST_CHECK(CloseHandle(file));
+}
+
 static void test_overlapped_write(void) {
     HANDLE file = CreateFileA(kFilename, GENERIC_WRITE, 0, NULL,
                               OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, NULL);
@@ -157,6 +231,8 @@ int main(void) {
     test_overlapped_read_with_event();
     test_overlapped_eof();
     test_getoverlappedresult_pending();
+    test_overlapped_multiple_reads();
+    test_getoverlappedresult_wait();
     test_overlapped_write();
     TEST_CHECK(DeleteFileA(kFilename));
     return 0;

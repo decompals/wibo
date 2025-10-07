@@ -4,14 +4,15 @@ FROM --platform=linux/i386 alpine:latest AS build
 # Install dependencies
 RUN apk add --no-cache \
     bash \
-    cmake \
-    ninja \
-    g++ \
-    linux-headers \
     binutils \
+    cmake \
+    g++ \
     git \
+    linux-headers \
+    make \
     mingw-w64-binutils \
-    mingw-w64-gcc
+    mingw-w64-gcc \
+    ninja
 
 # Copy source files
 WORKDIR /wibo
@@ -23,6 +24,7 @@ ARG build_type=Release
 # Build static binary
 RUN cmake -S /wibo -B /wibo/build -G Ninja \
         -DCMAKE_BUILD_TYPE="$build_type" \
+        -DCMAKE_C_FLAGS="-static" \
         -DCMAKE_CXX_FLAGS="-static" \
         -DBUILD_TESTING=ON \
         -DWIBO_ENABLE_FIXTURE_TESTS=ON \

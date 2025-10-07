@@ -8,6 +8,7 @@ constexpr DWORD WAIT_ABANDONED = 0x00000080;
 constexpr DWORD WAIT_TIMEOUT = 0x00000102;
 constexpr DWORD WAIT_FAILED = 0xFFFFFFFF;
 constexpr DWORD INFINITE = 0xFFFFFFFF;
+constexpr DWORD MAXIMUM_WAIT_OBJECTS = 64;
 
 constexpr DWORD INIT_ONCE_CHECK_ONLY = 0x00000001UL;
 constexpr DWORD INIT_ONCE_ASYNC = 0x00000002UL;
@@ -89,6 +90,7 @@ HANDLE WIN_FUNC CreateSemaphoreW(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LO
 								 LPCWSTR lpName);
 BOOL WIN_FUNC ReleaseSemaphore(HANDLE hSemaphore, LONG lReleaseCount, PLONG lpPreviousCount);
 DWORD WIN_FUNC WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds);
+DWORD WIN_FUNC WaitForMultipleObjects(DWORD nCount, const HANDLE *lpHandles, BOOL bWaitAll, DWORD dwMilliseconds);
 void WIN_FUNC InitializeCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 BOOL WIN_FUNC InitializeCriticalSectionEx(LPCRITICAL_SECTION lpCriticalSection, DWORD dwSpinCount, DWORD Flags);
 BOOL WIN_FUNC InitializeCriticalSectionAndSpinCount(LPCRITICAL_SECTION lpCriticalSection, DWORD dwSpinCount);

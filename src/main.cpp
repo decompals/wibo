@@ -1,4 +1,5 @@
 #include "common.h"
+#include "async_io.h"
 #include "context.h"
 #include "files.h"
 #include "modules.h"
@@ -408,6 +409,7 @@ int main(int argc, char **argv) {
 	blockUpper2GB();
 	files::init();
 	wibo::processes().init();
+	async_io::initialize();
 
 	// Create TIB
 	memset(&tib, 0, sizeof(tib));

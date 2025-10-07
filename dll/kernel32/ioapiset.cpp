@@ -2,6 +2,7 @@
 
 #include "context.h"
 #include "errors.h"
+#include "overlapped_util.h"
 #include "synchapi.h"
 
 namespace kernel32 {
@@ -15,8 +16,11 @@ BOOL WIN_FUNC GetOverlappedResult(HANDLE hFile, LPOVERLAPPED lpOverlapped, LPDWO
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
-	if (bWait && lpOverlapped->Internal == STATUS_PENDING && lpOverlapped->hEvent) {
-		WaitForSingleObject(lpOverlapped->hEvent, INFINITE);
+	if (bWait && lpOverlapped->Internal == STATUS_PENDING &&
+		kernel32::detail::shouldSignalOverlappedEvent(lpOverlapped)) {
+		if (HANDLE waitHandle = kernel32::detail::normalizedOverlappedEventHandle(lpOverlapped)) {
+			WaitForSingleObject(waitHandle, INFINITE);
+		}
 	}
 
 	const auto status = static_cast<NTSTATUS>(lpOverlapped->Internal);
@@ -29,15 +33,11 @@ BOOL WIN_FUNC GetOverlappedResult(HANDLE hFile, LPOVERLAPPED lpOverlapped, LPDWO
 		*lpNumberOfBytesTransferred = static_cast<DWORD>(lpOverlapped->InternalHigh);
 	}
 
-	if (status == STATUS_SUCCESS) {
+	DWORD error = wibo::winErrorFromNtStatus(status);
+	if (error == ERROR_SUCCESS) {
 		return TRUE;
 	}
-	if (status == STATUS_END_OF_FILE) {
-		wibo::lastError = ERROR_HANDLE_EOF;
-		return FALSE;
-	}
-
-	wibo::lastError = status;
+	wibo::lastError = error;
 	return FALSE;
 }
 

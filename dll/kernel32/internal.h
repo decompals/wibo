@@ -98,7 +98,7 @@ struct MutexObject final : WaitableObject {
 	unsigned int recursionCount = 0;
 	bool abandoned = false; // Owner exited without releasing
 
-	MutexObject() : WaitableObject(kType) { signaled.store(true, std::memory_order_relaxed); }
+	MutexObject() : WaitableObject(kType) { signaled = true; }
 
 	void noteOwnerExit(/*pthread_t tid or emu tid*/) {
 		std::lock_guard lk(m);
@@ -106,8 +106,9 @@ struct MutexObject final : WaitableObject {
 			ownerValid = false;
 			recursionCount = 0;
 			abandoned = true;
-			signaled.store(true, std::memory_order_release);
+			signaled = true;
 			cv.notify_one();
+			notifyWaiters(true);
 		}
 	}
 };
@@ -123,7 +124,7 @@ struct EventObject final : WaitableObject {
 		bool resetAll = false;
 		{
 			std::lock_guard lk(m);
-			signaled.store(true, std::memory_order_release);
+			signaled = true;
 			resetAll = manualReset;
 		}
 		if (resetAll) {
@@ -131,11 +132,12 @@ struct EventObject final : WaitableObject {
 		} else {
 			cv.notify_one();
 		}
+		notifyWaiters(false);
 	}
 
 	void reset() {
 		std::lock_guard lk(m);
-		signaled.store(false, std::memory_order_release);
+		signaled = false;
 	}
 };
 

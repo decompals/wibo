@@ -1,12 +1,14 @@
 #include "fileapi.h"
 
 #include "access.h"
+#include "async_io.h"
 #include "common.h"
 #include "context.h"
 #include "errors.h"
 #include "files.h"
 #include "handles.h"
 #include "internal.h"
+#include "overlapped_util.h"
 #include "strutil.h"
 #include "timeutil.h"
 
@@ -291,7 +293,7 @@ template <typename FindData> void populateFromStat(const FindSearchEntry &entry,
 
 template <typename FindData> void populateFindData(const FindSearchEntry &entry, FindData &out) {
 	resetFindDataStruct(out);
-	std::string nativePath = entry.fullPath.empty() ? std::string() : entry.fullPath.u8string();
+	std::string nativePath = entry.fullPath.empty() ? std::string() : entry.fullPath.string();
 	struct stat st{};
 	if (!nativePath.empty() && stat(nativePath.c_str(), &st) == 0) {
 		populateFromStat(entry, st, out);
@@ -548,26 +550,6 @@ bool tryOpenConsoleDevice(DWORD dwDesiredAccess, DWORD dwShareMode, DWORD dwCrea
 
 namespace kernel32 {
 
-namespace {
-
-void signalOverlappedEvent(OVERLAPPED *ov) {
-	if (ov && ov->hEvent) {
-		if (auto ev = wibo::handles().getAs<EventObject>(ov->hEvent)) {
-			ev->set();
-		}
-	}
-}
-
-void resetOverlappedEvent(OVERLAPPED *ov) {
-	if (ov && ov->hEvent) {
-		if (auto ev = wibo::handles().getAs<EventObject>(ov->hEvent)) {
-			ev->reset();
-		}
-	}
-}
-
-} // namespace
-
 DWORD WIN_FUNC GetFileAttributesA(LPCSTR lpFileName) {
 	HOST_CONTEXT_GUARD();
 	if (!lpFileName) {
@@ -743,7 +725,27 @@ BOOL WIN_FUNC WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWr
 		lpOverlapped->Internal = STATUS_PENDING;
 		lpOverlapped->InternalHigh = 0;
 		updateFilePointer = !file->overlapped;
-		resetOverlappedEvent(lpOverlapped);
+		detail::resetOverlappedEvent(lpOverlapped);
+		if (file->overlapped) {
+			if (nNumberOfBytesToWrite == 0) {
+				lpOverlapped->Internal = STATUS_SUCCESS;
+				lpOverlapped->InternalHigh = 0;
+				detail::signalOverlappedEvent(lpOverlapped);
+				if (lpNumberOfBytesWritten) {
+					*lpNumberOfBytesWritten = 0;
+				}
+				return TRUE;
+			}
+			auto asyncFile = file.clone();
+			if (async_io::queueWrite(std::move(asyncFile), lpOverlapped, lpBuffer, nNumberOfBytesToWrite, offset,
+									 file->isPipe)) {
+				if (lpNumberOfBytesWritten) {
+					*lpNumberOfBytesWritten = 0;
+				}
+				wibo::lastError = ERROR_IO_PENDING;
+				return FALSE;
+			}
+		}
 	}
 
 	auto io = files::write(file.get(), lpBuffer, nNumberOfBytesToWrite, offset, updateFilePointer);
@@ -762,7 +764,7 @@ BOOL WIN_FUNC WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWr
 	if (lpOverlapped != nullptr) {
 		lpOverlapped->Internal = completionStatus;
 		lpOverlapped->InternalHigh = io.bytesTransferred;
-		signalOverlappedEvent(lpOverlapped);
+		detail::signalOverlappedEvent(lpOverlapped);
 	}
 
 	return io.unixError == 0;
@@ -820,7 +822,25 @@ BOOL WIN_FUNC ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead
 		lpOverlapped->Internal = STATUS_PENDING;
 		lpOverlapped->InternalHigh = 0;
 		updateFilePointer = !file->overlapped;
-		resetOverlappedEvent(lpOverlapped);
+		detail::resetOverlappedEvent(lpOverlapped);
+		if (file->overlapped) {
+			if (nNumberOfBytesToRead == 0) {
+				lpOverlapped->Internal = STATUS_SUCCESS;
+				lpOverlapped->InternalHigh = 0;
+				detail::signalOverlappedEvent(lpOverlapped);
+				if (lpNumberOfBytesRead) {
+					*lpNumberOfBytesRead = 0;
+				}
+				return TRUE;
+			}
+			if (async_io::queueRead(file.clone(), lpOverlapped, lpBuffer, nNumberOfBytesToRead, offset, file->isPipe)) {
+				if (lpNumberOfBytesRead) {
+					*lpNumberOfBytesRead = 0;
+				}
+				wibo::lastError = ERROR_IO_PENDING;
+				return FALSE;
+			}
+		}
 	}
 
 	auto io = files::read(file.get(), lpBuffer, nNumberOfBytesToRead, offset, updateFilePointer);
@@ -829,17 +849,18 @@ BOOL WIN_FUNC ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead
 		completionStatus = wibo::statusFromErrno(io.unixError);
 		wibo::lastError = wibo::winErrorFromErrno(io.unixError);
 	} else if (io.reachedEnd && io.bytesTransferred == 0) {
-		completionStatus = STATUS_END_OF_FILE;
 		if (file->isPipe) {
+			completionStatus = STATUS_PIPE_BROKEN;
 			wibo::lastError = ERROR_BROKEN_PIPE;
 			if (lpOverlapped != nullptr) {
 				lpOverlapped->Internal = completionStatus;
 				lpOverlapped->InternalHigh = 0;
-				signalOverlappedEvent(lpOverlapped);
+				detail::signalOverlappedEvent(lpOverlapped);
 			}
 			DEBUG_LOG("-> ERROR_BROKEN_PIPE\n");
 			return FALSE;
 		}
+		completionStatus = STATUS_END_OF_FILE;
 	}
 
 	if (lpNumberOfBytesRead && (!file->overlapped || lpOverlapped == nullptr)) {
@@ -849,7 +870,7 @@ BOOL WIN_FUNC ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead
 	if (lpOverlapped != nullptr) {
 		lpOverlapped->Internal = completionStatus;
 		lpOverlapped->InternalHigh = io.bytesTransferred;
-		signalOverlappedEvent(lpOverlapped);
+		detail::signalOverlappedEvent(lpOverlapped);
 	}
 
 	DEBUG_LOG("-> %u bytes read, error %d\n", io.bytesTransferred, io.unixError == 0 ? 0 : wibo::lastError);

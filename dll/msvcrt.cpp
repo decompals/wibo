@@ -2906,7 +2906,7 @@ namespace msvcrt {
 
 		if (mode == P_WAIT) {
 			std::unique_lock lk(po->m);
-			po->cv.wait(lk, [&] { return po->signaled.load(); });
+			po->cv.wait(lk, [&] { return po->signaled; });
 			return static_cast<intptr_t>(po->exitCode);
 		}
 
@@ -2955,7 +2955,7 @@ namespace msvcrt {
 
 		if (mode == P_WAIT) {
 			std::unique_lock lk(po->m);
-			po->cv.wait(lk, [&] { return po->signaled.load(); });
+			po->cv.wait(lk, [&] { return po->signaled; });
 			return static_cast<intptr_t>(po->exitCode);
 		}
 

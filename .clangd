@@ -1,4 +1,5 @@
 CompileFlags:
+  CompilationDatabase: build/debug
   Remove: ["-maccumulate-outgoing-args"]
 ---
 If:

@@ -7,11 +7,13 @@ Download the latest release from [GitHub releases](https://github.com/decompals/
 ## Building
 
 ```sh
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-cmake --build build
+cmake --preset debug
+cmake --build --preset debug
 ```
 
-Set `-DCMAKE_BUILD_TYPE=Release` to produce an optimized binary instead.
+This will produce a debug binary at `build/debug/wibo`.
+
+Use `--preset release` to produce an optimized binary at `build/release/wibo`.
 
 ## Usage
 
@@ -64,7 +66,7 @@ wibo -- test.exe a b c
 Self-checking Windows fixtures run through CTest. They require a 32-bit MinGW cross toolchain (`i686-w64-mingw32-gcc` and `i686-w64-mingw32-windres`).
 
 ```sh
-ctest --test-dir build --output-on-failure
+ctest --preset fixtures
 ```
 
 This will cross-compile the fixture executables, run them through `wibo`, and fail if any WinAPI expectations are not met.

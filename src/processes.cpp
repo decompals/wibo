@@ -189,7 +189,7 @@ void ProcessManager::checkPidfd(int pidfd) {
 
 	Pin<ProcessObject> po;
 	{
-		std::shared_lock lk(m);
+		std::unique_lock lk(m);
 		auto it = mReg.find(pidfd);
 		if (it != mReg.end()) {
 			po = std::move(it->second);

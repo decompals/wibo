@@ -106,9 +106,11 @@ bool ProcessManager::addProcess(Pin<ProcessObject> po) {
 	if (!po) {
 		return false;
 	}
+	pid_t pid;
 	int pidfd;
 	{
 		std::lock_guard lk(po->m);
+		pid = po->pid;
 		pidfd = po->pidfd;
 		if (pidfd < 0) {
 			return false;
@@ -128,7 +130,7 @@ bool ProcessManager::addProcess(Pin<ProcessObject> po) {
 		std::lock_guard lk(m);
 		mReg.emplace(pidfd, std::move(po));
 	}
-	DEBUG_LOG("ProcessManager: tracking pidfd %d\n", pidfd);
+	DEBUG_LOG("ProcessManager: registered pid %d with pidfd %d\n", pid, pidfd);
 	wake();
 	return true;
 }
@@ -181,7 +183,6 @@ void ProcessManager::checkPidfd(int pidfd) {
 			return;
 		}
 		epoll_ctl(mEpollFd, EPOLL_CTL_DEL, pidfd, nullptr);
-		close(pidfd);
 	}
 
 	DEBUG_LOG("ProcessManager: pidfd %d exited: code=%d status=%d\n", pidfd, si.si_code, si.si_status);
@@ -190,10 +191,14 @@ void ProcessManager::checkPidfd(int pidfd) {
 	{
 		std::shared_lock lk(m);
 		auto it = mReg.find(pidfd);
-		if (it == mReg.end()) {
-			return;
+		if (it != mReg.end()) {
+			po = std::move(it->second);
+			mReg.erase(it);
 		}
-		po = it->second.clone();
+	}
+	close(pidfd);
+	if (!po) {
+		return;
 	}
 	{
 		std::lock_guard lk(po->m);
@@ -205,14 +210,6 @@ void ProcessManager::checkPidfd(int pidfd) {
 	}
 	po->cv.notify_all();
 	po->notifyWaiters(false);
-
-	{
-		std::lock_guard lk(m);
-		auto it = mReg.find(pidfd);
-		if (it != mReg.end()) {
-			mReg.erase(it);
-		}
-	}
 }
 
 ProcessManager &processes() {

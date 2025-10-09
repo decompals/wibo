@@ -312,17 +312,24 @@ DWORD_PTR WIN_FUNC SetThreadAffinityMask(HANDLE hThread, DWORD_PTR dwThreadAffin
 	return processMask;
 }
 
+[[noreturn]] void exitInternal(DWORD exitCode) {
+	DEBUG_LOG("exitInternal(%u)\n", exitCode);
+	// We have some problems cleaning up when shutting down with exit;
+	// temporarily use _exit to terminate without running cleanup
+	_exit(static_cast<int>(exitCode));
+}
+
 void WIN_FUNC ExitProcess(UINT uExitCode) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("ExitProcess(%u)\n", uExitCode);
-	exit(static_cast<int>(uExitCode));
+	exitInternal(uExitCode);
 }
 
 BOOL WIN_FUNC TerminateProcess(HANDLE hProcess, UINT uExitCode) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("TerminateProcess(%p, %u)\n", hProcess, uExitCode);
 	if (isPseudoCurrentProcessHandle(hProcess)) {
-		exit(static_cast<int>(uExitCode));
+		exitInternal(uExitCode);
 	}
 	auto process = wibo::handles().getAs<ProcessObject>(hProcess);
 	if (!process) {

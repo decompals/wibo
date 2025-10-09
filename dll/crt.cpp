@@ -1,5 +1,6 @@
 #include "common.h"
 #include "context.h"
+#include "kernel32/internal.h"
 #include "modules.h"
 
 #include <csignal>
@@ -291,7 +292,7 @@ void WIN_ENTRY exit(int status) {
 			(*it)();
 		}
 	}
-	::_exit(status);
+	kernel32::exitInternal(status);
 }
 
 void WIN_ENTRY _cexit() {
@@ -310,7 +311,7 @@ void WIN_ENTRY _cexit() {
 void WIN_ENTRY _exit(int status) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("_exit(%i)\n", status);
-	::_exit(status);
+	kernel32::exitInternal(status);
 }
 
 void WIN_ENTRY abort(void) {

@@ -2741,7 +2741,7 @@ namespace msvcrt {
 	void WIN_ENTRY exit(int status) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("exit(%d)\n", status);
-		_Exit(status);
+		kernel32::exitInternal(status);
 	}
 
 	int WIN_ENTRY wcsncmp(const uint16_t *string1, const uint16_t *string2, size_t count) {

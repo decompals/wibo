@@ -183,5 +183,6 @@ inline bool isPseudoCurrentThreadHandle(HANDLE h) {
 
 void tryMarkExecutable(void *mem);
 void setLastErrorFromErrno();
+[[noreturn]] void exitInternal(DWORD exitCode);
 
 } // namespace kernel32

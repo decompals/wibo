@@ -1,5 +1,6 @@
 #include "common.h"
 #include "context.h"
+#include "kernel32/internal.h"
 #include "modules.h"
 
 namespace mscoree {
@@ -7,7 +8,7 @@ namespace mscoree {
 void WIN_FUNC CorExitProcess(int exitCode) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CorExitProcess(%i)\n", exitCode);
-	exit(exitCode);
+	kernel32::exitInternal(exitCode);
 }
 
 } // namespace mscoree

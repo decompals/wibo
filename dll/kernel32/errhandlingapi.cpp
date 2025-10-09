@@ -3,6 +3,7 @@
 #include "common.h"
 #include "context.h"
 #include "errors.h"
+#include "internal.h"
 
 namespace {
 
@@ -35,7 +36,7 @@ void WIN_FUNC RaiseException(DWORD dwExceptionCode, DWORD dwExceptionFlags, DWOR
 	(void)dwExceptionFlags;
 	(void)nNumberOfArguments;
 	(void)lpArguments;
-	exit(static_cast<int>(dwExceptionCode));
+	exitInternal(dwExceptionCode);
 }
 
 PVOID WIN_FUNC AddVectoredExceptionHandler(ULONG First, PVECTORED_EXCEPTION_HANDLER Handler) {

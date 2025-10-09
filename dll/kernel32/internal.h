@@ -55,7 +55,6 @@ struct ProcessObject final : WaitableObject {
 	static constexpr ObjectType kType = ObjectType::Process;
 
 	pid_t pid;
-	pid_t tid = 0;
 	int pidfd;
 	DWORD exitCode = STILL_ACTIVE;
 	bool forcedExitCode = false;

@@ -651,7 +651,7 @@ BOOL WIN_FUNC CreateProcessA(LPCSTR lpApplicationName, LPSTR lpCommandLine, LPSE
 
 	if (lpProcessInformation) {
 		lpProcessInformation->dwProcessId = static_cast<DWORD>(obj->pid);
-		lpProcessInformation->dwThreadId = static_cast<DWORD>(obj->tid);
+		lpProcessInformation->dwThreadId = static_cast<DWORD>(obj->pid); // Use the process ID as the thread ID
 		lpProcessInformation->hProcess = wibo::handles().alloc(obj.clone(), 0 /* TODO: access */, 0);
 		// Give hThread a process handle for now
 		lpProcessInformation->hThread = wibo::handles().alloc(std::move(obj), 0 /* TODO: access */, 0);

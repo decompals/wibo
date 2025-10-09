@@ -247,8 +247,7 @@ RPC_STATUS WIN_FUNC RpcStringFreeW(RPC_WSTR *string) {
 	return RPC_S_OK;
 }
 
-CLIENT_CALL_RETURN __attribute__((force_align_arg_pointer, callee_pop_aggregate_return(0), cdecl))
-NdrClientCall2(PMIDL_STUB_DESC stubDescriptor, PFORMAT_STRING format, ...) {
+CLIENT_CALL_RETURN WIN_ENTRY NdrClientCall2(PMIDL_STUB_DESC stubDescriptor, PFORMAT_STRING format, ...) {
 	DEBUG_LOG("STUB: NdrClientCall2 stubDescriptor=%p format=%p\n", stubDescriptor, format);
 	CLIENT_CALL_RETURN result = {};
 	result.Simple = RPC_S_SERVER_UNAVAILABLE;

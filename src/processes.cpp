@@ -7,7 +7,9 @@
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
+#include <fcntl.h>
 #include <filesystem>
+#include <linux/sched.h>
 #include <mutex>
 #include <optional>
 #include <shared_mutex>
@@ -16,6 +18,7 @@
 #include <strings.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
+#include <sys/prctl.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -372,54 +375,81 @@ std::optional<std::filesystem::path> resolveExecutable(const std::string &comman
 static int spawnInternal(const std::vector<std::string> &args, Pin<kernel32::ProcessObject> &pinOut) {
 	std::vector<char *> argv;
 	argv.reserve(args.size() + 2);
-	argv.push_back(const_cast<char *>(wibo::executableName.c_str()));
+	argv.push_back(const_cast<char *>("wibo"));
 	for (auto &arg : args) {
 		argv.push_back(const_cast<char *>(arg.c_str()));
 	}
 	argv.push_back(nullptr);
 
-	DEBUG_LOG("Spawning process: %s, args: [", wibo::executableName.c_str());
-	for (size_t i = 0; i < args.size(); ++i) {
-		if (i != 0) {
-			DEBUG_LOG(", ");
+	if (wibo::debugEnabled) {
+		std::string cmdline;
+		for (size_t i = 1; i < argv.size() - 1; ++i) {
+			if (i != 1) {
+				cmdline += ' ';
+			}
+			cmdline += '\'';
+			cmdline += argv[i];
+			cmdline += '\'';
 		}
-		DEBUG_LOG("'%s'", args[i].c_str());
-	}
-	DEBUG_LOG("]\n");
-
-	std::vector<char *> childEnv;
-	for (char **e = environ; *e != nullptr; ++e) {
-		if (strncmp(*e, "WIBO_DEBUG_INDENT=", 18) != 0) {
-			childEnv.push_back(*e);
-		}
-	}
-	std::string indent = "WIBO_DEBUG_INDENT=" + std::to_string(wibo::debugIndent + 1);
-	childEnv.push_back(strdup(indent.c_str()));
-	childEnv.push_back(nullptr);
-
-	pid_t pid = -1;
-	int spawnResult = posix_spawn(&pid, wibo::executableName.c_str(), nullptr, nullptr, argv.data(), childEnv.data());
-	if (spawnResult != 0) {
-		return spawnResult;
+		DEBUG_LOG("Spawning process: %s %s\n", argv[0], cmdline.c_str());
 	}
 
-	DEBUG_LOG("Spawned process with PID %d\n", pid);
-
-	int pidfd = static_cast<int>(syscall(SYS_pidfd_open, pid, 0));
-	if (pidfd < 0) {
-		perror("pidfd_open");
-		return false;
+	std::vector<std::string> ownedEnv;
+	ownedEnv.reserve(256);
+	for (char **e = environ; *e; ++e) {
+		if (strncmp(*e, "WIBO_DEBUG_INDENT=", 18) != 0)
+			ownedEnv.emplace_back(*e);
 	}
+	ownedEnv.emplace_back("WIBO_DEBUG_INDENT=" + std::to_string(wibo::debugIndent + 1));
+
+	std::vector<char *> envp;
+	envp.reserve(ownedEnv.size() + 1);
+	for (auto &s : ownedEnv)
+		envp.push_back(const_cast<char *>(s.c_str()));
+	envp.push_back(nullptr);
+
+	int exefd = open("/proc/self/exe", O_PATH | O_CLOEXEC);
+	if (exefd < 0) {
+		int err = errno;
+		perror("open /proc/self/exe");
+		return err;
+	}
+
+	int pidfd = -1;
+	int tid = -1;
+	struct clone_args ca = {};
+	ca.flags = CLONE_PIDFD | CLONE_PARENT_SETTID | CLONE_CLEAR_SIGHAND;
+	ca.pidfd = reinterpret_cast<uintptr_t>(&pidfd);
+	ca.parent_tid = reinterpret_cast<uintptr_t>(&tid);
+	pid_t pid = static_cast<pid_t>(syscall(SYS_clone3, &ca, sizeof(ca)));
+	if (pid < 0) {
+		close(exefd);
+		int err = errno;
+		perror("clone3");
+		return err;
+	} else if (pid == 0) {
+		prctl(PR_SET_PDEATHSIG, SIGKILL);
+		int rc = execveat(exefd, "", argv.data(), envp.data(), AT_EMPTY_PATH);
+		fprintf(stderr, "execveat failed: %s\n", strerror(rc));
+		_exit(127);
+	}
+	close(exefd);
+
+	DEBUG_LOG("Spawned process with PID %d (pidfd=%d, tid=%d)\n", pid, pidfd, tid);
 
 	auto obj = make_pin<kernel32::ProcessObject>(pid, pidfd);
+	obj->tid = tid;
 	pinOut = obj.clone();
-	processes().addProcess(std::move(obj));
+	if (!processes().addProcess(std::move(obj))) {
+		fprintf(stderr, "Failed to add process to process manager\n");
+		abort();
+	}
 	return 0;
 }
 
 int spawnWithCommandLine(const std::string &applicationName, const std::string &commandLine,
 						 Pin<kernel32::ProcessObject> &pinOut) {
-	if (wibo::executableName.empty() || (applicationName.empty() && commandLine.empty())) {
+	if (applicationName.empty() && commandLine.empty()) {
 		return ENOENT;
 	}
 
@@ -438,7 +468,7 @@ int spawnWithCommandLine(const std::string &applicationName, const std::string &
 
 int spawnWithArgv(const std::string &applicationName, const std::vector<std::string> &argv,
 				  Pin<kernel32::ProcessObject> &pinOut) {
-	if (wibo::executableName.empty() || (applicationName.empty() && argv.empty())) {
+	if (applicationName.empty() && argv.empty()) {
 		return ENOENT;
 	}
 

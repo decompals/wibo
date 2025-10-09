@@ -28,7 +28,6 @@ thread_local uint32_t wibo::lastError = 0;
 char **wibo::argv;
 int wibo::argc;
 std::filesystem::path wibo::guestExecutablePath;
-std::string wibo::executableName;
 std::string wibo::commandLine;
 std::vector<uint16_t> wibo::commandLineW;
 wibo::ModuleInfo *wibo::mainModule = nullptr;
@@ -431,18 +430,6 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-	// Try to resolve our own executable path
-	std::error_code ec;
-	auto resolved = std::filesystem::read_symlink("/proc/self/exe", ec);
-	std::string executablePath;
-	if (!ec) {
-		executablePath = resolved.string();
-	} else {
-		const char *selfArg = argv[0] ? argv[0] : "";
-		auto absCandidate = std::filesystem::absolute(selfArg, ec);
-		executablePath = ec ? std::string(selfArg) : absCandidate.string();
-	}
-
 	if (!chdirPath.empty()) {
 		if (chdir(chdirPath.c_str()) != 0) {
 			std::string message = std::string("Failed to chdir to ") + chdirPath;
@@ -562,7 +549,6 @@ int main(int argc, char **argv) {
 	DEBUG_LOG("Command line: %s\n", wibo::commandLine.c_str());
 
 	wibo::guestExecutablePath = resolvedGuestPath;
-	wibo::executableName = executablePath;
 
 	// Build argv/argc
 	std::vector<char *> guestArgv;

@@ -648,13 +648,13 @@ BOOL WIN_FUNC CreateProcessA(LPCSTR lpApplicationName, LPSTR lpCommandLine, LPSE
 		wibo::lastError = (spawnResult == ENOENT) ? ERROR_FILE_NOT_FOUND : ERROR_ACCESS_DENIED;
 		return FALSE;
 	}
-	pid_t pid = obj->pid;
 
 	if (lpProcessInformation) {
-		lpProcessInformation->hProcess = wibo::handles().alloc(std::move(obj), 0 /* TODO: access */, 0);
-		lpProcessInformation->hThread = nullptr;
-		lpProcessInformation->dwProcessId = static_cast<DWORD>(pid);
-		lpProcessInformation->dwThreadId = 0;
+		lpProcessInformation->dwProcessId = static_cast<DWORD>(obj->pid);
+		lpProcessInformation->dwThreadId = static_cast<DWORD>(obj->tid);
+		lpProcessInformation->hProcess = wibo::handles().alloc(obj.clone(), 0 /* TODO: access */, 0);
+		// Give hThread a process handle for now
+		lpProcessInformation->hThread = wibo::handles().alloc(std::move(obj), 0 /* TODO: access */, 0);
 	}
 	(void)lpProcessAttributes;
 	(void)lpThreadAttributes;

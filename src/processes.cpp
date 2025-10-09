@@ -5,6 +5,7 @@
 #include "kernel32/internal.h"
 #include <algorithm>
 #include <cassert>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <fcntl.h>
@@ -372,6 +373,55 @@ std::optional<std::filesystem::path> resolveExecutable(const std::string &comman
 	return std::nullopt;
 }
 
+static int spawnClone3(pid_t &pid, int &pidfd, int &tid, char **argv, char **envp) {
+	int exefd = open("/proc/self/exe", O_PATH | O_CLOEXEC);
+	if (exefd < 0) {
+		int err = errno;
+		perror("open /proc/self/exe");
+		return err;
+	}
+	struct clone_args ca = {};
+	ca.flags = CLONE_PIDFD | CLONE_PARENT_SETTID | CLONE_CLEAR_SIGHAND;
+	ca.pidfd = reinterpret_cast<uintptr_t>(&pidfd);
+	ca.parent_tid = reinterpret_cast<uintptr_t>(&tid);
+	pid = static_cast<pid_t>(syscall(SYS_clone3, &ca, sizeof(ca)));
+	if (pid < 0) {
+		int err = errno;
+		close(exefd);
+		return err;
+	} else if (pid == 0) {
+		prctl(PR_SET_PDEATHSIG, SIGKILL);
+		// First, attempt to execveat using the open fd (atomic)
+		syscall(SYS_execveat, exefd, "", argv, envp, AT_EMPTY_PATH);
+		// Otherwise, fall back to direct execve
+		execve("/proc/self/exe", argv, envp);
+		// If we're still here, something went wrong
+		perror("execve");
+		_exit(127);
+	}
+	close(exefd);
+	return 0;
+}
+
+static int spawnPosixSpawn(pid_t &pid, int &pidfd, char **argv, char **envp) {
+	std::error_code ec;
+	auto resolved = std::filesystem::read_symlink("/proc/self/exe", ec);
+	if (ec) {
+		return ec.value();
+	}
+	int rc = posix_spawn(&pid, resolved.c_str(), nullptr, nullptr, argv, envp);
+	if (rc != 0) {
+		return rc;
+	}
+	pidfd = static_cast<int>(syscall(SYS_pidfd_open, pid, 0));
+	if (pidfd < 0) {
+		int err = errno;
+		perror("pidfd_open");
+		return err;
+	}
+	return 0;
+}
+
 static int spawnInternal(const std::vector<std::string> &args, Pin<kernel32::ProcessObject> &pinOut) {
 	std::vector<char *> argv;
 	argv.reserve(args.size() + 2);
@@ -408,32 +458,19 @@ static int spawnInternal(const std::vector<std::string> &args, Pin<kernel32::Pro
 		envp.push_back(const_cast<char *>(s.c_str()));
 	envp.push_back(nullptr);
 
-	int exefd = open("/proc/self/exe", O_PATH | O_CLOEXEC);
-	if (exefd < 0) {
-		int err = errno;
-		perror("open /proc/self/exe");
-		return err;
-	}
-
+	pid_t pid = -1;
 	int pidfd = -1;
 	int tid = -1;
-	struct clone_args ca = {};
-	ca.flags = CLONE_PIDFD | CLONE_PARENT_SETTID | CLONE_CLEAR_SIGHAND;
-	ca.pidfd = reinterpret_cast<uintptr_t>(&pidfd);
-	ca.parent_tid = reinterpret_cast<uintptr_t>(&tid);
-	pid_t pid = static_cast<pid_t>(syscall(SYS_clone3, &ca, sizeof(ca)));
-	if (pid < 0) {
-		close(exefd);
-		int err = errno;
-		perror("clone3");
-		return err;
-	} else if (pid == 0) {
-		prctl(PR_SET_PDEATHSIG, SIGKILL);
-		int rc = execveat(exefd, "", argv.data(), envp.data(), AT_EMPTY_PATH);
-		fprintf(stderr, "execveat failed: %s\n", strerror(rc));
-		_exit(127);
+	int rc = spawnClone3(pid, pidfd, tid, argv.data(), envp.data());
+	if (rc != 0) {
+		if (rc == ENOSYS) {
+			rc = spawnPosixSpawn(pid, pidfd, argv.data(), envp.data());
+		}
+		if (rc != 0) {
+			return rc;
+		}
+		tid = pid;
 	}
-	close(exefd);
 
 	DEBUG_LOG("Spawned process with PID %d (pidfd=%d, tid=%d)\n", pid, pidfd, tid);
 

@@ -1,5 +1,6 @@
 #include "stringapiset.h"
 
+#include "common.h"
 #include "context.h"
 #include "errors.h"
 #include "strutil.h"
@@ -14,8 +15,8 @@ namespace kernel32 {
 int WIN_FUNC WideCharToMultiByte(UINT CodePage, DWORD dwFlags, LPCWCH lpWideCharStr, int cchWideChar,
 								 LPSTR lpMultiByteStr, int cbMultiByte, LPCCH lpDefaultChar, LPBOOL lpUsedDefaultChar) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("WideCharToMultiByte(%u, %u, %p, %d, %p, %d, %p, %p)\n", CodePage, dwFlags, lpWideCharStr, cchWideChar,
-			  lpMultiByteStr, cbMultiByte, lpDefaultChar, lpUsedDefaultChar);
+	VERBOSE_LOG("WideCharToMultiByte(%u, %u, %p, %d, %p, %d, %p, %p)\n", CodePage, dwFlags, lpWideCharStr, cchWideChar,
+				lpMultiByteStr, cbMultiByte, lpDefaultChar, lpUsedDefaultChar);
 
 	(void)CodePage;
 	(void)dwFlags;
@@ -37,7 +38,7 @@ int WIN_FUNC WideCharToMultiByte(UINT CodePage, DWORD dwFlags, LPCWCH lpWideChar
 
 	if (wibo::debugEnabled) {
 		std::string s(lpMultiByteStr, lpMultiByteStr + cchWideChar);
-		DEBUG_LOG("Converted string: [%s] (len %d)\n", s.c_str(), cchWideChar);
+		VERBOSE_LOG("Converted string: [%s] (len %d)\n", s.c_str(), cchWideChar);
 	}
 
 	return cchWideChar;
@@ -46,7 +47,7 @@ int WIN_FUNC WideCharToMultiByte(UINT CodePage, DWORD dwFlags, LPCWCH lpWideChar
 int WIN_FUNC MultiByteToWideChar(UINT CodePage, DWORD dwFlags, LPCCH lpMultiByteStr, int cbMultiByte,
 								 LPWSTR lpWideCharStr, int cchWideChar) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("MultiByteToWideChar(%u, %u, %d, %d)\n", CodePage, dwFlags, cbMultiByte, cchWideChar);
+	VERBOSE_LOG("MultiByteToWideChar(%u, %u, %d, %d)\n", CodePage, dwFlags, cbMultiByte, cchWideChar);
 
 	(void)CodePage;
 	(void)dwFlags;
@@ -60,7 +61,7 @@ int WIN_FUNC MultiByteToWideChar(UINT CodePage, DWORD dwFlags, LPCCH lpMultiByte
 	}
 	if (wibo::debugEnabled) {
 		std::string s(lpMultiByteStr, lpMultiByteStr + cbMultiByte);
-		DEBUG_LOG("Converting string: [%s] (len %d)\n", s.c_str(), cbMultiByte);
+		VERBOSE_LOG("Converting string: [%s] (len %d)\n", s.c_str(), cbMultiByte);
 	}
 
 	assert(cbMultiByte <= cchWideChar);
@@ -133,7 +134,7 @@ BOOL WIN_FUNC GetStringTypeA(LCID Locale, DWORD dwInfoType, LPCSTR lpSrcStr, int
 
 	if (length > 0) {
 		return GetStringTypeW(dwInfoType, wide.data(), length, lpCharType);
-	} 
+	}
 	return TRUE;
 }
 

@@ -17,13 +17,13 @@ void setLastErrorFromErrno() { wibo::lastError = wibo::winErrorFromErrno(errno);
 
 DWORD WIN_FUNC GetLastError() {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("GetLastError() -> %u\n", wibo::lastError);
+	VERBOSE_LOG("GetLastError() -> %u\n", wibo::lastError);
 	return wibo::lastError;
 }
 
 void WIN_FUNC SetLastError(DWORD dwErrCode) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("SetLastError(%u)\n", dwErrCode);
+	VERBOSE_LOG("SetLastError(%u)\n", dwErrCode);
 	wibo::lastError = dwErrCode;
 }
 

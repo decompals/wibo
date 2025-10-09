@@ -82,6 +82,7 @@ FetchContent_MakeAvailable(mimalloc)
 
 # Disable `note: the alignment of '_Atomic long long int' fields changed in GCC 11.1`
 target_compile_options(mimalloc-obj PRIVATE -Wno-psabi)
+target_compile_definitions(mimalloc-obj PRIVATE MI_USE_BUILTIN_THREAD_POINTER=1)
 
 if (WIBO_ENABLE_LIBURING)
     FetchContent_Declare(

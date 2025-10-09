@@ -153,16 +153,19 @@ struct SemaphoreObject final : WaitableObject {
 struct HeapObject : public ObjectBase {
 	static constexpr ObjectType kType = ObjectType::Heap;
 
-	std::mutex m;
 	mi_heap_t *heap;
+	const pthread_t owner;
 	DWORD createFlags = 0;
 	SIZE_T initialSize = 0;
 	SIZE_T maximumSize = 0;
 	DWORD compatibility = 0;
 	bool isProcessHeap = false;
 
-	explicit HeapObject(mi_heap_t *heap) : ObjectBase(kType), heap(heap) {}
+	explicit HeapObject(mi_heap_t *heap) : ObjectBase(kType), heap(heap), owner(pthread_self()) {}
 	~HeapObject() override;
+
+	[[nodiscard]] inline bool isOwner() const { return pthread_equal(owner, pthread_self()); }
+	[[nodiscard]] inline bool canAccess() const { return (isProcessHeap || isOwner()) && heap != nullptr; }
 };
 
 inline constexpr uintptr_t kPseudoCurrentProcessHandleValue = static_cast<uintptr_t>(-1);

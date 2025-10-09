@@ -1,80 +1,70 @@
 {
-    "version": 2,
-    "configurePresets": [
-        {
-            "name": "ninja-base",
-            "hidden": true,
-            "generator": "Ninja",
-            "cacheVariables": {
-                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-                "WIBO_ENABLE_LIBURING": "ON"
-            }
-        },
-        {
-            "name": "debug",
-            "displayName": "Debug",
-            "inherits": [
-                "ninja-base"
-            ],
-            "binaryDir": "${sourceDir}/build/debug",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug"
-            }
-        },
-        {
-            "name": "release",
-            "displayName": "Release",
-            "inherits": [
-                "ninja-base"
-            ],
-            "binaryDir": "${sourceDir}/build/release",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release"
-            }
-        }
-    ],
-    "buildPresets": [
-        {
-            "name": "debug",
-            "displayName": "Build (Debug)",
-            "configurePreset": "debug",
-            "targets": [
-                "wibo",
-                "wibo_test_fixtures"
-            ],
-            "configuration": "Debug"
-        },
-        {
-            "name": "release",
-            "displayName": "Build (Release)",
-            "configurePreset": "release",
-            "targets": [
-                "wibo",
-                "wibo_test_fixtures"
-            ],
-            "configuration": "Release"
-        }
-    ],
-    "testPresets": [
-        {
-            "name": "fixtures",
-            "displayName": "Run fixture tests (Debug)",
-            "configurePreset": "debug",
-            "configuration": "Debug",
-            "output": {
-                "outputOnFailure": true,
-                "shortProgress": true
-            }
-        },
-        {
-            "name": "fixtures-release",
-            "displayName": "Run fixture tests (Release)",
-            "configurePreset": "release",
-            "configuration": "Release",
-            "output": {
-                "outputOnFailure": true,
-                "shortProgress": true
-            }
-        }
-    ]
+  "version": 2,
+  "configurePresets": [
+    {
+      "name": "ninja-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "WIBO_ENABLE_LIBURING": "ON"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug",
+      "inherits": ["ninja-base"],
+      "binaryDir": "${sourceDir}/build/debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release",
+      "inherits": ["ninja-base"],
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "displayName": "Build (Debug)",
+      "configurePreset": "debug",
+      "targets": ["wibo", "wibo_test_fixtures"],
+      "configuration": "Debug"
+    },
+    {
+      "name": "release",
+      "displayName": "Build (Release)",
+      "configurePreset": "release",
+      "targets": ["wibo", "wibo_test_fixtures"],
+      "configuration": "Release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "fixtures",
+      "displayName": "Run fixture tests (Debug)",
+      "configurePreset": "debug",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      }
+    },
+    {
+      "name": "fixtures-release",
+      "displayName": "Run fixture tests (Release)",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      }
+    }
+  ]
 }

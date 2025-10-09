@@ -73,9 +73,9 @@ This will cross-compile the fixture executables, run them through `wibo`, and fa
 
 ## Related Projects
 
-* [taviso/loadlibrary](https://github.com/taviso/loadlibrary) - Initial inspiration for this project.
-* [evmar/retrowin32](https://github.com/evmar/retrowin32) - A similar project with different goals and architecture.
-* [decomp.me](https://decomp.me) - Collaborative decompilation website; uses wibo to run Windows compilers.
+- [taviso/loadlibrary](https://github.com/taviso/loadlibrary) - Initial inspiration for this project.
+- [evmar/retrowin32](https://github.com/evmar/retrowin32) - A similar project with different goals and architecture.
+- [decomp.me](https://decomp.me) - Collaborative decompilation website; uses wibo to run Windows compilers.
 
 ## License
 

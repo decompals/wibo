@@ -10,7 +10,7 @@
 - `cmake --build --preset debug` compiles the program and tests.
 - `./build/debug/wibo /path/to/program.exe` runs a Windows binary. Use `-D` (or `WIBO_DEBUG=1`) for verbose logging. Use `-C` to set the working directory.
 - `ctest --preset fixtures` runs the self-checking WinAPI fixtures (requires `i686-w64-mingw32-gcc` and `i686-w64-mingw32-windres`).
-- `clang-format -i path/to/file.cpp` and `clang-tidy path/to/file.cpp -p build` keep contributions aligned with the repo's tooling.
+- `clang-format -i path/to/file.cpp` and `clang-tidy -p build/debug path/to/file.cpp` keep contributions aligned with the repo's tooling.
 
 ## Coding Style & Naming Conventions
 - Formatting follows `.clang-format` (LLVM base, tabbed indentation width 4, 120 column limit).

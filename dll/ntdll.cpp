@@ -14,7 +14,7 @@
 
 #include <optional>
 
-#define PIO_APC_ROUTINE void *
+using PIO_APC_ROUTINE = void *;
 
 typedef struct _IO_STATUS_BLOCK {
 	union {
@@ -109,7 +109,7 @@ std::string windowsImagePathFor(const ProcessHandleDetails &details) {
 	if (!ec) {
 		return files::pathToWindows(files::canonicalPath(resolved));
 	}
-	return std::string();
+	return {};
 }
 
 } // namespace

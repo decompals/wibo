@@ -36,12 +36,24 @@ uint16_t wcharToLower(uint16_t ch) {
 	if (ch >= 'A' && ch <= 'Z') {
 		return static_cast<uint16_t>(ch + ('a' - 'A'));
 	}
-	wchar_t wide = static_cast<wchar_t>(ch);
-	wchar_t lowered = std::towlower(wide);
-	if (lowered < 0 || lowered > 0xFFFF) {
+	wint_t wide = static_cast<wint_t>(ch);
+	wint_t lowered = std::towlower(wide);
+	if (lowered > 0xFFFF) {
 		return ch;
 	}
 	return static_cast<uint16_t>(lowered);
+}
+
+uint16_t wcharToUpper(uint16_t ch) {
+	if (ch >= 'a' && ch <= 'z') {
+		return static_cast<uint16_t>(ch - ('a' - 'A'));
+	}
+	wint_t wide = static_cast<wint_t>(ch);
+	wint_t uppered = std::towupper(wide);
+	if (uppered > 0xFFFF) {
+		return ch;
+	}
+	return static_cast<uint16_t>(uppered);
 }
 
 size_t wstrlen(const uint16_t *str) {

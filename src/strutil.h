@@ -24,3 +24,4 @@ void toUpperInPlace(std::string &str);
 std::string stringToLower(std::string_view str);
 std::string stringToUpper(std::string_view str);
 uint16_t wcharToLower(uint16_t ch);
+uint16_t wcharToUpper(uint16_t ch);

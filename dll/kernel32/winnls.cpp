@@ -315,9 +315,9 @@ int WIN_FUNC LCMapStringW(LCID Locale, DWORD dwMapFlags, LPCWCH lpSrcStr, int cc
 	for (size_t i = 0; i < srcLen; ++i) {
 		uint16_t ch = lpSrcStr[i];
 		if (casingFlags == 0x00000200u) {
-			buffer[i] = static_cast<uint16_t>(std::towupper(static_cast<wint_t>(ch)));
+			buffer[i] = wcharToUpper(ch);
 		} else if (casingFlags == 0x00000100u) {
-			buffer[i] = static_cast<uint16_t>(std::towlower(static_cast<wint_t>(ch)));
+			buffer[i] = wcharToLower(ch);
 		} else {
 			buffer[i] = ch;
 		}

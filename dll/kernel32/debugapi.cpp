@@ -2,7 +2,6 @@
 
 #include "common.h"
 #include "context.h"
-#include "errors.h"
 
 namespace kernel32 {
 

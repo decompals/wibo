@@ -16,11 +16,11 @@ namespace {
 
 constexpr uint32_t RT_VERSION = 16;
 
-static uint16_t readU16(const uint8_t *ptr) { return static_cast<uint16_t>(ptr[0] | (ptr[1] << 8)); }
+uint16_t readU16(const uint8_t *ptr) { return static_cast<uint16_t>(ptr[0] | (ptr[1] << 8)); }
 
-static size_t align4(size_t offset) { return (offset + 3u) & ~static_cast<size_t>(3u); }
+size_t align4(size_t offset) { return (offset + 3u) & ~static_cast<size_t>(3u); }
 
-static std::string narrowKey(const std::u16string &key) {
+std::string narrowKey(const std::u16string &key) {
 	std::string result;
 	result.reserve(key.size());
 	for (char16_t ch : key) {
@@ -40,7 +40,7 @@ struct VersionBlockView {
 	uint32_t childrenBytes = 0;
 };
 
-static bool parseVersionBlock(const uint8_t *block, size_t available, VersionBlockView &out) {
+bool parseVersionBlock(const uint8_t *block, size_t available, VersionBlockView &out) {
 	if (available < sizeof(uint16_t) * 3) {
 		DEBUG_LOG("header too small: available=%zu\n", available);
 		return false;
@@ -99,8 +99,8 @@ static bool parseVersionBlock(const uint8_t *block, size_t available, VersionBlo
 	return true;
 }
 
-static bool queryVersionBlock(const uint8_t *block, size_t available, const std::vector<std::string> &segments,
-							  size_t depth, const uint8_t **outPtr, uint32_t *outLen, uint16_t *outType) {
+bool queryVersionBlock(const uint8_t *block, size_t available, const std::vector<std::string> &segments, size_t depth,
+					   const uint8_t **outPtr, uint32_t *outLen, uint16_t *outType) {
 	VersionBlockView view;
 	if (!parseVersionBlock(block, available, view))
 		return false;
@@ -139,7 +139,7 @@ static bool queryVersionBlock(const uint8_t *block, size_t available, const std:
 	return false;
 }
 
-static bool splitSubBlock(const std::string &subBlock, std::vector<std::string> &segments) {
+bool splitSubBlock(const std::string &subBlock, std::vector<std::string> &segments) {
 	segments.clear();
 	if (subBlock.empty() || subBlock == "\\")
 		return true;
@@ -158,7 +158,7 @@ static bool splitSubBlock(const std::string &subBlock, std::vector<std::string> 
 	return true;
 }
 
-static bool loadVersionResource(const char *fileName, std::vector<uint8_t> &buffer) {
+bool loadVersionResource(const char *fileName, std::vector<uint8_t> &buffer) {
 	if (!fileName) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return false;

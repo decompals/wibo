@@ -1613,13 +1613,13 @@ namespace msvcrt {
 	int WIN_ENTRY strcmp(const char *lhs, const char *rhs) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("strcmp(%s, %s)\n", lhs, rhs);
-		return ::strcmp(lhs, rhs); 
+		return ::strcmp(lhs, rhs);
 	}
 
 	int WIN_ENTRY strncmp(const char *lhs, const char *rhs, size_t count) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("strncmp(%s, %s, %zu)\n", lhs, rhs, count);
-		return ::strncmp(lhs, rhs, count); 
+		return ::strncmp(lhs, rhs, count);
 	}
 
 	void WIN_ENTRY _exit(int status) {
@@ -2150,8 +2150,7 @@ namespace msvcrt {
 			return ERANGE;
 		}
 		for (size_t i = 0; i < len; ++i) {
-			wchar_t ch = static_cast<wchar_t>(str[i]);
-			str[i] = static_cast<uint16_t>(std::towupper(ch));
+			str[i] = wcharToUpper(str[i]);
 		}
 		return 0;
 	}
@@ -2167,8 +2166,7 @@ namespace msvcrt {
 			return ERANGE;
 		}
 		for (size_t i = 0; i < len; ++i) {
-			wchar_t ch = static_cast<wchar_t>(str[i]);
-			str[i] = static_cast<uint16_t>(std::towlower(ch));
+			str[i] = wcharToLower(str[i]);
 		}
 		return 0;
 	}
@@ -2176,7 +2174,7 @@ namespace msvcrt {
 	wint_t WIN_ENTRY towlower(wint_t ch) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("towlower(%d)\n", ch);
-		return static_cast<wint_t>(std::towlower(static_cast<wchar_t>(ch)));
+		return wcharToLower(ch);
 	}
 
 	unsigned int WIN_ENTRY _mbctolower(unsigned int ch) {
@@ -2416,9 +2414,8 @@ namespace msvcrt {
 		}
 
 		const auto wStr = stringToWideString(wibo::guestExecutablePath.c_str());
-		if (_wpgmptr) {
-			delete[] _wpgmptr;
-		}
+		delete[] _wpgmptr;
+
 		_wpgmptr = new uint16_t[wStr.size() + 1];
 		std::copy(wStr.begin(), wStr.end(), _wpgmptr);
 		_wpgmptr[wStr.size()] = 0;
@@ -2660,7 +2657,7 @@ namespace msvcrt {
 		return 0;
 	}
 
-	int WIN_ENTRY wcscpy_s(uint16_t *dest, size_t dest_size, const uint16_t *src){
+	int WIN_ENTRY wcscpy_s(uint16_t *dest, size_t dest_size, const uint16_t *src) {
 		HOST_CONTEXT_GUARD();
 		std::string src_str = wideStringToString(src);
 		VERBOSE_LOG("wcscpy_s(%p, %zu, %p)\n", dest, dest_size, src);
@@ -2670,7 +2667,7 @@ namespace msvcrt {
 
 		if (wstrlen(src) + 1 > dest_size) {
 			dest[0] = 0;
-			return 34; 
+			return 34;
 		}
 
 		wstrcpy(dest, src);
@@ -2753,37 +2750,60 @@ namespace msvcrt {
 		return wstrncmp(string1, string2, count);
 	}
 
-	int WIN_ENTRY _vswprintf_c_l(uint16_t* buffer, size_t size, const uint16_t* format, ...) {
+	int WIN_ENTRY _vswprintf_c_l(uint16_t *buffer, size_t size, const uint16_t *format, ...) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_vswprintf_c_l(%p, %zu, %p, ...)\n", buffer, size, format);
-		if (!buffer || !format || size == 0)
+		if (!buffer || !format || size == 0) {
+			if (buffer && size > 0) {
+				buffer[0] = 0;
+			}
 			return -1;
+		}
 
 		std::string narrow_fmt = wideStringToString(format);
 		DEBUG_LOG("\tFmt: %s\n", narrow_fmt.c_str());
-		
+
 		va_list args;
 		va_start(args, format);
-		int required = vsnprintf(nullptr, 0, narrow_fmt.c_str(), args);
-		va_end(args);
+		va_list argsCopy;
+		va_copy(argsCopy, args);
+		int required = vsnprintf(nullptr, 0, narrow_fmt.c_str(), argsCopy);
+		va_end(argsCopy);
+
 		if (required < 0) {
+			va_end(args);
 			buffer[0] = 0;
 			return -1;
 		}
 
-		char buffer_narrow[required + 1];
-		va_start(args, format);
-		vsnprintf(buffer_narrow, required + 1, narrow_fmt.c_str(), args);
+		std::vector<char> narrowBuffer(static_cast<size_t>(required) + 1);
+		int written = vsnprintf(narrowBuffer.data(), narrowBuffer.size(), narrow_fmt.c_str(), args);
 		va_end(args);
-		DEBUG_LOG("\tBuffer: %s\n", buffer_narrow);
 
-		std::vector<uint16_t> wide = stringToWideString(buffer_narrow);
-		size_t copy_len = std::min(wide.size(), size - 1);
-		std::memcpy(buffer, wide.data(), copy_len * sizeof(uint16_t));
-		buffer[copy_len] = 0;
+		if (written < 0) {
+			buffer[0] = 0;
+			return -1;
+		}
+		DEBUG_LOG("\tBuffer: %s\n", narrowBuffer.data());
 
-		return static_cast<int>(copy_len);
-		// return vswprintf(buffer, size, format, args); this doesn't work because on this architecture, wchar_t is size 4, instead of size 2
+		std::vector<uint16_t> wide = stringToWideString(narrowBuffer.data());
+		size_t wideLen = wide.size();
+
+		if (wideLen + 1 > size) {
+			buffer[0] = 0;
+			return -1;
+		}
+		if (wideLen > static_cast<size_t>(std::numeric_limits<int>::max())) {
+			buffer[0] = 0;
+			return -1;
+		}
+
+		if (wideLen > 0) {
+			std::memcpy(buffer, wide.data(), wideLen * sizeof(uint16_t));
+		}
+		buffer[wideLen] = 0;
+
+		return static_cast<int>(wideLen);
 	}
 
 	const uint16_t* WIN_ENTRY wcsstr( const uint16_t *dest, const uint16_t *src ){

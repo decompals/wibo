@@ -125,6 +125,7 @@ add_executable(wibo
     dll/advapi32/winbase.cpp
     dll/advapi32/wincrypt.cpp
     dll/advapi32/winreg.cpp
+    dll/advapi32/md5.c
     dll/bcrypt.cpp
     dll/crt.cpp
     dll/kernel32.cpp

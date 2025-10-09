@@ -314,8 +314,7 @@ DWORD_PTR WIN_FUNC SetThreadAffinityMask(HANDLE hThread, DWORD_PTR dwThreadAffin
 
 [[noreturn]] void exitInternal(DWORD exitCode) {
 	DEBUG_LOG("exitInternal(%u)\n", exitCode);
-	// We have some problems cleaning up when shutting down with exit;
-	// temporarily use _exit to terminate without running cleanup
+	wibo::handles().clear();
 	_exit(static_cast<int>(exitCode));
 }
 

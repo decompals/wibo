@@ -1625,7 +1625,7 @@ namespace msvcrt {
 	void WIN_ENTRY _exit(int status) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_exit(%d)\n", status);
-		_Exit(status);
+		kernel32::exitInternal(status);
 	}
 
 	int WIN_ENTRY strcpy_s(char *dest, size_t dest_size, const char *src) {

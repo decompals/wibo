@@ -39,7 +39,6 @@ struct MappingObject : ObjectBase {
 };
 
 MappingObject::~MappingObject() {
-	std::lock_guard lk(m);
 	if (fd != -1) {
 		close(fd);
 		fd = -1;

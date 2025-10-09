@@ -28,6 +28,20 @@ inline bool isPseudo(HANDLE h) noexcept { return reinterpret_cast<int32_t>(h) < 
 
 } // namespace
 
+Handles::~Handles() { clear(); }
+
+void Handles::clear() {
+	for (auto &entry : mSlots) {
+		if (entry.obj) {
+			detail::deref(entry.obj);
+		}
+	}
+	mSlots.clear();
+	mFreeBelow.clear();
+	mFreeAbove.clear();
+	nextIndex = 0;
+}
+
 HANDLE Handles::alloc(Pin<> obj, uint32_t grantedAccess, uint32_t flags) {
 	std::unique_lock lk(m);
 

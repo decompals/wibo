@@ -17,7 +17,6 @@
 #include <utility>
 
 kernel32::FsObject::~FsObject() {
-	std::lock_guard lk(m);
 	int fd = std::exchange(this->fd, -1);
 	if (fd >= 0 && closeOnDestroy) {
 		close(fd);

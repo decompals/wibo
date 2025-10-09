@@ -189,7 +189,9 @@ class Handles {
   public:
 	using OnHandleZeroFn = void (*)(ObjectBase *);
 	explicit Handles(OnHandleZeroFn cb) : mOnHandleZero(cb) {}
+	~Handles();
 
+	void clear();
 	HANDLE alloc(Pin<> obj, uint32_t grantedAccess, uint32_t flags);
 	bool release(HANDLE h);
 	Pin<> get(HANDLE h, HandleMeta *metaOut = nullptr);

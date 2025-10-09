@@ -62,7 +62,6 @@ struct ProcessObject final : WaitableObject {
 	explicit ProcessObject(pid_t pid, int pidfd) : WaitableObject(kType), pid(pid), pidfd(pidfd) {}
 
 	~ProcessObject() override {
-		std::lock_guard lk(m);
 		if (pidfd != -1) {
 			close(pidfd);
 			pidfd = -1;
@@ -81,7 +80,6 @@ struct ThreadObject final : WaitableObject {
 	explicit ThreadObject(pthread_t thread) : WaitableObject(kType), thread(thread) {}
 
 	~ThreadObject() override {
-		std::lock_guard lk(m);
 		// Threads are detached at creation; we can safely drop
 		if (tib) {
 			wibo::destroyTib(tib);

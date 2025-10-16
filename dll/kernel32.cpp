@@ -400,6 +400,8 @@ void *resolveByName(const char *name) {
 		return (void *)kernel32::MapViewOfFileEx;
 	if (strcmp(name, "UnmapViewOfFile") == 0)
 		return (void *)kernel32::UnmapViewOfFile;
+	if (strcmp(name, "FlushViewOfFile") == 0)
+		return (void *)kernel32::FlushViewOfFile;
 	if (strcmp(name, "DeleteFileA") == 0)
 		return (void *)kernel32::DeleteFileA;
 	if (strcmp(name, "DeleteFileW") == 0)

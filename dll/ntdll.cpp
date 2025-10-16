@@ -124,6 +124,11 @@ namespace ntdll {
 constexpr LARGE_INTEGER FILE_WRITE_TO_END_OF_FILE = static_cast<LARGE_INTEGER>(-1);
 constexpr LARGE_INTEGER FILE_USE_FILE_POINTER_POSITION = static_cast<LARGE_INTEGER>(-2);
 
+void *WIN_ENTRY memset(void *dest, int ch, size_t count) {
+	VERBOSE_LOG("ntdll::memset(%p, %i, %zu)\n", dest, ch, count);
+	return std::memset(dest, ch, count);
+}
+
 NTSTATUS WIN_FUNC NtReadFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext,
 							 PIO_STATUS_BLOCK IoStatusBlock, PVOID Buffer, ULONG Length, PLARGE_INTEGER ByteOffset,
 							 PULONG Key) {
@@ -420,6 +425,8 @@ static void *resolveByName(const char *name) {
 		return (void *)ntdll::RtlGetVersion;
 	if (strcmp(name, "NtQueryInformationProcess") == 0)
 		return (void *)ntdll::NtQueryInformationProcess;
+	if (strcmp(name, "memset") == 0)
+		return (void *)ntdll::memset;
 	return nullptr;
 }
 

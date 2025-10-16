@@ -708,6 +708,81 @@ BOOL WIN_FUNC UnmapViewOfFile(LPCVOID lpBaseAddress) {
 	return TRUE;
 }
 
+BOOL WIN_FUNC FlushViewOfFile(LPCVOID lpBaseAddress, SIZE_T dwNumberOfBytesToFlush) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("FlushViewOfFile(%p, %zu)\n", lpBaseAddress, dwNumberOfBytesToFlush);
+
+	if (!lpBaseAddress) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return FALSE;
+	}
+
+	uintptr_t address = reinterpret_cast<uintptr_t>(lpBaseAddress);
+	uintptr_t viewBase = 0;
+	size_t viewLength = 0;
+	uintptr_t allocationBase = 0;
+	size_t allocationLength = 0;
+
+	{
+		std::lock_guard guard(g_viewInfoMutex);
+		auto it = g_viewInfo.upper_bound(address);
+		if (it == g_viewInfo.begin()) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+		--it;
+		const auto &view = it->second;
+		if (address < view.viewBase || address >= view.viewBase + view.viewLength) {
+			wibo::lastError = ERROR_INVALID_PARAMETER;
+			return FALSE;
+		}
+		viewBase = view.viewBase;
+		viewLength = view.viewLength;
+		allocationBase = view.allocationBase;
+		allocationLength = view.allocationLength;
+	}
+
+	size_t offsetIntoView = static_cast<size_t>(address - viewBase);
+	size_t bytesToFlush = dwNumberOfBytesToFlush;
+	size_t maxFlush = viewLength - offsetIntoView;
+	if (bytesToFlush == 0 || bytesToFlush > maxFlush) {
+		bytesToFlush = maxFlush;
+	}
+	if (bytesToFlush == 0) {
+		return TRUE;
+	}
+
+	uintptr_t flushStart = address;
+	uintptr_t flushEnd = flushStart + bytesToFlush;
+	const size_t pageSize = systemPageSize();
+	uintptr_t alignedStart = alignDown(flushStart, pageSize);
+	uintptr_t alignedEnd = alignUp(flushEnd, pageSize);
+	if (alignedEnd == std::numeric_limits<uintptr_t>::max()) {
+		alignedEnd = flushEnd;
+	}
+
+	uintptr_t mappingEnd = allocationBase + allocationLength;
+	if (alignedEnd > mappingEnd) {
+		alignedEnd = mappingEnd;
+	}
+	if (alignedEnd < alignedStart) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return FALSE;
+	}
+
+	size_t length = static_cast<size_t>(alignedEnd - alignedStart);
+	if (length == 0) {
+		length = pageSize;
+	}
+
+	if (msync(reinterpret_cast<void *>(alignedStart), length, MS_SYNC) != 0) {
+		wibo::lastError = wibo::winErrorFromErrno(errno);
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
 LPVOID WIN_FUNC VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("VirtualAlloc(%p, %zu, %u, %u)\n", lpAddress, dwSize, flAllocationType, flProtect);

@@ -56,6 +56,12 @@ using LONG = int32_t;
 using PLONG = LONG *;
 using ULONG = uint32_t;
 using PULONG = ULONG *;
+struct GUID {
+	uint32_t Data1;
+	uint16_t Data2;
+	uint16_t Data3;
+	uint8_t Data4[8];
+};
 struct LUID {
 	DWORD LowPart;
 	LONG HighPart;

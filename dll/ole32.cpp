@@ -31,11 +31,20 @@ namespace ole32 {
 		// in a segfault with mwcceppc.exe when it's told to include directories that don't exist
 		return 0x80004003; // E_POINTER
 	}
+
+	int WIN_FUNC CLSIDFromString(const wchar_t *lpsz, ole32::GUID *pclsid) {
+		if (!pclsid)
+			return (int)0x80070057; // E_INVALIDARG
+
+		memset(pclsid, 0, sizeof(*pclsid));
+		return 0; // S_OK
+	}
 }
 
 static void *resolveByName(const char *name) {
 	if (strcmp(name, "CoInitialize") == 0) return (void *) ole32::CoInitialize;
 	if (strcmp(name, "CoCreateInstance") == 0) return (void *) ole32::CoCreateInstance;
+	if (strcmp(name, "CLSIDFromString") == 0) return (void *) ole32::CLSIDFromString;
 	return nullptr;
 }
 

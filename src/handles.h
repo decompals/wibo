@@ -25,6 +25,7 @@ enum class ObjectType : uint16_t {
 	Thread,
 	Heap,
 	RegistryKey,
+	NamedPipe,
 };
 
 enum ObjectFlags : uint16_t {

@@ -276,6 +276,7 @@ if (WIBO_ENABLE_FIXTURE_TESTS)
         wibo_add_fixture_bin(NAME test_ntquery SOURCES test/test_ntquery.c)
         wibo_add_fixture_bin(NAME test_ntreadfile SOURCES test/test_ntreadfile.c)
         wibo_add_fixture_bin(NAME test_pipe_io SOURCES test/test_pipe_io.c)
+        wibo_add_fixture_bin(NAME test_namedpipe SOURCES test/test_namedpipe.c)
         wibo_add_fixture_bin(NAME test_sysdir SOURCES test/test_sysdir.c)
 
         # DLLs for fixture tests

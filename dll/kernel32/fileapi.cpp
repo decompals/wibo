@@ -8,6 +8,7 @@
 #include "files.h"
 #include "handles.h"
 #include "internal.h"
+#include "namedpipeapi.h"
 #include "overlapped_util.h"
 #include "strutil.h"
 #include "timeutil.h"
@@ -893,6 +894,13 @@ HANDLE WIN_FUNC CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwSh
 		DEBUG_LOG("CreateFileA(console=%s, desiredAccess=0x%x, shareMode=%u, flags=0x%x) -> %p\n", lpFileName,
 				  dwDesiredAccess, dwShareMode, dwFlagsAndAttributes, consoleHandle);
 		return consoleHandle;
+	}
+
+	HANDLE pipeHandle = INVALID_HANDLE_VALUE;
+	if (kernel32::tryCreateFileNamedPipeA(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes,
+										  dwCreationDisposition, dwFlagsAndAttributes, pipeHandle)) {
+		DEBUG_LOG("CreateFileA(pipe=%s) -> %p (err=%u)\n", lpFileName, pipeHandle, wibo::lastError);
+		return pipeHandle;
 	}
 
 	std::filesystem::path hostPath = files::pathFromWindows(lpFileName);

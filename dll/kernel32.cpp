@@ -198,6 +198,8 @@ void *resolveByName(const char *name) {
 	// namedpipeapi.h
 	if (strcmp(name, "CreatePipe") == 0)
 		return (void *)kernel32::CreatePipe;
+	if (strcmp(name, "CreateNamedPipeA") == 0)
+		return (void *)kernel32::CreateNamedPipeA;
 
 	// winbase.h
 	if (strcmp(name, "FindAtomA") == 0)

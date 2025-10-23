@@ -17,6 +17,7 @@ uint16_t *wstrcpy(uint16_t *dest, const uint16_t *src);
 size_t wstrncpy(uint16_t *dst, const uint16_t *src, size_t n);
 std::string wideStringToString(const uint16_t *src, int len = -1);
 std::vector<uint16_t> stringToWideString(const char *src, size_t length = static_cast<size_t>(-1));
+std::u16string stringToUtf16(std::string_view str);
 long wstrtol(const uint16_t *string, uint16_t **end_ptr, int base);
 unsigned long wstrtoul(const uint16_t *string, uint16_t **end_ptr, int base);
 void toLowerInPlace(std::string &str);

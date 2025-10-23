@@ -232,6 +232,15 @@ std::vector<uint16_t> stringToWideString(const char *src, size_t length) {
 	return res;
 }
 
+std::u16string stringToUtf16(std::string_view str) {
+	std::u16string result;
+	result.reserve(str.size());
+	for (unsigned char ch : str) {
+		result.push_back(static_cast<char16_t>(ch));
+	}
+	return result;
+}
+
 long wstrtol(const uint16_t *string, uint16_t **end_ptr, int base) {
 	if (!string) {
 		if (end_ptr)

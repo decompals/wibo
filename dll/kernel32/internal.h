@@ -23,7 +23,7 @@ struct FsObject : ObjectBase {
 	explicit FsObject(ObjectType type, int fd) : ObjectBase(type), fd(fd) {}
 };
 
-struct FileObject final : FsObject {
+struct FileObject : FsObject {
 	static constexpr ObjectType kType = ObjectType::File;
 
 	off_t filePos = 0;
@@ -41,6 +41,8 @@ struct FileObject final : FsObject {
 			}
 		}
 	}
+
+	~FileObject() override = default;
 };
 
 struct DirectoryObject final : FsObject {

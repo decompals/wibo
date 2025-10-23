@@ -77,7 +77,7 @@ bool ThreadPoolBackend::init() {
 	for (unsigned int i = 0; i < threadCount; ++i) {
 		mWorkers.emplace_back(&ThreadPoolBackend::workerLoop, this);
 	}
-	DEBUG_LOG("thread-pool async backend initialized (%u worker%s)\n", threadCount, threadCount == 1 ? "" : "s");
+	DEBUG_LOG("thread pool backend initialized (workers=%u)\n", threadCount);
 	return true;
 }
 
@@ -176,7 +176,11 @@ void ThreadPoolBackend::workerLoop() {
 
 void ThreadPoolBackend::processRequest(const AsyncRequest &req) {
 	if (!req.file || !req.file->valid()) {
-		kernel32::detail::signalOverlappedEvent(req.file.get(), req.overlapped, STATUS_INVALID_HANDLE, 0);
+		if (req.overlapped) {
+			req.overlapped->Internal = STATUS_INVALID_HANDLE;
+			req.overlapped->InternalHigh = 0;
+			kernel32::detail::signalOverlappedEvent(req.overlapped);
+		}
 		return;
 	}
 
@@ -202,7 +206,11 @@ void ThreadPoolBackend::processRequest(const AsyncRequest &req) {
 		completionStatus = STATUS_END_OF_FILE;
 	}
 
-	kernel32::detail::signalOverlappedEvent(req.file.get(), req.overlapped, completionStatus, bytesTransferred);
+	if (req.overlapped) {
+		req.overlapped->Internal = completionStatus;
+		req.overlapped->InternalHigh = bytesTransferred;
+		kernel32::detail::signalOverlappedEvent(req.overlapped);
+	}
 }
 
 } // namespace

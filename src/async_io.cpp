@@ -38,18 +38,43 @@ class NoOpBackend : public wibo::AsyncIOBackend {
 
 namespace wibo {
 
+using BackendFactory = auto (*)() -> std::unique_ptr<AsyncIOBackend>;
+
+struct BackendEntry {
+	const char *name;
+	BackendFactory factory;
+};
+
+static constexpr BackendEntry kBackends[] = {
+#if WIBO_ENABLE_LIBURING
+	{"io_uring", detail::createIoUringBackend},
+#endif
+	{"thread pool", detail::createThreadPoolBackend},
+};
+
 AsyncIOBackend &asyncIO() {
 	if (!g_backend) {
-#if WIBO_ENABLE_LIBURING
-		g_backend = detail::createIoUringBackend();
-#else
-		g_backend = std::make_unique<NoOpBackend>();
-#endif
+		for (const auto &entry : kBackends) {
+			DEBUG_LOG("AsyncIO: initializing %s backend\n", entry.name);
+			auto backend = entry.factory();
+			if (backend && backend->init()) {
+				g_backend = std::move(backend);
+				break;
+			} else {
+				DEBUG_LOG("AsyncIO: %s backend unavailable\n", entry.name);
+				if (backend) {
+					backend->shutdown();
+				}
+			}
+		}
 	}
-	if (!g_backend->init()) {
-		DEBUG_LOG("AsyncIOBackend initialization failed; using no-op backend\n");
+
+	if (!g_backend) {
+		DEBUG_LOG("AsyncIO: no backend available; using no-op backend\n");
 		g_backend = std::make_unique<NoOpBackend>();
+		g_backend->init();
 	}
+
 	return *g_backend;
 }
 

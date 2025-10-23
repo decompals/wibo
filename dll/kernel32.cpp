@@ -200,6 +200,8 @@ void *resolveByName(const char *name) {
 		return (void *)kernel32::CreatePipe;
 	if (strcmp(name, "CreateNamedPipeA") == 0)
 		return (void *)kernel32::CreateNamedPipeA;
+	if (strcmp(name, "ConnectNamedPipe") == 0)
+		return (void *)kernel32::ConnectNamedPipe;
 
 	// winbase.h
 	if (strcmp(name, "FindAtomA") == 0)

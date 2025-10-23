@@ -5,11 +5,13 @@
 #include "errors.h"
 #include "handles.h"
 #include "internal.h"
+#include "overlapped_util.h"
 #include "strutil.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <condition_variable>
 #include <fcntl.h>
 #include <mutex>
 #include <optional>
@@ -174,6 +176,10 @@ struct NamedPipeInstance final : FileObject {
 	DWORD accessMode;
 	DWORD pipeMode;
 	bool clientConnected = false;
+	bool connectPending = false;
+	LPOVERLAPPED pendingOverlapped = nullptr;
+	std::mutex connectMutex;
+	std::condition_variable connectCv;
 
 	NamedPipeInstance(int fd, Pin<NamedPipeState> st, int companion, DWORD open, DWORD mode)
 		: FileObject(fd), state(std::move(st)), companionFd(companion), accessMode(open), pipeMode(mode) {
@@ -183,9 +189,22 @@ struct NamedPipeInstance final : FileObject {
 	}
 
 	~NamedPipeInstance() override {
-		if (companionFd >= 0) {
-			close(companionFd);
+		int localCompanion = -1;
+		{
+			std::lock_guard lk(connectMutex);
+			localCompanion = companionFd;
 			companionFd = -1;
+			if (pendingOverlapped) {
+				pendingOverlapped->Internal = STATUS_PIPE_BROKEN;
+				pendingOverlapped->InternalHigh = 0;
+				kernel32::detail::signalOverlappedEvent(pendingOverlapped);
+				pendingOverlapped = nullptr;
+			}
+			connectPending = false;
+			connectCv.notify_all();
+		}
+		if (localCompanion >= 0) {
+			close(localCompanion);
 		}
 		if (state) {
 			state->unregisterInstance(this);
@@ -195,7 +214,8 @@ struct NamedPipeInstance final : FileObject {
 		}
 	}
 
-	bool canAcceptClient(DWORD desiredAccess) const {
+	bool canAcceptClient(DWORD desiredAccess) {
+		std::lock_guard lk(connectMutex);
 		if (companionFd < 0 || clientConnected) {
 			return false;
 		}
@@ -213,16 +233,29 @@ struct NamedPipeInstance final : FileObject {
 	}
 
 	int takeCompanion() {
-		if (companionFd < 0) {
+		std::unique_lock lk(connectMutex);
+		if (companionFd < 0 || clientConnected) {
 			return -1;
 		}
 		int fd = companionFd;
 		companionFd = -1;
 		clientConnected = true;
+		if (pendingOverlapped) {
+			pendingOverlapped->Internal = STATUS_SUCCESS;
+			pendingOverlapped->InternalHigh = 0;
+			kernel32::detail::signalOverlappedEvent(pendingOverlapped);
+			pendingOverlapped = nullptr;
+		}
+		if (connectPending) {
+			connectPending = false;
+			connectCv.notify_all();
+		}
+		lk.unlock();
 		return fd;
 	}
 
 	void restoreCompanion(int fd) {
+		std::lock_guard lk(connectMutex);
 		companionFd = fd;
 		if (fd >= 0) {
 			clientConnected = false;
@@ -500,6 +533,66 @@ HANDLE WIN_FUNC CreateNamedPipeA(LPCSTR lpName, DWORD dwOpenMode, DWORD dwPipeMo
 
 	uint32_t handleFlags = inheritHandles ? HANDLE_FLAG_INHERIT : 0;
 	return wibo::handles().alloc(std::move(pipeObj), grantedAccess, handleFlags);
+}
+
+BOOL WIN_FUNC ConnectNamedPipe(HANDLE hNamedPipe, LPOVERLAPPED lpOverlapped) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("ConnectNamedPipe(%p, %p)\n", hNamedPipe, lpOverlapped);
+
+	auto pin = wibo::handles().get(hNamedPipe);
+	auto *pipe = pin ? dynamic_cast<NamedPipeInstance *>(pin.get()) : nullptr;
+	if (!pipe) {
+		wibo::lastError = ERROR_INVALID_HANDLE;
+		return FALSE;
+	}
+
+	const bool isOverlappedHandle = pipe->overlapped;
+	if (isOverlappedHandle && lpOverlapped == nullptr) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return FALSE;
+	}
+
+	std::unique_lock lock(pipe->connectMutex);
+
+	if (pipe->clientConnected) {
+		wibo::lastError = ERROR_PIPE_CONNECTED;
+		return FALSE;
+	}
+
+	if (pipe->companionFd < 0) {
+		wibo::lastError = ERROR_PIPE_BUSY;
+		return FALSE;
+	}
+
+	if (pipe->connectPending) {
+		wibo::lastError = ERROR_PIPE_LISTENING;
+		return FALSE;
+	}
+
+	if ((pipe->pipeMode & PIPE_NOWAIT) != 0) {
+		wibo::lastError = ERROR_PIPE_LISTENING;
+		return FALSE;
+	}
+
+	if (isOverlappedHandle) {
+		pipe->connectPending = true;
+		pipe->pendingOverlapped = lpOverlapped;
+		lpOverlapped->Internal = STATUS_PENDING;
+		lpOverlapped->InternalHigh = 0;
+		kernel32::detail::resetOverlappedEvent(lpOverlapped);
+		lock.unlock();
+		wibo::lastError = ERROR_IO_PENDING;
+		return FALSE;
+	}
+
+	pipe->connectPending = true;
+	pipe->connectCv.wait(lock, [&]() { return pipe->clientConnected || pipe->companionFd < 0; });
+	pipe->connectPending = false;
+	if (!pipe->clientConnected) {
+		wibo::lastError = ERROR_NO_DATA;
+		return FALSE;
+	}
+	return TRUE;
 }
 
 } // namespace kernel32

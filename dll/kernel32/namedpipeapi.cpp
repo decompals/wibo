@@ -25,7 +25,7 @@ namespace kernel32 {
 
 namespace {
 
-class NamedPipeInstance;
+struct NamedPipeInstance;
 
 void configureInheritability(int fd, bool inherit) {
 	if (fd < 0) {
@@ -112,17 +112,17 @@ struct NamedPipeState : ObjectBase {
 	DWORD defaultTimeout = 0;
 	DWORD maxInstances = PIPE_UNLIMITED_INSTANCES;
 	uint32_t instanceCount = 0;
-	std::vector<class NamedPipeInstance *> instances;
+	std::vector<NamedPipeInstance *> instances;
 
 	explicit NamedPipeState(std::string k) : ObjectBase(kType), key(std::move(k)) {}
 	~NamedPipeState() override { wibo::g_namespace.remove(this); }
 
-	void registerInstance(class NamedPipeInstance *inst) {
+	void registerInstance(NamedPipeInstance *inst) {
 		std::lock_guard lk(mutex);
 		instances.push_back(inst);
 	}
 
-	void unregisterInstance(class NamedPipeInstance *inst) {
+	void unregisterInstance(NamedPipeInstance *inst) {
 		std::lock_guard lk(mutex);
 		auto it = std::find(instances.begin(), instances.end(), inst);
 		if (it != instances.end()) {
@@ -194,12 +194,8 @@ struct NamedPipeInstance final : FileObject {
 			std::lock_guard lk(connectMutex);
 			localCompanion = companionFd;
 			companionFd = -1;
-			if (pendingOverlapped) {
-				pendingOverlapped->Internal = STATUS_PIPE_BROKEN;
-				pendingOverlapped->InternalHigh = 0;
-				kernel32::detail::signalOverlappedEvent(pendingOverlapped);
-				pendingOverlapped = nullptr;
-			}
+			kernel32::detail::signalOverlappedEvent(this, pendingOverlapped, STATUS_PIPE_BROKEN, 0);
+			pendingOverlapped = nullptr;
 			connectPending = false;
 			connectCv.notify_all();
 		}
@@ -208,8 +204,6 @@ struct NamedPipeInstance final : FileObject {
 		}
 		if (state) {
 			state->unregisterInstance(this);
-		}
-		if (state) {
 			state->releaseInstance();
 		}
 	}
@@ -233,24 +227,19 @@ struct NamedPipeInstance final : FileObject {
 	}
 
 	int takeCompanion() {
-		std::unique_lock lk(connectMutex);
+		std::lock_guard lk(connectMutex);
 		if (companionFd < 0 || clientConnected) {
 			return -1;
 		}
 		int fd = companionFd;
 		companionFd = -1;
 		clientConnected = true;
-		if (pendingOverlapped) {
-			pendingOverlapped->Internal = STATUS_SUCCESS;
-			pendingOverlapped->InternalHigh = 0;
-			kernel32::detail::signalOverlappedEvent(pendingOverlapped);
-			pendingOverlapped = nullptr;
-		}
+		kernel32::detail::signalOverlappedEvent(this, pendingOverlapped, STATUS_SUCCESS, 0);
+		pendingOverlapped = nullptr;
 		if (connectPending) {
 			connectPending = false;
 			connectCv.notify_all();
 		}
-		lk.unlock();
 		return fd;
 	}
 

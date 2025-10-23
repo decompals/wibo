@@ -2,8 +2,11 @@
 
 #include "context.h"
 #include "errors.h"
+#include "internal.h"
 #include "overlapped_util.h"
 #include "synchapi.h"
+
+#include <mutex>
 
 namespace kernel32 {
 
@@ -11,15 +14,20 @@ BOOL WIN_FUNC GetOverlappedResult(HANDLE hFile, LPOVERLAPPED lpOverlapped, LPDWO
 								  BOOL bWait) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetOverlappedResult(%p, %p, %p, %d)\n", hFile, lpOverlapped, lpNumberOfBytesTransferred, bWait);
-	(void)hFile;
 	if (!lpOverlapped) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
-	if (bWait && lpOverlapped->Internal == STATUS_PENDING &&
-		kernel32::detail::shouldSignalOverlappedEvent(lpOverlapped)) {
+
+	if (bWait && lpOverlapped->Internal == STATUS_PENDING) {
 		if (HANDLE waitHandle = kernel32::detail::normalizedOverlappedEventHandle(lpOverlapped)) {
 			WaitForSingleObject(waitHandle, INFINITE);
+		} else if (auto file = wibo::handles().getAs<FileObject>(hFile)) {
+			std::unique_lock lk(file->m);
+			file->overlappedCv.wait(lk, [&] { return lpOverlapped->Internal != STATUS_PENDING; });
+		} else {
+			wibo::lastError = ERROR_INVALID_HANDLE;
+			return FALSE;
 		}
 	}
 

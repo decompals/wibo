@@ -176,11 +176,7 @@ void ThreadPoolBackend::workerLoop() {
 
 void ThreadPoolBackend::processRequest(const AsyncRequest &req) {
 	if (!req.file || !req.file->valid()) {
-		if (req.overlapped) {
-			req.overlapped->Internal = STATUS_INVALID_HANDLE;
-			req.overlapped->InternalHigh = 0;
-			kernel32::detail::signalOverlappedEvent(req.overlapped);
-		}
+		kernel32::detail::signalOverlappedEvent(req.file.get(), req.overlapped, STATUS_INVALID_HANDLE, 0);
 		return;
 	}
 
@@ -206,11 +202,7 @@ void ThreadPoolBackend::processRequest(const AsyncRequest &req) {
 		completionStatus = STATUS_END_OF_FILE;
 	}
 
-	if (req.overlapped) {
-		req.overlapped->Internal = completionStatus;
-		req.overlapped->InternalHigh = bytesTransferred;
-		kernel32::detail::signalOverlappedEvent(req.overlapped);
-	}
+	kernel32::detail::signalOverlappedEvent(req.file.get(), req.overlapped, completionStatus, bytesTransferred);
 }
 
 } // namespace

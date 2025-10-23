@@ -201,30 +201,25 @@ void IoUringBackend::handleCompletion(struct io_uring_cqe *cqe) {
 		return;
 	}
 
-	OVERLAPPED *ov = req->overlapped;
-	if (ov) {
-		if (cqe->res >= 0) {
-			ov->InternalHigh = static_cast<ULONG_PTR>(cqe->res);
-			if (req->kind == AsyncRequest::Kind::Read && cqe->res == 0) {
-				ov->Internal = req->isPipe ? STATUS_PIPE_BROKEN : STATUS_END_OF_FILE;
-			} else {
-				ov->Internal = STATUS_SUCCESS;
-			}
+	NTSTATUS completionStatus = STATUS_SUCCESS;
+	size_t bytesTransferred = 0;
+	if (cqe->res >= 0) {
+		bytesTransferred = static_cast<size_t>(cqe->res);
+		if (req->kind == AsyncRequest::Kind::Read && cqe->res == 0) {
+			completionStatus = req->isPipe ? STATUS_PIPE_BROKEN : STATUS_END_OF_FILE;
+		}
+	} else {
+		int err = -cqe->res;
+		if (err == EPIPE) {
+			completionStatus = STATUS_PIPE_BROKEN;
 		} else {
-			int err = -cqe->res;
-			ov->InternalHigh = 0;
-			if (err == EPIPE) {
-				ov->Internal = STATUS_PIPE_BROKEN;
-			} else {
-				NTSTATUS status = wibo::statusFromErrno(err);
-				if (status == STATUS_SUCCESS) {
-					status = STATUS_UNEXPECTED_IO_ERROR;
-				}
-				ov->Internal = status;
+			completionStatus = wibo::statusFromErrno(err);
+			if (completionStatus == STATUS_SUCCESS) {
+				completionStatus = STATUS_UNEXPECTED_IO_ERROR;
 			}
 		}
-		kernel32::detail::signalOverlappedEvent(ov);
 	}
+	kernel32::detail::signalOverlappedEvent(req->file.get(), req->overlapped, completionStatus, bytesTransferred);
 
 	delete req;
 	mPending.fetch_sub(1, std::memory_order_acq_rel);

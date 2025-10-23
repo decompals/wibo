@@ -4,6 +4,7 @@
 #include "handles.h"
 #include "mimalloc.h"
 
+#include <condition_variable>
 #include <pthread.h>
 
 namespace kernel32 {
@@ -30,6 +31,8 @@ struct FileObject : FsObject {
 	bool overlapped = false;
 	bool appendOnly = false;
 	bool isPipe = false;
+	// Used to notify overlapped operations without an event handle
+	std::condition_variable overlappedCv;
 
 	explicit FileObject(int fd) : FsObject(kType, fd) {
 		if (fd >= 0) {
@@ -99,18 +102,6 @@ struct MutexObject final : WaitableObject {
 	bool abandoned = false; // Owner exited without releasing
 
 	MutexObject() : WaitableObject(kType) { signaled = true; }
-
-	void noteOwnerExit(/*pthread_t tid or emu tid*/) {
-		std::lock_guard lk(m);
-		if (ownerValid /* && matches tid if you store emu id */) {
-			ownerValid = false;
-			recursionCount = 0;
-			abandoned = true;
-			signaled = true;
-			cv.notify_one();
-			notifyWaiters(true);
-		}
-	}
 };
 
 struct EventObject final : WaitableObject {

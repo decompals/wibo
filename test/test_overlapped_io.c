@@ -95,6 +95,28 @@ static void write_fixture_file(void) {
 	TEST_CHECK(CloseHandle(file));
 }
 
+static void test_overlapped_requires_overlapped_structure(void) {
+	HANDLE file = CreateFileA(g_tempFilename, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING,
+		FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, NULL);
+	TEST_CHECK(file != INVALID_HANDLE_VALUE);
+
+	char buffer[8] = {0};
+	DWORD bytesRead = 0xFFFFFFFFu;
+	SetLastError(0);
+	TEST_CHECK(!ReadFile(file, buffer, sizeof(buffer), &bytesRead, NULL));
+	TEST_CHECK_EQ(ERROR_INVALID_PARAMETER, GetLastError());
+	TEST_CHECK_EQ(0U, bytesRead);
+
+	static const char payload[] = "data";
+	DWORD bytesWritten = 0xFFFFFFFFu;
+	SetLastError(0);
+	TEST_CHECK(!WriteFile(file, payload, (DWORD)(sizeof(payload) - 1), &bytesWritten, NULL));
+	TEST_CHECK_EQ(ERROR_INVALID_PARAMETER, GetLastError());
+	TEST_CHECK_EQ(0U, bytesWritten);
+
+	TEST_CHECK(CloseHandle(file));
+}
+
 static void test_synchronous_overlapped_read(void) {
 	HANDLE file = CreateFileA(g_tempFilename, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	TEST_CHECK(file != INVALID_HANDLE_VALUE);
@@ -455,6 +477,7 @@ int main(void) {
 	DeleteFileA(g_tempFilename);
 	write_fixture_file();
 	test_synchronous_overlapped_read();
+	test_overlapped_requires_overlapped_structure();
 	test_overlapped_read_with_event();
 	test_overlapped_read_without_event();
 	test_overlapped_eof();

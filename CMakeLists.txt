@@ -164,6 +164,7 @@ add_executable(wibo
     dll/version.cpp
     src/access.cpp
     src/async_io.cpp
+    src/async_io_epoll.cpp
     src/async_io_threadpool.cpp
     src/context.cpp
     src/errors.cpp

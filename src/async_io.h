@@ -24,6 +24,7 @@ namespace detail {
 #if WIBO_ENABLE_LIBURING
 std::unique_ptr<AsyncIOBackend> createIoUringBackend();
 #endif
+std::unique_ptr<AsyncIOBackend> createEpollBackend();
 std::unique_ptr<AsyncIOBackend> createThreadPoolBackend();
 
 } // namespace detail

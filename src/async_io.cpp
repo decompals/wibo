@@ -49,6 +49,7 @@ static constexpr BackendEntry kBackends[] = {
 #if WIBO_ENABLE_LIBURING
 	{"io_uring", detail::createIoUringBackend},
 #endif
+	{"epoll", detail::createEpollBackend},
 	{"thread pool", detail::createThreadPoolBackend},
 };
 

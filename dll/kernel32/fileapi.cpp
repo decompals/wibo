@@ -718,6 +718,15 @@ BOOL WIN_FUNC WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWr
 		return FALSE;
 	}
 
+	if (lpNumberOfBytesWritten && (!file->overlapped || lpOverlapped == nullptr)) {
+		*lpNumberOfBytesWritten = 0;
+	}
+
+	if (file->overlapped && lpOverlapped == nullptr) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return FALSE;
+	}
+
 	std::optional<off_t> offset;
 	bool updateFilePointer = true;
 	if (lpOverlapped != nullptr) {
@@ -806,6 +815,11 @@ BOOL WIN_FUNC ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead
 
 	if (lpNumberOfBytesRead && (!file->overlapped || lpOverlapped == nullptr)) {
 		*lpNumberOfBytesRead = 0;
+	}
+
+	if (file->overlapped && lpOverlapped == nullptr) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return FALSE;
 	}
 
 	std::optional<off_t> offset;

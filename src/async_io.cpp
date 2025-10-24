@@ -50,7 +50,6 @@ static constexpr BackendEntry kBackends[] = {
 	{"io_uring", detail::createIoUringBackend},
 #endif
 	{"epoll", detail::createEpollBackend},
-	{"thread pool", detail::createThreadPoolBackend},
 };
 
 AsyncIOBackend &asyncIO() {

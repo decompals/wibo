@@ -25,7 +25,6 @@ namespace detail {
 std::unique_ptr<AsyncIOBackend> createIoUringBackend();
 #endif
 std::unique_ptr<AsyncIOBackend> createEpollBackend();
-std::unique_ptr<AsyncIOBackend> createThreadPoolBackend();
 
 } // namespace detail
 

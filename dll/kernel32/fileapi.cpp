@@ -1504,7 +1504,7 @@ BOOL WIN_FUNC GetFileInformationByHandle(HANDLE hFile, LPBY_HANDLE_FILE_INFORMAT
 	lpFileInformation->dwVolumeSerialNumber = 0;
 	lpFileInformation->nFileSizeHigh = static_cast<DWORD>(static_cast<uint64_t>(st.st_size) >> 32);
 	lpFileInformation->nFileSizeLow = static_cast<DWORD>(st.st_size & 0xFFFFFFFFULL);
-	lpFileInformation->nNumberOfLinks = 0;
+	lpFileInformation->nNumberOfLinks = 1;
 	lpFileInformation->nFileIndexHigh = 0;
 	lpFileInformation->nFileIndexLow = 0;
 	return TRUE;

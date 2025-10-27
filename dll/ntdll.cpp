@@ -9,7 +9,9 @@
 #include "processes.h"
 #include "strutil.h"
 
+#include <cerrno>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <optional>
@@ -192,6 +194,90 @@ NTSTATUS WIN_FUNC NtReadFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE Ap
 	IoStatusBlock->Information = static_cast<ULONG_PTR>(io.bytesTransferred);
 
 	if (ev && (status == STATUS_SUCCESS || status == STATUS_END_OF_FILE)) {
+		ev->set();
+	}
+
+	DEBUG_LOG("-> 0x%x\n", status);
+	return status;
+}
+
+NTSTATUS WIN_FUNC NtWriteFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext,
+							  PIO_STATUS_BLOCK IoStatusBlock, PVOID Buffer, ULONG Length, PLARGE_INTEGER ByteOffset,
+							  PULONG Key) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("NtWriteFile(%p, %p, %p, %p, %p, %p, %u, %p, %p) ", FileHandle, Event, ApcRoutine, ApcContext,
+			  IoStatusBlock, Buffer, Length, ByteOffset, Key);
+	(void)ApcRoutine;
+	(void)ApcContext;
+	(void)Key;
+
+	if (!IoStatusBlock) {
+		return STATUS_INVALID_PARAMETER;
+	}
+	IoStatusBlock->Information = 0;
+
+	auto file = wibo::handles().getAs<FileObject>(FileHandle);
+	if (!file || !file->valid()) {
+		IoStatusBlock->Status = STATUS_INVALID_HANDLE;
+		return STATUS_INVALID_HANDLE;
+	}
+
+	bool useOverlapped = file->overlapped;
+	bool useCurrentFilePosition = (ByteOffset == nullptr);
+	bool writeToEndOfFile = false;
+	if (ByteOffset) {
+		if (*ByteOffset == FILE_USE_FILE_POINTER_POSITION) {
+			useCurrentFilePosition = true;
+		} else if (*ByteOffset == FILE_WRITE_TO_END_OF_FILE) {
+			writeToEndOfFile = true;
+		}
+	}
+
+	std::optional<off_t> offset;
+	if (!useCurrentFilePosition && !writeToEndOfFile) {
+		offset = static_cast<off_t>(*ByteOffset);
+	}
+
+	if (useOverlapped && useCurrentFilePosition) {
+		IoStatusBlock->Status = STATUS_INVALID_PARAMETER;
+		return STATUS_INVALID_PARAMETER;
+	}
+
+	Pin<kernel32::EventObject> ev;
+	if (Event) {
+		ev = wibo::handles().getAs<kernel32::EventObject>(Event);
+		if (!ev) {
+			IoStatusBlock->Status = STATUS_INVALID_HANDLE;
+			return STATUS_INVALID_HANDLE;
+		}
+		ev->reset();
+	}
+
+	bool updateFilePointer = file->isPipe ? true : !useOverlapped;
+
+	if (writeToEndOfFile && !offset.has_value()) {
+		if (!file->isPipe) {
+			struct stat st{};
+			if (fstat(file->fd, &st) != 0) {
+				int err = errno ? errno : EIO;
+				NTSTATUS status = wibo::statusFromErrno(err);
+				IoStatusBlock->Status = status;
+				return status;
+			}
+			offset = static_cast<off_t>(st.st_size);
+		}
+	}
+
+	auto io = files::write(file.get(), Buffer, static_cast<size_t>(Length), offset, updateFilePointer);
+	NTSTATUS status = STATUS_SUCCESS;
+	if (io.unixError != 0) {
+		status = wibo::statusFromErrno(io.unixError);
+	}
+
+	IoStatusBlock->Status = status;
+	IoStatusBlock->Information = static_cast<ULONG_PTR>(io.bytesTransferred);
+
+	if (ev && status == STATUS_SUCCESS) {
 		ev->set();
 	}
 
@@ -417,6 +503,8 @@ NTSTATUS WIN_FUNC NtQueryInformationProcess(HANDLE ProcessHandle, PROCESSINFOCLA
 static void *resolveByName(const char *name) {
 	if (strcmp(name, "NtReadFile") == 0)
 		return (void *)ntdll::NtReadFile;
+	if (strcmp(name, "NtWriteFile") == 0)
+		return (void *)ntdll::NtWriteFile;
 	if (strcmp(name, "NtAllocateVirtualMemory") == 0)
 		return (void *)ntdll::NtAllocateVirtualMemory;
 	if (strcmp(name, "NtProtectVirtualMemory") == 0)

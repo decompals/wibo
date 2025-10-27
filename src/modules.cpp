@@ -137,6 +137,7 @@ struct ModuleRegistry {
 	std::unordered_map<std::string, wibo::ModuleInfo *> builtinAliasMap;
 	std::unordered_set<std::string> pinnedAliases;
 	std::unordered_set<wibo::ModuleInfo *> pinnedModules;
+	std::vector<wibo::ModuleInfo *> tlsModuleSlots;
 };
 
 struct LockedRegistry {
@@ -172,6 +173,23 @@ LockedRegistry registry() {
 		}
 	}
 	return {reg, std::move(guard)};
+}
+
+DWORD allocateModuleTlsSlot(ModuleRegistry &reg, wibo::ModuleInfo &module) {
+	for (DWORD i = 0; i < static_cast<DWORD>(reg.tlsModuleSlots.size()); ++i) {
+		if (reg.tlsModuleSlots[i] == nullptr) {
+			reg.tlsModuleSlots[i] = &module;
+			return i;
+		}
+	}
+	reg.tlsModuleSlots.push_back(&module);
+	return static_cast<DWORD>(reg.tlsModuleSlots.size() - 1);
+}
+
+void releaseModuleTlsSlot(ModuleRegistry &reg, DWORD index) {
+	if (index < static_cast<DWORD>(reg.tlsModuleSlots.size())) {
+		reg.tlsModuleSlots[index] = nullptr;
+	}
 }
 
 std::string normalizeAlias(const std::string &value) {
@@ -256,16 +274,16 @@ uintptr_t resolveModuleAddress(const wibo::Executable &exec, uintptr_t address) 
 	return static_cast<uintptr_t>(static_cast<intptr_t>(address) + exec.relocationDelta);
 }
 
-void allocateModuleTlsForThread(wibo::ModuleInfo &module, TIB *tib) {
+bool allocateModuleTlsForThread(wibo::ModuleInfo &module, TIB *tib) {
 	if (!tib) {
-		return;
+		return true;
 	}
 	auto &info = module.tlsInfo;
-	if (!info.hasTls || info.index == wibo::tls::kInvalidTlsIndex || info.index >= kTlsSlotCount) {
-		return;
+	if (!info.hasTls || info.index == wibo::tls::kInvalidTlsIndex) {
+		return true;
 	}
 	if (info.threadAllocations.find(tib) != info.threadAllocations.end()) {
-		return;
+		return true;
 	}
 	void *block = nullptr;
 	const size_t allocationSize = info.allocationSize;
@@ -274,7 +292,7 @@ void allocateModuleTlsForThread(wibo::ModuleInfo &module, TIB *tib) {
 		if (!block) {
 			DEBUG_LOG("  allocateModuleTlsForThread: failed to allocate %zu bytes for %s\n", allocationSize,
 					  module.originalName.c_str());
-			return;
+			return false;
 		}
 		std::memset(block, 0, allocationSize);
 		if (info.templateData && info.templateSize > 0) {
@@ -286,6 +304,13 @@ void allocateModuleTlsForThread(wibo::ModuleInfo &module, TIB *tib) {
 		DEBUG_LOG("  allocateModuleTlsForThread: failed to publish TLS pointer for %s (index %u)\n",
 				  module.originalName.c_str(), info.index);
 	}
+	if (info.loaderIndex != wibo::tls::kInvalidTlsIndex) {
+		if (!wibo::tls::setModulePointer(tib, info.loaderIndex, block)) {
+			DEBUG_LOG("  allocateModuleTlsForThread: failed to update module pointer for %s (slot %u)\n",
+					  module.originalName.c_str(), info.loaderIndex);
+		}
+	}
+	return true;
 }
 
 void freeModuleTlsForThread(wibo::ModuleInfo &module, TIB *tib) {
@@ -302,11 +327,14 @@ void freeModuleTlsForThread(wibo::ModuleInfo &module, TIB *tib) {
 	}
 	void *block = it->second;
 	info.threadAllocations.erase(it);
-	if (info.index < kTlsSlotCount && wibo::tls::getValue(tib, info.index) == block) {
+	if (wibo::tls::getValue(tib, info.index) == block) {
 		if (!wibo::tls::setValue(tib, info.index, nullptr)) {
 			DEBUG_LOG("  freeModuleTlsForThread: failed to clear TLS pointer for %s (index %u)\n",
 					  module.originalName.c_str(), info.index);
 		}
+	}
+	if (info.loaderIndex != wibo::tls::kInvalidTlsIndex) {
+		wibo::tls::clearModulePointer(tib, info.loaderIndex);
 	}
 	if (block) {
 		std::free(block);
@@ -908,20 +936,73 @@ bool initializeModuleTls(ModuleInfo &module) {
 		}
 	}
 	info.allocationSize = info.templateSize + info.zeroFillSize;
-	DWORD index = tls::reserveSlot();
-	if (index == tls::kInvalidTlsIndex) {
+	info.threadAllocations.clear();
+
+	auto reg = registry();
+	DWORD loaderIndex = allocateModuleTlsSlot(*reg, module);
+	size_t requiredModuleCapacity = reg->tlsModuleSlots.size();
+	if (!wibo::tls::ensureModulePointerCapacity(requiredModuleCapacity)) {
+		releaseModuleTlsSlot(*reg, loaderIndex);
 		wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
 		return false;
 	}
-	info.index = index;
+	info.loaderIndex = loaderIndex;
 	if (info.indexLocation) {
-		*info.indexLocation = index;
+		*info.indexLocation = loaderIndex;
 	}
-	info.hasTls = true;
-	info.threadAllocations.clear();
 
-	if (TIB *tib = wibo::getThreadTibForHost()) {
-		allocateModuleTlsForThread(module, tib);
+	DWORD apiIndex = tls::reserveSlot();
+	if (apiIndex == tls::kInvalidTlsIndex) {
+		releaseModuleTlsSlot(*reg, loaderIndex);
+		info.loaderIndex = tls::kInvalidTlsIndex;
+		if (info.indexLocation) {
+			*info.indexLocation = 0;
+		}
+		wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+		return false;
+	}
+	info.index = apiIndex;
+	info.hasTls = true;
+
+	struct AllocContext {
+		ModuleInfo *module;
+		bool success;
+	};
+	AllocContext ctx{&module, true};
+	wibo::tls::forEachTib(
+		[](TIB *tib, void *opaque) {
+			auto *context = static_cast<AllocContext *>(opaque);
+			if (!context->success) {
+				return;
+			}
+			if (!allocateModuleTlsForThread(*context->module, tib)) {
+				context->success = false;
+			}
+		},
+		&ctx);
+	if (!ctx.success) {
+		for (auto &[thread, block] : info.threadAllocations) {
+			if (block) {
+				std::free(block);
+			}
+			if (info.loaderIndex != tls::kInvalidTlsIndex) {
+				wibo::tls::clearModulePointer(thread, info.loaderIndex);
+			}
+			if (wibo::tls::getValue(thread, info.index) == block) {
+				wibo::tls::setValue(thread, info.index, nullptr);
+			}
+		}
+		info.threadAllocations.clear();
+		wibo::tls::releaseSlot(info.index);
+		info.index = tls::kInvalidTlsIndex;
+		releaseModuleTlsSlot(*reg, loaderIndex);
+		info.loaderIndex = tls::kInvalidTlsIndex;
+		info.hasTls = false;
+		if (info.indexLocation) {
+			*info.indexLocation = 0;
+		}
+		wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+		return false;
 	}
 	runModuleTlsCallbacks(module, TLS_PROCESS_ATTACH);
 	wibo::lastError = ERROR_SUCCESS;
@@ -932,19 +1013,31 @@ void releaseModuleTls(ModuleInfo &module) {
 	if (!module.tlsInfo.hasTls) {
 		return;
 	}
-	for (auto &[tib, block] : module.tlsInfo.threadAllocations) {
-		if (tib && module.tlsInfo.index < kTlsSlotCount && wibo::tls::getValue(tib, module.tlsInfo.index) == block) {
-			wibo::tls::setValue(tib, module.tlsInfo.index, nullptr);
+	auto &info = module.tlsInfo;
+	for (auto &[tib, block] : info.threadAllocations) {
+		if (tib) {
+			if (wibo::tls::getValue(tib, info.index) == block) {
+				wibo::tls::setValue(tib, info.index, nullptr);
+			}
+			if (info.loaderIndex != tls::kInvalidTlsIndex) {
+				wibo::tls::clearModulePointer(tib, info.loaderIndex);
+			}
 		}
 		if (block) {
 			std::free(block);
 		}
 	}
-	module.tlsInfo.threadAllocations.clear();
-	if (module.tlsInfo.index != wibo::tls::kInvalidTlsIndex) {
-		wibo::tls::releaseSlot(module.tlsInfo.index);
+	info.threadAllocations.clear();
+	if (info.index != tls::kInvalidTlsIndex) {
+		wibo::tls::releaseSlot(info.index);
 	}
-	module.tlsInfo = wibo::ModuleTlsInfo{};
+	{
+		auto reg = registry();
+		if (info.loaderIndex != tls::kInvalidTlsIndex) {
+			releaseModuleTlsSlot(*reg, info.loaderIndex);
+		}
+	}
+	info = wibo::ModuleTlsInfo{};
 }
 
 void executeOnExitTable(void *table) {
@@ -977,7 +1070,9 @@ void notifyDllThreadAttach() {
 	TIB *tib = wibo::getThreadTibForHost();
 	for (wibo::ModuleInfo *info : targets) {
 		if (info && info->tlsInfo.hasTls && tib) {
-			allocateModuleTlsForThread(*info, tib);
+			if (!allocateModuleTlsForThread(*info, tib)) {
+				DEBUG_LOG("notifyDllThreadAttach: failed to allocate TLS for %s\n", info->originalName.c_str());
+			}
 			runModuleTlsCallbacks(*info, TLS_THREAD_ATTACH);
 		}
 	}

@@ -66,6 +66,7 @@ class Executable {
 struct ModuleTlsInfo {
 	bool hasTls = false;
 	DWORD index = tls::kInvalidTlsIndex;
+	DWORD loaderIndex = tls::kInvalidTlsIndex;
 	DWORD *indexLocation = nullptr;
 	uint8_t *templateData = nullptr;
 	size_t templateSize = 0;

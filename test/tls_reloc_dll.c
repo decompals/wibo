@@ -27,14 +27,11 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
 	return TRUE;
 }
 
-__declspec(dllexport) int __stdcall tls_get_template_value(void) {
-	return g_tlsInitialValue;
-}
+__declspec(dllexport) int __stdcall tls_get_template_value(void) { return g_tlsInitialValue; }
 
-__declspec(dllexport) void *__stdcall tls_template_address(void) {
-	return &g_tlsInitialValue;
-}
+__declspec(dllexport) void *__stdcall tls_template_address(void) { return &g_tlsInitialValue; }
 
-__declspec(dllexport) int __stdcall tls_callback_hits(void) {
-	return g_tlsCallbackCount;
-}
+__declspec(dllexport) int __stdcall tls_callback_hits(void) { return g_tlsCallbackCount; }
+
+extern DWORD _tls_index;
+__declspec(dllexport) DWORD __stdcall tls_module_index(void) { return _tls_index; }

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.13)
 
 set(CMAKE_C_FLAGS_INIT "-m32")
-set(CMAKE_CXX_FLAGS_INIT "-m32")
+set(CMAKE_CXX_FLAGS_INIT "-m32 -fno-exceptions -fno-rtti")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "-m32")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "-m32")
 

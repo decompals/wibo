@@ -26,11 +26,13 @@ enum class ObjectType : uint16_t {
 	Heap,
 	RegistryKey,
 	NamedPipe,
+	NamedPipeState,
 };
 
 enum ObjectFlags : uint16_t {
 	Of_None = 0x0,
 	Of_Waitable = 0x1,
+	Of_File = 0x2,
 };
 
 struct ObjectBase {

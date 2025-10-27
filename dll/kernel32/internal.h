@@ -25,8 +25,6 @@ struct FsObject : ObjectBase {
 };
 
 struct FileObject : FsObject {
-	static constexpr ObjectType kType = ObjectType::File;
-
 	off_t filePos = 0;
 	bool overlapped = false;
 	bool appendOnly = false;
@@ -34,7 +32,9 @@ struct FileObject : FsObject {
 	// Used to notify overlapped operations without an event handle
 	std::condition_variable overlappedCv;
 
-	explicit FileObject(int fd) : FsObject(kType, fd) {
+	explicit FileObject(int fd) : FileObject(ObjectType::File, fd) {}
+	FileObject(ObjectType type, int fd) : FsObject(type, fd) {
+		flags |= Of_File;
 		if (fd >= 0) {
 			off_t pos = lseek(fd, 0, SEEK_CUR);
 			if (pos == -1 && errno == ESPIPE) {
@@ -177,3 +177,11 @@ void setLastErrorFromErrno();
 [[noreturn]] void exitInternal(DWORD exitCode);
 
 } // namespace kernel32
+
+namespace detail {
+
+template <> constexpr bool typeMatches<kernel32::FileObject>(const ObjectBase *o) noexcept {
+	return o && (o->flags & Of_File);
+}
+
+} // namespace detail

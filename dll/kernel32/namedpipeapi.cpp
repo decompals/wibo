@@ -103,7 +103,7 @@ DWORD normalizeMaxInstances(DWORD value) {
 }
 
 struct NamedPipeState : ObjectBase {
-	static constexpr ObjectType kType = ObjectType::NamedPipe;
+	static constexpr ObjectType kType = ObjectType::NamedPipeState;
 
 	std::mutex mutex;
 	std::string key;
@@ -171,6 +171,8 @@ struct NamedPipeState : ObjectBase {
 };
 
 struct NamedPipeInstance final : FileObject {
+	static constexpr ObjectType kType = ObjectType::NamedPipe;
+
 	Pin<NamedPipeState> state;
 	int companionFd = -1;
 	DWORD accessMode;
@@ -182,7 +184,7 @@ struct NamedPipeInstance final : FileObject {
 	std::condition_variable connectCv;
 
 	NamedPipeInstance(int fd, Pin<NamedPipeState> st, int companion, DWORD open, DWORD mode)
-		: FileObject(fd), state(std::move(st)), companionFd(companion), accessMode(open), pipeMode(mode) {
+		: FileObject(kType, fd), state(std::move(st)), companionFd(companion), accessMode(open), pipeMode(mode) {
 		if (state) {
 			state->registerInstance(this);
 		}
@@ -494,7 +496,7 @@ HANDLE WIN_FUNC CreateNamedPipeA(LPCSTR lpName, DWORD dwOpenMode, DWORD dwPipeMo
 		configureInheritability(companionFd, inheritHandles);
 	}
 
-	auto pipeObj = make_pin<NamedPipeInstance>(serverFd, state.clone(), companionFd, accessMode, dwPipeMode);
+	auto pipeObj = make_pin<NamedPipeInstance>(serverFd, std::move(state), companionFd, accessMode, dwPipeMode);
 	if (!pipeObj) {
 		return fail(ERROR_NOT_ENOUGH_MEMORY);
 	}
@@ -528,8 +530,7 @@ BOOL WIN_FUNC ConnectNamedPipe(HANDLE hNamedPipe, LPOVERLAPPED lpOverlapped) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("ConnectNamedPipe(%p, %p)\n", hNamedPipe, lpOverlapped);
 
-	auto pin = wibo::handles().get(hNamedPipe);
-	auto *pipe = pin ? dynamic_cast<NamedPipeInstance *>(pin.get()) : nullptr;
+	auto pipe = wibo::handles().getAs<NamedPipeInstance>(hNamedPipe);
 	if (!pipe) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;

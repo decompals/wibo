@@ -4,8 +4,8 @@
 #include "modules.h"
 #include "processes.h"
 #include "strutil.h"
-#include "version_info.h"
 #include "tls.h"
+#include "version_info.h"
 
 #include <asm/ldt.h>
 #include <charconv>

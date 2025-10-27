@@ -107,16 +107,16 @@ std::filesystem::path pathFromWindows(const char *inStr) {
 		if (followingExisting && !std::filesystem::exists(newPath2) &&
 			(component != ".." && component != "." && component != "")) {
 			followingExisting = false;
-			try {
-				for (std::filesystem::path entry : std::filesystem::directory_iterator{newPath}) {
+			std::error_code ec;
+			std::filesystem::directory_iterator iter{newPath, ec};
+			if (!ec) {
+				for (std::filesystem::path entry : iter) {
 					if (strcasecmp(entry.filename().c_str(), component.c_str()) == 0) {
 						followingExisting = true;
 						newPath2 = entry;
 						break;
 					}
 				}
-			} catch (const std::filesystem::filesystem_error &) {
-				// not a directory
 			}
 		}
 		newPath = newPath2;

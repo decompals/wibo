@@ -29,9 +29,9 @@
 - Fixture tests live in `test/` and are compiled automatically with `i686-w64-mingw32-gcc`.
 - Keep new repros small and self-contained (`test_<feature>.c`).
 - All fixtures must self-assert; use `test_assert.h` helpers so `ctest` fails on mismatched WinAPI behaviour.
-- Update `CMakeLists.txt` to add new fixture sources.
-- Rebuild, then run with `ctest --preset fixtures`.
-- ALWAYS run tests against `wine` manually to confirm expected behaviour. If `wine` fails, the expected behaviour is VERY LIKELY wrong. (`wine` is not perfect, but we can assume it's closer to Windows than we are.)
+- Update `CMakeLists.txt` to add new fixture sources, then rebuild. (`cmake --build --preset debug`)
+- ALWAYS run tests against `wine` FIRST to establish expected behaviour. (`WINEDEBUG=-all wine build/debug/test/test_<feature>.exe`)
+- Run tests against wibo with `ctest --preset fixtures`. (Or `fixtures-release` for optimized builds.)
 
 ## Debugging Workflow
 - Reproduce crashes under `gdb` (or `lldb`) with `-q -batch` to capture backtraces, register state, and the faulting instruction without interactive prompts.
@@ -40,9 +40,9 @@
 - Missing stubs generally do _not_ cause a crash; we return valid function pointers for unknown imports. Only when the missing stub is _called_ do we abort with a message. Therefore, don't preemptively add stubs for every missing import; wait until the binary actually calls it.
 
 ## Implementation Workflow
-- Fetch API documentation with `microsoft_docs`
-- Create test cases in `test/test_<feature>.c`
-- Build, then run the test(s) against `wine` (`wine build/debug/test/test_<feature>.exe`) to establish baseline behaviour (important!)
-- Plan and implement the API
-- Build, then run tests against `wibo` (`ctest --preset fixtures`) for validation
-- Format with `clang-format` and lint with `clang-tidy`
+- Fetch API documentation with `microsoft_docs`.
+- Create test cases in `test/test_<feature>.c`.
+- Build, then run the test(s) against `wine` to establish expected behaviour. (Important!)
+- Plan and implement the API.
+- Build, then run tests against `wibo` for validation.
+- Format with `clang-format` and lint with `clang-tidy`.

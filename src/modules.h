@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common.h"
+#include "tls.h"
 
 #include <optional>
 #include <unordered_map>
@@ -54,10 +55,25 @@ class Executable {
 	uint32_t importDirectorySize = 0;
 	uint32_t delayImportDirectoryRVA = 0;
 	uint32_t delayImportDirectorySize = 0;
+	uint32_t tlsDirectoryRVA = 0;
+	uint32_t tlsDirectorySize = 0;
 	bool execMapped = false;
 	bool importsResolved = false;
 	bool importsResolving = false;
 	std::vector<SectionInfo> sections;
+};
+
+struct ModuleTlsInfo {
+	bool hasTls = false;
+	DWORD index = tls::kInvalidTlsIndex;
+	DWORD *indexLocation = nullptr;
+	uint8_t *templateData = nullptr;
+	size_t templateSize = 0;
+	size_t zeroFillSize = 0;
+	uint32_t characteristics = 0;
+	size_t allocationSize = 0;
+	std::vector<void *> callbacks;
+	std::unordered_map<TIB *, void *> threadAllocations;
 };
 
 struct ModuleInfo {
@@ -84,6 +100,7 @@ struct ModuleInfo {
 	std::unordered_map<std::string, uint16_t> exportNameToOrdinal;
 	bool exportsInitialized = false;
 	std::vector<void *> onExitFunctions;
+	ModuleTlsInfo tlsInfo;
 };
 extern ModuleInfo *mainModule;
 
@@ -104,6 +121,8 @@ void notifyDllThreadAttach();
 void notifyDllThreadDetach();
 BOOL disableThreadNotifications(ModuleInfo *info);
 std::unordered_map<std::string, ModulePtr> allLoadedModules();
+bool initializeModuleTls(ModuleInfo &module);
+void releaseModuleTls(ModuleInfo &module);
 
 ModuleInfo *loadModule(const char *name);
 void freeModule(ModuleInfo *info);

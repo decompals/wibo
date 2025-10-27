@@ -5,6 +5,7 @@
 #include "errors.h"
 #include "files.h"
 #include "strutil.h"
+#include "tls.h"
 
 #include <algorithm>
 #include <array>
@@ -40,6 +41,10 @@ constexpr DWORD DLL_PROCESS_DETACH = 0;
 constexpr DWORD DLL_PROCESS_ATTACH = 1;
 constexpr DWORD DLL_THREAD_ATTACH = 2;
 constexpr DWORD DLL_THREAD_DETACH = 3;
+constexpr DWORD TLS_PROCESS_ATTACH = DLL_PROCESS_ATTACH;
+constexpr DWORD TLS_PROCESS_DETACH = DLL_PROCESS_DETACH;
+constexpr DWORD TLS_THREAD_ATTACH = DLL_THREAD_ATTACH;
+constexpr DWORD TLS_THREAD_DETACH = DLL_THREAD_DETACH;
 
 struct PEExportDirectory {
 	uint32_t characteristics;
@@ -222,6 +227,103 @@ std::string normalizedBaseKey(const ParsedModuleName &parsed) {
 		base += ".dll";
 	}
 	return normalizeAlias(base);
+}
+
+struct ImageTlsDirectory32 {
+	uint32_t StartAddressOfRawData;
+	uint32_t EndAddressOfRawData;
+	uint32_t AddressOfIndex;
+	uint32_t AddressOfCallBacks;
+	uint32_t SizeOfZeroFill;
+	uint32_t Characteristics;
+};
+
+uintptr_t resolveModuleAddress(const wibo::Executable &exec, uintptr_t address) {
+	if (address == 0) {
+		return 0;
+	}
+	const uintptr_t actualBase = reinterpret_cast<uintptr_t>(exec.imageBase);
+	if (address >= actualBase) {
+		uintptr_t offset = address - actualBase;
+		if (offset < exec.imageSize) {
+			return address;
+		}
+	}
+	const uintptr_t preferredBase = static_cast<uintptr_t>(exec.preferredImageBase);
+	if (address >= preferredBase) {
+		return actualBase + (address - preferredBase);
+	}
+	return static_cast<uintptr_t>(static_cast<intptr_t>(address) + exec.relocationDelta);
+}
+
+void allocateModuleTlsForThread(wibo::ModuleInfo &module, TIB *tib) {
+	if (!tib) {
+		return;
+	}
+	auto &info = module.tlsInfo;
+	if (!info.hasTls || info.index == wibo::tls::kInvalidTlsIndex || info.index >= kTlsSlotCount) {
+		return;
+	}
+	if (info.threadAllocations.find(tib) != info.threadAllocations.end()) {
+		return;
+	}
+	void *block = nullptr;
+	const size_t allocationSize = info.allocationSize;
+	if (allocationSize > 0) {
+		block = std::malloc(allocationSize);
+		if (!block) {
+			DEBUG_LOG("  allocateModuleTlsForThread: failed to allocate %zu bytes for %s\n", allocationSize,
+					  module.originalName.c_str());
+			return;
+		}
+		std::memset(block, 0, allocationSize);
+		if (info.templateData && info.templateSize > 0) {
+			std::memcpy(block, info.templateData, info.templateSize);
+		}
+	}
+	info.threadAllocations.emplace(tib, block);
+	wibo::tls::setValue(tib, info.index, block);
+}
+
+void freeModuleTlsForThread(wibo::ModuleInfo &module, TIB *tib) {
+	if (!tib) {
+		return;
+	}
+	auto &info = module.tlsInfo;
+	if (!info.hasTls) {
+		return;
+	}
+	auto it = info.threadAllocations.find(tib);
+	if (it == info.threadAllocations.end()) {
+		return;
+	}
+	void *block = it->second;
+	info.threadAllocations.erase(it);
+	if (info.index < kTlsSlotCount && wibo::tls::getValue(tib, info.index) == block) {
+		wibo::tls::setValue(tib, info.index, nullptr);
+	}
+	if (block) {
+		std::free(block);
+	}
+}
+
+void runModuleTlsCallbacks(wibo::ModuleInfo &module, DWORD reason) {
+	if (!module.tlsInfo.hasTls || module.tlsInfo.callbacks.empty()) {
+		return;
+	}
+	TIB *tib = wibo::getThreadTibForHost();
+	if (!tib) {
+		return;
+	}
+	GUEST_CONTEXT_GUARD(tib);
+	using TlsCallback = void(WIN_FUNC *)(void *, DWORD, void *);
+	for (void *callbackAddr : module.tlsInfo.callbacks) {
+		if (!callbackAddr) {
+			continue;
+		}
+		auto callback = reinterpret_cast<TlsCallback>(callbackAddr);
+		callback(module.handle, reason, nullptr);
+	}
 }
 
 std::optional<std::filesystem::path> combineAndFind(const std::filesystem::path &directory,
@@ -663,9 +765,13 @@ void shutdownModuleRegistry() {
 			continue;
 		}
 		runPendingOnExit(*info);
+		if (info->tlsInfo.hasTls) {
+			runModuleTlsCallbacks(*info, TLS_PROCESS_DETACH);
+		}
 		if (info->processAttachCalled && info->processAttachSucceeded) {
 			callDllMain(*info, DLL_PROCESS_DETACH, reinterpret_cast<LPVOID>(1));
 		}
+		releaseModuleTls(*info);
 	}
 	reg->modulesByKey.clear();
 	reg->modulesByAlias.clear();
@@ -762,6 +868,79 @@ void runPendingOnExit(ModuleInfo &info) {
 	info.onExitFunctions.clear();
 }
 
+bool initializeModuleTls(ModuleInfo &module) {
+	if (module.tlsInfo.hasTls) {
+		return true;
+	}
+	if (!module.executable) {
+		return true;
+	}
+	Executable &exec = *module.executable;
+	if (exec.tlsDirectoryRVA == 0 || exec.tlsDirectorySize < sizeof(ImageTlsDirectory32)) {
+		return true;
+	}
+	auto tlsDirectory = exec.fromRVA<ImageTlsDirectory32>(exec.tlsDirectoryRVA);
+	if (!tlsDirectory) {
+		return false;
+	}
+
+	auto &info = module.tlsInfo;
+	info.templateSize = (tlsDirectory->EndAddressOfRawData > tlsDirectory->StartAddressOfRawData)
+							? tlsDirectory->EndAddressOfRawData - tlsDirectory->StartAddressOfRawData
+							: 0;
+	info.zeroFillSize = tlsDirectory->SizeOfZeroFill;
+	info.characteristics = tlsDirectory->Characteristics;
+	info.templateData = reinterpret_cast<uint8_t *>(resolveModuleAddress(exec, tlsDirectory->StartAddressOfRawData));
+	info.indexLocation = reinterpret_cast<DWORD *>(resolveModuleAddress(exec, tlsDirectory->AddressOfIndex));
+	info.callbacks.clear();
+	uintptr_t callbacksArray = resolveModuleAddress(exec, tlsDirectory->AddressOfCallBacks);
+	if (callbacksArray) {
+		auto callbackPtr = reinterpret_cast<uintptr_t *>(callbacksArray);
+		while (callbackPtr && *callbackPtr) {
+			info.callbacks.push_back(reinterpret_cast<void *>(resolveModuleAddress(exec, *callbackPtr)));
+			++callbackPtr;
+		}
+	}
+	info.allocationSize = info.templateSize + info.zeroFillSize;
+	DWORD index = tls::reserveSlot();
+	if (index == tls::kInvalidTlsIndex) {
+		wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+		return false;
+	}
+	info.index = index;
+	if (info.indexLocation) {
+		*info.indexLocation = index;
+	}
+	info.hasTls = true;
+	info.threadAllocations.clear();
+
+	if (TIB *tib = wibo::getThreadTibForHost()) {
+		allocateModuleTlsForThread(module, tib);
+	}
+	runModuleTlsCallbacks(module, TLS_PROCESS_ATTACH);
+	wibo::lastError = ERROR_SUCCESS;
+	return true;
+}
+
+void releaseModuleTls(ModuleInfo &module) {
+	if (!module.tlsInfo.hasTls) {
+		return;
+	}
+	for (auto &[tib, block] : module.tlsInfo.threadAllocations) {
+		if (tib && module.tlsInfo.index < kTlsSlotCount && wibo::tls::getValue(tib, module.tlsInfo.index) == block) {
+			wibo::tls::setValue(tib, module.tlsInfo.index, nullptr);
+		}
+		if (block) {
+			std::free(block);
+		}
+	}
+	module.tlsInfo.threadAllocations.clear();
+	if (module.tlsInfo.index != wibo::tls::kInvalidTlsIndex) {
+		wibo::tls::releaseSlot(module.tlsInfo.index);
+	}
+	module.tlsInfo = wibo::ModuleTlsInfo{};
+}
+
 void executeOnExitTable(void *table) {
 	auto reg = registry();
 	ModuleInfo *info = nullptr;
@@ -789,6 +968,13 @@ void notifyDllThreadAttach() {
 			targets.push_back(info);
 		}
 	}
+	TIB *tib = wibo::getThreadTibForHost();
+	for (wibo::ModuleInfo *info : targets) {
+		if (info && info->tlsInfo.hasTls && tib) {
+			allocateModuleTlsForThread(*info, tib);
+			runModuleTlsCallbacks(*info, TLS_THREAD_ATTACH);
+		}
+	}
 	for (wibo::ModuleInfo *info : targets) {
 		callDllMain(*info, DLL_THREAD_ATTACH, nullptr);
 	}
@@ -805,8 +991,19 @@ void notifyDllThreadDetach() {
 			targets.push_back(info);
 		}
 	}
+	TIB *tib = wibo::getThreadTibForHost();
+	for (auto it = targets.rbegin(); it != targets.rend(); ++it) {
+		if (*it && (*it)->tlsInfo.hasTls && tib) {
+			runModuleTlsCallbacks(**it, TLS_THREAD_DETACH);
+		}
+	}
 	for (auto it = targets.rbegin(); it != targets.rend(); ++it) {
 		callDllMain(**it, DLL_THREAD_DETACH, nullptr);
+	}
+	for (auto it = targets.rbegin(); it != targets.rend(); ++it) {
+		if (*it && (*it)->tlsInfo.hasTls && tib) {
+			freeModuleTlsForThread(**it, tib);
+		}
 	}
 	wibo::lastError = ERROR_SUCCESS;
 }
@@ -903,9 +1100,17 @@ ModuleInfo *loadModule(const char *dllName) {
 			diskError = wibo::lastError;
 			return nullptr;
 		}
+		if (!initializeModuleTls(*raw)) {
+			DEBUG_LOG("  initializeModuleTls failed for %s\n", raw->originalName.c_str());
+			reg.lock.lock();
+			reg->modulesByKey.erase(key);
+			diskError = wibo::lastError;
+			return nullptr;
+		}
 		reg.lock.lock();
 		if (!callDllMain(*raw, DLL_PROCESS_ATTACH, nullptr)) {
 			DEBUG_LOG("  DllMain failed for %s\n", raw->originalName.c_str());
+			releaseModuleTls(*raw);
 			runPendingOnExit(*raw);
 			for (auto it = reg->onExitTables.begin(); it != reg->onExitTables.end();) {
 				if (it->second == raw) {
@@ -1015,7 +1220,11 @@ void freeModule(ModuleInfo *info) {
 			}
 		}
 		runPendingOnExit(*info);
+		if (info->tlsInfo.hasTls) {
+			runModuleTlsCallbacks(*info, TLS_PROCESS_DETACH);
+		}
 		callDllMain(*info, DLL_PROCESS_DETACH, nullptr);
+		releaseModuleTls(*info);
 		std::string key = info->resolvedPath.empty() ? storageKeyForBuiltin(info->normalizedName)
 													 : storageKeyForPath(info->resolvedPath);
 		reg->modulesByKey.erase(key);

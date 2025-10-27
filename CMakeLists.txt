@@ -175,6 +175,7 @@ add_executable(wibo
     src/processes.cpp
     src/resources.cpp
     src/strutil.cpp
+    src/tls.cpp
 )
 target_compile_definitions(wibo PRIVATE _GNU_SOURCE _FILE_OFFSET_BITS=64 _TIME_BITS=64)
 target_compile_features(wibo PRIVATE cxx_std_20)
@@ -261,6 +262,8 @@ if (WIBO_ENABLE_FIXTURE_TESTS)
         wibo_add_fixture_bin(NAME test_bcrypt SOURCES test/test_bcrypt.c COMPILE_OPTIONS -lbcrypt)
         wibo_add_fixture_bin(NAME test_resources SOURCES test/test_resources.c ${WIBO_TEST_BIN_DIR}/test_resources_res.o COMPILE_OPTIONS -lversion)
         wibo_add_fixture_bin(NAME test_threading SOURCES test/test_threading.c)
+        wibo_add_fixture_bin(NAME test_tls SOURCES test/test_tls.c)
+        wibo_add_fixture_bin(NAME test_tls_reloc SOURCES test/test_tls_reloc.c)
         wibo_add_fixture_bin(NAME test_handleapi SOURCES test/test_handleapi.c)
         wibo_add_fixture_bin(NAME test_findfile SOURCES test/test_findfile.c)
         wibo_add_fixture_bin(NAME test_synchapi SOURCES test/test_synchapi.c)
@@ -283,6 +286,7 @@ if (WIBO_ENABLE_FIXTURE_TESTS)
         wibo_add_fixture_dll(NAME external_exports SOURCES test/external_exports.c)
         wibo_add_fixture_dll(NAME dll_attach_failure SOURCES test/dll_attach_failure.c)
         wibo_add_fixture_dll(NAME thread_notifications SOURCES test/thread_notifications.c)
+        wibo_add_fixture_dll(NAME tls_reloc SOURCES test/tls_reloc_dll.c)
 
         # Resources for test_resources
         add_custom_command(

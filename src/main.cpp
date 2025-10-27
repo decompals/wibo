@@ -1,4 +1,3 @@
-#include "async_io.h"
 #include "common.h"
 #include "context.h"
 #include "files.h"
@@ -6,6 +5,7 @@
 #include "processes.h"
 #include "strutil.h"
 #include "version_info.h"
+#include "tls.h"
 
 #include <asm/ldt.h>
 #include <charconv>
@@ -57,7 +57,8 @@ TIB *wibo::allocateTib() {
 	if (!newTib) {
 		return nullptr;
 	}
-	newTib->tib = newTib;
+	tls::initializeTib(newTib);
+	newTib->self = newTib;
 	newTib->peb = processPeb;
 	return newTib;
 }
@@ -451,7 +452,8 @@ int main(int argc, char **argv) {
 
 	// Create TIB
 	memset(&tib, 0, sizeof(tib));
-	tib.tib = &tib;
+	wibo::tls::initializeTib(&tib);
+	tib.self = &tib;
 	tib.peb = static_cast<PEB *>(calloc(1, sizeof(PEB)));
 	tib.peb->ProcessParameters =
 		static_cast<RTL_USER_PROCESS_PARAMETERS *>(calloc(1, sizeof(RTL_USER_PROCESS_PARAMETERS)));
@@ -595,6 +597,10 @@ int main(int argc, char **argv) {
 	if (!wibo::mainModule->executable->resolveImports()) {
 		fprintf(stderr, "Failed to resolve imports for main module (DLL initialization failure?)\n");
 		abort();
+	}
+	if (!wibo::initializeModuleTls(*wibo::mainModule)) {
+		fprintf(stderr, "Failed to initialize TLS for main module\n");
+		return 1;
 	}
 
 	// Reset last error

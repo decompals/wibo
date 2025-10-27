@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -220,6 +221,8 @@ constexpr DWORD PIPE_ACCEPT_REMOTE_CLIENTS = 0x00000000;
 constexpr DWORD PIPE_REJECT_REMOTE_CLIENTS = 0x00000008;
 constexpr DWORD PIPE_UNLIMITED_INSTANCES = 255;
 
+constexpr size_t kTlsSlotCount = 64;
+
 struct UNICODE_STRING {
 	unsigned short Length;
 	unsigned short MaximumLength;
@@ -248,22 +251,149 @@ struct PEB {
 	unsigned int SessionId;
 };
 
+struct ClientId {
+	void *uniqueProcess;
+	void *uniqueThread;
+};
+
+struct ListEntry {
+	void *flink;
+	void *blink;
+};
+
+struct ActivationContextStack {
+	void *activeFrame;
+	ListEntry frameListCache;
+	uint32_t flags;
+	uint32_t nextCookieSequenceNumber;
+	uint32_t stackId;
+};
+
+struct GdiTebBatch {
+	uint32_t offset;
+	uint32_t hdc;
+	uint32_t buffer[310];
+};
+
 struct TIB {
-	void *sehFrame;
+	void *exceptionList;
 	void *stackBase;
 	void *stackLimit;
 	void *subSystemTib;
-	void *fiberData;
-	void *arbitraryDataSlot;
-	TIB *tib;
-	char reserved1[0x14];
+	union {
+		void *fiberData;
+		uint32_t version;
+	} fiber;
+	void *arbitraryUserPointer;
+	TIB *self;
+	void *environmentPointer;
+	ClientId clientId;
+	void *activeRpcHandle;
+	void *threadLocalStoragePointer;
 	PEB *peb;
-	char reserved2[0x1000];
+	uint32_t lastErrorValue;
+	uint32_t countOfOwnedCriticalSections;
+	void *csrClientThread;
+	void *win32ThreadInfo;
+	uint32_t user32Reserved[26];
+	uint32_t userReserved[5];
+	void *wow32Reserved;
+	uint32_t currentLocale;
+	uint32_t fpSoftwareStatusRegister;
+	void *reservedForDebuggerInstrumentation[16];
+	void *systemReserved1[26];
+	uint8_t placeholderCompatibilityMode;
+	uint8_t placeholderHydrationAlwaysExplicit;
+	uint8_t placeholderReserved[10];
+	uint32_t proxiedProcessId;
+	ActivationContextStack activationContextStack;
+	uint8_t workingOnBehalfOfTicket[8];
+	int32_t exceptionCode;
+	ActivationContextStack *activationContextStackPointer;
+	uintptr_t instrumentationCallbackSp;
+	uintptr_t instrumentationCallbackPreviousPc;
+	uintptr_t instrumentationCallbackPreviousSp;
+	uint8_t instrumentationCallbackDisabled;
+	uint8_t spareBytes1[23];
+	uint32_t txFsContext;
+	GdiTebBatch gdiTebBatch;
+	ClientId realClientId;
+	void *gdiCachedProcessHandle;
+	uint32_t gdiClientPID;
+	uint32_t gdiClientTID;
+	void *gdiThreadLocaleInfo;
+	uintptr_t win32ClientInfo[62];
+	void *glDispatchTable[233];
+	void *glReserved1[29];
+	void *glReserved2;
+	void *glSectionInfo;
+	void *glSection;
+	void *glTable;
+	void *glCurrentRC;
+	void *glContext;
+	uint32_t lastStatusValue;
+	UNICODE_STRING staticUnicodeString;
+	WCHAR staticUnicodeBuffer[261];
+	void *deallocationStack;
+	void *tlsSlots[kTlsSlotCount];
+	ListEntry tlsLinks;
+	void *vdm;
+	void *reservedForNtRpc;
+	void *dbgSsReserved[2];
+	uint32_t hardErrorMode;
+	void *instrumentation[9];
+	GUID activityId;
+	void *subProcessTag;
+	void *perflibData;
+	void *etwTraceData;
+	void *winSockData;
+	uint32_t gdiBatchCount;
+	uint32_t idealProcessorValue;
+	uint32_t guaranteedStackBytes;
+	void *reservedForPerf;
+	void *reservedForOle;
+	uint32_t waitingOnLoaderLock;
+	void *savedPriorityState;
+	uintptr_t reservedForCodeCoverage;
+	void *threadPoolData;
+	void **tlsExpansionSlots;
+	uint32_t muiGeneration;
+	uint32_t isImpersonating;
+	void *nlsCache;
+	void *shimData;
+	uint32_t heapVirtualAffinity;
+	void *currentTransactionHandle;
+	void *activeFrame;
+	void *flsSlots;
+	void *preferredLanguages;
+	void *userPrefLanguages;
+	void *mergedPrefLanguages;
+	uint32_t muiImpersonation;
+	uint16_t crossTebFlags;
+	uint16_t sameTebFlags;
+	void *txnScopeEnterCallback;
+	void *txnScopeExitCallback;
+	void *txnScopeContext;
+	uint32_t lockCount;
+	long wowTebOffset;
+	void *resourceRetValue;
+	void *reservedForWdf;
+	uint64_t reservedForCrt;
+	GUID effectiveContainerId;
 	uint16_t hostFsSelector;
 	uint16_t hostGsSelector;
 	uint8_t hostSegmentsValid;
 	uint8_t padding[3];
 };
+
+static_assert(offsetof(TIB, self) == 0x18, "Self pointer offset mismatch");
+static_assert(offsetof(TIB, threadLocalStoragePointer) == 0x2C, "TLS pointer offset mismatch");
+static_assert(offsetof(TIB, peb) == 0x30, "PEB pointer offset mismatch");
+static_assert(offsetof(TIB, lastErrorValue) == 0x34, "LastErrorValue offset mismatch");
+static_assert(offsetof(TIB, gdiTebBatch) == 0x1D4, "GdiTebBatch offset mismatch");
+static_assert(offsetof(TIB, deallocationStack) == 0xE0C, "DeallocationStack offset mismatch");
+static_assert(offsetof(TIB, tlsSlots) == 0xE10, "TLS slots offset mismatch");
+static_assert(sizeof(TIB) >= 0x1000, "TIB too small");
 
 namespace wibo {
 

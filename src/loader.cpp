@@ -230,6 +230,8 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 	importDirectorySize = header32.importTable.size;
 	delayImportDirectoryRVA = header32.delayImportDescriptor.virtualAddress;
 	delayImportDirectorySize = header32.delayImportDescriptor.size;
+	tlsDirectoryRVA = header32.tlsTable.virtualAddress;
+	tlsDirectorySize = header32.tlsTable.size;
 	execMapped = exec;
 	importsResolved = false;
 	importsResolving = false;

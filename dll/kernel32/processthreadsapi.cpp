@@ -10,8 +10,8 @@
 #include "processes.h"
 #include "strutil.h"
 #include "timeutil.h"
+#include "tls.h"
 
-#include <atomic>
 #include <cerrno>
 #include <csignal>
 #include <cstdio>
@@ -32,10 +32,6 @@
 namespace {
 
 using kernel32::ThreadObject;
-
-constexpr DWORD kMaxTlsValues = 100;
-bool g_tlsSlotsUsed[kMaxTlsValues] = {false};
-LPVOID g_tlsSlots[kMaxTlsValues] = {nullptr};
 
 DWORD_PTR g_processAffinityMask = 0;
 bool g_processAffinityMaskInitialized = false;
@@ -386,47 +382,50 @@ BOOL WIN_FUNC GetExitCodeProcess(HANDLE hProcess, LPDWORD lpExitCode) {
 DWORD WIN_FUNC TlsAlloc() {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("TlsAlloc()\n");
-	for (DWORD i = 0; i < kMaxTlsValues; ++i) {
-		if (!g_tlsSlotsUsed[i]) {
-			g_tlsSlotsUsed[i] = true;
-			g_tlsSlots[i] = nullptr;
-			return i;
-		}
+	DWORD index = wibo::tls::reserveSlot();
+	if (index == wibo::tls::kInvalidTlsIndex) {
+		wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+		return TLS_OUT_OF_INDEXES;
 	}
-	wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
-	return TLS_OUT_OF_INDEXES;
+	wibo::tls::setValue(index, nullptr);
+	wibo::lastError = ERROR_SUCCESS;
+	return index;
 }
 
 BOOL WIN_FUNC TlsFree(DWORD dwTlsIndex) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("TlsFree(%u)\n", dwTlsIndex);
-	if (dwTlsIndex >= kMaxTlsValues || !g_tlsSlotsUsed[dwTlsIndex]) {
+	if (!wibo::tls::releaseSlot(dwTlsIndex)) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
-	g_tlsSlotsUsed[dwTlsIndex] = false;
-	g_tlsSlots[dwTlsIndex] = nullptr;
+	wibo::tls::setValue(dwTlsIndex, nullptr);
+	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 
 LPVOID WIN_FUNC TlsGetValue(DWORD dwTlsIndex) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("TlsGetValue(%u)\n", dwTlsIndex);
-	if (dwTlsIndex >= kMaxTlsValues || !g_tlsSlotsUsed[dwTlsIndex]) {
+	if (!wibo::tls::isSlotAllocated(dwTlsIndex)) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return nullptr;
 	}
-	return g_tlsSlots[dwTlsIndex];
+	return wibo::tls::getValue(dwTlsIndex);
 }
 
 BOOL WIN_FUNC TlsSetValue(DWORD dwTlsIndex, LPVOID lpTlsValue) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("TlsSetValue(%u, %p)\n", dwTlsIndex, lpTlsValue);
-	if (dwTlsIndex >= kMaxTlsValues || !g_tlsSlotsUsed[dwTlsIndex]) {
+	if (!wibo::tls::isSlotAllocated(dwTlsIndex)) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
-	g_tlsSlots[dwTlsIndex] = lpTlsValue;
+	if (!wibo::tls::setValue(dwTlsIndex, lpTlsValue)) {
+		wibo::lastError = ERROR_INVALID_PARAMETER;
+		return FALSE;
+	}
+	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
 

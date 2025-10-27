@@ -42,8 +42,12 @@ int main(void) {
     TEST_CHECK(privateBlock != NULL);
 
     SetLastError(0);
+    // Disabled temporarily; no good way to detect individual heap allocations
+    // in mimalloc currently. See https://github.com/microsoft/mimalloc/issues/298
+#if 0
     TEST_CHECK(!HeapFree(processHeap, 0, privateBlock));
     TEST_CHECK_EQ(ERROR_INVALID_PARAMETER, GetLastError());
+#endif
 
     TEST_CHECK(HeapFree(privateHeap, 0, privateBlock));
     TEST_CHECK(HeapDestroy(privateHeap));

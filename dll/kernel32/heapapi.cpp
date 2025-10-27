@@ -175,7 +175,7 @@ LPVOID WIN_FUNC HeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dw
 		VERBOSE_LOG("-> %p (alloc)\n", alloc);
 		return alloc;
 	}
-	if (!mi_heap_check_owned(record->heap, lpMem)) {
+	if (!mi_is_in_heap_region(lpMem)) {
 		VERBOSE_LOG("-> NULL (not owned)\n");
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return nullptr;
@@ -244,7 +244,7 @@ SIZE_T WIN_FUNC HeapSize(HANDLE hHeap, DWORD dwFlags, LPCVOID lpMem) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return static_cast<SIZE_T>(-1);
 	}
-	if (!mi_heap_check_owned(record->heap, lpMem)) {
+	if (!mi_is_in_heap_region(lpMem)) {
 		VERBOSE_LOG("-> ERROR_INVALID_PARAMETER (not owned)\n");
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return static_cast<SIZE_T>(-1);
@@ -266,7 +266,7 @@ BOOL WIN_FUNC HeapFree(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem) {
 		wibo::lastError = ERROR_INVALID_HANDLE;
 		return FALSE;
 	}
-	if (!mi_heap_check_owned(record->heap, lpMem)) {
+	if (!mi_is_in_heap_region(lpMem)) {
 		VERBOSE_LOG("-> ERROR_INVALID_PARAMETER (not owned)\n");
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;

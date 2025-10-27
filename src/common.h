@@ -104,6 +104,7 @@ using LCID = DWORD;
 using LCTYPE = DWORD;
 using HWINSTA = HANDLE;
 using HWND = HANDLE;
+using PBYTE = BYTE *;
 
 constexpr BOOL TRUE = 1;
 constexpr BOOL FALSE = 0;

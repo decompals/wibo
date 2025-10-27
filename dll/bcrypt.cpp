@@ -66,17 +66,28 @@ NTSTATUS WIN_FUNC BCryptGenRandom(BCRYPT_ALG_HANDLE hAlgorithm, PUCHAR pbBuffer,
 	return STATUS_SUCCESS;
 }
 
+BOOL WIN_FUNC ProcessPrng(PBYTE pbData, SIZE_T cbData) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("ProcessPrng(%p, %lu)\n", pbData, cbData);
+	if (pbData == nullptr && cbData != 0)
+		return FALSE;
+	return fillWithSystemRandom(pbData, cbData);
+}
+
 } // namespace bcrypt
 
 static void *resolveByName(const char *name) {
 	if (strcmp(name, "BCryptGenRandom") == 0)
 		return (void *)bcrypt::BCryptGenRandom;
+	if (strcmp(name, "ProcessPrng") == 0)
+		return (void *)bcrypt::ProcessPrng;
 	return nullptr;
 }
 
 extern const wibo::ModuleStub lib_bcrypt = {
 	(const char *[]){
 		"bcrypt",
+		"bcryptprimitives",
 		nullptr,
 	},
 	resolveByName,

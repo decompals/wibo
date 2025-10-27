@@ -282,7 +282,10 @@ void allocateModuleTlsForThread(wibo::ModuleInfo &module, TIB *tib) {
 		}
 	}
 	info.threadAllocations.emplace(tib, block);
-	wibo::tls::setValue(tib, info.index, block);
+	if (!wibo::tls::setValue(tib, info.index, block)) {
+		DEBUG_LOG("  allocateModuleTlsForThread: failed to publish TLS pointer for %s (index %u)\n",
+				  module.originalName.c_str(), info.index);
+	}
 }
 
 void freeModuleTlsForThread(wibo::ModuleInfo &module, TIB *tib) {
@@ -300,7 +303,10 @@ void freeModuleTlsForThread(wibo::ModuleInfo &module, TIB *tib) {
 	void *block = it->second;
 	info.threadAllocations.erase(it);
 	if (info.index < kTlsSlotCount && wibo::tls::getValue(tib, info.index) == block) {
-		wibo::tls::setValue(tib, info.index, nullptr);
+		if (!wibo::tls::setValue(tib, info.index, nullptr)) {
+			DEBUG_LOG("  freeModuleTlsForThread: failed to clear TLS pointer for %s (index %u)\n",
+					  module.originalName.c_str(), info.index);
+		}
 	}
 	if (block) {
 		std::free(block);

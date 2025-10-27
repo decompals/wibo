@@ -67,6 +67,7 @@ void wibo::destroyTib(TIB *tibPtr) {
 	if (!tibPtr) {
 		return;
 	}
+	tls::cleanupTib(tibPtr);
 	std::free(tibPtr);
 }
 
@@ -613,6 +614,7 @@ int main(int argc, char **argv) {
 	}
 	DEBUG_LOG("We came back\n");
 	wibo::shutdownModuleRegistry();
+	wibo::tls::cleanupTib(&tib);
 
 	return 1;
 }

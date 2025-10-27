@@ -387,7 +387,6 @@ DWORD WIN_FUNC TlsAlloc() {
 		wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
 		return TLS_OUT_OF_INDEXES;
 	}
-	wibo::tls::setValue(index, nullptr);
 	wibo::lastError = ERROR_SUCCESS;
 	return index;
 }
@@ -399,7 +398,6 @@ BOOL WIN_FUNC TlsFree(DWORD dwTlsIndex) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return FALSE;
 	}
-	wibo::tls::setValue(dwTlsIndex, nullptr);
 	wibo::lastError = ERROR_SUCCESS;
 	return TRUE;
 }
@@ -411,7 +409,9 @@ LPVOID WIN_FUNC TlsGetValue(DWORD dwTlsIndex) {
 		wibo::lastError = ERROR_INVALID_PARAMETER;
 		return nullptr;
 	}
-	return wibo::tls::getValue(dwTlsIndex);
+	void *result = wibo::tls::getValue(dwTlsIndex);
+	wibo::lastError = ERROR_SUCCESS;
+	return result;
 }
 
 BOOL WIN_FUNC TlsSetValue(DWORD dwTlsIndex, LPVOID lpTlsValue) {

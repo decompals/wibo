@@ -5,8 +5,10 @@
 namespace wibo::tls {
 
 constexpr DWORD kInvalidTlsIndex = 0xFFFFFFFFu;
+constexpr size_t kTlsMaxSlotCount = 1088;
 
 void initializeTib(TIB *tib);
+void cleanupTib(TIB *tib);
 
 DWORD reserveSlot();
 bool releaseSlot(DWORD index);
@@ -19,4 +21,3 @@ void *getValue(DWORD index);
 bool setValue(DWORD index, void *value);
 
 } // namespace wibo::tls
-

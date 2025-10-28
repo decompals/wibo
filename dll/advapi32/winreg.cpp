@@ -4,6 +4,7 @@
 #include "context.h"
 #include "errors.h"
 #include "handles.h"
+#include "kernel32/internal.h"
 #include "strutil.h"
 
 #include <algorithm>
@@ -135,17 +136,17 @@ LSTATUS WIN_FUNC RegCreateKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD Reserved, LP
 	(void)lpClass;
 	(void)lpSecurityAttributes;
 	if (!phkResult) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return ERROR_INVALID_PARAMETER;
 	}
 	*phkResult = nullptr;
 	if (Reserved != 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return ERROR_INVALID_PARAMETER;
 	}
 	if (dwOptions != 0) {
 		DEBUG_LOG("RegCreateKeyExW: unsupported options 0x%x\n", dwOptions);
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return ERROR_INVALID_PARAMETER;
 	}
 	REGSAM sanitizedAccess = samDesired & ~(KEY_WOW64_64KEY | KEY_WOW64_32KEY);
@@ -155,7 +156,7 @@ LSTATUS WIN_FUNC RegCreateKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD Reserved, LP
 	std::lock_guard<std::mutex> lock(g_registryMutex);
 	Pin<RegistryKeyObject> baseHandle = handleDataFromHKeyLocked(hKey);
 	if (!baseHandle) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		kernel32::setLastError(ERROR_INVALID_HANDLE);
 		return ERROR_INVALID_HANDLE;
 	}
 	std::u16string targetPath = baseHandle->canonicalPath;
@@ -171,7 +172,7 @@ LSTATUS WIN_FUNC RegCreateKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD Reserved, LP
 		}
 	}
 	if (targetPath.empty()) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		kernel32::setLastError(ERROR_INVALID_HANDLE);
 		return ERROR_INVALID_HANDLE;
 	}
 	bool existed = g_existingKeys.find(targetPath) != g_existingKeys.end();
@@ -216,12 +217,12 @@ LSTATUS WIN_FUNC RegOpenKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD ulOptions, REG
 	std::string subKeyString = lpSubKey ? wideStringToString(lpSubKey) : std::string("(null)");
 	DEBUG_LOG("RegOpenKeyExW(%p, %s, %u, 0x%x, %p)\n", hKey, subKeyString.c_str(), ulOptions, samDesired, phkResult);
 	if (!phkResult) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return ERROR_INVALID_PARAMETER;
 	}
 	*phkResult = nullptr;
 	if ((ulOptions & ~REG_OPTION_OPEN_LINK) != 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return ERROR_INVALID_PARAMETER;
 	}
 	if (ulOptions & REG_OPTION_OPEN_LINK) {
@@ -235,7 +236,7 @@ LSTATUS WIN_FUNC RegOpenKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD ulOptions, REG
 	std::lock_guard<std::mutex> lock(g_registryMutex);
 	Pin<RegistryKeyObject> baseHandle = handleDataFromHKeyLocked(hKey);
 	if (!baseHandle) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		kernel32::setLastError(ERROR_INVALID_HANDLE);
 		return ERROR_INVALID_HANDLE;
 	}
 	std::u16string targetPath = baseHandle->canonicalPath;
@@ -249,11 +250,11 @@ LSTATUS WIN_FUNC RegOpenKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD ulOptions, REG
 		}
 	}
 	if (targetPath.empty()) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		kernel32::setLastError(ERROR_INVALID_HANDLE);
 		return ERROR_INVALID_HANDLE;
 	}
 	if (g_existingKeys.find(targetPath) == g_existingKeys.end()) {
-		wibo::lastError = ERROR_FILE_NOT_FOUND;
+		kernel32::setLastError(ERROR_FILE_NOT_FOUND);
 		return ERROR_FILE_NOT_FOUND;
 	}
 	if (!lpSubKey || lpSubKey[0] == 0) {
@@ -288,7 +289,7 @@ LSTATUS WIN_FUNC RegQueryValueExW(HKEY hKey, LPCWSTR lpValueName, LPDWORD lpRese
 	DEBUG_LOG("RegQueryValueExW(%p, %s, %p, %p, %p, %p)\n", hKey, valueName.c_str(), lpReserved, lpType, lpData,
 			  lpcbData);
 	if (lpReserved) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return ERROR_INVALID_PARAMETER;
 	}
 	if (lpcbData) {
@@ -299,7 +300,7 @@ LSTATUS WIN_FUNC RegQueryValueExW(HKEY hKey, LPCWSTR lpValueName, LPDWORD lpRese
 	}
 	(void)hKey;
 	(void)lpData;
-	wibo::lastError = ERROR_FILE_NOT_FOUND;
+	kernel32::setLastError(ERROR_FILE_NOT_FOUND);
 	return ERROR_FILE_NOT_FOUND;
 }
 
@@ -324,7 +325,7 @@ LSTATUS WIN_FUNC RegEnumKeyExW(HKEY hKey, DWORD dwIndex, LPWSTR lpName, LPDWORD 
 	(void)hKey;
 	(void)dwIndex;
 	if (lpReserved) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return ERROR_INVALID_PARAMETER;
 	}
 	if (lpcchName) {
@@ -340,7 +341,7 @@ LSTATUS WIN_FUNC RegEnumKeyExW(HKEY hKey, DWORD dwIndex, LPWSTR lpName, LPDWORD 
 		*lpcchClass = 0;
 	}
 	(void)lpftLastWriteTime;
-	wibo::lastError = ERROR_NO_MORE_ITEMS;
+	kernel32::setLastError(ERROR_NO_MORE_ITEMS);
 	return ERROR_NO_MORE_ITEMS;
 }
 
@@ -352,7 +353,7 @@ LSTATUS WIN_FUNC RegEnumKeyExA(HKEY hKey, DWORD dwIndex, LPSTR lpName, LPDWORD l
 	(void)hKey;
 	(void)dwIndex;
 	if (lpReserved) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return ERROR_INVALID_PARAMETER;
 	}
 	if (lpcchName) {
@@ -368,7 +369,7 @@ LSTATUS WIN_FUNC RegEnumKeyExA(HKEY hKey, DWORD dwIndex, LPSTR lpName, LPDWORD l
 		*lpcchClass = 0;
 	}
 	(void)lpftLastWriteTime;
-	wibo::lastError = ERROR_NO_MORE_ITEMS;
+	kernel32::setLastError(ERROR_NO_MORE_ITEMS);
 	return ERROR_NO_MORE_ITEMS;
 }
 
@@ -380,7 +381,7 @@ LSTATUS WIN_FUNC RegCloseKey(HKEY hKey) {
 	}
 	auto obj = wibo::handles().getAs<RegistryKeyObject>(hKey);
 	if (!obj || obj->closed) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		kernel32::setLastError(ERROR_INVALID_HANDLE);
 		return ERROR_INVALID_HANDLE;
 	}
 	return ERROR_SUCCESS;

@@ -284,7 +284,7 @@ bool tryCreateFileNamedPipeA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwS
 	auto parsed = parsePipeName(lpFileName, parseError);
 	if (!parsed) {
 		if (parseError != ERROR_SUCCESS) {
-			wibo::lastError = parseError;
+			setLastError(parseError);
 			outHandle = INVALID_HANDLE_VALUE;
 			return true;
 		}
@@ -293,7 +293,7 @@ bool tryCreateFileNamedPipeA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwS
 
 	auto state = wibo::g_namespace.getAs<NamedPipeState>(parsed->namespaceKey);
 	if (!state) {
-		wibo::lastError = ERROR_FILE_NOT_FOUND;
+		setLastError(ERROR_FILE_NOT_FOUND);
 		outHandle = INVALID_HANDLE_VALUE;
 		return true;
 	}
@@ -301,14 +301,14 @@ bool tryCreateFileNamedPipeA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwS
 	DWORD acquireError = ERROR_SUCCESS;
 	auto instancePin = acquireConnectableInstance(state, dwDesiredAccess, acquireError);
 	if (!instancePin) {
-		wibo::lastError = acquireError;
+		setLastError(acquireError);
 		outHandle = INVALID_HANDLE_VALUE;
 		return true;
 	}
 
 	int clientFd = instancePin->takeCompanion();
 	if (clientFd < 0) {
-		wibo::lastError = ERROR_PIPE_BUSY;
+		setLastError(ERROR_PIPE_BUSY);
 		outHandle = INVALID_HANDLE_VALUE;
 		return true;
 	}
@@ -319,7 +319,7 @@ bool tryCreateFileNamedPipeA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwS
 	auto clientObj = make_pin<FileObject>(clientFd);
 	if (!clientObj) {
 		instancePin->restoreCompanion(clientFd);
-		wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+		setLastError(ERROR_NOT_ENOUGH_MEMORY);
 		outHandle = INVALID_HANDLE_VALUE;
 		return true;
 	}
@@ -352,7 +352,7 @@ BOOL WIN_FUNC CreatePipe(PHANDLE hReadPipe, PHANDLE hWritePipe, LPSECURITY_ATTRI
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CreatePipe(%p, %p, %p, %u)\n", hReadPipe, hWritePipe, lpPipeAttributes, nSize);
 	if (!hReadPipe || !hWritePipe) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	*hReadPipe = nullptr;
@@ -393,20 +393,20 @@ HANDLE WIN_FUNC CreateNamedPipeA(LPCSTR lpName, DWORD dwOpenMode, DWORD dwPipeMo
 	DWORD parseError = ERROR_SUCCESS;
 	std::optional<ParsedPipeName> parsed = parsePipeName(lpName, parseError);
 	if (!parsed) {
-		wibo::lastError = (parseError == ERROR_SUCCESS) ? ERROR_INVALID_NAME : parseError;
+		setLastError((parseError == ERROR_SUCCESS) ? ERROR_INVALID_NAME : parseError);
 		return INVALID_HANDLE_VALUE;
 	}
 
 	constexpr DWORD kAllowedOpenFlags = PIPE_ACCESS_DUPLEX | WRITE_DAC | WRITE_OWNER | ACCESS_SYSTEM_SECURITY |
 										FILE_FLAG_FIRST_PIPE_INSTANCE | FILE_FLAG_WRITE_THROUGH | FILE_FLAG_OVERLAPPED;
 	if ((dwOpenMode & ~kAllowedOpenFlags) != 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return INVALID_HANDLE_VALUE;
 	}
 
 	DWORD accessMode = dwOpenMode & PIPE_ACCESS_DUPLEX;
 	if (accessMode != PIPE_ACCESS_DUPLEX && accessMode != PIPE_ACCESS_INBOUND && accessMode != PIPE_ACCESS_OUTBOUND) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return INVALID_HANDLE_VALUE;
 	}
 
@@ -417,11 +417,11 @@ HANDLE WIN_FUNC CreateNamedPipeA(LPCSTR lpName, DWORD dwOpenMode, DWORD dwPipeMo
 	constexpr DWORD kAllowedPipeModeFlags =
 		PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_NOWAIT | PIPE_REJECT_REMOTE_CLIENTS;
 	if ((dwPipeMode & ~kAllowedPipeModeFlags) != 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return INVALID_HANDLE_VALUE;
 	}
 	if ((dwPipeMode & PIPE_READMODE_MESSAGE) != 0 && (dwPipeMode & PIPE_TYPE_MESSAGE) == 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return INVALID_HANDLE_VALUE;
 	}
 
@@ -431,7 +431,7 @@ HANDLE WIN_FUNC CreateNamedPipeA(LPCSTR lpName, DWORD dwOpenMode, DWORD dwPipeMo
 	auto [state, isNewState] = wibo::g_namespace.getOrCreate(
 		parsed->namespaceKey, [&]() -> NamedPipeState * { return new NamedPipeState(parsed->key); });
 	if (!state) {
-		wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+		setLastError(ERROR_NOT_ENOUGH_MEMORY);
 		return INVALID_HANDLE_VALUE;
 	}
 
@@ -439,7 +439,7 @@ HANDLE WIN_FUNC CreateNamedPipeA(LPCSTR lpName, DWORD dwOpenMode, DWORD dwPipeMo
 	DWORD reserveError = ERROR_SUCCESS;
 	if (!state->reserveInstance(accessMode, pipeType, nDefaultTimeOut, normalizedMaxInstances, firstInstanceFlag,
 								isNewState, reserveError)) {
-		wibo::lastError = reserveError;
+		setLastError(reserveError);
 		return INVALID_HANDLE_VALUE;
 	}
 	instanceReserved = true;
@@ -459,7 +459,7 @@ HANDLE WIN_FUNC CreateNamedPipeA(LPCSTR lpName, DWORD dwOpenMode, DWORD dwPipeMo
 			state->releaseInstance();
 			instanceReserved = false;
 		}
-		wibo::lastError = err;
+		setLastError(err);
 		return INVALID_HANDLE_VALUE;
 	};
 
@@ -532,35 +532,35 @@ BOOL WIN_FUNC ConnectNamedPipe(HANDLE hNamedPipe, LPOVERLAPPED lpOverlapped) {
 
 	auto pipe = wibo::handles().getAs<NamedPipeInstance>(hNamedPipe);
 	if (!pipe) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
 
 	const bool isOverlappedHandle = pipe->overlapped;
 	if (isOverlappedHandle && lpOverlapped == nullptr) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 
 	std::unique_lock lock(pipe->connectMutex);
 
 	if (pipe->clientConnected) {
-		wibo::lastError = ERROR_PIPE_CONNECTED;
+		setLastError(ERROR_PIPE_CONNECTED);
 		return FALSE;
 	}
 
 	if (pipe->companionFd < 0) {
-		wibo::lastError = ERROR_PIPE_BUSY;
+		setLastError(ERROR_PIPE_BUSY);
 		return FALSE;
 	}
 
 	if (pipe->connectPending) {
-		wibo::lastError = ERROR_PIPE_LISTENING;
+		setLastError(ERROR_PIPE_LISTENING);
 		return FALSE;
 	}
 
 	if ((pipe->pipeMode & PIPE_NOWAIT) != 0) {
-		wibo::lastError = ERROR_PIPE_LISTENING;
+		setLastError(ERROR_PIPE_LISTENING);
 		return FALSE;
 	}
 
@@ -571,7 +571,7 @@ BOOL WIN_FUNC ConnectNamedPipe(HANDLE hNamedPipe, LPOVERLAPPED lpOverlapped) {
 		lpOverlapped->InternalHigh = 0;
 		kernel32::detail::resetOverlappedEvent(lpOverlapped);
 		lock.unlock();
-		wibo::lastError = ERROR_IO_PENDING;
+		setLastError(ERROR_IO_PENDING);
 		return FALSE;
 	}
 
@@ -579,7 +579,7 @@ BOOL WIN_FUNC ConnectNamedPipe(HANDLE hNamedPipe, LPOVERLAPPED lpOverlapped) {
 	pipe->connectCv.wait(lock, [&]() { return pipe->clientConnected || pipe->companionFd < 0; });
 	pipe->connectPending = false;
 	if (!pipe->clientConnected) {
-		wibo::lastError = ERROR_NO_DATA;
+		setLastError(ERROR_NO_DATA);
 		return FALSE;
 	}
 	return TRUE;

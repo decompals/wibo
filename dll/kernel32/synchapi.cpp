@@ -157,11 +157,11 @@ HANDLE WIN_FUNC CreateMutexW(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInit
 	});
 	if (!mu) {
 		// Name exists but isn't a mutex
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return nullptr;
 	}
 	HANDLE h = wibo::handles().alloc(std::move(mu), grantedAccess, handleFlags);
-	wibo::lastError = created ? ERROR_SUCCESS : ERROR_ALREADY_EXISTS;
+	setLastError(created ? ERROR_SUCCESS : ERROR_ALREADY_EXISTS);
 	return h;
 }
 
@@ -179,7 +179,7 @@ BOOL WIN_FUNC ReleaseMutex(HANDLE hMutex) {
 	DEBUG_LOG("ReleaseMutex(%p)\n", hMutex);
 	auto mu = wibo::handles().getAs<MutexObject>(hMutex);
 	if (!mu) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
 	const pthread_t self = pthread_self();
@@ -187,7 +187,7 @@ BOOL WIN_FUNC ReleaseMutex(HANDLE hMutex) {
 	{
 		std::lock_guard lk(mu->m);
 		if (!mu->ownerValid || !pthread_equal(mu->owner, self) || mu->recursionCount == 0) {
-			wibo::lastError = ERROR_NOT_OWNER;
+			setLastError(ERROR_NOT_OWNER);
 			return FALSE;
 		}
 		if (--mu->recursionCount == 0) {
@@ -221,12 +221,12 @@ HANDLE WIN_FUNC CreateEventW(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManu
 	});
 	if (!ev) {
 		// Name exists but isn't an event
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return nullptr;
 	}
 	HANDLE h = wibo::handles().alloc(std::move(ev), grantedAccess, handleFlags);
 	DEBUG_LOG("-> %p (created=%d)\n", h, created ? 1 : 0);
-	wibo::lastError = created ? ERROR_SUCCESS : ERROR_ALREADY_EXISTS;
+	setLastError(created ? ERROR_SUCCESS : ERROR_ALREADY_EXISTS);
 	return h;
 }
 
@@ -259,11 +259,11 @@ HANDLE WIN_FUNC CreateSemaphoreW(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LO
 	});
 	if (!sem) {
 		// Name exists but isn't an event
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return nullptr;
 	}
 	HANDLE h = wibo::handles().alloc(std::move(sem), granted, hflags);
-	wibo::lastError = created ? ERROR_SUCCESS : ERROR_ALREADY_EXISTS;
+	setLastError(created ? ERROR_SUCCESS : ERROR_ALREADY_EXISTS);
 	return h;
 }
 
@@ -281,12 +281,12 @@ BOOL WIN_FUNC ReleaseSemaphore(HANDLE hSemaphore, LONG lReleaseCount, PLONG lpPr
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("ReleaseSemaphore(%p, %ld, %p)\n", hSemaphore, lReleaseCount, lpPreviousCount);
 	if (lReleaseCount < 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	auto sem = wibo::handles().getAs<SemaphoreObject>(hSemaphore);
 	if (!sem) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
 
@@ -298,7 +298,7 @@ BOOL WIN_FUNC ReleaseSemaphore(HANDLE hSemaphore, LONG lReleaseCount, PLONG lpPr
 			prev = sem->count;
 		}
 		if (sem->count > sem->maxCount - lReleaseCount) {
-			wibo::lastError = ERROR_TOO_MANY_POSTS;
+			setLastError(ERROR_TOO_MANY_POSTS);
 			return FALSE;
 		}
 		sem->count += lReleaseCount;
@@ -323,7 +323,7 @@ BOOL WIN_FUNC SetEvent(HANDLE hEvent) {
 	DEBUG_LOG("SetEvent(%p)\n", hEvent);
 	auto ev = wibo::handles().getAs<EventObject>(hEvent);
 	if (!ev) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
 	ev->set();
@@ -335,7 +335,7 @@ BOOL WIN_FUNC ResetEvent(HANDLE hEvent) {
 	DEBUG_LOG("ResetEvent(%p)\n", hEvent);
 	auto ev = wibo::handles().getAs<EventObject>(hEvent);
 	if (!ev) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
 	ev->reset();
@@ -348,13 +348,13 @@ DWORD WIN_FUNC WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds) {
 	HandleMeta meta{};
 	Pin<> obj = wibo::handles().get(hHandle, &meta);
 	if (!obj) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		DEBUG_LOG("-> ERROR_INVALID_HANDLE\n");
 		return WAIT_FAILED;
 	}
 #ifdef CHECK_ACCESS
 	if ((meta.grantedAccess & SYNCHRONIZE) == 0) {
-		wibo::lastError = ERROR_ACCESS_DENIED;
+		setLastError(ERROR_ACCESS_DENIED);
 		DEBUG_LOG("!!! DENIED: 0x%x\n", meta.grantedAccess);
 		return WAIT_FAILED;
 	}
@@ -443,7 +443,7 @@ DWORD WIN_FUNC WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds) {
 		return ok ? WAIT_OBJECT_0 : WAIT_TIMEOUT;
 	}
 	default:
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return WAIT_FAILED;
 	}
 }
@@ -454,7 +454,7 @@ DWORD WIN_FUNC WaitForMultipleObjects(DWORD nCount, const HANDLE *lpHandles, BOO
 			  dwMilliseconds);
 
 	if (nCount == 0 || nCount > MAXIMUM_WAIT_OBJECTS || !lpHandles) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return WAIT_FAILED;
 	}
 
@@ -463,7 +463,7 @@ DWORD WIN_FUNC WaitForMultipleObjects(DWORD nCount, const HANDLE *lpHandles, BOO
 		HandleMeta meta{};
 		auto obj = wibo::handles().getAs<WaitableObject>(lpHandles[i], &meta);
 		if (!obj) {
-			wibo::lastError = ERROR_INVALID_HANDLE;
+			setLastError(ERROR_INVALID_HANDLE);
 			return WAIT_FAILED;
 		}
 		objects[i] = std::move(obj);
@@ -556,11 +556,11 @@ BOOL WIN_FUNC InitializeCriticalSectionEx(LPCRITICAL_SECTION lpCriticalSection, 
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: InitializeCriticalSectionEx(%p, %u, 0x%x)\n", lpCriticalSection, dwSpinCount, Flags);
 	if (!lpCriticalSection) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	if (Flags & ~CRITICAL_SECTION_NO_DEBUG_INFO) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	std::memset(lpCriticalSection, 0, sizeof(*lpCriticalSection));
@@ -572,7 +572,7 @@ BOOL WIN_FUNC InitializeCriticalSectionAndSpinCount(LPCRITICAL_SECTION lpCritica
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: InitializeCriticalSectionAndSpinCount(%p, %u)\n", lpCriticalSection, dwSpinCount);
 	if (!lpCriticalSection) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	std::memset(lpCriticalSection, 0, sizeof(*lpCriticalSection));
@@ -602,11 +602,11 @@ BOOL WIN_FUNC InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBO
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: InitOnceBeginInitialize(%p, %u, %p, %p)\n", lpInitOnce, dwFlags, fPending, lpContext);
 	if (!lpInitOnce) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	if (dwFlags & ~(INIT_ONCE_CHECK_ONLY | INIT_ONCE_ASYNC)) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	if (fPending) {
@@ -622,11 +622,11 @@ BOOL WIN_FUNC InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpC
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: InitOnceComplete(%p, %u, %p)\n", lpInitOnce, dwFlags, lpContext);
 	if (!lpInitOnce) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	if ((dwFlags & INIT_ONCE_INIT_FAILED) && (dwFlags & INIT_ONCE_ASYNC)) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	(void)lpContext;

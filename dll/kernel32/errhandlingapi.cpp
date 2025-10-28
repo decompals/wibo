@@ -14,18 +14,34 @@ UINT g_processErrorMode = 0;
 
 namespace kernel32 {
 
-void setLastErrorFromErrno() { wibo::lastError = wibo::winErrorFromErrno(errno); }
+DWORD getLastError() { return wibo::getThreadTibForHost()->lastErrorValue; }
+
+void setLastError(DWORD error) { wibo::getThreadTibForHost()->lastErrorValue = error; }
+
+void setLastErrorFromErrno() { setLastError(wibo::winErrorFromErrno(errno)); }
 
 DWORD WIN_FUNC GetLastError() {
-	HOST_CONTEXT_GUARD();
-	VERBOSE_LOG("GetLastError() -> %u\n", wibo::lastError);
-	return wibo::lastError;
+#ifndef NDEBUG
+	{
+		HOST_CONTEXT_GUARD();
+		DEBUG_LOG("GetLastError() -> %u\n", getLastError());
+	}
+#endif
+	// In guest context, fetch via TIB
+	DWORD err;
+	__asm__ __volatile__("movl %%fs:%c1, %0" : "=r"(err) : "i"(offsetof(TIB, lastErrorValue)));
+	return err;
 }
 
 void WIN_FUNC SetLastError(DWORD dwErrCode) {
-	HOST_CONTEXT_GUARD();
-	VERBOSE_LOG("SetLastError(%u)\n", dwErrCode);
-	wibo::lastError = dwErrCode;
+#ifndef NDEBUG
+	{
+		HOST_CONTEXT_GUARD();
+		DEBUG_LOG("SetLastError(%u)\n", dwErrCode);
+	}
+#endif
+	// In guest context, store via TIB
+	__asm__ __volatile__("movl %0, %%fs:%c1" : : "r"(dwErrCode), "i"(offsetof(TIB, lastErrorValue)) : "memory");
 }
 
 void WIN_FUNC RaiseException(DWORD dwExceptionCode, DWORD dwExceptionFlags, DWORD nNumberOfArguments,

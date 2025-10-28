@@ -2,6 +2,7 @@
 
 #include "context.h"
 #include "errors.h"
+#include "internal.h"
 #include "timeutil.h"
 
 #include <cerrno>
@@ -14,22 +15,22 @@ BOOL WIN_FUNC SystemTimeToFileTime(const SYSTEMTIME *lpSystemTime, LPFILETIME lp
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SystemTimeToFileTime(%p, %p)\n", lpSystemTime, lpFileTime);
 	if (!lpSystemTime || !lpFileTime) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	int64_t seconds = 0;
 	uint32_t hundreds = 0;
 	if (!systemTimeToUnixParts(*lpSystemTime, seconds, hundreds)) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	FILETIME result;
 	if (!unixPartsToFileTime(seconds, hundreds, result)) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	if (fileTimeToDuration(result) >= MAX_VALID_FILETIME) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	*lpFileTime = result;
@@ -40,12 +41,12 @@ BOOL WIN_FUNC FileTimeToSystemTime(const FILETIME *lpFileTime, LPSYSTEMTIME lpSy
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FileTimeToSystemTime(%p, %p)\n", lpFileTime, lpSystemTime);
 	if (!lpFileTime || !lpSystemTime) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	uint64_t ticks = fileTimeToDuration(*lpFileTime);
 	if (ticks >= MAX_VALID_FILETIME) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	uint64_t daysSince1601 = ticks / TICKS_PER_DAY;
@@ -69,45 +70,45 @@ BOOL WIN_FUNC FileTimeToLocalFileTime(const FILETIME *lpFileTime, LPFILETIME lpL
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FileTimeToLocalFileTime(%p, %p)\n", lpFileTime, lpLocalFileTime);
 	if (!lpFileTime || !lpLocalFileTime) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	int64_t seconds = 0;
 	uint32_t hundreds = 0;
 	if (!fileTimeToUnixParts(*lpFileTime, seconds, hundreds)) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	if (seconds > static_cast<int64_t>(std::numeric_limits<time_t>::max()) ||
 		seconds < static_cast<int64_t>(std::numeric_limits<time_t>::min())) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	time_t unixTime = static_cast<time_t>(seconds);
 	struct tm localTm{};
 #if defined(_POSIX_VERSION)
 	if (!localtime_r(&unixTime, &localTm)) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 #else
 	struct tm *tmp = localtime(&unixTime);
 	if (!tmp) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	localTm = *tmp;
 #endif
 	int64_t localAsUtcSeconds = 0;
 	if (!tmToUnixSeconds(localTm, localAsUtcSeconds)) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	int64_t offsetSeconds = localAsUtcSeconds - seconds;
 	int64_t localSeconds = seconds + offsetSeconds;
 	FILETIME result;
 	if (!unixPartsToFileTime(localSeconds, hundreds, result)) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	*lpLocalFileTime = result;
@@ -118,12 +119,12 @@ BOOL WIN_FUNC LocalFileTimeToFileTime(const FILETIME *lpLocalFileTime, LPFILETIM
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("LocalFileTimeToFileTime(%p, %p)\n", lpLocalFileTime, lpFileTime);
 	if (!lpLocalFileTime || !lpFileTime) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	uint64_t ticks = fileTimeToDuration(*lpLocalFileTime);
 	if (ticks >= MAX_VALID_FILETIME) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	uint32_t hundredNs = static_cast<uint32_t>(ticks % HUNDRED_NS_PER_SECOND);
@@ -144,12 +145,12 @@ BOOL WIN_FUNC LocalFileTimeToFileTime(const FILETIME *lpLocalFileTime, LPFILETIM
 	errno = 0;
 	time_t utcTime = mktime(&tmCopy);
 	if (utcTime == static_cast<time_t>(-1) && errno != 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	FILETIME result;
 	if (!unixPartsToFileTime(static_cast<int64_t>(utcTime), hundredNs, result)) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	*lpFileTime = result;
@@ -160,7 +161,7 @@ BOOL WIN_FUNC DosDateTimeToFileTime(WORD wFatDate, WORD wFatTime, LPFILETIME lpF
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("DosDateTimeToFileTime(%04x, %04x, %p)\n", wFatDate, wFatTime, lpFileTime);
 	if (!lpFileTime) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	unsigned day = wFatDate & 0x1F;
@@ -170,7 +171,7 @@ BOOL WIN_FUNC DosDateTimeToFileTime(WORD wFatDate, WORD wFatTime, LPFILETIME lpF
 	unsigned minute = (wFatTime >> 5) & 0x3F;
 	unsigned hour = (wFatTime >> 11) & 0x1F;
 	if (day == 0 || month == 0 || month > 12 || day > 31 || hour > 23 || minute > 59 || second > 59) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	struct tm tmValue{};
@@ -183,7 +184,7 @@ BOOL WIN_FUNC DosDateTimeToFileTime(WORD wFatDate, WORD wFatTime, LPFILETIME lpF
 	tmValue.tm_isdst = -1;
 	time_t localSeconds = mktime(&tmValue);
 	if (localSeconds == static_cast<time_t>(-1)) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	uint64_t ticks = (static_cast<uint64_t>(localSeconds) + UNIX_TIME_ZERO / HUNDRED_NS_PER_SECOND) * 10000000ULL;
@@ -195,23 +196,23 @@ BOOL WIN_FUNC FileTimeToDosDateTime(const FILETIME *lpFileTime, LPWORD lpFatDate
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FileTimeToDosDateTime(%p, %p, %p)\n", lpFileTime, lpFatDate, lpFatTime);
 	if (!lpFileTime || !lpFatDate || !lpFatTime) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	uint64_t ticks = fileTimeToDuration(*lpFileTime);
 	if (ticks < UNIX_TIME_ZERO) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	time_t utcSeconds = static_cast<time_t>((ticks / 10000000ULL) - (UNIX_TIME_ZERO / HUNDRED_NS_PER_SECOND));
 	struct tm tmValue{};
 	if (!localtime_r(&utcSeconds, &tmValue)) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	int year = tmValue.tm_year + 1900;
 	if (year < 1980 || year > 2107) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	*lpFatDate = static_cast<WORD>(((year - 1980) << 9) | ((tmValue.tm_mon + 1) << 5) | tmValue.tm_mday);
@@ -224,7 +225,7 @@ DWORD WIN_FUNC GetTimeZoneInformation(LPTIME_ZONE_INFORMATION lpTimeZoneInformat
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetTimeZoneInformation(%p)\n", lpTimeZoneInformation);
 	if (!lpTimeZoneInformation) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return TIME_ZONE_ID_INVALID;
 	}
 	std::memset(lpTimeZoneInformation, 0, sizeof(*lpTimeZoneInformation));

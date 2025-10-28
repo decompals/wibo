@@ -3,6 +3,7 @@
 #include "common.h"
 #include "context.h"
 #include "errors.h"
+#include "internal.h"
 #include "strutil.h"
 
 #include <cstring>
@@ -78,7 +79,7 @@ BOOL WIN_FUNC GetStringTypeW(DWORD dwInfoType, LPCWCH lpSrcStr, int cchSrc, LPWO
 	assert(dwInfoType == 1); // CT_CTYPE1
 
 	if (!lpSrcStr || !lpCharType) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 
@@ -110,11 +111,11 @@ BOOL WIN_FUNC GetStringTypeA(LCID Locale, DWORD dwInfoType, LPCSTR lpSrcStr, int
 	(void)Locale;
 
 	if (!lpSrcStr || !lpCharType) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	if (dwInfoType != 1) {
-		wibo::lastError = ERROR_NOT_SUPPORTED;
+		setLastError(ERROR_NOT_SUPPORTED);
 		return FALSE;
 	}
 

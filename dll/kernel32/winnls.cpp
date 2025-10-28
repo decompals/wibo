@@ -2,6 +2,7 @@
 
 #include "context.h"
 #include "errors.h"
+#include "internal.h"
 #include "strutil.h"
 
 #include <algorithm>
@@ -106,7 +107,7 @@ BOOL WIN_FUNC GetCPInfo(UINT CodePage, LPCPINFO lpCPInfo) {
 	(void)CodePage;
 
 	if (!lpCPInfo) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 
@@ -124,7 +125,7 @@ int WIN_FUNC CompareStringA(LCID Locale, DWORD dwCmpFlags, LPCSTR lpString1, int
 			  cchCount1, lpString2 ? lpString2 : "(null)", cchCount2);
 	(void)Locale;
 	if (!lpString1 || !lpString2) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 
@@ -147,7 +148,7 @@ int WIN_FUNC CompareStringW(LCID Locale, DWORD dwCmpFlags, LPCWCH lpString1, int
 			  cchCount2);
 	(void)Locale;
 	if (!lpString1 || !lpString2) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 
@@ -168,7 +169,7 @@ BOOL WIN_FUNC IsValidLocale(LCID Locale, DWORD dwFlags) {
 	DEBUG_LOG("IsValidLocale(%u, 0x%x)\n", Locale, dwFlags);
 	(void)Locale;
 	if (dwFlags != 0 && (dwFlags & ~(LCID_INSTALLED | LCID_SUPPORTED | LCID_ALTERNATE_SORTS)) != 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	return TRUE;
@@ -186,11 +187,11 @@ int WIN_FUNC GetLocaleInfoA(LCID Locale, LCTYPE LCType, LPSTR lpLCData, int cchD
 		return static_cast<int>(required);
 	}
 	if (!lpLCData || cchData < 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	if (static_cast<size_t>(cchData) < required) {
-		wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+		setLastError(ERROR_INSUFFICIENT_BUFFER);
 		return 0;
 	}
 
@@ -211,11 +212,11 @@ int WIN_FUNC GetLocaleInfoW(LCID Locale, LCTYPE LCType, LPWSTR lpLCData, int cch
 		return static_cast<int>(required);
 	}
 	if (!lpLCData || cchData < 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	if (static_cast<size_t>(cchData) < required) {
-		wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+		setLastError(ERROR_INSUFFICIENT_BUFFER);
 		return 0;
 	}
 
@@ -224,16 +225,18 @@ int WIN_FUNC GetLocaleInfoW(LCID Locale, LCTYPE LCType, LPWSTR lpLCData, int cch
 }
 
 BOOL WIN_FUNC EnumSystemLocalesA(LOCALE_ENUMPROCA lpLocaleEnumProc, DWORD dwFlags) {
-	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("EnumSystemLocalesA(%p, 0x%x)\n", lpLocaleEnumProc, dwFlags);
-	(void)dwFlags;
-	if (!lpLocaleEnumProc) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
-		return FALSE;
+	{
+		HOST_CONTEXT_GUARD();
+		DEBUG_LOG("EnumSystemLocalesA(%p, 0x%x)\n", lpLocaleEnumProc, dwFlags);
+		(void)dwFlags;
+		if (!lpLocaleEnumProc) {
+			setLastError(ERROR_INVALID_PARAMETER);
+			return FALSE;
+		}
 	}
+	// Return to guest context before callback
 	char localeId[] = "00000409"; // en-US
-	BOOL callbackResult = lpLocaleEnumProc(localeId);
-	return callbackResult;
+	return lpLocaleEnumProc(localeId);
 }
 
 LCID WIN_FUNC GetUserDefaultLCID() {
@@ -262,7 +265,7 @@ BOOL WIN_FUNC IsDBCSLeadByteEx(UINT CodePage, BYTE TestChar) {
 		return FALSE;
 	};
 
-	wibo::lastError = ERROR_SUCCESS;
+	setLastError(ERROR_SUCCESS);
 	switch (CodePage) {
 	case 932: // Shift-JIS
 		return inRanges({{0x81, 0x9F}, {0xE0, 0xFC}});
@@ -285,14 +288,14 @@ int WIN_FUNC LCMapStringW(LCID Locale, DWORD dwMapFlags, LPCWCH lpSrcStr, int cc
 	DEBUG_LOG("LCMapStringW(%u, 0x%x, %p, %d, %p, %d)\n", Locale, dwMapFlags, lpSrcStr, cchSrc, lpDestStr, cchDest);
 	(void)Locale;
 	if (!lpSrcStr || cchSrc == 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 
 	bool nullTerminated = cchSrc < 0;
 	size_t srcLen = nullTerminated ? (wstrlen(lpSrcStr) + 1) : static_cast<size_t>(cchSrc);
 	if (srcLen == 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 
@@ -300,13 +303,13 @@ int WIN_FUNC LCMapStringW(LCID Locale, DWORD dwMapFlags, LPCWCH lpSrcStr, int cc
 		return static_cast<int>(srcLen);
 	}
 	if (cchDest < static_cast<int>(srcLen)) {
-		wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+		setLastError(ERROR_INSUFFICIENT_BUFFER);
 		return 0;
 	}
 
 	if (dwMapFlags & (0x00000400u | 0x00000800u)) { // LCMAP_SORTKEY | LCMAP_BYTEREV
 		DEBUG_LOG("LCMapStringW: unsupported mapping flags 0x%x\n", dwMapFlags);
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 
@@ -331,7 +334,7 @@ int WIN_FUNC LCMapStringA(LCID Locale, DWORD dwMapFlags, LPCCH lpSrcStr, int cch
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("LCMapStringA(%u, 0x%x, %p, %d, %p, %d)\n", Locale, dwMapFlags, lpSrcStr, cchSrc, lpDestStr, cchDest);
 	if (!lpSrcStr) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	int length = cchSrc;
@@ -344,7 +347,7 @@ int WIN_FUNC LCMapStringA(LCID Locale, DWORD dwMapFlags, LPCCH lpSrcStr, int cch
 	int wideResult =
 		LCMapStringW(Locale, dwMapFlags, wideSrc.data(), length, wideDest.empty() ? nullptr : wideDest.data(), cchDest);
 	if (wideResult == 0) {
-		wibo::lastError = ERROR_SUCCESS;
+		setLastError(ERROR_SUCCESS);
 		return 0;
 	}
 
@@ -355,7 +358,7 @@ int WIN_FUNC LCMapStringA(LCID Locale, DWORD dwMapFlags, LPCCH lpSrcStr, int cch
 	auto mapped = wideStringToString(wideDest.data(), wideResult);
 	size_t bytesToCopy = mapped.size() + 1;
 	if (static_cast<size_t>(cchDest) < bytesToCopy) {
-		wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+		setLastError(ERROR_INSUFFICIENT_BUFFER);
 		return 0;
 	}
 	std::memcpy(lpDestStr, mapped.c_str(), bytesToCopy);

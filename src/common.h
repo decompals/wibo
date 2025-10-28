@@ -398,7 +398,6 @@ static_assert(sizeof(TIB) >= 0x1000, "TIB too small");
 
 namespace wibo {
 
-extern thread_local uint32_t lastError;
 extern char **argv;
 extern int argc;
 extern std::filesystem::path guestExecutablePath;

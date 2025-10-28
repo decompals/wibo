@@ -18,7 +18,7 @@ HRSRC findResourceInternal(HMODULE hModule, const wibo::ResourceIdentifier &type
 						   std::optional<uint16_t> language) {
 	auto *exe = wibo::executableFromModule(hModule);
 	if (!exe) {
-		wibo::lastError = ERROR_RESOURCE_DATA_NOT_FOUND;
+		kernel32::setLastError(ERROR_RESOURCE_DATA_NOT_FOUND);
 		return nullptr;
 	}
 	wibo::ResourceLocation loc;
@@ -36,16 +36,16 @@ BOOL WIN_FUNC DisableThreadLibraryCalls(HMODULE hLibModule) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("DisableThreadLibraryCalls(%p)\n", hLibModule);
 	if (!hLibModule) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
 	wibo::ModuleInfo *info = wibo::moduleInfoFromHandle(hLibModule);
 	if (!info) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
 	if (!wibo::disableThreadNotifications(info)) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
 	return TRUE;
@@ -56,7 +56,7 @@ HMODULE WIN_FUNC GetModuleHandleA(LPCSTR lpModuleName) {
 	DEBUG_LOG("GetModuleHandleA(%s)\n", lpModuleName);
 	const auto *module = wibo::findLoadedModule(lpModuleName);
 	if (!module) {
-		wibo::lastError = ERROR_MOD_NOT_FOUND;
+		setLastError(ERROR_MOD_NOT_FOUND);
 		return nullptr;
 	}
 	return module->handle;
@@ -76,12 +76,12 @@ DWORD WIN_FUNC GetModuleFileNameA(HMODULE hModule, LPSTR lpFilename, DWORD nSize
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetModuleFileNameA(%p, %p, %u)\n", hModule, lpFilename, nSize);
 	if (!lpFilename) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	auto *info = wibo::moduleInfoFromHandle(hModule);
 	if (!info) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	std::string path;
@@ -92,7 +92,7 @@ DWORD WIN_FUNC GetModuleFileNameA(HMODULE hModule, LPSTR lpFilename, DWORD nSize
 	}
 	DEBUG_LOG("-> %s\n", path.c_str());
 	if (nSize == 0) {
-		wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+		setLastError(ERROR_INSUFFICIENT_BUFFER);
 		return 0;
 	}
 	const size_t len = path.size();
@@ -102,7 +102,7 @@ DWORD WIN_FUNC GetModuleFileNameA(HMODULE hModule, LPSTR lpFilename, DWORD nSize
 		lpFilename[copyLen] = '\0';
 	}
 	if (copyLen < len) {
-		wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+		setLastError(ERROR_INSUFFICIENT_BUFFER);
 		return nSize;
 	}
 	return static_cast<DWORD>(copyLen);
@@ -112,12 +112,12 @@ DWORD WIN_FUNC GetModuleFileNameW(HMODULE hModule, LPWSTR lpFilename, DWORD nSiz
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetModuleFileNameW(%p, %s, %u)\n", hModule, wideStringToString(lpFilename).c_str(), nSize);
 	if (!lpFilename) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	auto *info = wibo::moduleInfoFromHandle(hModule);
 	if (!info) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	std::string path;
@@ -127,7 +127,7 @@ DWORD WIN_FUNC GetModuleFileNameW(HMODULE hModule, LPWSTR lpFilename, DWORD nSiz
 		path = info->originalName;
 	}
 	if (nSize == 0) {
-		wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+		setLastError(ERROR_INSUFFICIENT_BUFFER);
 		return 0;
 	}
 	auto wide = stringToWideString(path.c_str());
@@ -143,7 +143,7 @@ DWORD WIN_FUNC GetModuleFileNameW(HMODULE hModule, LPWSTR lpFilename, DWORD nSiz
 		lpFilename[copyLen] = 0;
 	}
 	if (copyLen < len) {
-		wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+		setLastError(ERROR_INSUFFICIENT_BUFFER);
 		return nSize;
 	}
 	return static_cast<DWORD>(copyLen);
@@ -185,17 +185,17 @@ HGLOBAL WIN_FUNC LoadResource(HMODULE hModule, HRSRC hResInfo) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("LoadResource %p %p\n", hModule, hResInfo);
 	if (!hResInfo) {
-		wibo::lastError = ERROR_RESOURCE_DATA_NOT_FOUND;
+		setLastError(ERROR_RESOURCE_DATA_NOT_FOUND);
 		return nullptr;
 	}
 	auto *exe = wibo::executableFromModule(hModule);
 	if (!exe || !exe->rsrcBase) {
-		wibo::lastError = ERROR_RESOURCE_DATA_NOT_FOUND;
+		setLastError(ERROR_RESOURCE_DATA_NOT_FOUND);
 		return nullptr;
 	}
 	const auto *entry = reinterpret_cast<const wibo::ImageResourceDataEntry *>(hResInfo);
 	if (!wibo::resourceEntryBelongsToExecutable(*exe, entry)) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return nullptr;
 	}
 	return const_cast<void *>(exe->fromRVA<const void>(entry->offsetToData));
@@ -211,17 +211,17 @@ DWORD WIN_FUNC SizeofResource(HMODULE hModule, HRSRC hResInfo) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SizeofResource(%p, %p)\n", hModule, hResInfo);
 	if (!hResInfo) {
-		wibo::lastError = ERROR_RESOURCE_DATA_NOT_FOUND;
+		setLastError(ERROR_RESOURCE_DATA_NOT_FOUND);
 		return 0;
 	}
 	auto *exe = wibo::executableFromModule(hModule);
 	if (!exe || !exe->rsrcBase) {
-		wibo::lastError = ERROR_RESOURCE_DATA_NOT_FOUND;
+		setLastError(ERROR_RESOURCE_DATA_NOT_FOUND);
 		return 0;
 	}
 	const auto *entry = reinterpret_cast<const wibo::ImageResourceDataEntry *>(hResInfo);
 	if (!wibo::resourceEntryBelongsToExecutable(*exe, entry)) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	return entry->size;
@@ -262,7 +262,7 @@ BOOL WIN_FUNC FreeLibrary(HMODULE hLibModule) {
 	DEBUG_LOG("FreeLibrary(%p)\n", hLibModule);
 	auto *info = wibo::moduleInfoFromHandle(hLibModule);
 	if (!info) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
 	wibo::freeModule(info);
@@ -275,7 +275,7 @@ FARPROC WIN_FUNC GetProcAddress(HMODULE hModule, LPCSTR lpProcName) {
 	const auto info = wibo::moduleInfoFromHandle(hModule);
 	if (!info) {
 		DEBUG_LOG("GetProcAddress(%p) -> ERROR_INVALID_HANDLE\n", hModule);
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return nullptr;
 	}
 	const auto proc = reinterpret_cast<uintptr_t>(lpProcName);
@@ -288,7 +288,7 @@ FARPROC WIN_FUNC GetProcAddress(HMODULE hModule, LPCSTR lpProcName) {
 	}
 	DEBUG_LOG("-> %p\n", result);
 	if (!result) {
-		wibo::lastError = ERROR_PROC_NOT_FOUND;
+		setLastError(ERROR_PROC_NOT_FOUND);
 	}
 	return result;
 }

@@ -4,6 +4,7 @@
 #include "context.h"
 #include "errors.h"
 #include "internal.h"
+#include "kernel32/internal.h"
 #include "strutil.h"
 
 #include <algorithm>
@@ -90,12 +91,12 @@ BOOL WIN_FUNC LookupAccountSidW(LPCWSTR lpSystemName, PSID Sid, LPWSTR Name, LPD
 	DEBUG_LOG("LookupAccountSidW(%s, %p, %p, %p, %p, %p, %p)\n", systemName.c_str(), Sid, Name, cchName,
 			  ReferencedDomainName, cchReferencedDomainName, peUse);
 	if (!Sid || !cchName || !cchReferencedDomainName || !peUse) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	auto *sidStruct = reinterpret_cast<const struct Sid *>(Sid);
 	if (!isLocalSystemSid(sidStruct)) {
-		wibo::lastError = ERROR_NONE_MAPPED;
+		kernel32::setLastError(ERROR_NONE_MAPPED);
 		return FALSE;
 	}
 	DWORD requiredAccount = static_cast<DWORD>(wstrlen(kAccountSystem));
@@ -103,7 +104,7 @@ BOOL WIN_FUNC LookupAccountSidW(LPCWSTR lpSystemName, PSID Sid, LPWSTR Name, LPD
 	if (!Name || *cchName <= requiredAccount || !ReferencedDomainName || *cchReferencedDomainName <= requiredDomain) {
 		*cchName = requiredAccount + 1;
 		*cchReferencedDomainName = requiredDomain + 1;
-		wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+		kernel32::setLastError(ERROR_INSUFFICIENT_BUFFER);
 		return FALSE;
 	}
 	std::copy_n(kAccountSystem, requiredAccount + 1, Name);
@@ -120,7 +121,7 @@ BOOL WIN_FUNC LookupPrivilegeValueA(LPCSTR lpSystemName, LPCSTR lpName, PLUID lp
 			  lpLuid);
 	(void)lpSystemName; // only local lookup supported
 	if (!lpName || !lpLuid) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	std::string normalized = normalizePrivilegeName(lpName);
@@ -134,7 +135,7 @@ BOOL WIN_FUNC LookupPrivilegeValueW(LPCWSTR lpSystemName, LPCWSTR lpName, PLUID 
 	DEBUG_LOG("LookupPrivilegeValueW(%p, %p, %p)\n", lpSystemName, lpName, lpLuid);
 	(void)lpSystemName; // only local lookup supported
 	if (!lpName || !lpLuid) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	std::string ansiName = wideStringToString(lpName);
@@ -148,14 +149,14 @@ BOOL WIN_FUNC GetUserNameA(LPSTR lpBuffer, LPDWORD pcbBuffer) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetUserNameA(%p, %p)\n", lpBuffer, pcbBuffer);
 	if (!pcbBuffer) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	const char *name = "SYSTEM";
 	size_t needed = std::strlen(name) + 1;
 	if (!lpBuffer || *pcbBuffer < needed) {
 		*pcbBuffer = static_cast<DWORD>(needed);
-		wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+		kernel32::setLastError(ERROR_INSUFFICIENT_BUFFER);
 		return FALSE;
 	}
 	std::memcpy(lpBuffer, name, needed);
@@ -167,13 +168,13 @@ BOOL WIN_FUNC GetUserNameW(LPWSTR lpBuffer, LPDWORD pcbBuffer) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetUserNameW(%p, %p)\n", lpBuffer, pcbBuffer);
 	if (!pcbBuffer) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	size_t needed = wstrlen(kAccountSystem) + 1;
 	if (!lpBuffer || *pcbBuffer < needed) {
 		*pcbBuffer = static_cast<DWORD>(needed);
-		wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+		kernel32::setLastError(ERROR_INSUFFICIENT_BUFFER);
 		return FALSE;
 	}
 	std::memcpy(lpBuffer, kAccountSystem, needed * sizeof(WCHAR));

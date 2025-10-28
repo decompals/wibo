@@ -80,7 +80,7 @@ LPCH WIN_FUNC GetEnvironmentStrings() {
 
 	char *buffer = static_cast<char *>(mi_malloc(bufSize));
 	if (!buffer) {
-		wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+		setLastError(ERROR_NOT_ENOUGH_MEMORY);
 		return nullptr;
 	}
 	char *ptr = buffer;
@@ -113,7 +113,7 @@ LPWCH WIN_FUNC GetEnvironmentStringsW() {
 
 	uint16_t *buffer = static_cast<uint16_t *>(mi_malloc(bufSizeW * sizeof(uint16_t)));
 	if (!buffer) {
-		wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+		setLastError(ERROR_NOT_ENOUGH_MEMORY);
 		return nullptr;
 	}
 	uint16_t *ptr = buffer;
@@ -137,7 +137,7 @@ BOOL WIN_FUNC FreeEnvironmentStringsA(LPCH penv) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FreeEnvironmentStringsA(%p)\n", penv);
 	if (!penv) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	free(penv);
@@ -148,7 +148,7 @@ BOOL WIN_FUNC FreeEnvironmentStringsW(LPWCH penv) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FreeEnvironmentStringsW(%p)\n", penv);
 	if (!penv) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	free(penv);
@@ -159,12 +159,12 @@ DWORD WIN_FUNC GetEnvironmentVariableA(LPCSTR lpName, LPSTR lpBuffer, DWORD nSiz
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetEnvironmentVariableA(%s, %p, %u)\n", lpName ? lpName : "(null)", lpBuffer, nSize);
 	if (!lpName) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	const char *rawValue = getenv(lpName);
 	if (!rawValue) {
-		wibo::lastError = ERROR_ENVVAR_NOT_FOUND;
+		setLastError(ERROR_ENVVAR_NOT_FOUND);
 		return 0;
 	}
 	std::string converted = convertEnvValueForWindows(lpName, rawValue);
@@ -174,7 +174,7 @@ DWORD WIN_FUNC GetEnvironmentVariableA(LPCSTR lpName, LPSTR lpBuffer, DWORD nSiz
 		return len + 1;
 	}
 	if (!lpBuffer) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	if (nSize <= len) {
@@ -189,12 +189,12 @@ DWORD WIN_FUNC GetEnvironmentVariableW(LPCWSTR lpName, LPWSTR lpBuffer, DWORD nS
 	std::string name = lpName ? wideStringToString(lpName) : std::string();
 	DEBUG_LOG("GetEnvironmentVariableW(%s, %p, %u)\n", name.c_str(), lpBuffer, nSize);
 	if (name.empty()) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	const char *rawValue = getenv(name.c_str());
 	if (!rawValue) {
-		wibo::lastError = ERROR_ENVVAR_NOT_FOUND;
+		setLastError(ERROR_ENVVAR_NOT_FOUND);
 		return 0;
 	}
 	std::string converted = convertEnvValueForWindows(name, rawValue);
@@ -205,7 +205,7 @@ DWORD WIN_FUNC GetEnvironmentVariableW(LPCWSTR lpName, LPWSTR lpBuffer, DWORD nS
 		return required;
 	}
 	if (!lpBuffer) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	if (nSize < required) {
@@ -219,7 +219,7 @@ BOOL WIN_FUNC SetEnvironmentVariableA(LPCSTR lpName, LPCSTR lpValue) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetEnvironmentVariableA(%s, %s)\n", lpName ? lpName : "(null)", lpValue ? lpValue : "(null)");
 	if (!lpName || std::strchr(lpName, '=')) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	int rc = 0;
@@ -245,7 +245,7 @@ BOOL WIN_FUNC SetEnvironmentVariableW(LPCWSTR lpName, LPCWSTR lpValue) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetEnvironmentVariableW -> ");
 	if (!lpName) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		DEBUG_LOG("ERROR_INVALID_PARAMETER\n");
 		return FALSE;
 	}

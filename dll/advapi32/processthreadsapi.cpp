@@ -14,7 +14,7 @@ BOOL WIN_FUNC OpenProcessToken(HANDLE ProcessHandle, DWORD DesiredAccess, PHANDL
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("OpenProcessToken(%p, %u, %p)\n", ProcessHandle, DesiredAccess, TokenHandle);
 	if (!TokenHandle) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	Pin<ProcessObject> obj;
@@ -24,7 +24,7 @@ BOOL WIN_FUNC OpenProcessToken(HANDLE ProcessHandle, DWORD DesiredAccess, PHANDL
 		obj = wibo::handles().getAs<ProcessObject>(ProcessHandle);
 	}
 	if (!obj) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		kernel32::setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
 	auto token = make_pin<TokenObject>(std::move(obj), DesiredAccess);

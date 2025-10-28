@@ -4,6 +4,7 @@
 #include "context.h"
 #include "errors.h"
 #include "files.h"
+#include "kernel32/internal.h"
 #include "strutil.h"
 #include "tls.h"
 
@@ -562,7 +563,7 @@ BOOL callDllMain(wibo::ModuleInfo &info, DWORD reason, LPVOID reserved) {
 	}
 
 	// Reset last error
-	wibo::lastError = ERROR_SUCCESS;
+	kernel32::setLastError(ERROR_SUCCESS);
 
 	using DllMainFunc = BOOL(WIN_FUNC *)(HMODULE, DWORD, LPVOID);
 	auto dllMain = reinterpret_cast<DllMainFunc>(entry);
@@ -943,7 +944,7 @@ bool initializeModuleTls(ModuleInfo &module) {
 	size_t requiredModuleCapacity = reg->tlsModuleSlots.size();
 	if (!wibo::tls::ensureModulePointerCapacity(requiredModuleCapacity)) {
 		releaseModuleTlsSlot(*reg, loaderIndex);
-		wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+		kernel32::setLastError(ERROR_NOT_ENOUGH_MEMORY);
 		return false;
 	}
 	info.loaderIndex = loaderIndex;
@@ -958,7 +959,7 @@ bool initializeModuleTls(ModuleInfo &module) {
 		if (info.indexLocation) {
 			*info.indexLocation = 0;
 		}
-		wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+		kernel32::setLastError(ERROR_NOT_ENOUGH_MEMORY);
 		return false;
 	}
 	info.index = apiIndex;
@@ -1001,11 +1002,11 @@ bool initializeModuleTls(ModuleInfo &module) {
 		if (info.indexLocation) {
 			*info.indexLocation = 0;
 		}
-		wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+		kernel32::setLastError(ERROR_NOT_ENOUGH_MEMORY);
 		return false;
 	}
 	runModuleTlsCallbacks(module, TLS_PROCESS_ATTACH);
-	wibo::lastError = ERROR_SUCCESS;
+	kernel32::setLastError(ERROR_SUCCESS);
 	return true;
 }
 
@@ -1079,7 +1080,7 @@ void notifyDllThreadAttach() {
 	for (wibo::ModuleInfo *info : targets) {
 		callDllMain(*info, DLL_THREAD_ATTACH, nullptr);
 	}
-	wibo::lastError = ERROR_SUCCESS;
+	kernel32::setLastError(ERROR_SUCCESS);
 }
 
 void notifyDllThreadDetach() {
@@ -1106,7 +1107,7 @@ void notifyDllThreadDetach() {
 			freeModuleTlsForThread(**it, tib);
 		}
 	}
-	wibo::lastError = ERROR_SUCCESS;
+	kernel32::setLastError(ERROR_SUCCESS);
 }
 
 BOOL disableThreadNotifications(ModuleInfo *info) {
@@ -1135,7 +1136,7 @@ ModuleInfo *findLoadedModule(const char *name) {
 
 ModuleInfo *loadModule(const char *dllName) {
 	if (!dllName || *dllName == '\0') {
-		lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return nullptr;
 	}
 	std::string requested(dllName);
@@ -1198,14 +1199,14 @@ ModuleInfo *loadModule(const char *dllName) {
 			DEBUG_LOG("  resolveImports failed for %s\n", raw->originalName.c_str());
 			reg.lock.lock();
 			reg->modulesByKey.erase(key);
-			diskError = wibo::lastError;
+			diskError = kernel32::getLastError();
 			return nullptr;
 		}
 		if (!initializeModuleTls(*raw)) {
 			DEBUG_LOG("  initializeModuleTls failed for %s\n", raw->originalName.c_str());
 			reg.lock.lock();
 			reg->modulesByKey.erase(key);
-			diskError = wibo::lastError;
+			diskError = kernel32::getLastError();
 			return nullptr;
 		}
 		reg.lock.lock();
@@ -1230,7 +1231,7 @@ ModuleInfo *loadModule(const char *dllName) {
 			reg->pinnedModules.erase(raw);
 			reg->modulesByKey.erase(key);
 			diskError = ERROR_DLL_INIT_FAILED;
-			wibo::lastError = ERROR_DLL_INIT_FAILED;
+			kernel32::setLastError(ERROR_DLL_INIT_FAILED);
 			return nullptr;
 		}
 		return raw;
@@ -1266,7 +1267,7 @@ ModuleInfo *loadModule(const char *dllName) {
 				DEBUG_LOG("  replaced builtin module %s with external copy\n", requested.c_str());
 				return external;
 			} else if (diskError != ERROR_MOD_NOT_FOUND) {
-				lastError = diskError;
+				kernel32::setLastError(diskError);
 				return nullptr;
 			}
 		}
@@ -1278,7 +1279,7 @@ ModuleInfo *loadModule(const char *dllName) {
 		DEBUG_LOG("  loaded external module %s\n", requested.c_str());
 		return external;
 	} else if (diskError != ERROR_MOD_NOT_FOUND) {
-		lastError = diskError;
+		kernel32::setLastError(diskError);
 		return nullptr;
 	}
 
@@ -1299,7 +1300,7 @@ ModuleInfo *loadModule(const char *dllName) {
 		return builtin;
 	}
 
-	lastError = (diskError != ERROR_SUCCESS) ? diskError : ERROR_MOD_NOT_FOUND;
+	kernel32::setLastError((diskError != ERROR_SUCCESS) ? diskError : ERROR_MOD_NOT_FOUND);
 	return nullptr;
 }
 

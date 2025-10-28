@@ -176,6 +176,9 @@ void tryMarkExecutable(void *mem);
 void setLastErrorFromErrno();
 [[noreturn]] void exitInternal(DWORD exitCode);
 
+DWORD getLastError();
+void setLastError(DWORD error);
+
 } // namespace kernel32
 
 namespace detail {

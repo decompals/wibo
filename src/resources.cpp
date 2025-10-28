@@ -2,6 +2,7 @@
 
 #include "common.h"
 #include "errors.h"
+#include "kernel32/internal.h"
 #include "modules.h"
 
 namespace {
@@ -146,39 +147,39 @@ bool Executable::findResource(const ResourceIdentifier &type, const ResourceIden
 							  std::optional<uint16_t> language, ResourceLocation &out) const {
 	const uint8_t *base = reinterpret_cast<const uint8_t *>(rsrcBase);
 	if (!base) {
-		wibo::lastError = ERROR_RESOURCE_DATA_NOT_FOUND;
+		kernel32::setLastError(ERROR_RESOURCE_DATA_NOT_FOUND);
 		return false;
 	}
 	const auto *root = reinterpret_cast<const ImageResourceDirectory *>(base);
 	const auto *typeEntry = findEntry(base, root, type, rsrcSize);
 	if (!typeEntry) {
-		wibo::lastError = ERROR_RESOURCE_TYPE_NOT_FOUND;
+		kernel32::setLastError(ERROR_RESOURCE_TYPE_NOT_FOUND);
 		return false;
 	}
 	const auto *nameDir = entryAsDirectory(base, typeEntry, rsrcSize);
 	if (!nameDir) {
-		wibo::lastError = ERROR_RESOURCE_DATA_NOT_FOUND;
+		kernel32::setLastError(ERROR_RESOURCE_DATA_NOT_FOUND);
 		return false;
 	}
 	const auto *nameEntry = findEntry(base, nameDir, name, rsrcSize);
 	if (!nameEntry) {
-		wibo::lastError = ERROR_RESOURCE_NAME_NOT_FOUND;
+		kernel32::setLastError(ERROR_RESOURCE_NAME_NOT_FOUND);
 		return false;
 	}
 	const auto *langDir = entryAsDirectory(base, nameEntry, rsrcSize);
 	if (!langDir) {
-		wibo::lastError = ERROR_RESOURCE_DATA_NOT_FOUND;
+		kernel32::setLastError(ERROR_RESOURCE_DATA_NOT_FOUND);
 		return false;
 	}
 	uint16_t chosenLang = language.value_or(0);
 	const auto *langEntry = selectLanguageEntry(langDir, language, chosenLang);
 	if (!langEntry) {
-		wibo::lastError = ERROR_RESOURCE_LANG_NOT_FOUND;
+		kernel32::setLastError(ERROR_RESOURCE_LANG_NOT_FOUND);
 		return false;
 	}
 	const auto *dataEntry = entryAsData(base, langEntry, rsrcSize);
 	if (!dataEntry) {
-		wibo::lastError = ERROR_RESOURCE_DATA_NOT_FOUND;
+		kernel32::setLastError(ERROR_RESOURCE_DATA_NOT_FOUND);
 		return false;
 	}
 	out.dataEntry = dataEntry;

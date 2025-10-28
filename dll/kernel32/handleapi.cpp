@@ -18,7 +18,7 @@ BOOL WIN_FUNC DuplicateHandle(HANDLE hSourceProcessHandle, HANDLE hSourceHandle,
 	(void)dwDesiredAccess;
 	(void)dwOptions;
 	if (!lpTargetHandle) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 
@@ -33,7 +33,7 @@ BOOL WIN_FUNC DuplicateHandle(HANDLE hSourceProcessHandle, HANDLE hSourceHandle,
 	if (!validateProcessHandle(hSourceProcessHandle) || !validateProcessHandle(hTargetProcessHandle)) {
 		DEBUG_LOG("DuplicateHandle: unsupported process handle combination (source=%p target=%p)\n",
 				  hSourceProcessHandle, hTargetProcessHandle);
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
 
@@ -53,7 +53,7 @@ BOOL WIN_FUNC DuplicateHandle(HANDLE hSourceProcessHandle, HANDLE hSourceHandle,
 	}
 
 	if (!handles.duplicateTo(hSourceHandle, handles, *lpTargetHandle, dwDesiredAccess, bInheritHandle, dwOptions)) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
 	return TRUE;
@@ -63,7 +63,7 @@ BOOL WIN_FUNC CloseHandle(HANDLE hObject) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CloseHandle(%p)\n", hObject);
 	if (!wibo::handles().release(hObject)) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
 	return TRUE;

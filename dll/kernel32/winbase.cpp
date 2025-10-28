@@ -83,7 +83,7 @@ bool tryHandleIntegerAtomPointer(const void *ptr, ATOM &atomOut) {
 	}
 	ATOM maybeAtom = static_cast<ATOM>(value & 0xFFFFu);
 	if (maybeAtom < kMinIntegerAtom || maybeAtom > kMaxIntegerAtom) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		atomOut = 0;
 		return true;
 	}
@@ -96,7 +96,7 @@ ATOM findAtomByNormalizedKey(const std::string &normalizedKey) {
 	std::lock_guard lk(table.mutex);
 	auto it = table.stringToAtom.find(normalizedKey);
 	if (it == table.stringToAtom.end()) {
-		wibo::lastError = ERROR_FILE_NOT_FOUND;
+		kernel32::setLastError(ERROR_FILE_NOT_FOUND);
 		return 0;
 	}
 	return it->second;
@@ -114,7 +114,7 @@ ATOM tryParseIntegerAtomString(const std::string &value, bool &handled) {
 	}
 	handled = true;
 	if (parsed < kMinIntegerAtom || parsed > kMaxIntegerAtom) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	return static_cast<ATOM>(parsed);
@@ -137,7 +137,7 @@ ATOM addAtomByString(const std::string &value) {
 		return atom;
 	}
 	if (value.empty() || value.size() > 255) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	std::string normalized = stringToLower(value);
@@ -153,7 +153,7 @@ ATOM addAtomByString(const std::string &value) {
 	}
 	ATOM newAtom = allocateStringAtomLocked(table);
 	if (newAtom == 0) {
-		wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+		kernel32::setLastError(ERROR_NOT_ENOUGH_MEMORY);
 		return 0;
 	}
 	AtomData data;
@@ -192,7 +192,7 @@ bool tryGetCurrentDirectoryPath(std::string &outPath) {
 	std::error_code ec;
 	std::filesystem::path cwd = std::filesystem::current_path(ec);
 	if (ec) {
-		wibo::lastError = wibo::winErrorFromErrno(ec.value());
+		kernel32::setLastError(wibo::winErrorFromErrno(ec.value()));
 		return false;
 	}
 	outPath = files::pathToWindows(cwd);
@@ -208,13 +208,13 @@ bool computeLongWindowsPath(const std::string &inputPath, std::string &longPath)
 
 	auto hostPath = files::pathFromWindows(inputPath.c_str());
 	if (hostPath.empty()) {
-		wibo::lastError = ERROR_PATH_NOT_FOUND;
+		kernel32::setLastError(ERROR_PATH_NOT_FOUND);
 		return false;
 	}
 
 	std::error_code ec;
 	if (!std::filesystem::exists(hostPath, ec)) {
-		wibo::lastError = ERROR_FILE_NOT_FOUND;
+		kernel32::setLastError(ERROR_FILE_NOT_FOUND);
 		return false;
 	}
 
@@ -233,12 +233,12 @@ bool resolveDiskFreeSpaceStat(const char *rootPathName, struct statvfs &outBuf, 
 		std::error_code ec;
 		hostPath = std::filesystem::current_path(ec);
 		if (ec) {
-			wibo::lastError = ERROR_PATH_NOT_FOUND;
+			kernel32::setLastError(ERROR_PATH_NOT_FOUND);
 			return false;
 		}
 	}
 	if (hostPath.empty()) {
-		wibo::lastError = ERROR_PATH_NOT_FOUND;
+		kernel32::setLastError(ERROR_PATH_NOT_FOUND);
 		return false;
 	}
 
@@ -251,7 +251,7 @@ bool resolveDiskFreeSpaceStat(const char *rootPathName, struct statvfs &outBuf, 
 	if (!hostPath.is_absolute()) {
 		auto abs = std::filesystem::absolute(hostPath, ec);
 		if (ec) {
-			wibo::lastError = ERROR_PATH_NOT_FOUND;
+			kernel32::setLastError(ERROR_PATH_NOT_FOUND);
 			return false;
 		}
 		hostPath = abs;
@@ -270,13 +270,13 @@ bool resolveDiskFreeSpaceStat(const char *rootPathName, struct statvfs &outBuf, 
 
 		int savedErrno = errno;
 		if (savedErrno != ENOENT && savedErrno != ENOTDIR) {
-			wibo::lastError = wibo::winErrorFromErrno(savedErrno);
+			kernel32::setLastError(wibo::winErrorFromErrno(savedErrno));
 			return false;
 		}
 
 		std::filesystem::path parent = queryPath.parent_path();
 		if (parent == queryPath) {
-			wibo::lastError = wibo::winErrorFromErrno(savedErrno);
+			kernel32::setLastError(wibo::winErrorFromErrno(savedErrno));
 			return false;
 		}
 		if (parent.empty()) {
@@ -342,17 +342,17 @@ ATOM WIN_FUNC AddAtomA(LPCSTR lpString) {
 	}
 	DEBUG_LOG("AddAtomA(%s)\n", lpString ? lpString : "<null>");
 	if (!lpString) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	size_t len = strnlen(lpString, 256);
 	if (len == 0 || len >= 256) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	std::string value(lpString, len);
 	ATOM result = addAtomByString(value);
-	DEBUG_LOG("AddAtomA -> %u (lastError=%u)\n", result, wibo::lastError);
+	DEBUG_LOG("AddAtomA -> %u (lastError=%u)\n", result, getLastError());
 	return result;
 }
 
@@ -365,19 +365,19 @@ ATOM WIN_FUNC AddAtomW(LPCWSTR lpString) {
 	}
 	if (!lpString) {
 		DEBUG_LOG("AddAtomW(<null>)\n");
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	size_t len = wstrnlen(reinterpret_cast<const uint16_t *>(lpString), 256);
 	if (len == 0 || len >= 256) {
 		DEBUG_LOG("AddAtomW(invalid length)\n");
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	std::string value = wideStringToString(reinterpret_cast<const uint16_t *>(lpString), static_cast<int>(len));
 	DEBUG_LOG("AddAtomW(%s)\n", value.c_str());
 	ATOM result = addAtomByString(value);
-	DEBUG_LOG("AddAtomW -> %u (lastError=%u)\n", result, wibo::lastError);
+	DEBUG_LOG("AddAtomW -> %u (lastError=%u)\n", result, getLastError());
 	return result;
 }
 
@@ -390,17 +390,17 @@ ATOM WIN_FUNC FindAtomA(LPCSTR lpString) {
 	}
 	DEBUG_LOG("FindAtomA(%s)\n", lpString ? lpString : "<null>");
 	if (!lpString) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	size_t len = strnlen(lpString, 256);
 	if (len == 0 || len >= 256) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	std::string value(lpString, len);
 	ATOM result = findAtomByString(value);
-	DEBUG_LOG("FindAtomA -> %u (lastError=%u)\n", result, wibo::lastError);
+	DEBUG_LOG("FindAtomA -> %u (lastError=%u)\n", result, getLastError());
 	return result;
 }
 
@@ -413,19 +413,19 @@ ATOM WIN_FUNC FindAtomW(LPCWSTR lpString) {
 	}
 	if (!lpString) {
 		DEBUG_LOG("FindAtomW(<null>)\n");
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	size_t len = wstrnlen(reinterpret_cast<const uint16_t *>(lpString), 256);
 	if (len == 0 || len >= 256) {
 		DEBUG_LOG("FindAtomW(invalid length)\n");
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	std::string value = wideStringToString(reinterpret_cast<const uint16_t *>(lpString), static_cast<int>(len));
 	DEBUG_LOG("FindAtomW(%s)\n", value.c_str());
 	ATOM result = findAtomByString(value);
-	DEBUG_LOG("FindAtomW -> %u (lastError=%u)\n", result, wibo::lastError);
+	DEBUG_LOG("FindAtomW -> %u (lastError=%u)\n", result, getLastError());
 	return result;
 }
 
@@ -433,7 +433,7 @@ UINT WIN_FUNC GetAtomNameA(ATOM nAtom, LPSTR lpBuffer, int nSize) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetAtomNameA(%u, %p, %d)\n", nAtom, lpBuffer, nSize);
 	if (!lpBuffer || nSize <= 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	std::string value;
@@ -445,19 +445,19 @@ UINT WIN_FUNC GetAtomNameA(ATOM nAtom, LPSTR lpBuffer, int nSize) {
 		std::lock_guard lk(table.mutex);
 		auto it = table.atomToData.find(nAtom);
 		if (it == table.atomToData.end()) {
-			wibo::lastError = ERROR_INVALID_HANDLE;
+			kernel32::setLastError(ERROR_INVALID_HANDLE);
 			return 0;
 		}
 		value = it->second.original;
 	}
 	if (value.size() + 1 > static_cast<size_t>(nSize)) {
-		wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+		kernel32::setLastError(ERROR_INSUFFICIENT_BUFFER);
 		return 0;
 	}
 	std::memcpy(lpBuffer, value.c_str(), value.size());
 	lpBuffer[value.size()] = '\0';
 	UINT written = static_cast<UINT>(value.size());
-	DEBUG_LOG("GetAtomNameA -> %u (lastError=%u)\n", written, wibo::lastError);
+	DEBUG_LOG("GetAtomNameA -> %u (lastError=%u)\n", written, getLastError());
 	return written;
 }
 
@@ -465,7 +465,7 @@ UINT WIN_FUNC GetAtomNameW(ATOM nAtom, LPWSTR lpBuffer, int nSize) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetAtomNameW(%u, %p, %d)\n", nAtom, lpBuffer, nSize);
 	if (!lpBuffer || nSize <= 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	std::string narrow;
@@ -477,7 +477,7 @@ UINT WIN_FUNC GetAtomNameW(ATOM nAtom, LPWSTR lpBuffer, int nSize) {
 		std::lock_guard lk(table.mutex);
 		auto it = table.atomToData.find(nAtom);
 		if (it == table.atomToData.end()) {
-			wibo::lastError = ERROR_INVALID_HANDLE;
+			kernel32::setLastError(ERROR_INVALID_HANDLE);
 			return 0;
 		}
 		narrow = it->second.original;
@@ -485,7 +485,7 @@ UINT WIN_FUNC GetAtomNameW(ATOM nAtom, LPWSTR lpBuffer, int nSize) {
 	auto wide = stringToWideString(narrow.c_str(), narrow.size());
 	size_t needed = wide.size();
 	if (needed > static_cast<size_t>(nSize)) {
-		wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+		kernel32::setLastError(ERROR_INSUFFICIENT_BUFFER);
 		return 0;
 	}
 	std::memcpy(lpBuffer, wide.data(), needed * sizeof(uint16_t));
@@ -493,7 +493,7 @@ UINT WIN_FUNC GetAtomNameW(ATOM nAtom, LPWSTR lpBuffer, int nSize) {
 		lpBuffer[needed - 1] = 0;
 	}
 	UINT written = static_cast<UINT>(needed ? needed - 1 : 0);
-	DEBUG_LOG("GetAtomNameW -> %u (lastError=%u)\n", written, wibo::lastError);
+	DEBUG_LOG("GetAtomNameW -> %u (lastError=%u)\n", written, getLastError());
 	return written;
 }
 
@@ -523,7 +523,7 @@ DWORD WIN_FUNC FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId
 		std::string message = std::system_category().message(static_cast<int>(dwMessageId));
 		size_t length = message.length();
 		if (!lpBuffer || nSize == 0) {
-			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			setLastError(ERROR_INSUFFICIENT_BUFFER);
 			return 0;
 		}
 		std::strncpy(lpBuffer, message.c_str(), static_cast<size_t>(nSize));
@@ -531,7 +531,7 @@ DWORD WIN_FUNC FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId
 			if (static_cast<size_t>(nSize) > 0) {
 				lpBuffer[nSize - 1] = '\0';
 			}
-			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			setLastError(ERROR_INSUFFICIENT_BUFFER);
 			return 0;
 		}
 		lpBuffer[length] = '\0';
@@ -545,7 +545,7 @@ DWORD WIN_FUNC FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId
 	if (lpBuffer && nSize > 0) {
 		lpBuffer[0] = '\0';
 	}
-	wibo::lastError = ERROR_CALL_NOT_IMPLEMENTED;
+	setLastError(ERROR_CALL_NOT_IMPLEMENTED);
 	return 0;
 }
 
@@ -571,7 +571,7 @@ BOOL WIN_FUNC SetDllDirectoryA(LPCSTR lpPathName) {
 
 	std::filesystem::path hostPath = files::pathFromWindows(lpPathName);
 	if (hostPath.empty() || !std::filesystem::exists(hostPath)) {
-		wibo::lastError = ERROR_PATH_NOT_FOUND;
+		setLastError(ERROR_PATH_NOT_FOUND);
 		return FALSE;
 	}
 
@@ -603,23 +603,23 @@ BOOL WIN_FUNC FindActCtxSectionStringW(DWORD dwFlags, const GUID *lpExtensionGui
 			  ReturnedData);
 
 	if (lpExtensionGuid) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 
 	if (!ReturnedData) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 
 	if (dwFlags & ~FIND_ACTCTX_SECTION_KEY_RETURN_HACTCTX) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 
 	ULONG originalSize = ReturnedData->cbSize;
 	if (originalSize < sizeof(ACTCTX_SECTION_KEYED_DATA)) {
-		wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+		setLastError(ERROR_INSUFFICIENT_BUFFER);
 		return FALSE;
 	}
 
@@ -646,7 +646,7 @@ BOOL WIN_FUNC FindActCtxSectionStringW(DWORD dwFlags, const GUID *lpExtensionGui
 	}
 
 	if (!matchedEntry) {
-		wibo::lastError = ERROR_SXS_KEY_NOT_FOUND;
+		setLastError(ERROR_SXS_KEY_NOT_FOUND);
 		return FALSE;
 	}
 
@@ -707,13 +707,13 @@ BOOL WIN_FUNC GetComputerNameA(LPSTR lpBuffer, LPDWORD nSize) {
 		if (nSize) {
 			*nSize = 0;
 		}
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 
 	if (*nSize < kComputerNameRequiredSize) {
 		*nSize = kComputerNameRequiredSize;
-		wibo::lastError = ERROR_BUFFER_OVERFLOW;
+		setLastError(ERROR_BUFFER_OVERFLOW);
 		return FALSE;
 	}
 
@@ -729,13 +729,13 @@ BOOL WIN_FUNC GetComputerNameW(LPWSTR lpBuffer, LPDWORD nSize) {
 		if (nSize) {
 			*nSize = 0;
 		}
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 
 	if (*nSize < kComputerNameRequiredSize) {
 		*nSize = kComputerNameRequiredSize;
-		wibo::lastError = ERROR_BUFFER_OVERFLOW;
+		setLastError(ERROR_BUFFER_OVERFLOW);
 		return FALSE;
 	}
 
@@ -790,7 +790,7 @@ HLOCAL WIN_FUNC LocalAlloc(UINT uFlags, SIZE_T uBytes) {
 	}
 	void *result = doAlloc(static_cast<UINT>(uBytes), zero);
 	if (!result) {
-		wibo::lastError = ERROR_NOT_SUPPORTED;
+		setLastError(ERROR_NOT_SUPPORTED);
 		return nullptr;
 	}
 	// Legacy Windows applications (pre-NX and DEP) may expect executable memory from LocalAlloc.
@@ -816,7 +816,7 @@ HLOCAL WIN_FUNC LocalReAlloc(HLOCAL hMem, SIZE_T uBytes, UINT uFlags) {
 	}
 	void *result = doRealloc(hMem, static_cast<UINT>(uBytes), zero);
 	if (!result && uBytes != 0) {
-		wibo::lastError = ERROR_NOT_SUPPORTED;
+		setLastError(ERROR_NOT_SUPPORTED);
 		return nullptr;
 	}
 	// Legacy Windows applications (pre-NX and DEP) may expect executable memory from LocalReAlloc.
@@ -895,7 +895,7 @@ UINT WIN_FUNC GetSystemWow64DirectoryA(LPSTR lpBuffer, UINT uSize) {
 	DEBUG_LOG("GetSystemWow64DirectoryA(%p, %u)\n", lpBuffer, uSize);
 	(void)lpBuffer;
 	(void)uSize;
-	wibo::lastError = ERROR_CALL_NOT_IMPLEMENTED;
+	setLastError(ERROR_CALL_NOT_IMPLEMENTED);
 	return 0;
 }
 
@@ -904,7 +904,7 @@ UINT WIN_FUNC GetSystemWow64DirectoryW(LPWSTR lpBuffer, UINT uSize) {
 	DEBUG_LOG("GetSystemWow64DirectoryW(%p, %u)\n", lpBuffer, uSize);
 	(void)lpBuffer;
 	(void)uSize;
-	wibo::lastError = ERROR_CALL_NOT_IMPLEMENTED;
+	setLastError(ERROR_CALL_NOT_IMPLEMENTED);
 	return 0;
 }
 
@@ -959,11 +959,11 @@ DWORD WIN_FUNC GetCurrentDirectoryA(DWORD nBufferLength, LPSTR lpBuffer) {
 		return required;
 	}
 	if (!lpBuffer) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	if (nBufferLength < required) {
-		wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+		setLastError(ERROR_INSUFFICIENT_BUFFER);
 		return required;
 	}
 	std::memcpy(lpBuffer, path.c_str(), required);
@@ -984,11 +984,11 @@ DWORD WIN_FUNC GetCurrentDirectoryW(DWORD nBufferLength, LPWSTR lpBuffer) {
 		return required;
 	}
 	if (!lpBuffer) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	if (nBufferLength < required) {
-		wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+		setLastError(ERROR_INSUFFICIENT_BUFFER);
 		return required;
 	}
 	std::copy(widePath.begin(), widePath.end(), lpBuffer);
@@ -999,14 +999,14 @@ int WIN_FUNC SetCurrentDirectoryA(LPCSTR lpPathName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetCurrentDirectoryA(%s)\n", lpPathName ? lpPathName : "(null)");
 	if (!lpPathName) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	auto hostPath = files::pathFromWindows(lpPathName);
 	std::error_code ec;
 	std::filesystem::current_path(hostPath, ec);
 	if (ec) {
-		wibo::lastError = wibo::winErrorFromErrno(ec.value());
+		setLastError(wibo::winErrorFromErrno(ec.value()));
 		return 0;
 	}
 	return 1;
@@ -1016,7 +1016,7 @@ int WIN_FUNC SetCurrentDirectoryW(LPCWSTR lpPathName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetCurrentDirectoryW\n");
 	if (!lpPathName) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	std::string path = wideStringToString(lpPathName);
@@ -1027,7 +1027,7 @@ DWORD WIN_FUNC GetLongPathNameA(LPCSTR lpszShortPath, LPSTR lpszLongPath, DWORD 
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetLongPathNameA(%s, %p, %u)\n", lpszShortPath ? lpszShortPath : "(null)", lpszLongPath, cchBuffer);
 	if (!lpszShortPath) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 
@@ -1042,11 +1042,11 @@ DWORD WIN_FUNC GetLongPathNameA(LPCSTR lpszShortPath, LPSTR lpszLongPath, DWORD 
 		return required;
 	}
 	if (!lpszLongPath) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	if (cchBuffer < required) {
-		wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+		setLastError(ERROR_INSUFFICIENT_BUFFER);
 		return required;
 	}
 	std::memcpy(lpszLongPath, longPath.c_str(), required);
@@ -1057,7 +1057,7 @@ DWORD WIN_FUNC GetLongPathNameW(LPCWSTR lpszShortPath, LPWSTR lpszLongPath, DWOR
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetLongPathNameW(%p, %p, %u)\n", lpszShortPath, lpszLongPath, cchBuffer);
 	if (!lpszShortPath) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	std::string input = wideStringToString(lpszShortPath);
@@ -1071,11 +1071,11 @@ DWORD WIN_FUNC GetLongPathNameW(LPCWSTR lpszShortPath, LPWSTR lpszLongPath, DWOR
 		return required;
 	}
 	if (!lpszLongPath) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 	if (cchBuffer < required) {
-		wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+		setLastError(ERROR_INSUFFICIENT_BUFFER);
 		return required;
 	}
 	std::copy(wideLong.begin(), wideLong.end(), lpszLongPath);

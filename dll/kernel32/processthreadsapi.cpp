@@ -225,14 +225,14 @@ BOOL WIN_FUNC GetProcessAffinityMask(HANDLE hProcess, PDWORD_PTR lpProcessAffini
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetProcessAffinityMask(%p, %p, %p)\n", hProcess, lpProcessAffinityMask, lpSystemAffinityMask);
 	if (!lpProcessAffinityMask || !lpSystemAffinityMask) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 
 	if (!isPseudoCurrentProcessHandle(hProcess)) {
 		auto obj = wibo::handles().getAs<ProcessObject>(hProcess);
 		if (!obj) {
-			wibo::lastError = ERROR_INVALID_HANDLE;
+			setLastError(ERROR_INVALID_HANDLE);
 			return 0;
 		}
 	}
@@ -256,21 +256,21 @@ BOOL WIN_FUNC SetProcessAffinityMask(HANDLE hProcess, DWORD_PTR dwProcessAffinit
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetProcessAffinityMask(%p, 0x%lx)\n", hProcess, static_cast<unsigned long>(dwProcessAffinityMask));
 	if (dwProcessAffinityMask == 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 
 	if (!isPseudoCurrentProcessHandle(hProcess)) {
 		auto obj = wibo::handles().getAs<ProcessObject>(hProcess);
 		if (!obj) {
-			wibo::lastError = ERROR_INVALID_HANDLE;
+			setLastError(ERROR_INVALID_HANDLE);
 			return 0;
 		}
 	}
 
 	DWORD_PTR systemMask = computeSystemAffinityMask();
 	if ((dwProcessAffinityMask & systemMask) == 0 || (dwProcessAffinityMask & ~systemMask) != 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 
@@ -283,14 +283,14 @@ DWORD_PTR WIN_FUNC SetThreadAffinityMask(HANDLE hThread, DWORD_PTR dwThreadAffin
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetThreadAffinityMask(%p, 0x%lx)\n", hThread, static_cast<unsigned long>(dwThreadAffinityMask));
 	if (dwThreadAffinityMask == 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 
 	if (!isPseudoCurrentThreadHandle(hThread)) {
 		auto obj = wibo::handles().getAs<ThreadObject>(hThread);
 		if (!obj) {
-			wibo::lastError = ERROR_INVALID_HANDLE;
+			setLastError(ERROR_INVALID_HANDLE);
 			return 0;
 		}
 	}
@@ -301,7 +301,7 @@ DWORD_PTR WIN_FUNC SetThreadAffinityMask(HANDLE hThread, DWORD_PTR dwThreadAffin
 		return 0;
 	}
 	if ((dwThreadAffinityMask & ~systemMask) != 0 || (dwThreadAffinityMask & processMask) == 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 
@@ -328,7 +328,7 @@ BOOL WIN_FUNC TerminateProcess(HANDLE hProcess, UINT uExitCode) {
 	}
 	auto process = wibo::handles().getAs<ProcessObject>(hProcess);
 	if (!process) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
 	std::lock_guard lk(process->m);
@@ -341,10 +341,10 @@ BOOL WIN_FUNC TerminateProcess(HANDLE hProcess, UINT uExitCode) {
 		switch (err) {
 		case ESRCH:
 		case EPERM:
-			wibo::lastError = ERROR_ACCESS_DENIED;
+			setLastError(ERROR_ACCESS_DENIED);
 			break;
 		default:
-			wibo::lastError = ERROR_INVALID_PARAMETER;
+			setLastError(ERROR_INVALID_PARAMETER);
 			break;
 		}
 		return FALSE;
@@ -358,7 +358,7 @@ BOOL WIN_FUNC GetExitCodeProcess(HANDLE hProcess, LPDWORD lpExitCode) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetExitCodeProcess(%p, %p)\n", hProcess, lpExitCode);
 	if (!lpExitCode) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	if (isPseudoCurrentProcessHandle(hProcess)) {
@@ -367,7 +367,7 @@ BOOL WIN_FUNC GetExitCodeProcess(HANDLE hProcess, LPDWORD lpExitCode) {
 	}
 	auto process = wibo::handles().getAs<ProcessObject>(hProcess);
 	if (!process) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
 	DWORD exitCode = STILL_ACTIVE;
@@ -384,10 +384,10 @@ DWORD WIN_FUNC TlsAlloc() {
 	VERBOSE_LOG("TlsAlloc()\n");
 	DWORD index = wibo::tls::reserveSlot();
 	if (index == wibo::tls::kInvalidTlsIndex) {
-		wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+		setLastError(ERROR_NOT_ENOUGH_MEMORY);
 		return TLS_OUT_OF_INDEXES;
 	}
-	wibo::lastError = ERROR_SUCCESS;
+	setLastError(ERROR_SUCCESS);
 	return index;
 }
 
@@ -395,10 +395,10 @@ BOOL WIN_FUNC TlsFree(DWORD dwTlsIndex) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("TlsFree(%u)\n", dwTlsIndex);
 	if (!wibo::tls::releaseSlot(dwTlsIndex)) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
-	wibo::lastError = ERROR_SUCCESS;
+	setLastError(ERROR_SUCCESS);
 	return TRUE;
 }
 
@@ -406,11 +406,11 @@ LPVOID WIN_FUNC TlsGetValue(DWORD dwTlsIndex) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("TlsGetValue(%u)\n", dwTlsIndex);
 	if (!wibo::tls::isSlotAllocated(dwTlsIndex)) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return nullptr;
 	}
 	void *result = wibo::tls::getValue(dwTlsIndex);
-	wibo::lastError = ERROR_SUCCESS;
+	setLastError(ERROR_SUCCESS);
 	return result;
 }
 
@@ -418,14 +418,14 @@ BOOL WIN_FUNC TlsSetValue(DWORD dwTlsIndex, LPVOID lpTlsValue) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("TlsSetValue(%u, %p)\n", dwTlsIndex, lpTlsValue);
 	if (!wibo::tls::isSlotAllocated(dwTlsIndex)) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	if (!wibo::tls::setValue(dwTlsIndex, lpTlsValue)) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
-	wibo::lastError = ERROR_SUCCESS;
+	setLastError(ERROR_SUCCESS);
 	return TRUE;
 }
 
@@ -435,7 +435,7 @@ DWORD WIN_FUNC ResumeThread(HANDLE hThread) {
 	// TODO: behavior with current thread handle?
 	auto obj = wibo::handles().getAs<ThreadObject>(hThread);
 	if (!obj) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return static_cast<DWORD>(-1);
 	}
 	DWORD previous = 0;
@@ -476,7 +476,7 @@ HANDLE WIN_FUNC CreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dw
 	constexpr DWORD SUPPORTED_FLAGS = CREATE_SUSPENDED | STACK_SIZE_PARAM_IS_A_RESERVATION;
 	if ((dwCreationFlags & ~SUPPORTED_FLAGS) != 0) {
 		DEBUG_LOG("CreateThread: unsupported creation flags 0x%x\n", dwCreationFlags);
-		wibo::lastError = ERROR_NOT_SUPPORTED;
+		setLastError(ERROR_NOT_SUPPORTED);
 		return nullptr;
 	}
 
@@ -504,7 +504,7 @@ HANDLE WIN_FUNC CreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dw
 		// Clean up
 		delete startData;
 		detail::deref(obj.get());
-		wibo::lastError = wibo::winErrorFromErrno(rc);
+		setLastError(wibo::winErrorFromErrno(rc));
 		return INVALID_HANDLE_VALUE;
 	}
 
@@ -534,7 +534,7 @@ BOOL WIN_FUNC GetExitCodeThread(HANDLE hThread, LPDWORD lpExitCode) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetExitCodeThread(%p, %p)\n", hThread, lpExitCode);
 	if (!lpExitCode) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	if (isPseudoCurrentThreadHandle(hThread)) {
@@ -543,7 +543,7 @@ BOOL WIN_FUNC GetExitCodeThread(HANDLE hThread, LPDWORD lpExitCode) {
 	}
 	auto obj = wibo::handles().getAs<ThreadObject>(hThread);
 	if (!obj) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
 	std::lock_guard lk(obj->m);
@@ -579,13 +579,13 @@ BOOL WIN_FUNC GetThreadTimes(HANDLE hThread, FILETIME *lpCreationTime, FILETIME 
 	DEBUG_LOG("GetThreadTimes(%p, %p, %p, %p, %p)\n", hThread, lpCreationTime, lpExitTime, lpKernelTime, lpUserTime);
 
 	if (!lpKernelTime || !lpUserTime) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 
 	if (!isPseudoCurrentThreadHandle(hThread)) {
 		DEBUG_LOG("GetThreadTimes: unsupported handle %p\n", hThread);
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
 
@@ -635,7 +635,7 @@ BOOL WIN_FUNC CreateProcessA(LPCSTR lpApplicationName, LPSTR lpCommandLine, LPSE
 	} else {
 		std::vector<std::string> arguments = wibo::splitCommandLine(commandLine.c_str());
 		if (arguments.empty()) {
-			wibo::lastError = ERROR_FILE_NOT_FOUND;
+			setLastError(ERROR_FILE_NOT_FOUND);
 			return FALSE;
 		}
 		application = arguments.front();
@@ -643,14 +643,14 @@ BOOL WIN_FUNC CreateProcessA(LPCSTR lpApplicationName, LPSTR lpCommandLine, LPSE
 
 	auto resolved = wibo::resolveExecutable(application, useSearchPath);
 	if (!resolved) {
-		wibo::lastError = ERROR_FILE_NOT_FOUND;
+		setLastError(ERROR_FILE_NOT_FOUND);
 		return FALSE;
 	}
 
 	Pin<ProcessObject> obj;
 	int spawnResult = wibo::spawnWithCommandLine(*resolved, commandLine, obj);
 	if (spawnResult != 0) {
-		wibo::lastError = (spawnResult == ENOENT) ? ERROR_FILE_NOT_FOUND : ERROR_ACCESS_DENIED;
+		setLastError((spawnResult == ENOENT) ? ERROR_FILE_NOT_FOUND : ERROR_ACCESS_DENIED);
 		return FALSE;
 	}
 

@@ -42,14 +42,14 @@ LPVOID heapAllocFromRecord(HeapObject *record, DWORD dwFlags, SIZE_T dwBytes) {
 	}
 	if ((record->createFlags | dwFlags) & HEAP_GENERATE_EXCEPTIONS) {
 		DEBUG_LOG("HeapAlloc: HEAP_GENERATE_EXCEPTIONS not supported\n");
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return nullptr;
 	}
 	const bool zeroMemory = (dwFlags & HEAP_ZERO_MEMORY) != 0;
 	const SIZE_T requestSize = std::max<SIZE_T>(1, dwBytes);
 	void *mem = zeroMemory ? mi_heap_zalloc(record->heap, requestSize) : mi_heap_malloc(record->heap, requestSize);
 	if (!mem) {
-		wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+		kernel32::setLastError(ERROR_NOT_ENOUGH_MEMORY);
 		return nullptr;
 	}
 	if (isExecutableHeap(record)) {
@@ -79,13 +79,13 @@ HANDLE WIN_FUNC HeapCreate(DWORD flOptions, SIZE_T dwInitialSize, SIZE_T dwMaxim
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("HeapCreate(%u, %zu, %zu)\n", flOptions, dwInitialSize, dwMaximumSize);
 	if (dwMaximumSize != 0 && dwInitialSize > dwMaximumSize) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return nullptr;
 	}
 
 	mi_heap_t *heap = mi_heap_new();
 	if (!heap) {
-		wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+		setLastError(ERROR_NOT_ENOUGH_MEMORY);
 		return nullptr;
 	}
 
@@ -101,7 +101,7 @@ BOOL WIN_FUNC HeapDestroy(HANDLE hHeap) {
 	DEBUG_LOG("HeapDestroy(%p)\n", hHeap);
 	auto record = wibo::handles().getAs<HeapObject>(hHeap);
 	if (!record || !record->isOwner() || record->isProcessHeap) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
 	mi_heap_destroy(record->heap);
@@ -124,13 +124,13 @@ BOOL WIN_FUNC HeapSetInformation(HANDLE HeapHandle, HEAP_INFORMATION_CLASS HeapI
 			  HeapInformation, HeapInformationLength);
 	auto record = wibo::handles().getAs<HeapObject>(HeapHandle);
 	if (!record || !record->canAccess()) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
 	switch (HeapInformationClass) {
 	case HeapCompatibilityInformation: {
 		if (!HeapInformation || HeapInformationLength < sizeof(ULONG)) {
-			wibo::lastError = ERROR_INVALID_PARAMETER;
+			setLastError(ERROR_INVALID_PARAMETER);
 			return FALSE;
 		}
 		record->compatibility = *static_cast<ULONG *>(HeapInformation);
@@ -139,10 +139,10 @@ BOOL WIN_FUNC HeapSetInformation(HANDLE HeapHandle, HEAP_INFORMATION_CLASS HeapI
 	case HeapEnableTerminationOnCorruption:
 		return TRUE;
 	case HeapOptimizeResources:
-		wibo::lastError = ERROR_CALL_NOT_IMPLEMENTED;
+		setLastError(ERROR_CALL_NOT_IMPLEMENTED);
 		return FALSE;
 	default:
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 }
@@ -153,7 +153,7 @@ LPVOID WIN_FUNC HeapAlloc(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes) {
 	auto record = wibo::handles().getAs<HeapObject>(hHeap);
 	if (!record || !record->canAccess()) {
 		VERBOSE_LOG("-> NULL\n");
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return nullptr;
 	}
 	void *mem = heapAllocFromRecord(record.get(), dwFlags, dwBytes);
@@ -167,7 +167,7 @@ LPVOID WIN_FUNC HeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dw
 	auto record = wibo::handles().getAs<HeapObject>(hHeap);
 	if (!record || !record->canAccess()) {
 		VERBOSE_LOG("-> NULL\n");
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return nullptr;
 	}
 	if (lpMem == nullptr) {
@@ -177,12 +177,12 @@ LPVOID WIN_FUNC HeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dw
 	}
 	if (!mi_is_in_heap_region(lpMem)) {
 		VERBOSE_LOG("-> NULL (not owned)\n");
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return nullptr;
 	}
 	if ((record->createFlags | dwFlags) & HEAP_GENERATE_EXCEPTIONS) {
 		VERBOSE_LOG("-> NULL (exceptions unsupported)\n");
-		wibo::lastError = ERROR_NOT_SUPPORTED;
+		setLastError(ERROR_NOT_SUPPORTED);
 		return nullptr;
 	}
 	const bool inplaceOnly = (dwFlags & HEAP_REALLOC_IN_PLACE_ONLY) != 0;
@@ -194,7 +194,7 @@ LPVOID WIN_FUNC HeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dw
 			return nullptr;
 		}
 		VERBOSE_LOG("-> NULL (zero size with in-place flag)\n");
-		wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+		setLastError(ERROR_NOT_ENOUGH_MEMORY);
 		return nullptr;
 	}
 
@@ -203,7 +203,7 @@ LPVOID WIN_FUNC HeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dw
 	if (inplaceOnly || requestSize <= oldSize) {
 		if (requestSize > oldSize) {
 			VERBOSE_LOG("-> NULL (cannot grow in place)\n");
-			wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+			setLastError(ERROR_NOT_ENOUGH_MEMORY);
 			return nullptr;
 		}
 		VERBOSE_LOG("-> %p (in-place)\n", lpMem);
@@ -212,7 +212,7 @@ LPVOID WIN_FUNC HeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dw
 
 	void *ret = mi_heap_realloc(record->heap, lpMem, requestSize);
 	if (!ret) {
-		wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+		setLastError(ERROR_NOT_ENOUGH_MEMORY);
 		return nullptr;
 	}
 	if (zeroMemory && requestSize > oldSize) {
@@ -236,17 +236,17 @@ SIZE_T WIN_FUNC HeapSize(HANDLE hHeap, DWORD dwFlags, LPCVOID lpMem) {
 	auto record = wibo::handles().getAs<HeapObject>(hHeap);
 	if (!record || !record->canAccess()) {
 		VERBOSE_LOG("-> ERROR_INVALID_HANDLE\n");
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return static_cast<SIZE_T>(-1);
 	}
 	if (!lpMem) {
 		VERBOSE_LOG("-> ERROR_INVALID_PARAMETER\n");
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return static_cast<SIZE_T>(-1);
 	}
 	if (!mi_is_in_heap_region(lpMem)) {
 		VERBOSE_LOG("-> ERROR_INVALID_PARAMETER (not owned)\n");
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return static_cast<SIZE_T>(-1);
 	}
 	size_t size = mi_usable_size(lpMem);
@@ -263,12 +263,12 @@ BOOL WIN_FUNC HeapFree(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem) {
 	auto record = wibo::handles().getAs<HeapObject>(hHeap);
 	if (!record || !record->canAccess()) {
 		VERBOSE_LOG("-> ERROR_INVALID_HANDLE\n");
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
 	if (!mi_is_in_heap_region(lpMem)) {
 		VERBOSE_LOG("-> ERROR_INVALID_PARAMETER (not owned)\n");
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	mi_free(lpMem);

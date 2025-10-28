@@ -2,6 +2,7 @@
 #include "context.h"
 #include "errors.h"
 #include "files.h"
+#include "kernel32/internal.h"
 #include "modules.h"
 #include "resources.h"
 #include "strutil.h"
@@ -160,7 +161,7 @@ bool splitSubBlock(const std::string &subBlock, std::vector<std::string> &segmen
 
 bool loadVersionResource(const char *fileName, std::vector<uint8_t> &buffer) {
 	if (!fileName) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return false;
 	}
 
@@ -168,14 +169,14 @@ bool loadVersionResource(const char *fileName, std::vector<uint8_t> &buffer) {
 	std::string hostPathStr = hostPath.string();
 	FILE *fp = std::fopen(hostPathStr.c_str(), "rb");
 	if (!fp) {
-		wibo::lastError = ERROR_FILE_NOT_FOUND;
+		kernel32::setLastError(ERROR_FILE_NOT_FOUND);
 		return false;
 	}
 
 	wibo::Executable executable;
 	if (!executable.loadPE(fp, false)) {
 		std::fclose(fp);
-		wibo::lastError = ERROR_BAD_EXE_FORMAT;
+		kernel32::setLastError(ERROR_BAD_EXE_FORMAT);
 		return false;
 	}
 
@@ -217,7 +218,7 @@ unsigned int WIN_FUNC GetFileVersionInfoA(const char *lptstrFilename, unsigned i
 	(void)dwHandle;
 	DEBUG_LOG("GetFileVersionInfoA(%s, %u, %p)\n", lptstrFilename, dwLen, lpData);
 	if (!lpData || dwLen == 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
 
@@ -226,7 +227,7 @@ unsigned int WIN_FUNC GetFileVersionInfoA(const char *lptstrFilename, unsigned i
 		return 0;
 
 	if (buffer.size() > dwLen) {
-		wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+		kernel32::setLastError(ERROR_INSUFFICIENT_BUFFER);
 		return 0;
 	}
 

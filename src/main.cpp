@@ -24,7 +24,6 @@
 #include <unistd.h>
 #include <vector>
 
-thread_local uint32_t wibo::lastError = 0;
 char **wibo::argv;
 int wibo::argc;
 std::filesystem::path wibo::guestExecutablePath;
@@ -605,7 +604,7 @@ int main(int argc, char **argv) {
 	}
 
 	// Reset last error
-	wibo::lastError = 0;
+	kernel32::setLastError(0);
 
 	// Invoke the damn thing
 	{

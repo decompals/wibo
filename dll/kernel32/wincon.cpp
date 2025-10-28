@@ -50,7 +50,7 @@ BOOL WIN_FUNC GetConsoleScreenBufferInfo(HANDLE hConsoleOutput, CONSOLE_SCREEN_B
 	DEBUG_LOG("STUB: GetConsoleScreenBufferInfo(%p, %p)\n", hConsoleOutput, lpConsoleScreenBufferInfo);
 	(void)hConsoleOutput;
 	if (!lpConsoleScreenBufferInfo) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	lpConsoleScreenBufferInfo->dwSize = {80, 25};
@@ -71,7 +71,7 @@ BOOL WIN_FUNC WriteConsoleW(HANDLE hConsoleOutput, LPCVOID lpBuffer, DWORD nNumb
 		*lpNumberOfCharsWritten = 0;
 	}
 	if (!lpBuffer && nNumberOfCharsToWrite != 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 
@@ -85,7 +85,7 @@ BOOL WIN_FUNC WriteConsoleW(HANDLE hConsoleOutput, LPCVOID lpBuffer, DWORD nNumb
 		return TRUE;
 	}
 
-	wibo::lastError = ERROR_INVALID_HANDLE;
+	setLastError(ERROR_INVALID_HANDLE);
 	return FALSE;
 }
 
@@ -95,7 +95,7 @@ DWORD WIN_FUNC GetConsoleTitleA(LPSTR lpConsoleTitle, DWORD nSize) {
 	if (lpConsoleTitle && nSize > 0) {
 		lpConsoleTitle[0] = '\0';
 	}
-	wibo::lastError = ERROR_SUCCESS;
+	setLastError(ERROR_SUCCESS);
 	return 0;
 }
 
@@ -105,7 +105,7 @@ DWORD WIN_FUNC GetConsoleTitleW(LPWSTR lpConsoleTitle, DWORD nSize) {
 	if (lpConsoleTitle && nSize > 0) {
 		lpConsoleTitle[0] = 0;
 	}
-	wibo::lastError = ERROR_SUCCESS;
+	setLastError(ERROR_SUCCESS);
 	return 0;
 }
 

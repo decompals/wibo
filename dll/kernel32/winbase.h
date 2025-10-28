@@ -77,9 +77,9 @@ PVOID WIN_FUNC DecodePointer(PVOID Ptr);
 BOOL WIN_FUNC SetDllDirectoryA(LPCSTR lpPathName);
 
 BOOL WIN_FUNC FindActCtxSectionStringA(DWORD dwFlags, const GUID *lpExtensionGuid, ULONG ulSectionId,
-							 LPCSTR lpStringToFind, PACTCTX_SECTION_KEYED_DATA ReturnedData);
+									   LPCSTR lpStringToFind, PACTCTX_SECTION_KEYED_DATA ReturnedData);
 BOOL WIN_FUNC FindActCtxSectionStringW(DWORD dwFlags, const GUID *lpExtensionGuid, ULONG ulSectionId,
-							 LPCWSTR lpStringToFind, PACTCTX_SECTION_KEYED_DATA ReturnedData);
+									   LPCWSTR lpStringToFind, PACTCTX_SECTION_KEYED_DATA ReturnedData);
 
 BOOL WIN_FUNC GetComputerNameA(LPSTR lpBuffer, LPDWORD nSize);
 BOOL WIN_FUNC GetComputerNameW(LPWSTR lpBuffer, LPDWORD nSize);

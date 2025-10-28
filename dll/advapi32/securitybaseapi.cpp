@@ -5,6 +5,7 @@
 #include "errors.h"
 #include "handles.h"
 #include "internal.h"
+#include "kernel32/internal.h"
 
 #include <algorithm>
 #include <cstring>
@@ -106,11 +107,11 @@ BOOL WIN_FUNC InitializeAcl(PACL pAcl, DWORD nAclLength, DWORD dwAclRevision) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("InitializeAcl(%p, %u, %u)\n", pAcl, nAclLength, dwAclRevision);
 	if (!pAcl) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	if (nAclLength < sizeof(ACL) || nAclLength > std::numeric_limits<WORD>::max() || (nAclLength & 0x3) != 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	BYTE revision = static_cast<BYTE>(dwAclRevision);
@@ -121,7 +122,7 @@ BOOL WIN_FUNC InitializeAcl(PACL pAcl, DWORD nAclLength, DWORD dwAclRevision) {
 	case ACL_REVISION4:
 		break;
 	default:
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	pAcl->AclRevision = revision;
@@ -136,7 +137,7 @@ BOOL WIN_FUNC AddAccessAllowedAce(PACL pAcl, DWORD dwAceRevision, DWORD AccessMa
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("AddAccessAllowedAce(%p, %u, 0x%x, %p)\n", pAcl, dwAceRevision, AccessMask, pSid);
 	if (!pAcl || !pSid) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	BYTE revision = static_cast<BYTE>(dwAceRevision);
@@ -147,25 +148,25 @@ BOOL WIN_FUNC AddAccessAllowedAce(PACL pAcl, DWORD dwAceRevision, DWORD AccessMa
 	case ACL_REVISION4:
 		break;
 	default:
-		wibo::lastError = ERROR_REVISION_MISMATCH;
+		kernel32::setLastError(ERROR_REVISION_MISMATCH);
 		return FALSE;
 	}
 	if (pAcl->AclRevision < revision) {
-		wibo::lastError = ERROR_REVISION_MISMATCH;
+		kernel32::setLastError(ERROR_REVISION_MISMATCH);
 		return FALSE;
 	}
 	if (pAcl->AceCount == std::numeric_limits<WORD>::max()) {
-		wibo::lastError = ERROR_ALLOTTED_SPACE_EXCEEDED;
+		kernel32::setLastError(ERROR_ALLOTTED_SPACE_EXCEEDED);
 		return FALSE;
 	}
 	size_t capacity = pAcl->Sbz2 ? pAcl->Sbz2 : pAcl->AclSize;
 	if (capacity < sizeof(ACL)) {
-		wibo::lastError = ERROR_INVALID_ACL;
+		kernel32::setLastError(ERROR_INVALID_ACL);
 		return FALSE;
 	}
 	size_t used = 0;
 	if (!computeAclUsedSize(pAcl, capacity, used)) {
-		wibo::lastError = ERROR_INVALID_ACL;
+		kernel32::setLastError(ERROR_INVALID_ACL);
 		return FALSE;
 	}
 	if (used > pAcl->AclSize) {
@@ -175,17 +176,17 @@ BOOL WIN_FUNC AddAccessAllowedAce(PACL pAcl, DWORD dwAceRevision, DWORD AccessMa
 	const auto *sid = reinterpret_cast<const Sid *>(pSid);
 	size_t sidLen = sidLength(sid);
 	if (sidLen == 0 || sidLen > capacity) {
-		wibo::lastError = ERROR_INVALID_SID;
+		kernel32::setLastError(ERROR_INVALID_SID);
 		return FALSE;
 	}
 	size_t aceSize = sizeof(ACCESS_ALLOWED_ACE) - sizeof(DWORD) + sidLen;
 	aceSize = alignToDword(aceSize);
 	if (aceSize > std::numeric_limits<WORD>::max()) {
-		wibo::lastError = ERROR_INVALID_SID;
+		kernel32::setLastError(ERROR_INVALID_SID);
 		return FALSE;
 	}
 	if (used + aceSize > capacity) {
-		wibo::lastError = ERROR_ALLOTTED_SPACE_EXCEEDED;
+		kernel32::setLastError(ERROR_ALLOTTED_SPACE_EXCEEDED);
 		return FALSE;
 	}
 	auto *dest = reinterpret_cast<BYTE *>(pAcl) + used;
@@ -205,18 +206,18 @@ BOOL WIN_FUNC FindFirstFreeAce(PACL pAcl, LPVOID *pAce) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FindFirstFreeAce(%p, %p)\n", pAcl, pAce);
 	if (!pAce) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	*pAce = nullptr;
 	if (!pAcl) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	size_t capacity = pAcl->Sbz2 ? pAcl->Sbz2 : pAcl->AclSize;
 	size_t used = 0;
 	if (!computeAclUsedSize(pAcl, capacity, used)) {
-		wibo::lastError = ERROR_INVALID_ACL;
+		kernel32::setLastError(ERROR_INVALID_ACL);
 		return FALSE;
 	}
 	*pAce = reinterpret_cast<BYTE *>(pAcl) + used;
@@ -230,15 +231,15 @@ BOOL WIN_FUNC GetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR pSecurityDescriptor
 	DEBUG_LOG("GetSecurityDescriptorDacl(%p, %p, %p, %p)\n", pSecurityDescriptor, lpbDaclPresent, pDacl,
 			  lpbDaclDefaulted);
 	if (!pSecurityDescriptor) {
-		wibo::lastError = ERROR_INVALID_SECURITY_DESCR;
+		kernel32::setLastError(ERROR_INVALID_SECURITY_DESCR);
 		return FALSE;
 	}
 	if (!lpbDaclPresent) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	if (pSecurityDescriptor->Revision != SECURITY_DESCRIPTOR_REVISION) {
-		wibo::lastError = ERROR_INVALID_SECURITY_DESCR;
+		kernel32::setLastError(ERROR_INVALID_SECURITY_DESCR);
 		return FALSE;
 	}
 	BOOL hasDacl = (pSecurityDescriptor->Control & SE_DACL_PRESENT) ? TRUE : FALSE;
@@ -265,12 +266,12 @@ PSID_IDENTIFIER_AUTHORITY WIN_FUNC GetSidIdentifierAuthority(PSID pSid) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetSidIdentifierAuthority(%p)\n", pSid);
 	if (!pSid) {
-		wibo::lastError = ERROR_INVALID_SID;
+		kernel32::setLastError(ERROR_INVALID_SID);
 		return nullptr;
 	}
 	auto *sid = reinterpret_cast<Sid *>(pSid);
 	if (sid->SubAuthorityCount > SID_MAX_SUB_AUTHORITIES) {
-		wibo::lastError = ERROR_INVALID_SID;
+		kernel32::setLastError(ERROR_INVALID_SID);
 		return nullptr;
 	}
 	return reinterpret_cast<PSID_IDENTIFIER_AUTHORITY>(&sid->IdentifierAuthority);
@@ -280,12 +281,12 @@ PUCHAR WIN_FUNC GetSidSubAuthorityCount(PSID pSid) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetSidSubAuthorityCount(%p)\n", pSid);
 	if (!pSid) {
-		wibo::lastError = ERROR_INVALID_SID;
+		kernel32::setLastError(ERROR_INVALID_SID);
 		return nullptr;
 	}
 	auto *sid = reinterpret_cast<Sid *>(pSid);
 	if (sid->SubAuthorityCount > SID_MAX_SUB_AUTHORITIES) {
-		wibo::lastError = ERROR_INVALID_SID;
+		kernel32::setLastError(ERROR_INVALID_SID);
 		return nullptr;
 	}
 	return &sid->SubAuthorityCount;
@@ -295,12 +296,12 @@ PDWORD WIN_FUNC GetSidSubAuthority(PSID pSid, DWORD nSubAuthority) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetSidSubAuthority(%p, %u)\n", pSid, nSubAuthority);
 	if (!pSid) {
-		wibo::lastError = ERROR_INVALID_SID;
+		kernel32::setLastError(ERROR_INVALID_SID);
 		return nullptr;
 	}
 	auto *sid = reinterpret_cast<Sid *>(pSid);
 	if (sid->SubAuthorityCount > SID_MAX_SUB_AUTHORITIES || nSubAuthority >= sid->SubAuthorityCount) {
-		wibo::lastError = ERROR_INVALID_SID;
+		kernel32::setLastError(ERROR_INVALID_SID);
 		return nullptr;
 	}
 	return &sid->SubAuthority[nSubAuthority];
@@ -322,12 +323,12 @@ BOOL WIN_FUNC DuplicateTokenEx(HANDLE hExistingToken, DWORD dwDesiredAccess, voi
 	(void)ImpersonationLevel;
 	(void)TokenType;
 	if (!phNewToken) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	auto existing = wibo::handles().getAs<TokenObject>(hExistingToken);
 	if (!existing) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		kernel32::setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
 	auto newToken =
@@ -340,13 +341,13 @@ BOOL WIN_FUNC CopySid(DWORD nDestinationSidLength, PSID pDestinationSid, PSID pS
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CopySid(%u, %p, %p)\n", nDestinationSidLength, pDestinationSid, pSourceSid);
 	if (!pDestinationSid || !pSourceSid) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	auto *source = reinterpret_cast<Sid *>(pSourceSid);
 	size_t required = sidLength(source);
 	if (required == 0 || required > nDestinationSidLength) {
-		wibo::lastError = ERROR_ALLOTTED_SPACE_EXCEEDED;
+		kernel32::setLastError(ERROR_ALLOTTED_SPACE_EXCEEDED);
 		return FALSE;
 	}
 	std::memcpy(pDestinationSid, pSourceSid, required);
@@ -357,11 +358,11 @@ BOOL WIN_FUNC InitializeSid(PSID sid, PSID_IDENTIFIER_AUTHORITY pIdentifierAutho
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("InitializeSid(%p, %p, %u)\n", sid, pIdentifierAuthority, nSubAuthorityCount);
 	if (!sid || !pIdentifierAuthority) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	if (nSubAuthorityCount > SID_MAX_SUB_AUTHORITIES) {
-		wibo::lastError = ERROR_INVALID_SID;
+		kernel32::setLastError(ERROR_INVALID_SID);
 		return FALSE;
 	}
 	auto *sidStruct = reinterpret_cast<Sid *>(sid);
@@ -378,13 +379,13 @@ BOOL WIN_FUNC EqualSid(PSID pSid1, PSID pSid2) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("EqualSid(%p, %p)\n", pSid1, pSid2);
 	if (!pSid1 || !pSid2) {
-		wibo::lastError = ERROR_INVALID_SID;
+		kernel32::setLastError(ERROR_INVALID_SID);
 		return FALSE;
 	}
 	const auto *sid1 = reinterpret_cast<const Sid *>(pSid1);
 	const auto *sid2 = reinterpret_cast<const Sid *>(pSid2);
 	if (sid1->SubAuthorityCount > SID_MAX_SUB_AUTHORITIES || sid2->SubAuthorityCount > SID_MAX_SUB_AUTHORITIES) {
-		wibo::lastError = ERROR_INVALID_SID;
+		kernel32::setLastError(ERROR_INVALID_SID);
 		return FALSE;
 	}
 	bool equal =
@@ -403,12 +404,12 @@ BOOL WIN_FUNC SetKernelObjectSecurity(HANDLE Handle, SECURITY_INFORMATION Securi
 	DEBUG_LOG("STUB: SetKernelObjectSecurity(%p, 0x%x, %p)\n", Handle, SecurityInformation, SecurityDescriptor);
 	(void)SecurityInformation;
 	if (!SecurityDescriptor) {
-		wibo::lastError = ERROR_INVALID_SECURITY_DESCR;
+		kernel32::setLastError(ERROR_INVALID_SECURITY_DESCR);
 		return FALSE;
 	}
 	auto obj = wibo::handles().get(Handle);
 	if (!obj) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		kernel32::setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
 	return TRUE;
@@ -418,7 +419,7 @@ BOOL WIN_FUNC InitializeSecurityDescriptor(PSECURITY_DESCRIPTOR pSecurityDescrip
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("InitializeSecurityDescriptor(%p, %u)\n", pSecurityDescriptor, dwRevision);
 	if (!pSecurityDescriptor || dwRevision != SECURITY_DESCRIPTOR_REVISION) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	pSecurityDescriptor->Revision = static_cast<BYTE>(dwRevision);
@@ -436,7 +437,7 @@ BOOL WIN_FUNC SetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR pSecurityDescriptor
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetSecurityDescriptorDacl(%p, %u, %p, %u)\n", pSecurityDescriptor, bDaclPresent, pDacl, bDaclDefaulted);
 	if (!pSecurityDescriptor || pSecurityDescriptor->Revision != SECURITY_DESCRIPTOR_REVISION) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	WORD control = static_cast<WORD>(pSecurityDescriptor->Control & ~(SE_DACL_PRESENT | SE_DACL_DEFAULTED));
@@ -459,12 +460,12 @@ BOOL WIN_FUNC GetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS To
 	DEBUG_LOG("STUB: GetTokenInformation(%p, %u, %p, %u, %p)\n", TokenHandle, TokenInformationClass, TokenInformation,
 			  TokenInformationLength, ReturnLength);
 	if (!ReturnLength) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	auto token = wibo::handles().getAs<TokenObject>(TokenHandle);
 	if (!token) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		kernel32::setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
 	*ReturnLength = 0;
@@ -474,13 +475,13 @@ BOOL WIN_FUNC GetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS To
 		DWORD required = static_cast<DWORD>(tokenUserSize + sidSize);
 		*ReturnLength = required;
 		if (!TokenInformation || TokenInformationLength < required) {
-			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			kernel32::setLastError(ERROR_INSUFFICIENT_BUFFER);
 			return FALSE;
 		}
 		auto *tokenUser = reinterpret_cast<TokenUserData *>(TokenInformation);
 		auto *sid = reinterpret_cast<Sid *>(reinterpret_cast<BYTE *>(TokenInformation) + tokenUserSize);
 		if (!writeLocalSystemSid(sid)) {
-			wibo::lastError = ERROR_INVALID_PARAMETER;
+			kernel32::setLastError(ERROR_INVALID_PARAMETER);
 			return FALSE;
 		}
 		tokenUser->User.SidPtr = sid;
@@ -491,7 +492,7 @@ BOOL WIN_FUNC GetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS To
 		DWORD required = sizeof(TokenStatisticsData);
 		*ReturnLength = required;
 		if (!TokenInformation || TokenInformationLength < required) {
-			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			kernel32::setLastError(ERROR_INSUFFICIENT_BUFFER);
 			return FALSE;
 		}
 		auto *stats = reinterpret_cast<TokenStatisticsData *>(TokenInformation);
@@ -507,7 +508,7 @@ BOOL WIN_FUNC GetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS To
 		DWORD required = sizeof(DWORD);
 		*ReturnLength = required;
 		if (!TokenInformation || TokenInformationLength < required) {
-			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			kernel32::setLastError(ERROR_INSUFFICIENT_BUFFER);
 			return FALSE;
 		}
 		*reinterpret_cast<DWORD *>(TokenInformation) = 0; // not elevated
@@ -517,19 +518,19 @@ BOOL WIN_FUNC GetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS To
 		DWORD required = static_cast<DWORD>(sizeof(TokenPrimaryGroupStub) + sizeof(Sid));
 		*ReturnLength = required;
 		if (!TokenInformation || TokenInformationLength < required) {
-			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			kernel32::setLastError(ERROR_INSUFFICIENT_BUFFER);
 			return FALSE;
 		}
 		auto *groupInfo = reinterpret_cast<TokenPrimaryGroupStub *>(TokenInformation);
 		auto *sid = reinterpret_cast<Sid *>(reinterpret_cast<BYTE *>(TokenInformation) + sizeof(TokenPrimaryGroupStub));
 		if (!writeLocalSystemSid(sid)) {
-			wibo::lastError = ERROR_INVALID_PARAMETER;
+			kernel32::setLastError(ERROR_INVALID_PARAMETER);
 			return FALSE;
 		}
 		groupInfo->PrimaryGroup = sid;
 		return TRUE;
 	}
-	wibo::lastError = ERROR_NOT_SUPPORTED;
+	kernel32::setLastError(ERROR_NOT_SUPPORTED);
 	return FALSE;
 }
 
@@ -557,7 +558,7 @@ BOOL WIN_FUNC SetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS To
 	(void)TokenInformationLength;
 	auto token = wibo::handles().getAs<TokenObject>(TokenHandle);
 	if (!token) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		kernel32::setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
 	return TRUE;

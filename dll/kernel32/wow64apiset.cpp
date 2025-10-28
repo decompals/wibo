@@ -28,18 +28,18 @@ BOOL WIN_FUNC IsWow64Process(HANDLE hProcess, PBOOL Wow64Process) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("IsWow64Process(%p, %p)\n", hProcess, Wow64Process);
 	if (!Wow64Process) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 
 	if (!isPseudoCurrentProcessHandle(hProcess)) {
 		if (!hProcess) {
-			wibo::lastError = ERROR_INVALID_HANDLE;
+			setLastError(ERROR_INVALID_HANDLE);
 			return FALSE;
 		}
 		auto obj = wibo::handles().getAs<ProcessObject>(hProcess);
 		if (!obj) {
-			wibo::lastError = ERROR_INVALID_HANDLE;
+			setLastError(ERROR_INVALID_HANDLE);
 			return FALSE;
 		}
 	}

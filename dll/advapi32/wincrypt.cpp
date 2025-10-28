@@ -3,6 +3,7 @@
 #include "common.h"
 #include "context.h"
 #include "errors.h"
+#include "kernel32/internal.h"
 
 #include "md5.h"
 #define SHA1_IMPLEMENTATION
@@ -75,7 +76,7 @@ BOOL WIN_FUNC CryptAcquireContextW(HCRYPTPROV *phProv, LPCWSTR pszContainer, LPC
 	// to quote the guy above me: screw them for now
 	static int dummyProvider = 42;
 	if (!phProv) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	*phProv = static_cast<HCRYPTPROV>(reinterpret_cast<uintptr_t>(&dummyProvider));
@@ -87,13 +88,13 @@ BOOL WIN_FUNC CryptGenRandom(HCRYPTPROV hProv, DWORD dwLen, BYTE *pbBuffer) {
 	DEBUG_LOG("CryptGenRandom(%p)\n", reinterpret_cast<void *>(static_cast<uintptr_t>(hProv)));
 	(void)hProv;
 	if (!pbBuffer || dwLen == 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 
 	ssize_t ret = getrandom(pbBuffer, dwLen, 0);
 	if (ret < 0 || static_cast<DWORD>(ret) != dwLen) {
-		wibo::lastError = ERROR_NOT_SUPPORTED;
+		kernel32::setLastError(ERROR_NOT_SUPPORTED);
 		return FALSE;
 	}
 
@@ -106,19 +107,19 @@ BOOL WIN_FUNC CryptCreateHash(HCRYPTPROV hProv, ALG_ID Algid, HCRYPTKEY hKey, DW
 			  reinterpret_cast<void *>(static_cast<uintptr_t>(hKey)), dwFlags, phHash);
 	(void)hProv;
 	if (!phHash) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	if (dwFlags != 0) {
-		wibo::lastError = ERROR_NOT_SUPPORTED;
+		kernel32::setLastError(ERROR_NOT_SUPPORTED);
 		return FALSE;
 	}
 	if (hKey != 0) {
-		wibo::lastError = ERROR_NOT_SUPPORTED;
+		kernel32::setLastError(ERROR_NOT_SUPPORTED);
 		return FALSE;
 	}
 	if (Algid != CALG_MD5 && Algid != CALG_SHA1) {
-		wibo::lastError = ERROR_NOT_SUPPORTED;
+		kernel32::setLastError(ERROR_NOT_SUPPORTED);
 		return FALSE;
 	}
 	auto *hash = new HashObject;
@@ -137,12 +138,12 @@ BOOL WIN_FUNC CryptHashData(HCRYPTHASH hHash, const BYTE *pbData, DWORD dwDataLe
 	DEBUG_LOG("CryptHashData(%p, %p, %u, %u)\n", reinterpret_cast<void *>(static_cast<uintptr_t>(hHash)), pbData,
 			  dwDataLen, dwFlags);
 	if (dwFlags != 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	auto *hash = hashObjectFromHandle(hHash);
 	if (!hash || (dwDataLen != 0 && !pbData)) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	if (pbData && dwDataLen) {
@@ -160,12 +161,12 @@ BOOL WIN_FUNC CryptGetHashParam(HCRYPTHASH hHash, DWORD dwParam, BYTE *pbData, D
 	DEBUG_LOG("CryptGetHashParam(%p, %u, %p, %p, %u)\n", reinterpret_cast<void *>(static_cast<uintptr_t>(hHash)),
 			  dwParam, pbData, pdwDataLen, dwFlags);
 	if (dwFlags != 0 || !pdwDataLen) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	auto *hash = hashObjectFromHandle(hHash);
 	if (!hash) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	switch (dwParam) {
@@ -177,7 +178,7 @@ BOOL WIN_FUNC CryptGetHashParam(HCRYPTHASH hHash, DWORD dwParam, BYTE *pbData, D
 		}
 		if (*pdwDataLen < required) {
 			*pdwDataLen = required;
-			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			kernel32::setLastError(ERROR_INSUFFICIENT_BUFFER);
 			return FALSE;
 		}
 		memcpy(pbData, &hash->algid, required);
@@ -192,12 +193,12 @@ BOOL WIN_FUNC CryptGetHashParam(HCRYPTHASH hHash, DWORD dwParam, BYTE *pbData, D
 		}
 		if (*pdwDataLen < required) {
 			*pdwDataLen = required;
-			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			kernel32::setLastError(ERROR_INSUFFICIENT_BUFFER);
 			return FALSE;
 		}
 		DWORD size = hashSizeForAlgid(hash->algid);
 		if (size == 0) {
-			wibo::lastError = ERROR_NOT_SUPPORTED;
+			kernel32::setLastError(ERROR_NOT_SUPPORTED);
 			return FALSE;
 		}
 		memcpy(pbData, &size, required);
@@ -206,12 +207,12 @@ BOOL WIN_FUNC CryptGetHashParam(HCRYPTHASH hHash, DWORD dwParam, BYTE *pbData, D
 	}
 	case HP_HASHVAL: {
 		if (!computeDigest(*hash)) {
-			wibo::lastError = ERROR_NOT_SUPPORTED;
+			kernel32::setLastError(ERROR_NOT_SUPPORTED);
 			return FALSE;
 		}
 		DWORD size = hashSizeForAlgid(hash->algid);
 		if (size == 0) {
-			wibo::lastError = ERROR_NOT_SUPPORTED;
+			kernel32::setLastError(ERROR_NOT_SUPPORTED);
 			return FALSE;
 		}
 		if (!pbData) {
@@ -220,7 +221,7 @@ BOOL WIN_FUNC CryptGetHashParam(HCRYPTHASH hHash, DWORD dwParam, BYTE *pbData, D
 		}
 		if (*pdwDataLen < size) {
 			*pdwDataLen = size;
-			wibo::lastError = ERROR_INSUFFICIENT_BUFFER;
+			kernel32::setLastError(ERROR_INSUFFICIENT_BUFFER);
 			return FALSE;
 		}
 		memcpy(pbData, hash->digest, size);
@@ -228,7 +229,7 @@ BOOL WIN_FUNC CryptGetHashParam(HCRYPTHASH hHash, DWORD dwParam, BYTE *pbData, D
 		return TRUE;
 	}
 	default:
-		wibo::lastError = ERROR_NOT_SUPPORTED;
+		kernel32::setLastError(ERROR_NOT_SUPPORTED);
 		return FALSE;
 	}
 }
@@ -238,7 +239,7 @@ BOOL WIN_FUNC CryptDestroyHash(HCRYPTHASH hHash) {
 	DEBUG_LOG("CryptDestroyHash(%p)\n", reinterpret_cast<void *>(static_cast<uintptr_t>(hHash)));
 	auto *hash = hashObjectFromHandle(hHash);
 	if (!hash) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	delete hash;

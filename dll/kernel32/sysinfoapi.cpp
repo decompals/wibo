@@ -3,6 +3,7 @@
 #include "common.h"
 #include "context.h"
 #include "errors.h"
+#include "internal.h"
 #include "timeutil.h"
 
 #include <cstring>
@@ -194,7 +195,7 @@ BOOL WIN_FUNC GetVersionExA(LPOSVERSIONINFOA lpVersionInformation) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetVersionExA(%p)\n", lpVersionInformation);
 	if (!lpVersionInformation) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	std::memset(lpVersionInformation, 0, lpVersionInformation->dwOSVersionInfoSize);

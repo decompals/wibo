@@ -473,7 +473,7 @@ HANDLE WIN_FUNC CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMap
 	uint64_t size = (static_cast<uint64_t>(dwMaximumSizeHigh) << 32) | dwMaximumSizeLow;
 	if (flProtect != PAGE_READONLY && flProtect != PAGE_READWRITE && flProtect != PAGE_WRITECOPY) {
 		DEBUG_LOG("CreateFileMappingA: unsupported protection 0x%x\n", flProtect);
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return nullptr;
 	}
 
@@ -484,14 +484,14 @@ HANDLE WIN_FUNC CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMap
 		mapping->anonymous = true;
 		mapping->fd = -1;
 		if (size == 0) {
-			wibo::lastError = ERROR_INVALID_PARAMETER;
+			setLastError(ERROR_INVALID_PARAMETER);
 			return nullptr;
 		}
 		mapping->maxSize = size;
 	} else {
 		auto file = wibo::handles().getAs<FileObject>(hFile);
 		if (!file || !file->valid()) {
-			wibo::lastError = ERROR_INVALID_HANDLE;
+			setLastError(ERROR_INVALID_HANDLE);
 			return nullptr;
 		}
 		int dupFd = fcntl(file->fd, F_DUPFD_CLOEXEC, 0);
@@ -525,32 +525,32 @@ HANDLE WIN_FUNC CreateFileMappingW(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMap
 static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredAccess, uint64_t offset,
 									SIZE_T dwNumberOfBytesToMap, LPVOID baseAddress) {
 	if (!mapping) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return nullptr;
 	}
 	if (mapping->closed) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return nullptr;
 	}
 	if (mapping->anonymous && offset != 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return nullptr;
 	}
 	size_t maxSize = mapping->maxSize;
 	uint64_t length = static_cast<uint64_t>(dwNumberOfBytesToMap);
 	if (length == 0) {
 		if (maxSize == 0 || offset > maxSize) {
-			wibo::lastError = ERROR_INVALID_PARAMETER;
+			setLastError(ERROR_INVALID_PARAMETER);
 			return nullptr;
 		}
 		length = maxSize - offset;
 	}
 	if (length == 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return nullptr;
 	}
 	if (maxSize != 0 && offset + length > maxSize) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return nullptr;
 	}
 
@@ -568,7 +568,7 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 		}
 	} else {
 		if (wantWrite && !wantCopy) {
-			wibo::lastError = ERROR_ACCESS_DENIED;
+			setLastError(ERROR_ACCESS_DENIED);
 			return nullptr;
 		}
 		if (wantCopy) {
@@ -585,12 +585,12 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 	size_t offsetDelta = static_cast<size_t>(offset - static_cast<uint64_t>(alignedOffset));
 	uint64_t requestedLength = length + offsetDelta;
 	if (requestedLength < length) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return nullptr;
 	}
 	size_t mapLength = static_cast<size_t>(requestedLength);
 	if (static_cast<uint64_t>(mapLength) != requestedLength) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return nullptr;
 	}
 
@@ -600,16 +600,16 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 	if (baseAddress) {
 		uintptr_t baseAddr = reinterpret_cast<uintptr_t>(baseAddress);
 		if (baseAddr == 0 || (baseAddr % kVirtualAllocationGranularity) != 0) {
-			wibo::lastError = ERROR_INVALID_ADDRESS;
+			setLastError(ERROR_INVALID_ADDRESS);
 			return nullptr;
 		}
 		if (offsetDelta > baseAddr) {
-			wibo::lastError = ERROR_INVALID_ADDRESS;
+			setLastError(ERROR_INVALID_ADDRESS);
 			return nullptr;
 		}
 		uintptr_t mapBaseAddr = baseAddr - offsetDelta;
 		if ((mapBaseAddr & (pageSize - 1)) != 0) {
-			wibo::lastError = ERROR_INVALID_ADDRESS;
+			setLastError(ERROR_INVALID_ADDRESS);
 			return nullptr;
 		}
 		requestedBase = reinterpret_cast<void *>(mapBaseAddr);
@@ -625,16 +625,16 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 	if (mapBase == MAP_FAILED) {
 		int err = errno;
 		if (baseAddress && (err == ENOMEM || err == EEXIST || err == EINVAL || err == EPERM)) {
-			wibo::lastError = ERROR_INVALID_ADDRESS;
+			setLastError(ERROR_INVALID_ADDRESS);
 		} else {
-			wibo::lastError = wibo::winErrorFromErrno(err);
+			setLastError(wibo::winErrorFromErrno(err));
 		}
 		return nullptr;
 	}
 	void *viewPtr = static_cast<uint8_t *>(mapBase) + offsetDelta;
 	if (baseAddress && viewPtr != baseAddress) {
 		munmap(mapBase, mapLength);
-		wibo::lastError = ERROR_INVALID_ADDRESS;
+		setLastError(ERROR_INVALID_ADDRESS);
 		return nullptr;
 	}
 	uintptr_t viewLength = static_cast<uintptr_t>(length);
@@ -667,7 +667,7 @@ LPVOID WIN_FUNC MapViewOfFile(HANDLE hFileMappingObject, DWORD dwDesiredAccess, 
 
 	auto mapping = wibo::handles().getAs<MappingObject>(hFileMappingObject);
 	if (!mapping) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return nullptr;
 	}
 	uint64_t offset = (static_cast<uint64_t>(dwFileOffsetHigh) << 32) | dwFileOffsetLow;
@@ -682,7 +682,7 @@ LPVOID WIN_FUNC MapViewOfFileEx(HANDLE hFileMappingObject, DWORD dwDesiredAccess
 
 	auto mapping = wibo::handles().getAs<MappingObject>(hFileMappingObject);
 	if (!mapping) {
-		wibo::lastError = ERROR_INVALID_HANDLE;
+		setLastError(ERROR_INVALID_HANDLE);
 		return nullptr;
 	}
 	uint64_t offset = (static_cast<uint64_t>(dwFileOffsetHigh) << 32) | dwFileOffsetLow;
@@ -695,7 +695,7 @@ BOOL WIN_FUNC UnmapViewOfFile(LPCVOID lpBaseAddress) {
 	std::unique_lock lk(g_viewInfoMutex);
 	auto it = g_viewInfo.find(reinterpret_cast<uintptr_t>(lpBaseAddress));
 	if (it == g_viewInfo.end()) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	void *base = reinterpret_cast<void *>(it->second.allocationBase);
@@ -713,7 +713,7 @@ BOOL WIN_FUNC FlushViewOfFile(LPCVOID lpBaseAddress, SIZE_T dwNumberOfBytesToFlu
 	DEBUG_LOG("FlushViewOfFile(%p, %zu)\n", lpBaseAddress, dwNumberOfBytesToFlush);
 
 	if (!lpBaseAddress) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 
@@ -727,13 +727,13 @@ BOOL WIN_FUNC FlushViewOfFile(LPCVOID lpBaseAddress, SIZE_T dwNumberOfBytesToFlu
 		std::lock_guard guard(g_viewInfoMutex);
 		auto it = g_viewInfo.upper_bound(address);
 		if (it == g_viewInfo.begin()) {
-			wibo::lastError = ERROR_INVALID_PARAMETER;
+			setLastError(ERROR_INVALID_PARAMETER);
 			return FALSE;
 		}
 		--it;
 		const auto &view = it->second;
 		if (address < view.viewBase || address >= view.viewBase + view.viewLength) {
-			wibo::lastError = ERROR_INVALID_PARAMETER;
+			setLastError(ERROR_INVALID_PARAMETER);
 			return FALSE;
 		}
 		viewBase = view.viewBase;
@@ -766,7 +766,7 @@ BOOL WIN_FUNC FlushViewOfFile(LPCVOID lpBaseAddress, SIZE_T dwNumberOfBytesToFlu
 		alignedEnd = mappingEnd;
 	}
 	if (alignedEnd < alignedStart) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 
@@ -776,7 +776,7 @@ BOOL WIN_FUNC FlushViewOfFile(LPCVOID lpBaseAddress, SIZE_T dwNumberOfBytesToFlu
 	}
 
 	if (msync(reinterpret_cast<void *>(alignedStart), length, MS_SYNC) != 0) {
-		wibo::lastError = wibo::winErrorFromErrno(errno);
+		setLastError(wibo::winErrorFromErrno(errno));
 		return FALSE;
 	}
 
@@ -788,14 +788,14 @@ LPVOID WIN_FUNC VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocation
 	DEBUG_LOG("VirtualAlloc(%p, %zu, %u, %u)\n", lpAddress, dwSize, flAllocationType, flProtect);
 
 	if (dwSize == 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return nullptr;
 	}
 
 	DWORD unsupportedFlags = flAllocationType & (MEM_WRITE_WATCH | MEM_PHYSICAL | MEM_LARGE_PAGES | MEM_RESET_UNDO);
 	if (unsupportedFlags != 0) {
 		DEBUG_LOG("VirtualAlloc unsupported flags: 0x%x\n", unsupportedFlags);
-		wibo::lastError = ERROR_NOT_SUPPORTED;
+		setLastError(ERROR_NOT_SUPPORTED);
 		return nullptr;
 	}
 
@@ -809,17 +809,17 @@ LPVOID WIN_FUNC VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocation
 
 	if (reset) {
 		if (reserve || commit) {
-			wibo::lastError = ERROR_INVALID_PARAMETER;
+			setLastError(ERROR_INVALID_PARAMETER);
 			return nullptr;
 		}
 		if (!lpAddress) {
-			wibo::lastError = ERROR_INVALID_ADDRESS;
+			setLastError(ERROR_INVALID_ADDRESS);
 			return nullptr;
 		}
 		const size_t pageSize = systemPageSize();
 		uintptr_t request = reinterpret_cast<uintptr_t>(lpAddress);
 		if (addOverflows(request, static_cast<size_t>(dwSize))) {
-			wibo::lastError = ERROR_INVALID_PARAMETER;
+			setLastError(ERROR_INVALID_PARAMETER);
 			return nullptr;
 		}
 		uintptr_t start = alignDown(request, pageSize);
@@ -828,7 +828,7 @@ LPVOID WIN_FUNC VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocation
 		std::unique_lock lk(g_virtualAllocMutex);
 		VirtualAllocation *region = lookupRegion(start);
 		if (!region || !rangeWithinRegion(*region, start, length)) {
-			wibo::lastError = ERROR_INVALID_ADDRESS;
+			setLastError(ERROR_INVALID_ADDRESS);
 			return nullptr;
 		}
 #ifdef MADV_FREE
@@ -844,7 +844,7 @@ LPVOID WIN_FUNC VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocation
 	}
 
 	if (!reserve && !commit) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return nullptr;
 	}
 
@@ -859,24 +859,24 @@ LPVOID WIN_FUNC VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocation
 			base = alignDown(request, kVirtualAllocationGranularity);
 			size_t offset = static_cast<size_t>(request - base);
 			if (addOverflows(offset, static_cast<size_t>(dwSize))) {
-				wibo::lastError = ERROR_INVALID_PARAMETER;
+				setLastError(ERROR_INVALID_PARAMETER);
 				return nullptr;
 			}
 			size_t span = static_cast<size_t>(dwSize) + offset;
 			uintptr_t alignedSpan = alignUp(span, pageSize);
 			if (alignedSpan == std::numeric_limits<uintptr_t>::max()) {
-				wibo::lastError = ERROR_INVALID_PARAMETER;
+				setLastError(ERROR_INVALID_PARAMETER);
 				return nullptr;
 			}
 			length = static_cast<size_t>(alignedSpan);
 			if (length == 0 || rangeOverlapsLocked(base, length)) {
-				wibo::lastError = ERROR_INVALID_ADDRESS;
+				setLastError(ERROR_INVALID_ADDRESS);
 				return nullptr;
 			}
 		} else {
 			uintptr_t aligned = alignUp(static_cast<uintptr_t>(dwSize), pageSize);
 			if (aligned == std::numeric_limits<uintptr_t>::max() || aligned == 0) {
-				wibo::lastError = ERROR_INVALID_PARAMETER;
+				setLastError(ERROR_INVALID_PARAMETER);
 				return nullptr;
 			}
 			length = static_cast<size_t>(aligned);
@@ -903,7 +903,7 @@ LPVOID WIN_FUNC VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocation
 		}
 		if (reinterpret_cast<uintptr_t>(result) >= 0x80000000) {
 			munmap(result, length);
-			wibo::lastError = ERROR_NOT_ENOUGH_MEMORY;
+			setLastError(ERROR_NOT_ENOUGH_MEMORY);
 			return nullptr;
 		}
 		uintptr_t actualBase = reinterpret_cast<uintptr_t>(result);
@@ -918,19 +918,19 @@ LPVOID WIN_FUNC VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocation
 
 	uintptr_t request = reinterpret_cast<uintptr_t>(lpAddress);
 	if (addOverflows(request, static_cast<size_t>(dwSize))) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return nullptr;
 	}
 	uintptr_t start = alignDown(request, pageSize);
 	uintptr_t end = alignUp(request + static_cast<uintptr_t>(dwSize), pageSize);
 	size_t length = static_cast<size_t>(end - start);
 	if (length == 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return nullptr;
 	}
 	VirtualAllocation *region = lookupRegion(start);
 	if (!region || !rangeWithinRegion(*region, start, length)) {
-		wibo::lastError = ERROR_INVALID_ADDRESS;
+		setLastError(ERROR_INVALID_ADDRESS);
 		return nullptr;
 	}
 	const size_t pageCount = length / pageSize;
@@ -939,7 +939,7 @@ LPVOID WIN_FUNC VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocation
 	for (size_t i = 0; i < pageCount; ++i) {
 		size_t pageIndex = ((start - region->base) / pageSize) + i;
 		if (pageIndex >= region->pageProtect.size()) {
-			wibo::lastError = ERROR_INVALID_ADDRESS;
+			setLastError(ERROR_INVALID_ADDRESS);
 			return nullptr;
 		}
 		if (region->pageProtect[pageIndex] != 0) {
@@ -974,19 +974,19 @@ BOOL WIN_FUNC VirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("VirtualFree(%p, %zu, %u)\n", lpAddress, dwSize, dwFreeType);
 	if (!lpAddress) {
-		wibo::lastError = ERROR_INVALID_ADDRESS;
+		setLastError(ERROR_INVALID_ADDRESS);
 		return FALSE;
 	}
 
 	if ((dwFreeType & (MEM_COALESCE_PLACEHOLDERS | MEM_PRESERVE_PLACEHOLDER)) != 0) {
-		wibo::lastError = ERROR_NOT_SUPPORTED;
+		setLastError(ERROR_NOT_SUPPORTED);
 		return FALSE;
 	}
 
 	const bool release = (dwFreeType & MEM_RELEASE) != 0;
 	const bool decommit = (dwFreeType & MEM_DECOMMIT) != 0;
 	if (release == decommit) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 
@@ -999,14 +999,14 @@ BOOL WIN_FUNC VirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType) {
 		if (exact == g_virtualAllocations.end()) {
 			auto containing = findRegionIterator(base);
 			if (dwSize != 0 && containing != g_virtualAllocations.end()) {
-				wibo::lastError = ERROR_INVALID_PARAMETER;
+				setLastError(ERROR_INVALID_PARAMETER);
 			} else {
-				wibo::lastError = ERROR_INVALID_ADDRESS;
+				setLastError(ERROR_INVALID_ADDRESS);
 			}
 			return FALSE;
 		}
 		if (dwSize != 0) {
-			wibo::lastError = ERROR_INVALID_PARAMETER;
+			setLastError(ERROR_INVALID_PARAMETER);
 			return FALSE;
 		}
 		size_t length = exact->second.size;
@@ -1022,7 +1022,7 @@ BOOL WIN_FUNC VirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType) {
 	uintptr_t request = reinterpret_cast<uintptr_t>(lpAddress);
 	auto regionIt = findRegionIterator(request);
 	if (regionIt == g_virtualAllocations.end()) {
-		wibo::lastError = ERROR_INVALID_ADDRESS;
+		setLastError(ERROR_INVALID_ADDRESS);
 		return FALSE;
 	}
 	VirtualAllocation &region = regionIt->second;
@@ -1030,25 +1030,25 @@ BOOL WIN_FUNC VirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType) {
 	uintptr_t end = 0;
 	if (dwSize == 0) {
 		if (request != region.base) {
-			wibo::lastError = ERROR_INVALID_PARAMETER;
+			setLastError(ERROR_INVALID_PARAMETER);
 			return FALSE;
 		}
 		start = region.base;
 		end = region.base + region.size;
 	} else {
 		if (addOverflows(request, static_cast<size_t>(dwSize))) {
-			wibo::lastError = ERROR_INVALID_PARAMETER;
+			setLastError(ERROR_INVALID_PARAMETER);
 			return FALSE;
 		}
 		end = alignUp(request + static_cast<uintptr_t>(dwSize), pageSize);
 	}
 	if (end <= start) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	size_t length = static_cast<size_t>(end - start);
 	if (!rangeWithinRegion(region, start, length)) {
-		wibo::lastError = ERROR_INVALID_ADDRESS;
+		setLastError(ERROR_INVALID_ADDRESS);
 		return FALSE;
 	}
 	void *result = mmap(reinterpret_cast<void *>(start), length, PROT_NONE,
@@ -1065,7 +1065,7 @@ BOOL WIN_FUNC VirtualProtect(LPVOID lpAddress, SIZE_T dwSize, DWORD flNewProtect
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("VirtualProtect(%p, %zu, %u)\n", lpAddress, dwSize, flNewProtect);
 	if (!lpAddress || dwSize == 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 
@@ -1074,32 +1074,32 @@ BOOL WIN_FUNC VirtualProtect(LPVOID lpAddress, SIZE_T dwSize, DWORD flNewProtect
 	uintptr_t start = alignDown(request, pageSize);
 	uintptr_t end = alignUp(request + static_cast<uintptr_t>(dwSize), pageSize);
 	if (end <= start) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 
 	std::unique_lock lk(g_virtualAllocMutex);
 	VirtualAllocation *region = lookupRegion(start);
 	if (!region || !rangeWithinRegion(*region, start, static_cast<size_t>(end - start))) {
-		wibo::lastError = ERROR_INVALID_ADDRESS;
+		setLastError(ERROR_INVALID_ADDRESS);
 		return FALSE;
 	}
 
 	const size_t firstPage = (start - region->base) / pageSize;
 	const size_t pageCount = (end - start) / pageSize;
 	if (pageCount == 0) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 
 	DWORD previousProtect = region->pageProtect[firstPage];
 	if (previousProtect == 0) {
-		wibo::lastError = ERROR_NOACCESS;
+		setLastError(ERROR_NOACCESS);
 		return FALSE;
 	}
 	for (size_t i = 0; i < pageCount; ++i) {
 		if (region->pageProtect[firstPage + i] == 0) {
-			wibo::lastError = ERROR_NOACCESS;
+			setLastError(ERROR_NOACCESS);
 			return FALSE;
 		}
 	}
@@ -1124,7 +1124,7 @@ SIZE_T WIN_FUNC VirtualQuery(LPCVOID lpAddress, PMEMORY_BASIC_INFORMATION lpBuff
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("VirtualQuery(%p, %p, %zu)\n", lpAddress, lpBuffer, dwLength);
 	if (!lpBuffer || dwLength < sizeof(MEMORY_BASIC_INFORMATION)) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		DEBUG_LOG("-> ERROR_INVALID_PARAMETER\n");
 		return 0;
 	}
@@ -1134,7 +1134,7 @@ SIZE_T WIN_FUNC VirtualQuery(LPCVOID lpAddress, PMEMORY_BASIC_INFORMATION lpBuff
 	uintptr_t request = lpAddress ? reinterpret_cast<uintptr_t>(lpAddress) : 0;
 	uintptr_t pageBase = alignDown(request, pageSize);
 	if (pageBase >= kProcessAddressLimit) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		DEBUG_LOG("-> ERROR_INVALID_PARAMETER (beyond address space)\n");
 		return 0;
 	}
@@ -1153,7 +1153,7 @@ SIZE_T WIN_FUNC VirtualQuery(LPCVOID lpAddress, PMEMORY_BASIC_INFORMATION lpBuff
 		return sizeof(MEMORY_BASIC_INFORMATION);
 	}
 
-	wibo::lastError = ERROR_INVALID_ADDRESS;
+	setLastError(ERROR_INVALID_ADDRESS);
 	DEBUG_LOG("-> ERROR_INVALID_ADDRESS\n");
 	return 0;
 }
@@ -1164,7 +1164,7 @@ BOOL WIN_FUNC GetProcessWorkingSetSize(HANDLE hProcess, PSIZE_T lpMinimumWorking
 	DEBUG_LOG("GetProcessWorkingSetSize(%p, %p, %p)\n", hProcess, lpMinimumWorkingSetSize, lpMaximumWorkingSetSize);
 	(void)hProcess;
 	if (!lpMinimumWorkingSetSize || !lpMaximumWorkingSetSize) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	*lpMinimumWorkingSetSize = 32 * 1024 * 1024;  // 32 MiB stub

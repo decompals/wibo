@@ -1,5 +1,6 @@
 #include "common.h"
 #include "errors.h"
+#include "kernel32/internal.h"
 #include "modules.h"
 
 #include <algorithm>
@@ -390,7 +391,7 @@ bool wibo::Executable::resolveImports() {
 		uint32_t *addressTable = fromRVA(dir->importAddressTable);
 
 		ModuleInfo *module = loadModule(dllName);
-		if (!module && wibo::lastError != ERROR_MOD_NOT_FOUND) {
+		if (!module && kernel32::getLastError() != ERROR_MOD_NOT_FOUND) {
 			DEBUG_LOG("Failed to load import module %s\n", dllName);
 			// lastError is set by loadModule
 			importsResolved = false;

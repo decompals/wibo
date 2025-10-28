@@ -15,7 +15,7 @@ BOOL WIN_FUNC GetOverlappedResult(HANDLE hFile, LPOVERLAPPED lpOverlapped, LPDWO
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetOverlappedResult(%p, %p, %p, %d)\n", hFile, lpOverlapped, lpNumberOfBytesTransferred, bWait);
 	if (!lpOverlapped) {
-		wibo::lastError = ERROR_INVALID_PARAMETER;
+		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 
@@ -26,14 +26,14 @@ BOOL WIN_FUNC GetOverlappedResult(HANDLE hFile, LPOVERLAPPED lpOverlapped, LPDWO
 			std::unique_lock lk(file->m);
 			file->overlappedCv.wait(lk, [&] { return lpOverlapped->Internal != STATUS_PENDING; });
 		} else {
-			wibo::lastError = ERROR_INVALID_HANDLE;
+			setLastError(ERROR_INVALID_HANDLE);
 			return FALSE;
 		}
 	}
 
 	const auto status = static_cast<NTSTATUS>(lpOverlapped->Internal);
 	if (status == STATUS_PENDING) {
-		wibo::lastError = ERROR_IO_INCOMPLETE;
+		setLastError(ERROR_IO_INCOMPLETE);
 		return FALSE;
 	}
 
@@ -45,7 +45,7 @@ BOOL WIN_FUNC GetOverlappedResult(HANDLE hFile, LPOVERLAPPED lpOverlapped, LPDWO
 	if (error == ERROR_SUCCESS) {
 		return TRUE;
 	}
-	wibo::lastError = error;
+	setLastError(error);
 	return FALSE;
 }
 

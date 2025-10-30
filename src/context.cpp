@@ -4,18 +4,18 @@
 
 namespace {
 
-constexpr size_t kHostFsOffset = offsetof(TIB, hostFsSelector);
-constexpr size_t kHostGsOffset = offsetof(TIB, hostGsSelector);
-constexpr size_t kHostValidOffset = offsetof(TIB, hostSegmentsValid);
-thread_local TIB *g_threadTibForHost = nullptr;
+constexpr size_t kHostFsOffset = offsetof(TEB, hostFsSelector);
+constexpr size_t kHostGsOffset = offsetof(TEB, hostGsSelector);
+constexpr size_t kHostValidOffset = offsetof(TEB, hostSegmentsValid);
+thread_local TEB *g_threadTibForHost = nullptr;
 
 } // namespace
 
 namespace wibo {
 
-void setThreadTibForHost(TIB *tib) { g_threadTibForHost = tib; }
+void setThreadTibForHost(TEB *tib) { g_threadTibForHost = tib; }
 
-TIB *getThreadTibForHost() { return g_threadTibForHost; }
+TEB *getThreadTibForHost() { return g_threadTibForHost; }
 
 HostContextGuard::HostContextGuard() : previousFs_(0), previousGs_(0), restore_(false) {
 	asm volatile("mov %%fs, %0" : "=r"(previousFs_));
@@ -42,7 +42,7 @@ HostContextGuard::~HostContextGuard() {
 	}
 }
 
-GuestContextGuard::GuestContextGuard(TIB *tib) : previousFs_(0), previousGs_(0), applied_(false) {
+GuestContextGuard::GuestContextGuard(TEB *tib) : previousFs_(0), previousGs_(0), applied_(false) {
 	if (!tib || !wibo::tibSelector) {
 		return;
 	}

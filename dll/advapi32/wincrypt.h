@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common.h"
+#include "types.h"
 
 using ALG_ID = DWORD;
 using HCRYPTPROV = ULONG_PTR;

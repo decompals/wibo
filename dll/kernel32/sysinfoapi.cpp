@@ -33,7 +33,7 @@ DWORD_PTR computeSystemProcessorMask(unsigned int cpuCount) {
 
 namespace kernel32 {
 
-void WIN_FUNC GetSystemInfo(LPSYSTEM_INFO lpSystemInfo) {
+void WINAPI GetSystemInfo(LPSYSTEM_INFO lpSystemInfo) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetSystemInfo(%p)\n", lpSystemInfo);
 	if (!lpSystemInfo) {
@@ -70,7 +70,7 @@ void WIN_FUNC GetSystemInfo(LPSYSTEM_INFO lpSystemInfo) {
 	lpSystemInfo->dwAllocationGranularity = 0x10000;
 }
 
-void WIN_FUNC GetSystemTime(LPSYSTEMTIME lpSystemTime) {
+void WINAPI GetSystemTime(LPSYSTEMTIME lpSystemTime) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetSystemTime(%p)\n", lpSystemTime);
 	if (!lpSystemTime) {
@@ -99,7 +99,7 @@ void WIN_FUNC GetSystemTime(LPSYSTEMTIME lpSystemTime) {
 	lpSystemTime->wMilliseconds = 0;
 }
 
-void WIN_FUNC GetLocalTime(LPSYSTEMTIME lpSystemTime) {
+void WINAPI GetLocalTime(LPSYSTEMTIME lpSystemTime) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetLocalTime(%p)\n", lpSystemTime);
 	if (!lpSystemTime) {
@@ -128,7 +128,7 @@ void WIN_FUNC GetLocalTime(LPSYSTEMTIME lpSystemTime) {
 	lpSystemTime->wMilliseconds = 0;
 }
 
-void WIN_FUNC GetSystemTimeAsFileTime(LPFILETIME lpSystemTimeAsFileTime) {
+void WINAPI GetSystemTimeAsFileTime(LPFILETIME lpSystemTimeAsFileTime) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetSystemTimeAsFileTime(%p)\n", lpSystemTimeAsFileTime);
 	if (!lpSystemTimeAsFileTime) {
@@ -160,7 +160,7 @@ void WIN_FUNC GetSystemTimeAsFileTime(LPFILETIME lpSystemTimeAsFileTime) {
 	*lpSystemTimeAsFileTime = fallback;
 }
 
-DWORD WIN_FUNC GetTickCount() {
+DWORD WINAPI GetTickCount() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetTickCount()\n");
 #if defined(CLOCK_MONOTONIC)
@@ -185,13 +185,13 @@ DWORD WIN_FUNC GetTickCount() {
 	return 0;
 }
 
-DWORD WIN_FUNC GetVersion() {
+DWORD WINAPI GetVersion() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetVersion()\n");
 	return kMajorVersion | (kMinorVersion << 8) | (5 << 16) | (kBuildNumber << 24);
 }
 
-BOOL WIN_FUNC GetVersionExA(LPOSVERSIONINFOA lpVersionInformation) {
+BOOL WINAPI GetVersionExA(LPOSVERSIONINFOA lpVersionInformation) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetVersionExA(%p)\n", lpVersionInformation);
 	if (!lpVersionInformation) {

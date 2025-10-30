@@ -19,7 +19,7 @@ class HostContextGuard {
 
 class GuestContextGuard {
   public:
-	explicit GuestContextGuard(TIB *tib);
+	explicit GuestContextGuard(TEB *tib);
 	~GuestContextGuard();
 	GuestContextGuard(const GuestContextGuard &) = delete;
 	GuestContextGuard &operator=(const GuestContextGuard &) = delete;

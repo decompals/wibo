@@ -5,7 +5,7 @@ set(CMAKE_CXX_FLAGS_INIT "-m32 -fno-exceptions -fno-rtti")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "-m32")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "-m32")
 
-project(wibo LANGUAGES C CXX)
+project(wibo LANGUAGES ASM C CXX)
 
 set(WIBO_VERSION "" CACHE STRING "Version string for the wibo binary; if empty, attempts to use git describe")
 
@@ -31,6 +31,11 @@ endif()
 
 if(NOT DEFINED WIBO_VERSION_STRING OR "${WIBO_VERSION_STRING}" STREQUAL "")
     set(WIBO_VERSION_STRING "unknown")
+endif()
+
+# Clang on Linux needs help finding the 32-bit headers
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    include_directories(/usr/i686-linux-gnu/include)
 endif()
 
 set(WIBO_GENERATED_HEADER_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
@@ -179,10 +184,13 @@ add_executable(wibo
 )
 target_compile_definitions(wibo PRIVATE _GNU_SOURCE _FILE_OFFSET_BITS=64 _TIME_BITS=64)
 target_compile_features(wibo PRIVATE cxx_std_20)
-target_compile_options(wibo PRIVATE -Wall -Wextra -fno-pie -maccumulate-outgoing-args)
+target_compile_options(wibo PRIVATE -Wall -Wextra)
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(wibo PRIVATE -fno-pie -maccumulate-outgoing-args)
+    target_link_options(wibo PRIVATE -no-pie -maccumulate-outgoing-args)
+endif()
 target_include_directories(wibo PRIVATE dll src ${WIBO_GENERATED_HEADER_DIR})
-target_link_libraries(wibo PRIVATE mimalloc-obj)
-target_link_options(wibo PRIVATE -no-pie)
+target_link_libraries(wibo PRIVATE mimalloc-obj atomic)
 if (WIBO_ENABLE_LIBURING)
     target_compile_definitions(wibo PRIVATE WIBO_ENABLE_LIBURING=1)
     target_link_libraries(wibo PRIVATE liburing)
@@ -191,6 +199,92 @@ else()
     target_compile_definitions(wibo PRIVATE WIBO_ENABLE_LIBURING=0)
 endif()
 install(TARGETS wibo DESTINATION bin)
+
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
+# Track down libclang for trampoline generation.
+# find_package(Clang) ends up requiring too many dependencies,
+# so a quick-and-dirty manual search is done here instead.
+set(CLANG_ROOT "/usr" CACHE PATH "Path to Clang installation")
+set(_LLVM_MIN_VER 17)
+set(_LLVM_MAX_VER 25)
+set(_CLANG_LIB_SUFFIXES "")
+foreach(ver RANGE ${_LLVM_MAX_VER} ${_LLVM_MIN_VER} -1)
+    list(APPEND _CLANG_LIB_SUFFIXES "llvm-${ver}/lib")
+endforeach()
+list(APPEND _CLANG_LIB_SUFFIXES llvm/lib lib lib64)
+find_library(LIBCLANG_LIBRARY
+    NAMES libclang clang
+    HINTS ${CLANG_ROOT}
+    PATH_SUFFIXES ${_CLANG_LIB_SUFFIXES}
+)
+if(NOT LIBCLANG_LIBRARY)
+    message(FATAL_ERROR "libclang library not found!")
+endif()
+message(STATUS "Using libclang library: ${LIBCLANG_LIBRARY}")
+
+function(wibo_codegen_module)
+    set(options)
+    set(oneValueArgs NAME)
+    set(multiValueArgs HEADERS)
+    cmake_parse_arguments(PARSE_ARGV 0 module "${options}" "${oneValueArgs}" "${multiValueArgs}")
+
+    set(out_asm ${WIBO_GENERATED_HEADER_DIR}/${module_NAME}_trampolines.S)
+    set(out_hdr ${WIBO_GENERATED_HEADER_DIR}/${module_NAME}_trampolines.h)
+    add_custom_command(
+        OUTPUT ${out_asm} ${out_hdr}
+        COMMAND ${CMAKE_COMMAND} -E env
+                ${CMAKE_COMMAND} -E echo "Generating ${module_NAME} trampolines"
+        COMMAND ${CMAKE_COMMAND} -E env
+                LIBCLANG_PATH=${LIBCLANG_LIBRARY}
+                ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_trampolines.py
+                --dll ${module_NAME}
+                --headers ${module_HEADERS}
+                --namespace ${module_NAME}
+                --arch x86
+                --out-asm ${out_asm}
+                --out-hdr ${out_hdr}
+                -I ${CMAKE_CURRENT_SOURCE_DIR}
+                -I ${CMAKE_CURRENT_SOURCE_DIR}/dll
+                -I ${CMAKE_CURRENT_SOURCE_DIR}/src
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_trampolines.py ${module_HEADERS})
+    target_sources(wibo PRIVATE ${out_asm})
+    set_source_files_properties(${out_asm} PROPERTIES COMPILE_FLAGS "-m32")
+endfunction()
+
+wibo_codegen_module(NAME advapi32 HEADERS
+    dll/advapi32/processthreadsapi.h
+    dll/advapi32/securitybaseapi.h
+    dll/advapi32/winbase.h
+    dll/advapi32/wincrypt.h
+    dll/advapi32/winreg.h
+)
+wibo_codegen_module(NAME bcrypt HEADERS dll/bcrypt.h)
+wibo_codegen_module(NAME kernel32 HEADERS
+    dll/kernel32/debugapi.h
+    dll/kernel32/errhandlingapi.h
+    dll/kernel32/fibersapi.h
+    dll/kernel32/fileapi.h
+    dll/kernel32/handleapi.h
+    dll/kernel32/heapapi.h
+    dll/kernel32/interlockedapi.h
+    dll/kernel32/ioapiset.h
+    dll/kernel32/libloaderapi.h
+    dll/kernel32/memoryapi.h
+    dll/kernel32/namedpipeapi.h
+    dll/kernel32/processenv.h
+    dll/kernel32/processthreadsapi.h
+    dll/kernel32/profileapi.h
+    dll/kernel32/stringapiset.h
+    dll/kernel32/synchapi.h
+    dll/kernel32/sysinfoapi.h
+    dll/kernel32/timezoneapi.h
+    dll/kernel32/winbase.h
+    dll/kernel32/wincon.h
+    dll/kernel32/winnls.h
+    dll/kernel32/winnt.h
+    dll/kernel32/wow64apiset.h
+)
 
 if (WIBO_ENABLE_FIXTURE_TESTS)
     include(CTest)

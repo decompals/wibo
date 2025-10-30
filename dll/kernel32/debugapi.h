@@ -1,9 +1,9 @@
 #pragma once
 
-#include "common.h"
+#include "types.h"
 
 namespace kernel32 {
 
-BOOL WIN_FUNC IsDebuggerPresent();
+BOOL WINAPI IsDebuggerPresent();
 
 } // namespace kernel32

@@ -8,7 +8,7 @@
 
 namespace kernel32 {
 
-BOOL WIN_FUNC GetConsoleMode(HANDLE hConsoleHandle, LPDWORD lpMode) {
+BOOL WINAPI GetConsoleMode(HANDLE hConsoleHandle, LPDWORD lpMode) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: GetConsoleMode(%p)\n", hConsoleHandle);
 	if (lpMode) {
@@ -17,7 +17,7 @@ BOOL WIN_FUNC GetConsoleMode(HANDLE hConsoleHandle, LPDWORD lpMode) {
 	return TRUE;
 }
 
-BOOL WIN_FUNC SetConsoleMode(HANDLE hConsoleHandle, DWORD dwMode) {
+BOOL WINAPI SetConsoleMode(HANDLE hConsoleHandle, DWORD dwMode) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: SetConsoleMode(%p, 0x%x)\n", hConsoleHandle, dwMode);
 	(void)hConsoleHandle;
@@ -25,19 +25,19 @@ BOOL WIN_FUNC SetConsoleMode(HANDLE hConsoleHandle, DWORD dwMode) {
 	return TRUE;
 }
 
-UINT WIN_FUNC GetConsoleCP() {
+UINT WINAPI GetConsoleCP() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: GetConsoleCP() -> 65001\n");
 	return 65001; // UTF-8
 }
 
-UINT WIN_FUNC GetConsoleOutputCP() {
+UINT WINAPI GetConsoleOutputCP() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: GetConsoleOutputCP() -> 65001\n");
 	return 65001; // UTF-8
 }
 
-BOOL WIN_FUNC SetConsoleCtrlHandler(PHANDLER_ROUTINE HandlerRoutine, BOOL Add) {
+BOOL WINAPI SetConsoleCtrlHandler(PHANDLER_ROUTINE HandlerRoutine, BOOL Add) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: SetConsoleCtrlHandler(%p, %u)\n", reinterpret_cast<const void *>(HandlerRoutine), Add);
 	(void)HandlerRoutine;
@@ -45,7 +45,7 @@ BOOL WIN_FUNC SetConsoleCtrlHandler(PHANDLER_ROUTINE HandlerRoutine, BOOL Add) {
 	return TRUE;
 }
 
-BOOL WIN_FUNC GetConsoleScreenBufferInfo(HANDLE hConsoleOutput, CONSOLE_SCREEN_BUFFER_INFO *lpConsoleScreenBufferInfo) {
+BOOL WINAPI GetConsoleScreenBufferInfo(HANDLE hConsoleOutput, CONSOLE_SCREEN_BUFFER_INFO *lpConsoleScreenBufferInfo) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: GetConsoleScreenBufferInfo(%p, %p)\n", hConsoleOutput, lpConsoleScreenBufferInfo);
 	(void)hConsoleOutput;
@@ -61,7 +61,7 @@ BOOL WIN_FUNC GetConsoleScreenBufferInfo(HANDLE hConsoleOutput, CONSOLE_SCREEN_B
 	return TRUE;
 }
 
-BOOL WIN_FUNC WriteConsoleW(HANDLE hConsoleOutput, LPCVOID lpBuffer, DWORD nNumberOfCharsToWrite,
+BOOL WINAPI WriteConsoleW(HANDLE hConsoleOutput, LPCVOID lpBuffer, DWORD nNumberOfCharsToWrite,
 							LPDWORD lpNumberOfCharsWritten, LPVOID lpReserved) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("WriteConsoleW(%p, %p, %u, %p, %p)\n", hConsoleOutput, lpBuffer, nNumberOfCharsToWrite,
@@ -89,7 +89,7 @@ BOOL WIN_FUNC WriteConsoleW(HANDLE hConsoleOutput, LPCVOID lpBuffer, DWORD nNumb
 	return FALSE;
 }
 
-DWORD WIN_FUNC GetConsoleTitleA(LPSTR lpConsoleTitle, DWORD nSize) {
+DWORD WINAPI GetConsoleTitleA(LPSTR lpConsoleTitle, DWORD nSize) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetConsoleTitleA(%p, %u)\n", lpConsoleTitle, nSize);
 	if (lpConsoleTitle && nSize > 0) {
@@ -99,7 +99,7 @@ DWORD WIN_FUNC GetConsoleTitleA(LPSTR lpConsoleTitle, DWORD nSize) {
 	return 0;
 }
 
-DWORD WIN_FUNC GetConsoleTitleW(LPWSTR lpConsoleTitle, DWORD nSize) {
+DWORD WINAPI GetConsoleTitleW(LPWSTR lpConsoleTitle, DWORD nSize) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetConsoleTitleW(%p, %u)\n", lpConsoleTitle, nSize);
 	if (lpConsoleTitle && nSize > 0) {
@@ -109,7 +109,7 @@ DWORD WIN_FUNC GetConsoleTitleW(LPWSTR lpConsoleTitle, DWORD nSize) {
 	return 0;
 }
 
-BOOL WIN_FUNC PeekConsoleInputA(HANDLE hConsoleInput, INPUT_RECORD *lpBuffer, DWORD nLength,
+BOOL WINAPI PeekConsoleInputA(HANDLE hConsoleInput, INPUT_RECORD *lpBuffer, DWORD nLength,
 								LPDWORD lpNumberOfEventsRead) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: PeekConsoleInputA(%p, %p, %u)\n", hConsoleInput, lpBuffer, nLength);
@@ -122,7 +122,7 @@ BOOL WIN_FUNC PeekConsoleInputA(HANDLE hConsoleInput, INPUT_RECORD *lpBuffer, DW
 	return TRUE;
 }
 
-BOOL WIN_FUNC ReadConsoleInputA(HANDLE hConsoleInput, INPUT_RECORD *lpBuffer, DWORD nLength,
+BOOL WINAPI ReadConsoleInputA(HANDLE hConsoleInput, INPUT_RECORD *lpBuffer, DWORD nLength,
 								LPDWORD lpNumberOfEventsRead) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: ReadConsoleInputA(%p, %p, %u)\n", hConsoleInput, lpBuffer, nLength);

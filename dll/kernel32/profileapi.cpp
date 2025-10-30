@@ -7,7 +7,7 @@
 
 namespace kernel32 {
 
-BOOL WIN_FUNC QueryPerformanceCounter(LARGE_INTEGER *lpPerformanceCount) {
+BOOL WINAPI QueryPerformanceCounter(LARGE_INTEGER *lpPerformanceCount) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("STUB: QueryPerformanceCounter(%p)\n", lpPerformanceCount);
 	if (!lpPerformanceCount) {
@@ -18,7 +18,7 @@ BOOL WIN_FUNC QueryPerformanceCounter(LARGE_INTEGER *lpPerformanceCount) {
 	return TRUE;
 }
 
-BOOL WIN_FUNC QueryPerformanceFrequency(LARGE_INTEGER *lpFrequency) {
+BOOL WINAPI QueryPerformanceFrequency(LARGE_INTEGER *lpFrequency) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("STUB: QueryPerformanceFrequency(%p)\n", lpFrequency);
 	if (!lpFrequency) {

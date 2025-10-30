@@ -1,5 +1,11 @@
+.idea/
 .cache/
 .git/
 .vscode/
 build/
 tmp/
+tools/.venv/
+tools/__pycache__/
+tools/*.pyc
+tools/*.pyo
+tools/*.pyd

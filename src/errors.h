@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common.h"
+#include "types.h"
 
 #define ERROR_SUCCESS 0
 #define ERROR_FILE_NOT_FOUND 2
@@ -49,7 +49,6 @@
 #define INVALID_SET_FILE_POINTER ((DWORD) - 1)
 #define INVALID_HANDLE_VALUE ((HANDLE) - 1)
 
-typedef int NTSTATUS;
 #define STATUS_SUCCESS ((NTSTATUS)0x00000000)
 #define STATUS_INVALID_HANDLE ((NTSTATUS)0xC0000008)
 #define STATUS_INVALID_PARAMETER ((NTSTATUS)0xC000000D)
@@ -62,7 +61,6 @@ typedef int NTSTATUS;
 #define STATUS_UNEXPECTED_IO_ERROR ((NTSTATUS)0xC00000E9)
 #define STATUS_PIPE_BROKEN ((NTSTATUS)0xC000014B)
 
-typedef int HRESULT;
 #define S_OK ((HRESULT)0x00000000)
 
 namespace wibo {

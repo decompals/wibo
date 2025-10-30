@@ -11,7 +11,7 @@
 
 namespace kernel32 {
 
-BOOL WIN_FUNC SystemTimeToFileTime(const SYSTEMTIME *lpSystemTime, LPFILETIME lpFileTime) {
+BOOL WINAPI SystemTimeToFileTime(const SYSTEMTIME *lpSystemTime, LPFILETIME lpFileTime) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SystemTimeToFileTime(%p, %p)\n", lpSystemTime, lpFileTime);
 	if (!lpSystemTime || !lpFileTime) {
@@ -37,7 +37,7 @@ BOOL WIN_FUNC SystemTimeToFileTime(const SYSTEMTIME *lpSystemTime, LPFILETIME lp
 	return TRUE;
 }
 
-BOOL WIN_FUNC FileTimeToSystemTime(const FILETIME *lpFileTime, LPSYSTEMTIME lpSystemTime) {
+BOOL WINAPI FileTimeToSystemTime(const FILETIME *lpFileTime, LPSYSTEMTIME lpSystemTime) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FileTimeToSystemTime(%p, %p)\n", lpFileTime, lpSystemTime);
 	if (!lpFileTime || !lpSystemTime) {
@@ -66,7 +66,7 @@ BOOL WIN_FUNC FileTimeToSystemTime(const FILETIME *lpFileTime, LPSYSTEMTIME lpSy
 	return TRUE;
 }
 
-BOOL WIN_FUNC FileTimeToLocalFileTime(const FILETIME *lpFileTime, LPFILETIME lpLocalFileTime) {
+BOOL WINAPI FileTimeToLocalFileTime(const FILETIME *lpFileTime, LPFILETIME lpLocalFileTime) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FileTimeToLocalFileTime(%p, %p)\n", lpFileTime, lpLocalFileTime);
 	if (!lpFileTime || !lpLocalFileTime) {
@@ -115,7 +115,7 @@ BOOL WIN_FUNC FileTimeToLocalFileTime(const FILETIME *lpFileTime, LPFILETIME lpL
 	return TRUE;
 }
 
-BOOL WIN_FUNC LocalFileTimeToFileTime(const FILETIME *lpLocalFileTime, LPFILETIME lpFileTime) {
+BOOL WINAPI LocalFileTimeToFileTime(const FILETIME *lpLocalFileTime, LPFILETIME lpFileTime) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("LocalFileTimeToFileTime(%p, %p)\n", lpLocalFileTime, lpFileTime);
 	if (!lpLocalFileTime || !lpFileTime) {
@@ -157,7 +157,7 @@ BOOL WIN_FUNC LocalFileTimeToFileTime(const FILETIME *lpLocalFileTime, LPFILETIM
 	return TRUE;
 }
 
-BOOL WIN_FUNC DosDateTimeToFileTime(WORD wFatDate, WORD wFatTime, LPFILETIME lpFileTime) {
+BOOL WINAPI DosDateTimeToFileTime(WORD wFatDate, WORD wFatTime, LPFILETIME lpFileTime) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("DosDateTimeToFileTime(%04x, %04x, %p)\n", wFatDate, wFatTime, lpFileTime);
 	if (!lpFileTime) {
@@ -192,7 +192,7 @@ BOOL WIN_FUNC DosDateTimeToFileTime(WORD wFatDate, WORD wFatTime, LPFILETIME lpF
 	return TRUE;
 }
 
-BOOL WIN_FUNC FileTimeToDosDateTime(const FILETIME *lpFileTime, LPWORD lpFatDate, LPWORD lpFatTime) {
+BOOL WINAPI FileTimeToDosDateTime(const FILETIME *lpFileTime, LPWORD lpFatDate, LPWORD lpFatTime) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FileTimeToDosDateTime(%p, %p, %p)\n", lpFileTime, lpFatDate, lpFatTime);
 	if (!lpFileTime || !lpFatDate || !lpFatTime) {
@@ -221,7 +221,7 @@ BOOL WIN_FUNC FileTimeToDosDateTime(const FILETIME *lpFileTime, LPWORD lpFatDate
 	return TRUE;
 }
 
-DWORD WIN_FUNC GetTimeZoneInformation(LPTIME_ZONE_INFORMATION lpTimeZoneInformation) {
+DWORD WINAPI GetTimeZoneInformation(LPTIME_ZONE_INFORMATION lpTimeZoneInformation) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetTimeZoneInformation(%p)\n", lpTimeZoneInformation);
 	if (!lpTimeZoneInformation) {

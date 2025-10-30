@@ -2,6 +2,8 @@
 #include "context.h"
 #include "modules.h"
 
+#include <cstring>
+
 namespace vcruntime {
 
 void *WIN_ENTRY memcpy(void *dest, const void *src, size_t count) {

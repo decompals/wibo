@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common.h"
+#include "types.h"
 
 constexpr DWORD EXCEPTION_MAXIMUM_PARAMETERS = 15;
 
@@ -31,14 +31,13 @@ constexpr LONG EXCEPTION_EXECUTE_HANDLER = 1;
 
 namespace kernel32 {
 
-DWORD WIN_FUNC GetLastError();
-void WIN_FUNC SetLastError(DWORD dwErrCode);
-void WIN_FUNC RaiseException(DWORD dwExceptionCode, DWORD dwExceptionFlags, DWORD nNumberOfArguments,
-							 const ULONG_PTR *lpArguments);
-PVOID WIN_FUNC AddVectoredExceptionHandler(ULONG First, PVECTORED_EXCEPTION_HANDLER Handler);
-LPTOP_LEVEL_EXCEPTION_FILTER WIN_FUNC
-SetUnhandledExceptionFilter(LPTOP_LEVEL_EXCEPTION_FILTER lpTopLevelExceptionFilter);
-LONG WIN_FUNC UnhandledExceptionFilter(PEXCEPTION_POINTERS ExceptionInfo);
-UINT WIN_FUNC SetErrorMode(UINT uMode);
+DWORD WINAPI GetLastError();
+void WINAPI SetLastError(DWORD dwErrCode);
+void WINAPI RaiseException(DWORD dwExceptionCode, DWORD dwExceptionFlags, DWORD nNumberOfArguments,
+						   const ULONG_PTR *lpArguments);
+PVOID WINAPI AddVectoredExceptionHandler(ULONG First, PVECTORED_EXCEPTION_HANDLER Handler);
+LPTOP_LEVEL_EXCEPTION_FILTER WINAPI SetUnhandledExceptionFilter(LPTOP_LEVEL_EXCEPTION_FILTER lpTopLevelExceptionFilter);
+LONG WINAPI UnhandledExceptionFilter(PEXCEPTION_POINTERS ExceptionInfo);
+UINT WINAPI SetErrorMode(UINT uMode);
 
 } // namespace kernel32

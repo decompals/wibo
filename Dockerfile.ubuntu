@@ -8,14 +8,23 @@ RUN apt-get update \
         binutils \
         binutils-mingw-w64-i686 \
         ca-certificates \
+        clang \
         cmake \
         file \
-        g++-multilib \
         gcc-mingw-w64-i686 \
         gdb \
         git \
+        lib32gcc-13-dev \
+        lib32stdc++-13-dev \
+        libc6-dev-i386 \
+        libclang-dev \
+        linux-libc-dev-i386-cross \
+        llvm \
         make \
         ninja-build \
+        python3 \
+        python3-pip \
+        python3-venv \
         unzip \
         wget \
     && rm -rf /var/lib/apt/lists/*
@@ -34,11 +43,13 @@ ARG ENABLE_LTO=AUTO
 ARG WIBO_VERSION
 
 RUN cmake -S /wibo -B /wibo/build -G Ninja \
+        -DCMAKE_AR:PATH=/usr/bin/llvm-ar \
+        -DCMAKE_RANLIB:PATH=/usr/bin/llvm-ranlib \
         -DCMAKE_BUILD_TYPE:STRING="$BUILD_TYPE" \
         -DWIBO_ENABLE_LIBURING:BOOL=ON \
         -DWIBO_ENABLE_LTO:STRING="$ENABLE_LTO" \
         -DWIBO_VERSION:STRING="$WIBO_VERSION" \
-    && cmake --build /wibo/build --verbose \
+    && LIBCLANG_PATH=/usr/lib/llvm-18/lib cmake --build /wibo/build --verbose \
     && ( [ "$BUILD_TYPE" != "Release" ] || strip -g /wibo/build/wibo )
 
 # Export binary (usage: docker build -f Dockerfile.ubuntu --target export --output dist .)

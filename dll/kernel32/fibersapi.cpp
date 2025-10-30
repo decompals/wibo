@@ -15,7 +15,7 @@ LPVOID g_flsValues[kMaxFlsValues] = {nullptr};
 
 namespace kernel32 {
 
-DWORD WIN_FUNC FlsAlloc(PFLS_CALLBACK_FUNCTION lpCallback) {
+DWORD WINAPI FlsAlloc(PFLS_CALLBACK_FUNCTION lpCallback) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FlsAlloc(%p)", lpCallback);
 	// If the function succeeds, the return value is an FLS index initialized to zero.
@@ -32,7 +32,7 @@ DWORD WIN_FUNC FlsAlloc(PFLS_CALLBACK_FUNCTION lpCallback) {
 	return FLS_OUT_OF_INDEXES;
 }
 
-BOOL WIN_FUNC FlsFree(DWORD dwFlsIndex) {
+BOOL WINAPI FlsFree(DWORD dwFlsIndex) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FlsFree(%u)\n", dwFlsIndex);
 	if (dwFlsIndex < kMaxFlsValues && g_flsValuesUsed[dwFlsIndex]) {
@@ -44,7 +44,7 @@ BOOL WIN_FUNC FlsFree(DWORD dwFlsIndex) {
 	}
 }
 
-PVOID WIN_FUNC FlsGetValue(DWORD dwFlsIndex) {
+PVOID WINAPI FlsGetValue(DWORD dwFlsIndex) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("FlsGetValue(%u)\n", dwFlsIndex);
 	PVOID result = nullptr;
@@ -59,7 +59,7 @@ PVOID WIN_FUNC FlsGetValue(DWORD dwFlsIndex) {
 	return result;
 }
 
-BOOL WIN_FUNC FlsSetValue(DWORD dwFlsIndex, PVOID lpFlsData) {
+BOOL WINAPI FlsSetValue(DWORD dwFlsIndex, PVOID lpFlsData) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("FlsSetValue(%u, %p)\n", dwFlsIndex, lpFlsData);
 	if (dwFlsIndex < kMaxFlsValues && g_flsValuesUsed[dwFlsIndex]) {

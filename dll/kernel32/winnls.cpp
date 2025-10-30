@@ -83,25 +83,25 @@ std::string localeInfoString(int LCType) {
 
 namespace kernel32 {
 
-UINT WIN_FUNC GetACP() {
+UINT WINAPI GetACP() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetACP() -> %u\n", 28591);
 	return 28591; // Latin1 (ISO/IEC 8859-1)
 }
 
-LANGID WIN_FUNC GetSystemDefaultLangID() {
+LANGID WINAPI GetSystemDefaultLangID() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: GetSystemDefaultLangID()\n");
 	return 0;
 }
 
-LANGID WIN_FUNC GetUserDefaultUILanguage() {
+LANGID WINAPI GetUserDefaultUILanguage() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: GetUserDefaultUILanguage()\n");
 	return 0;
 }
 
-BOOL WIN_FUNC GetCPInfo(UINT CodePage, LPCPINFO lpCPInfo) {
+BOOL WINAPI GetCPInfo(UINT CodePage, LPCPINFO lpCPInfo) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetCPInfo(%u, %p)\n", CodePage, lpCPInfo);
 	(void)CodePage;
@@ -118,7 +118,7 @@ BOOL WIN_FUNC GetCPInfo(UINT CodePage, LPCPINFO lpCPInfo) {
 	return TRUE;
 }
 
-int WIN_FUNC CompareStringA(LCID Locale, DWORD dwCmpFlags, LPCSTR lpString1, int cchCount1, LPCSTR lpString2,
+int WINAPI CompareStringA(LCID Locale, DWORD dwCmpFlags, LPCSTR lpString1, int cchCount1, LPCSTR lpString2,
 							int cchCount2) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CompareStringA(%u, %u, %s, %d, %s, %d)\n", Locale, dwCmpFlags, lpString1 ? lpString1 : "(null)",
@@ -141,7 +141,7 @@ int WIN_FUNC CompareStringA(LCID Locale, DWORD dwCmpFlags, LPCSTR lpString1, int
 	return compareStrings(str1, str2, dwCmpFlags);
 }
 
-int WIN_FUNC CompareStringW(LCID Locale, DWORD dwCmpFlags, LPCWCH lpString1, int cchCount1, LPCWCH lpString2,
+int WINAPI CompareStringW(LCID Locale, DWORD dwCmpFlags, LPCWCH lpString1, int cchCount1, LPCWCH lpString2,
 							int cchCount2) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CompareStringW(%u, %u, %p, %d, %p, %d)\n", Locale, dwCmpFlags, lpString1, cchCount1, lpString2,
@@ -157,14 +157,14 @@ int WIN_FUNC CompareStringW(LCID Locale, DWORD dwCmpFlags, LPCWCH lpString1, int
 	return compareStrings(str1, str2, dwCmpFlags);
 }
 
-BOOL WIN_FUNC IsValidCodePage(UINT CodePage) {
+BOOL WINAPI IsValidCodePage(UINT CodePage) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("IsValidCodePage(%u)\n", CodePage);
 	(void)CodePage;
 	return TRUE;
 }
 
-BOOL WIN_FUNC IsValidLocale(LCID Locale, DWORD dwFlags) {
+BOOL WINAPI IsValidLocale(LCID Locale, DWORD dwFlags) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("IsValidLocale(%u, 0x%x)\n", Locale, dwFlags);
 	(void)Locale;
@@ -175,7 +175,7 @@ BOOL WIN_FUNC IsValidLocale(LCID Locale, DWORD dwFlags) {
 	return TRUE;
 }
 
-int WIN_FUNC GetLocaleInfoA(LCID Locale, LCTYPE LCType, LPSTR lpLCData, int cchData) {
+int WINAPI GetLocaleInfoA(LCID Locale, LCTYPE LCType, LPSTR lpLCData, int cchData) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetLocaleInfoA(%u, %u, %p, %d)\n", Locale, LCType, lpLCData, cchData);
 	(void)Locale;
@@ -199,7 +199,7 @@ int WIN_FUNC GetLocaleInfoA(LCID Locale, LCTYPE LCType, LPSTR lpLCData, int cchD
 	return static_cast<int>(required);
 }
 
-int WIN_FUNC GetLocaleInfoW(LCID Locale, LCTYPE LCType, LPWSTR lpLCData, int cchData) {
+int WINAPI GetLocaleInfoW(LCID Locale, LCTYPE LCType, LPWSTR lpLCData, int cchData) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetLocaleInfoW(%u, %u, %p, %d)\n", Locale, LCType, lpLCData, cchData);
 	(void)Locale;
@@ -224,7 +224,7 @@ int WIN_FUNC GetLocaleInfoW(LCID Locale, LCTYPE LCType, LPWSTR lpLCData, int cch
 	return static_cast<int>(required);
 }
 
-BOOL WIN_FUNC EnumSystemLocalesA(LOCALE_ENUMPROCA lpLocaleEnumProc, DWORD dwFlags) {
+BOOL WINAPI EnumSystemLocalesA(LOCALE_ENUMPROCA lpLocaleEnumProc, DWORD dwFlags) {
 	{
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("EnumSystemLocalesA(%p, 0x%x)\n", lpLocaleEnumProc, dwFlags);
@@ -239,20 +239,20 @@ BOOL WIN_FUNC EnumSystemLocalesA(LOCALE_ENUMPROCA lpLocaleEnumProc, DWORD dwFlag
 	return lpLocaleEnumProc(localeId);
 }
 
-LCID WIN_FUNC GetUserDefaultLCID() {
+LCID WINAPI GetUserDefaultLCID() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetUserDefaultLCID()\n");
 	return 0x0409; // en-US
 }
 
-BOOL WIN_FUNC IsDBCSLeadByte(BYTE TestChar) {
+BOOL WINAPI IsDBCSLeadByte(BYTE TestChar) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("IsDBCSLeadByte(%u)\n", TestChar);
 	(void)TestChar;
 	return FALSE;
 }
 
-BOOL WIN_FUNC IsDBCSLeadByteEx(UINT CodePage, BYTE TestChar) {
+BOOL WINAPI IsDBCSLeadByteEx(UINT CodePage, BYTE TestChar) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("IsDBCSLeadByteEx(%u, %u)\n", CodePage, TestChar);
 
@@ -283,7 +283,7 @@ BOOL WIN_FUNC IsDBCSLeadByteEx(UINT CodePage, BYTE TestChar) {
 	}
 }
 
-int WIN_FUNC LCMapStringW(LCID Locale, DWORD dwMapFlags, LPCWCH lpSrcStr, int cchSrc, LPWSTR lpDestStr, int cchDest) {
+int WINAPI LCMapStringW(LCID Locale, DWORD dwMapFlags, LPCWCH lpSrcStr, int cchSrc, LPWSTR lpDestStr, int cchDest) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("LCMapStringW(%u, 0x%x, %p, %d, %p, %d)\n", Locale, dwMapFlags, lpSrcStr, cchSrc, lpDestStr, cchDest);
 	(void)Locale;
@@ -330,7 +330,7 @@ int WIN_FUNC LCMapStringW(LCID Locale, DWORD dwMapFlags, LPCWCH lpSrcStr, int cc
 	return static_cast<int>(srcLen);
 }
 
-int WIN_FUNC LCMapStringA(LCID Locale, DWORD dwMapFlags, LPCCH lpSrcStr, int cchSrc, LPSTR lpDestStr, int cchDest) {
+int WINAPI LCMapStringA(LCID Locale, DWORD dwMapFlags, LPCCH lpSrcStr, int cchSrc, LPSTR lpDestStr, int cchDest) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("LCMapStringA(%u, 0x%x, %p, %d, %p, %d)\n", Locale, dwMapFlags, lpSrcStr, cchSrc, lpDestStr, cchDest);
 	if (!lpSrcStr) {

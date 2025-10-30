@@ -3,6 +3,8 @@
 #include "kernel32/internal.h"
 #include "modules.h"
 
+#include <cstring>
+
 namespace mscoree {
 
 void WIN_FUNC CorExitProcess(int exitCode) {

@@ -3,6 +3,7 @@
 #include "common.h"
 #include "handles.h"
 #include "mimalloc.h"
+#include "types.h"
 
 #include <condition_variable>
 #include <pthread.h>
@@ -80,7 +81,7 @@ struct ThreadObject final : WaitableObject {
 	pthread_t thread;
 	DWORD exitCode = STILL_ACTIVE;
 	unsigned int suspendCount = 0;
-	TIB *tib = nullptr;
+	TEB *tib = nullptr;
 
 	explicit ThreadObject(pthread_t thread) : WaitableObject(kType), thread(thread) {}
 

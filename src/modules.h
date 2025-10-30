@@ -74,7 +74,7 @@ struct ModuleTlsInfo {
 	uint32_t characteristics = 0;
 	size_t allocationSize = 0;
 	std::vector<void *> callbacks;
-	std::unordered_map<TIB *, void *> threadAllocations;
+	std::unordered_map<TEB *, void *> threadAllocations;
 };
 
 struct ModuleInfo {

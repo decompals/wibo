@@ -3,8 +3,19 @@ build/
 *.o
 
 .vscode/
+
 # CLion
 .idea/
 cmake-build-*/
+
 # clangd
 .cache/
+
+# Python
+__pycache__/
+.venv/
+env/
+venv/
+*.pyc
+*.pyo
+*.pyd

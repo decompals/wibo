@@ -45,7 +45,7 @@ _invalid_parameter_handler invalidParameterHandler = nullptr;
 void WIN_ENTRY _initterm(const _PVFV *ppfn, const _PVFV *end) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("_initterm(%p, %p)\n", ppfn, end);
-	TIB *tib = wibo::getThreadTibForHost();
+	auto *tib = wibo::getThreadTibForHost();
 	do {
 		if (_PVFV pfn = *++ppfn) {
 			DEBUG_LOG("-> calling %p\n", pfn);
@@ -60,7 +60,7 @@ void WIN_ENTRY _initterm(const _PVFV *ppfn, const _PVFV *end) {
 int WIN_ENTRY _initterm_e(const _PIFV *ppfn, const _PIFV *end) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("_initterm_e(%p, %p)\n", ppfn, end);
-	TIB *tib = wibo::getThreadTibForHost();
+	auto *tib = wibo::getThreadTibForHost();
 	do {
 		if (_PIFV pfn = *++ppfn) {
 			DEBUG_LOG("-> calling %p\n", pfn);
@@ -284,7 +284,7 @@ int WIN_ENTRY _execute_onexit_table(void *table) {
 void WIN_ENTRY exit(int status) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("exit(%i)\n", status);
-	TIB *tib = wibo::getThreadTibForHost();
+	auto *tib = wibo::getThreadTibForHost();
 	for (auto it = atexitFuncs.rbegin(); it != atexitFuncs.rend(); ++it) {
 		DEBUG_LOG("Calling atexit function %p\n", *it);
 		{
@@ -298,7 +298,7 @@ void WIN_ENTRY exit(int status) {
 void WIN_ENTRY _cexit() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("_cexit()\n");
-	TIB *tib = wibo::getThreadTibForHost();
+	auto *tib = wibo::getThreadTibForHost();
 	for (auto it = atexitFuncs.rbegin(); it != atexitFuncs.rend(); ++it) {
 		DEBUG_LOG("Calling atexit function %p\n", *it);
 		{

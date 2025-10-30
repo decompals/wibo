@@ -1,5 +1,6 @@
-
 #include "errors.h"
+
+#include "common.h"
 
 #include <cerrno>
 

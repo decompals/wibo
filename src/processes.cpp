@@ -8,6 +8,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fcntl.h>
 #include <filesystem>
 #include <linux/sched.h>
@@ -262,7 +263,7 @@ static std::vector<std::string> pathextValues() {
 
 static std::vector<std::filesystem::path> parseHostPath(const std::string &value) {
 	std::vector<std::filesystem::path> paths;
-	const char *delims = strchr(value.c_str(), ';') ? ";" : ":";
+	const char *delims = std::strchr(value.c_str(), ';') ? ";" : ":";
 	size_t start = 0;
 	while (start <= value.size()) {
 		size_t end = value.find_first_of(delims, start);
@@ -411,7 +412,7 @@ static int spawnInternal(const std::vector<std::string> &args, Pin<kernel32::Pro
 	std::vector<std::string> ownedEnv;
 	ownedEnv.reserve(256);
 	for (char **e = environ; *e; ++e) {
-		if (strncmp(*e, "WIBO_DEBUG_INDENT=", 18) != 0)
+		if (std::strncmp(*e, "WIBO_DEBUG_INDENT=", 18) != 0)
 			ownedEnv.emplace_back(*e);
 	}
 	ownedEnv.emplace_back("WIBO_DEBUG_INDENT=" + std::to_string(wibo::debugIndent + 1));

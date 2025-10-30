@@ -333,7 +333,7 @@ void ensureDefaultActivationContext() {
 
 namespace kernel32 {
 
-ATOM WIN_FUNC AddAtomA(LPCSTR lpString) {
+ATOM WINAPI AddAtomA(LPCSTR lpString) {
 	HOST_CONTEXT_GUARD();
 	ATOM atom = 0;
 	if (tryHandleIntegerAtomPointer(lpString, atom)) {
@@ -356,7 +356,7 @@ ATOM WIN_FUNC AddAtomA(LPCSTR lpString) {
 	return result;
 }
 
-ATOM WIN_FUNC AddAtomW(LPCWSTR lpString) {
+ATOM WINAPI AddAtomW(LPCWSTR lpString) {
 	HOST_CONTEXT_GUARD();
 	ATOM atom = 0;
 	if (tryHandleIntegerAtomPointer(lpString, atom)) {
@@ -381,7 +381,7 @@ ATOM WIN_FUNC AddAtomW(LPCWSTR lpString) {
 	return result;
 }
 
-ATOM WIN_FUNC FindAtomA(LPCSTR lpString) {
+ATOM WINAPI FindAtomA(LPCSTR lpString) {
 	HOST_CONTEXT_GUARD();
 	ATOM atom = 0;
 	if (tryHandleIntegerAtomPointer(lpString, atom)) {
@@ -404,7 +404,7 @@ ATOM WIN_FUNC FindAtomA(LPCSTR lpString) {
 	return result;
 }
 
-ATOM WIN_FUNC FindAtomW(LPCWSTR lpString) {
+ATOM WINAPI FindAtomW(LPCWSTR lpString) {
 	HOST_CONTEXT_GUARD();
 	ATOM atom = 0;
 	if (tryHandleIntegerAtomPointer(lpString, atom)) {
@@ -429,7 +429,7 @@ ATOM WIN_FUNC FindAtomW(LPCWSTR lpString) {
 	return result;
 }
 
-UINT WIN_FUNC GetAtomNameA(ATOM nAtom, LPSTR lpBuffer, int nSize) {
+UINT WINAPI GetAtomNameA(ATOM nAtom, LPSTR lpBuffer, int nSize) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetAtomNameA(%u, %p, %d)\n", nAtom, lpBuffer, nSize);
 	if (!lpBuffer || nSize <= 0) {
@@ -461,7 +461,7 @@ UINT WIN_FUNC GetAtomNameA(ATOM nAtom, LPSTR lpBuffer, int nSize) {
 	return written;
 }
 
-UINT WIN_FUNC GetAtomNameW(ATOM nAtom, LPWSTR lpBuffer, int nSize) {
+UINT WINAPI GetAtomNameW(ATOM nAtom, LPWSTR lpBuffer, int nSize) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetAtomNameW(%u, %p, %d)\n", nAtom, lpBuffer, nSize);
 	if (!lpBuffer || nSize <= 0) {
@@ -497,15 +497,15 @@ UINT WIN_FUNC GetAtomNameW(ATOM nAtom, LPWSTR lpBuffer, int nSize) {
 	return written;
 }
 
-UINT WIN_FUNC SetHandleCount(UINT uNumber) {
+UINT WINAPI SetHandleCount(UINT uNumber) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetHandleCount(%u)\n", uNumber);
 	(void)uNumber;
 	return 0x3FFE;
 }
 
-DWORD WIN_FUNC FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId, DWORD dwLanguageId, LPSTR lpBuffer,
-							  DWORD nSize, va_list *Arguments) {
+DWORD WINAPI FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId, DWORD dwLanguageId, LPSTR lpBuffer,
+							DWORD nSize, va_list *Arguments) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FormatMessageA(%u, %p, %u, %u, %p, %u, %p)\n", dwFlags, lpSource, dwMessageId, dwLanguageId, lpBuffer,
 			  nSize, Arguments);
@@ -549,19 +549,19 @@ DWORD WIN_FUNC FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId
 	return 0;
 }
 
-PVOID WIN_FUNC EncodePointer(PVOID Ptr) {
+PVOID WINAPI EncodePointer(PVOID Ptr) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("EncodePointer(%p)\n", Ptr);
 	return Ptr;
 }
 
-PVOID WIN_FUNC DecodePointer(PVOID Ptr) {
+PVOID WINAPI DecodePointer(PVOID Ptr) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("DecodePointer(%p)\n", Ptr);
 	return Ptr;
 }
 
-BOOL WIN_FUNC SetDllDirectoryA(LPCSTR lpPathName) {
+BOOL WINAPI SetDllDirectoryA(LPCSTR lpPathName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetDllDirectoryA(%s)\n", lpPathName);
 	if (!lpPathName || lpPathName[0] == '\0') {
@@ -579,8 +579,8 @@ BOOL WIN_FUNC SetDllDirectoryA(LPCSTR lpPathName) {
 	return TRUE;
 }
 
-BOOL WIN_FUNC FindActCtxSectionStringA(DWORD dwFlags, const GUID *lpExtensionGuid, ULONG ulSectionId,
-									   LPCSTR lpStringToFind, PACTCTX_SECTION_KEYED_DATA ReturnedData) {
+BOOL WINAPI FindActCtxSectionStringA(DWORD dwFlags, const GUID *lpExtensionGuid, ULONG ulSectionId,
+									 LPCSTR lpStringToFind, PACTCTX_SECTION_KEYED_DATA ReturnedData) {
 	DEBUG_LOG("FindActCtxSectionStringA(%#x, %p, %u, %s, %p)\n", dwFlags, lpExtensionGuid, ulSectionId,
 			  lpStringToFind ? lpStringToFind : "<null>", ReturnedData);
 	std::vector<uint16_t> wideStorage;
@@ -596,8 +596,8 @@ BOOL WIN_FUNC FindActCtxSectionStringA(DWORD dwFlags, const GUID *lpExtensionGui
 									ReturnedData);
 }
 
-BOOL WIN_FUNC FindActCtxSectionStringW(DWORD dwFlags, const GUID *lpExtensionGuid, ULONG ulSectionId,
-									   LPCWSTR lpStringToFind, PACTCTX_SECTION_KEYED_DATA ReturnedData) {
+BOOL WINAPI FindActCtxSectionStringW(DWORD dwFlags, const GUID *lpExtensionGuid, ULONG ulSectionId,
+									 LPCWSTR lpStringToFind, PACTCTX_SECTION_KEYED_DATA ReturnedData) {
 	std::string lookup = lpStringToFind ? wideStringToString(lpStringToFind) : std::string();
 	DEBUG_LOG("FindActCtxSectionStringW(%#x, %p, %u, %s, %p)\n", dwFlags, lpExtensionGuid, ulSectionId, lookup.c_str(),
 			  ReturnedData);
@@ -682,7 +682,7 @@ void tryMarkExecutable(void *mem) {
 	mprotect(reinterpret_cast<void *>(alignedStart), length, PROT_READ | PROT_WRITE | PROT_EXEC);
 }
 
-BOOL WIN_FUNC IsBadReadPtr(LPCVOID lp, UINT_PTR ucb) {
+BOOL WINAPI IsBadReadPtr(LPCVOID lp, UINT_PTR ucb) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: IsBadReadPtr(ptr=%p, size=%zu)\n", lp, static_cast<size_t>(ucb));
 	if (!lp) {
@@ -691,7 +691,7 @@ BOOL WIN_FUNC IsBadReadPtr(LPCVOID lp, UINT_PTR ucb) {
 	return FALSE;
 }
 
-BOOL WIN_FUNC IsBadWritePtr(LPVOID lp, UINT_PTR ucb) {
+BOOL WINAPI IsBadWritePtr(LPVOID lp, UINT_PTR ucb) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: IsBadWritePtr(ptr=%p, size=%zu)\n", lp, static_cast<size_t>(ucb));
 	if (!lp && ucb != 0) {
@@ -700,7 +700,7 @@ BOOL WIN_FUNC IsBadWritePtr(LPVOID lp, UINT_PTR ucb) {
 	return FALSE;
 }
 
-BOOL WIN_FUNC GetComputerNameA(LPSTR lpBuffer, LPDWORD nSize) {
+BOOL WINAPI GetComputerNameA(LPSTR lpBuffer, LPDWORD nSize) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetComputerNameA(%p, %p)\n", lpBuffer, nSize);
 	if (!nSize || !lpBuffer) {
@@ -722,7 +722,7 @@ BOOL WIN_FUNC GetComputerNameA(LPSTR lpBuffer, LPDWORD nSize) {
 	return TRUE;
 }
 
-BOOL WIN_FUNC GetComputerNameW(LPWSTR lpBuffer, LPDWORD nSize) {
+BOOL WINAPI GetComputerNameW(LPWSTR lpBuffer, LPDWORD nSize) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetComputerNameW(%p, %p)\n", lpBuffer, nSize);
 	if (!nSize || !lpBuffer) {
@@ -744,7 +744,7 @@ BOOL WIN_FUNC GetComputerNameW(LPWSTR lpBuffer, LPDWORD nSize) {
 	return TRUE;
 }
 
-HGLOBAL WIN_FUNC GlobalAlloc(UINT uFlags, SIZE_T dwBytes) {
+HGLOBAL WINAPI GlobalAlloc(UINT uFlags, SIZE_T dwBytes) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("GlobalAlloc(%x, %zu)\n", uFlags, static_cast<size_t>(dwBytes));
 	if (uFlags & GMEM_MOVEABLE) {
@@ -756,14 +756,14 @@ HGLOBAL WIN_FUNC GlobalAlloc(UINT uFlags, SIZE_T dwBytes) {
 	return doAlloc(static_cast<UINT>(dwBytes), zero);
 }
 
-HGLOBAL WIN_FUNC GlobalFree(HGLOBAL hMem) {
+HGLOBAL WINAPI GlobalFree(HGLOBAL hMem) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("GlobalFree(%p)\n", hMem);
 	std::free(hMem);
 	return nullptr;
 }
 
-HGLOBAL WIN_FUNC GlobalReAlloc(HGLOBAL hMem, SIZE_T dwBytes, UINT uFlags) {
+HGLOBAL WINAPI GlobalReAlloc(HGLOBAL hMem, SIZE_T dwBytes, UINT uFlags) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("GlobalReAlloc(%p, %zu, %x)\n", hMem, static_cast<size_t>(dwBytes), uFlags);
 	if (uFlags & GMEM_MODIFY) {
@@ -774,14 +774,14 @@ HGLOBAL WIN_FUNC GlobalReAlloc(HGLOBAL hMem, SIZE_T dwBytes, UINT uFlags) {
 	return doRealloc(hMem, static_cast<UINT>(dwBytes), zero);
 }
 
-UINT WIN_FUNC GlobalFlags(HGLOBAL hMem) {
+UINT WINAPI GlobalFlags(HGLOBAL hMem) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("GlobalFlags(%p)\n", hMem);
 	(void)hMem;
 	return 0;
 }
 
-HLOCAL WIN_FUNC LocalAlloc(UINT uFlags, SIZE_T uBytes) {
+HLOCAL WINAPI LocalAlloc(UINT uFlags, SIZE_T uBytes) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("LocalAlloc(%x, %zu)\n", uFlags, static_cast<size_t>(uBytes));
 	bool zero = (uFlags & LMEM_ZEROINIT) != 0;
@@ -799,7 +799,7 @@ HLOCAL WIN_FUNC LocalAlloc(UINT uFlags, SIZE_T uBytes) {
 	return result;
 }
 
-HLOCAL WIN_FUNC LocalFree(HLOCAL hMem) {
+HLOCAL WINAPI LocalFree(HLOCAL hMem) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("LocalFree(%p)\n", hMem);
 	// Windows returns NULL on success.
@@ -807,7 +807,7 @@ HLOCAL WIN_FUNC LocalFree(HLOCAL hMem) {
 	return nullptr;
 }
 
-HLOCAL WIN_FUNC LocalReAlloc(HLOCAL hMem, SIZE_T uBytes, UINT uFlags) {
+HLOCAL WINAPI LocalReAlloc(HLOCAL hMem, SIZE_T uBytes, UINT uFlags) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("LocalReAlloc(%p, %zu, %x)\n", hMem, static_cast<size_t>(uBytes), uFlags);
 	bool zero = (uFlags & LMEM_ZEROINIT) != 0;
@@ -825,32 +825,32 @@ HLOCAL WIN_FUNC LocalReAlloc(HLOCAL hMem, SIZE_T uBytes, UINT uFlags) {
 	return result;
 }
 
-HLOCAL WIN_FUNC LocalHandle(LPCVOID pMem) {
+HLOCAL WINAPI LocalHandle(LPCVOID pMem) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("LocalHandle(%p)\n", pMem);
 	return const_cast<LPVOID>(pMem);
 }
 
-LPVOID WIN_FUNC LocalLock(HLOCAL hMem) {
+LPVOID WINAPI LocalLock(HLOCAL hMem) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("LocalLock(%p)\n", hMem);
 	return hMem;
 }
 
-BOOL WIN_FUNC LocalUnlock(HLOCAL hMem) {
+BOOL WINAPI LocalUnlock(HLOCAL hMem) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("LocalUnlock(%p)\n", hMem);
 	(void)hMem;
 	return TRUE;
 }
 
-SIZE_T WIN_FUNC LocalSize(HLOCAL hMem) {
+SIZE_T WINAPI LocalSize(HLOCAL hMem) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("LocalSize(%p)\n", hMem);
 	return hMem ? mi_usable_size(hMem) : 0;
 }
 
-UINT WIN_FUNC LocalFlags(HLOCAL hMem) {
+UINT WINAPI LocalFlags(HLOCAL hMem) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("LocalFlags(%p)\n", hMem);
 	(void)hMem;
@@ -859,7 +859,7 @@ UINT WIN_FUNC LocalFlags(HLOCAL hMem) {
 
 static constexpr const char *kSystemDirectoryA = "C:\\Windows\\System32";
 
-UINT WIN_FUNC GetSystemDirectoryA(LPSTR lpBuffer, UINT uSize) {
+UINT WINAPI GetSystemDirectoryA(LPSTR lpBuffer, UINT uSize) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetSystemDirectoryA(%p, %u)\n", lpBuffer, uSize);
 	if (!lpBuffer) {
@@ -874,7 +874,7 @@ UINT WIN_FUNC GetSystemDirectoryA(LPSTR lpBuffer, UINT uSize) {
 	return static_cast<UINT>(len);
 }
 
-UINT WIN_FUNC GetSystemDirectoryW(LPWSTR lpBuffer, UINT uSize) {
+UINT WINAPI GetSystemDirectoryW(LPWSTR lpBuffer, UINT uSize) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetSystemDirectoryW(%p, %u)\n", lpBuffer, uSize);
 	if (!lpBuffer) {
@@ -890,7 +890,7 @@ UINT WIN_FUNC GetSystemDirectoryW(LPWSTR lpBuffer, UINT uSize) {
 	return length;
 }
 
-UINT WIN_FUNC GetSystemWow64DirectoryA(LPSTR lpBuffer, UINT uSize) {
+UINT WINAPI GetSystemWow64DirectoryA(LPSTR lpBuffer, UINT uSize) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetSystemWow64DirectoryA(%p, %u)\n", lpBuffer, uSize);
 	(void)lpBuffer;
@@ -899,7 +899,7 @@ UINT WIN_FUNC GetSystemWow64DirectoryA(LPSTR lpBuffer, UINT uSize) {
 	return 0;
 }
 
-UINT WIN_FUNC GetSystemWow64DirectoryW(LPWSTR lpBuffer, UINT uSize) {
+UINT WINAPI GetSystemWow64DirectoryW(LPWSTR lpBuffer, UINT uSize) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetSystemWow64DirectoryW(%p, %u)\n", lpBuffer, uSize);
 	(void)lpBuffer;
@@ -908,7 +908,7 @@ UINT WIN_FUNC GetSystemWow64DirectoryW(LPWSTR lpBuffer, UINT uSize) {
 	return 0;
 }
 
-UINT WIN_FUNC GetWindowsDirectoryA(LPSTR lpBuffer, UINT uSize) {
+UINT WINAPI GetWindowsDirectoryA(LPSTR lpBuffer, UINT uSize) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetWindowsDirectoryA(%p, %u)\n", lpBuffer, uSize);
 	if (!lpBuffer) {
@@ -924,12 +924,12 @@ UINT WIN_FUNC GetWindowsDirectoryA(LPSTR lpBuffer, UINT uSize) {
 	return static_cast<UINT>(len);
 }
 
-UINT WIN_FUNC GetSystemWindowsDirectoryA(LPSTR lpBuffer, UINT uSize) {
+UINT WINAPI GetSystemWindowsDirectoryA(LPSTR lpBuffer, UINT uSize) {
 	DEBUG_LOG("GetSystemWindowsDirectoryA(%p, %u)\n", lpBuffer, uSize);
 	return GetWindowsDirectoryA(lpBuffer, uSize);
 }
 
-UINT WIN_FUNC GetSystemWindowsDirectoryW(LPWSTR lpBuffer, UINT uSize) {
+UINT WINAPI GetSystemWindowsDirectoryW(LPWSTR lpBuffer, UINT uSize) {
 	DEBUG_LOG("GetSystemWindowsDirectoryW(%p, %u)\n", lpBuffer, uSize);
 	if (!lpBuffer) {
 		return 0;
@@ -945,7 +945,7 @@ UINT WIN_FUNC GetSystemWindowsDirectoryW(LPWSTR lpBuffer, UINT uSize) {
 	return length;
 }
 
-DWORD WIN_FUNC GetCurrentDirectoryA(DWORD nBufferLength, LPSTR lpBuffer) {
+DWORD WINAPI GetCurrentDirectoryA(DWORD nBufferLength, LPSTR lpBuffer) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetCurrentDirectoryA(%u, %p)\n", nBufferLength, lpBuffer);
 
@@ -970,7 +970,7 @@ DWORD WIN_FUNC GetCurrentDirectoryA(DWORD nBufferLength, LPSTR lpBuffer) {
 	return required - 1;
 }
 
-DWORD WIN_FUNC GetCurrentDirectoryW(DWORD nBufferLength, LPWSTR lpBuffer) {
+DWORD WINAPI GetCurrentDirectoryW(DWORD nBufferLength, LPWSTR lpBuffer) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetCurrentDirectoryW(%u, %p)\n", nBufferLength, lpBuffer);
 
@@ -995,7 +995,7 @@ DWORD WIN_FUNC GetCurrentDirectoryW(DWORD nBufferLength, LPWSTR lpBuffer) {
 	return required - 1;
 }
 
-int WIN_FUNC SetCurrentDirectoryA(LPCSTR lpPathName) {
+int WINAPI SetCurrentDirectoryA(LPCSTR lpPathName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetCurrentDirectoryA(%s)\n", lpPathName ? lpPathName : "(null)");
 	if (!lpPathName) {
@@ -1012,7 +1012,7 @@ int WIN_FUNC SetCurrentDirectoryA(LPCSTR lpPathName) {
 	return 1;
 }
 
-int WIN_FUNC SetCurrentDirectoryW(LPCWSTR lpPathName) {
+int WINAPI SetCurrentDirectoryW(LPCWSTR lpPathName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetCurrentDirectoryW\n");
 	if (!lpPathName) {
@@ -1023,7 +1023,7 @@ int WIN_FUNC SetCurrentDirectoryW(LPCWSTR lpPathName) {
 	return SetCurrentDirectoryA(path.c_str());
 }
 
-DWORD WIN_FUNC GetLongPathNameA(LPCSTR lpszShortPath, LPSTR lpszLongPath, DWORD cchBuffer) {
+DWORD WINAPI GetLongPathNameA(LPCSTR lpszShortPath, LPSTR lpszLongPath, DWORD cchBuffer) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetLongPathNameA(%s, %p, %u)\n", lpszShortPath ? lpszShortPath : "(null)", lpszLongPath, cchBuffer);
 	if (!lpszShortPath) {
@@ -1053,7 +1053,7 @@ DWORD WIN_FUNC GetLongPathNameA(LPCSTR lpszShortPath, LPSTR lpszLongPath, DWORD 
 	return required - 1;
 }
 
-DWORD WIN_FUNC GetLongPathNameW(LPCWSTR lpszShortPath, LPWSTR lpszLongPath, DWORD cchBuffer) {
+DWORD WINAPI GetLongPathNameW(LPCWSTR lpszShortPath, LPWSTR lpszLongPath, DWORD cchBuffer) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetLongPathNameW(%p, %p, %u)\n", lpszShortPath, lpszLongPath, cchBuffer);
 	if (!lpszShortPath) {
@@ -1082,8 +1082,8 @@ DWORD WIN_FUNC GetLongPathNameW(LPCWSTR lpszShortPath, LPWSTR lpszLongPath, DWOR
 	return required - 1;
 }
 
-BOOL WIN_FUNC GetDiskFreeSpaceA(LPCSTR lpRootPathName, LPDWORD lpSectorsPerCluster, LPDWORD lpBytesPerSector,
-								LPDWORD lpNumberOfFreeClusters, LPDWORD lpTotalNumberOfClusters) {
+BOOL WINAPI GetDiskFreeSpaceA(LPCSTR lpRootPathName, LPDWORD lpSectorsPerCluster, LPDWORD lpBytesPerSector,
+							  LPDWORD lpNumberOfFreeClusters, LPDWORD lpTotalNumberOfClusters) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetDiskFreeSpaceA(%s)\n", lpRootPathName ? lpRootPathName : "(null)");
 	struct statvfs buf{};
@@ -1133,16 +1133,16 @@ BOOL WIN_FUNC GetDiskFreeSpaceA(LPCSTR lpRootPathName, LPDWORD lpSectorsPerClust
 	return TRUE;
 }
 
-BOOL WIN_FUNC GetDiskFreeSpaceW(LPCWSTR lpRootPathName, LPDWORD lpSectorsPerCluster, LPDWORD lpBytesPerSector,
-								LPDWORD lpNumberOfFreeClusters, LPDWORD lpTotalNumberOfClusters) {
+BOOL WINAPI GetDiskFreeSpaceW(LPCWSTR lpRootPathName, LPDWORD lpSectorsPerCluster, LPDWORD lpBytesPerSector,
+							  LPDWORD lpNumberOfFreeClusters, LPDWORD lpTotalNumberOfClusters) {
 	HOST_CONTEXT_GUARD();
 	std::string rootPath = wideStringToString(lpRootPathName);
 	return GetDiskFreeSpaceA(lpRootPathName ? rootPath.c_str() : nullptr, lpSectorsPerCluster, lpBytesPerSector,
 							 lpNumberOfFreeClusters, lpTotalNumberOfClusters);
 }
 
-BOOL WIN_FUNC GetDiskFreeSpaceExA(LPCSTR lpDirectoryName, uint64_t *lpFreeBytesAvailableToCaller,
-								  uint64_t *lpTotalNumberOfBytes, uint64_t *lpTotalNumberOfFreeBytes) {
+BOOL WINAPI GetDiskFreeSpaceExA(LPCSTR lpDirectoryName, uint64_t *lpFreeBytesAvailableToCaller,
+								uint64_t *lpTotalNumberOfBytes, uint64_t *lpTotalNumberOfFreeBytes) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetDiskFreeSpaceExA(%s)\n", lpDirectoryName ? lpDirectoryName : "(null)");
 	struct statvfs buf{};
@@ -1176,8 +1176,8 @@ BOOL WIN_FUNC GetDiskFreeSpaceExA(LPCSTR lpDirectoryName, uint64_t *lpFreeBytesA
 	return TRUE;
 }
 
-BOOL WIN_FUNC GetDiskFreeSpaceExW(LPCWSTR lpDirectoryName, uint64_t *lpFreeBytesAvailableToCaller,
-								  uint64_t *lpTotalNumberOfBytes, uint64_t *lpTotalNumberOfFreeBytes) {
+BOOL WINAPI GetDiskFreeSpaceExW(LPCWSTR lpDirectoryName, uint64_t *lpFreeBytesAvailableToCaller,
+								uint64_t *lpTotalNumberOfBytes, uint64_t *lpTotalNumberOfFreeBytes) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetDiskFreeSpaceExW -> ");
 	std::string directoryName = wideStringToString(lpDirectoryName);

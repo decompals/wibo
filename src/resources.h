@@ -5,7 +5,7 @@
 
 namespace wibo {
 
-struct Executable;
+class Executable;
 
 struct ResourceIdentifier {
 	ResourceIdentifier() : isString(false), id(0) {}

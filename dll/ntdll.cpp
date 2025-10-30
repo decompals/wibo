@@ -10,6 +10,7 @@
 #include "strutil.h"
 
 #include <cerrno>
+#include <cstring>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>

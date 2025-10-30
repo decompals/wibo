@@ -5,15 +5,18 @@ FROM --platform=linux/i386 alpine:latest AS build
 RUN apk add --no-cache \
     bash \
     binutils \
+    clang \
+    clang-dev \
     cmake \
     coreutils \
-    g++ \
     git \
     linux-headers \
+    llvm-dev \
     make \
     mingw-w64-binutils \
     mingw-w64-gcc \
-    ninja
+    ninja \
+    python3
 
 # Copy source files
 WORKDIR /wibo
@@ -31,6 +34,8 @@ ARG WIBO_VERSION
 # Build static binary
 RUN cmake -S /wibo -B /wibo/build -G Ninja \
         -DCMAKE_BUILD_TYPE:STRING="$BUILD_TYPE" \
+        -DCMAKE_C_COMPILER:STRING=clang \
+        -DCMAKE_CXX_COMPILER:STRING=clang++ \
         -DCMAKE_C_FLAGS:STRING="-static" \
         -DCMAKE_CXX_FLAGS:STRING="-static" \
         -DMI_LIBC_MUSL:BOOL=ON \

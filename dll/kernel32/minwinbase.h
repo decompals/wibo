@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common.h"
+#include "types.h"
 
 struct SECURITY_ATTRIBUTES {
 	DWORD nLength;
@@ -56,8 +56,8 @@ struct WIN32_FIND_DATAA {
 	DWORD nFileSizeLow;
 	DWORD dwReserved0;
 	DWORD dwReserved1;
-	char cFileName[MAX_PATH];
-	char cAlternateFileName[14];
+	CHAR cFileName[MAX_PATH];
+	CHAR cAlternateFileName[14];
 };
 
 struct WIN32_FIND_DATAW {

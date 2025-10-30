@@ -51,18 +51,18 @@ void wibo::debug_log(const char *fmt, ...) {
 	va_end(args);
 }
 
-TIB *wibo::allocateTib() {
-	auto *newTib = static_cast<TIB *>(std::calloc(1, sizeof(TIB)));
+TEB *wibo::allocateTib() {
+	auto *newTib = static_cast<TEB *>(std::calloc(1, sizeof(TEB)));
 	if (!newTib) {
 		return nullptr;
 	}
 	tls::initializeTib(newTib);
-	newTib->self = newTib;
-	newTib->peb = processPeb;
+	newTib->Tib.Self = &newTib->Tib;
+	newTib->Peb = processPeb;
 	return newTib;
 }
 
-void wibo::destroyTib(TIB *tibPtr) {
+void wibo::destroyTib(TEB *tibPtr) {
 	if (!tibPtr) {
 		return;
 	}
@@ -70,7 +70,7 @@ void wibo::destroyTib(TIB *tibPtr) {
 	std::free(tibPtr);
 }
 
-void wibo::initializeTibStackInfo(TIB *tibPtr) {
+void wibo::initializeTibStackInfo(TEB *tibPtr) {
 	if (!tibPtr) {
 		return;
 	}
@@ -82,16 +82,16 @@ void wibo::initializeTibStackInfo(TIB *tibPtr) {
 	void *stackAddr = nullptr;
 	size_t stackSize = 0;
 	if (pthread_attr_getstack(&attr, &stackAddr, &stackSize) == 0 && stackAddr && stackSize > 0) {
-		tibPtr->stackLimit = stackAddr;
-		tibPtr->stackBase = static_cast<char *>(stackAddr) + stackSize;
+		tibPtr->Tib.StackLimit = stackAddr;
+		tibPtr->Tib.StackBase = static_cast<char *>(stackAddr) + stackSize;
 	} else {
 		perror("Failed to get thread stack info");
 	}
-	DEBUG_LOG("initializeTibStackInfo: stackBase=%p stackLimit=%p\n", tibPtr->stackBase, tibPtr->stackLimit);
+	DEBUG_LOG("initializeTibStackInfo: stackBase=%p stackLimit=%p\n", tibPtr->Tib.StackBase, tibPtr->Tib.StackLimit);
 	pthread_attr_destroy(&attr);
 }
 
-bool wibo::installTibForCurrentThread(TIB *tibPtr) {
+bool wibo::installTibForCurrentThread(TEB *tibPtr) {
 	if (!tibPtr) {
 		return false;
 	}
@@ -99,7 +99,7 @@ bool wibo::installTibForCurrentThread(TIB *tibPtr) {
 	std::memset(&desc, 0, sizeof(desc));
 	desc.entry_number = tibEntryNumber;
 	desc.base_addr = reinterpret_cast<unsigned int>(tibPtr);
-	desc.limit = static_cast<unsigned int>(sizeof(TIB) - 1);
+	desc.limit = static_cast<unsigned int>(sizeof(TEB) - 1);
 	desc.seg_32bit = 1;
 	desc.contents = 0;
 	desc.read_exec_only = 0;
@@ -121,7 +121,7 @@ bool wibo::installTibForCurrentThread(TIB *tibPtr) {
 }
 
 // Make this global to ease debugging
-TIB tib;
+TEB tib;
 
 const size_t MAPS_BUFFER_SIZE = 0x10000;
 
@@ -453,11 +453,11 @@ int main(int argc, char **argv) {
 	// Create TIB
 	memset(&tib, 0, sizeof(tib));
 	wibo::tls::initializeTib(&tib);
-	tib.self = &tib;
-	tib.peb = static_cast<PEB *>(calloc(1, sizeof(PEB)));
-	tib.peb->ProcessParameters =
+	tib.Tib.Self = &tib.Tib;
+	tib.Peb = static_cast<PEB *>(calloc(1, sizeof(PEB)));
+	tib.Peb->ProcessParameters =
 		static_cast<RTL_USER_PROCESS_PARAMETERS *>(calloc(1, sizeof(RTL_USER_PROCESS_PARAMETERS)));
-	wibo::processPeb = tib.peb;
+	wibo::processPeb = tib.Peb;
 	wibo::initializeTibStackInfo(&tib);
 	if (!wibo::installTibForCurrentThread(&tib)) {
 		fprintf(stderr, "Failed to install TIB for main thread\n");

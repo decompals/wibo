@@ -275,7 +275,7 @@ uintptr_t resolveModuleAddress(const wibo::Executable &exec, uintptr_t address) 
 	return static_cast<uintptr_t>(static_cast<intptr_t>(address) + exec.relocationDelta);
 }
 
-bool allocateModuleTlsForThread(wibo::ModuleInfo &module, TIB *tib) {
+bool allocateModuleTlsForThread(wibo::ModuleInfo &module, TEB *tib) {
 	if (!tib) {
 		return true;
 	}
@@ -314,7 +314,7 @@ bool allocateModuleTlsForThread(wibo::ModuleInfo &module, TIB *tib) {
 	return true;
 }
 
-void freeModuleTlsForThread(wibo::ModuleInfo &module, TIB *tib) {
+void freeModuleTlsForThread(wibo::ModuleInfo &module, TEB *tib) {
 	if (!tib) {
 		return;
 	}
@@ -346,7 +346,7 @@ void runModuleTlsCallbacks(wibo::ModuleInfo &module, DWORD reason) {
 	if (!module.tlsInfo.hasTls || module.tlsInfo.callbacks.empty()) {
 		return;
 	}
-	TIB *tib = wibo::getThreadTibForHost();
+	TEB *tib = wibo::getThreadTibForHost();
 	if (!tib) {
 		return;
 	}
@@ -590,7 +590,7 @@ BOOL callDllMain(wibo::ModuleInfo &info, DWORD reason, LPVOID reserved) {
 		if (!wibo::tibSelector) {
 			result = dllMain(reinterpret_cast<HMODULE>(info.executable->imageBase), callReason, callReserved);
 		} else {
-			TIB *tib = wibo::getThreadTibForHost();
+			TEB *tib = wibo::getThreadTibForHost();
 			GUEST_CONTEXT_GUARD(tib);
 			result = dllMain(reinterpret_cast<HMODULE>(info.executable->imageBase), callReason, callReserved);
 		}
@@ -892,7 +892,7 @@ void addOnExitFunction(void *table, void (*func)()) {
 }
 
 void runPendingOnExit(ModuleInfo &info) {
-	TIB *tib = wibo::getThreadTibForHost();
+	TEB *tib = wibo::getThreadTibForHost();
 	for (auto it = info.onExitFunctions.rbegin(); it != info.onExitFunctions.rend(); ++it) {
 		auto fn = reinterpret_cast<void (*)()>(*it);
 		if (fn) {
@@ -971,7 +971,7 @@ bool initializeModuleTls(ModuleInfo &module) {
 	};
 	AllocContext ctx{&module, true};
 	wibo::tls::forEachTib(
-		[](TIB *tib, void *opaque) {
+		[](TEB *tib, void *opaque) {
 			auto *context = static_cast<AllocContext *>(opaque);
 			if (!context->success) {
 				return;
@@ -1068,7 +1068,7 @@ void notifyDllThreadAttach() {
 			targets.push_back(info);
 		}
 	}
-	TIB *tib = wibo::getThreadTibForHost();
+	TEB *tib = wibo::getThreadTibForHost();
 	for (wibo::ModuleInfo *info : targets) {
 		if (info && info->tlsInfo.hasTls && tib) {
 			if (!allocateModuleTlsForThread(*info, tib)) {
@@ -1093,7 +1093,7 @@ void notifyDllThreadDetach() {
 			targets.push_back(info);
 		}
 	}
-	TIB *tib = wibo::getThreadTibForHost();
+	TEB *tib = wibo::getThreadTibForHost();
 	for (auto it = targets.rbegin(); it != targets.rend(); ++it) {
 		if (*it && (*it)->tlsInfo.hasTls && tib) {
 			runModuleTlsCallbacks(**it, TLS_THREAD_DETACH);

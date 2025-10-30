@@ -9,6 +9,7 @@
 #include "strutil.h"
 
 #include <cerrno>
+#include <cstring>
 #include <fcntl.h>
 #include <iterator>
 #include <limits>
@@ -462,7 +463,7 @@ int translateProtect(DWORD flProtect) {
 
 namespace kernel32 {
 
-HANDLE WIN_FUNC CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMappingAttributes, DWORD flProtect,
+HANDLE WINAPI CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMappingAttributes, DWORD flProtect,
 								   DWORD dwMaximumSizeHigh, DWORD dwMaximumSizeLow, LPCSTR lpName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CreateFileMappingA(%p, %p, %u, %u, %u, %s)\n", hFile, lpFileMappingAttributes, flProtect,
@@ -513,7 +514,7 @@ HANDLE WIN_FUNC CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMap
 	return wibo::handles().alloc(std::move(mapping), 0, 0);
 }
 
-HANDLE WIN_FUNC CreateFileMappingW(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMappingAttributes, DWORD flProtect,
+HANDLE WINAPI CreateFileMappingW(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMappingAttributes, DWORD flProtect,
 								   DWORD dwMaximumSizeHigh, DWORD dwMaximumSizeLow, LPCWSTR lpName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CreateFileMappingW -> ");
@@ -659,7 +660,7 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 	return viewPtr;
 }
 
-LPVOID WIN_FUNC MapViewOfFile(HANDLE hFileMappingObject, DWORD dwDesiredAccess, DWORD dwFileOffsetHigh,
+LPVOID WINAPI MapViewOfFile(HANDLE hFileMappingObject, DWORD dwDesiredAccess, DWORD dwFileOffsetHigh,
 							  DWORD dwFileOffsetLow, SIZE_T dwNumberOfBytesToMap) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("MapViewOfFile(%p, 0x%x, %u, %u, %zu)\n", hFileMappingObject, dwDesiredAccess, dwFileOffsetHigh,
@@ -674,7 +675,7 @@ LPVOID WIN_FUNC MapViewOfFile(HANDLE hFileMappingObject, DWORD dwDesiredAccess, 
 	return mapViewOfFileInternal(std::move(mapping), dwDesiredAccess, offset, dwNumberOfBytesToMap, nullptr);
 }
 
-LPVOID WIN_FUNC MapViewOfFileEx(HANDLE hFileMappingObject, DWORD dwDesiredAccess, DWORD dwFileOffsetHigh,
+LPVOID WINAPI MapViewOfFileEx(HANDLE hFileMappingObject, DWORD dwDesiredAccess, DWORD dwFileOffsetHigh,
 								DWORD dwFileOffsetLow, SIZE_T dwNumberOfBytesToMap, LPVOID lpBaseAddress) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("MapViewOfFileEx(%p, 0x%x, %u, %u, %zu, %p)\n", hFileMappingObject, dwDesiredAccess, dwFileOffsetHigh,
@@ -689,7 +690,7 @@ LPVOID WIN_FUNC MapViewOfFileEx(HANDLE hFileMappingObject, DWORD dwDesiredAccess
 	return mapViewOfFileInternal(std::move(mapping), dwDesiredAccess, offset, dwNumberOfBytesToMap, lpBaseAddress);
 }
 
-BOOL WIN_FUNC UnmapViewOfFile(LPCVOID lpBaseAddress) {
+BOOL WINAPI UnmapViewOfFile(LPCVOID lpBaseAddress) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("UnmapViewOfFile(%p)\n", lpBaseAddress);
 	std::unique_lock lk(g_viewInfoMutex);
@@ -708,7 +709,7 @@ BOOL WIN_FUNC UnmapViewOfFile(LPCVOID lpBaseAddress) {
 	return TRUE;
 }
 
-BOOL WIN_FUNC FlushViewOfFile(LPCVOID lpBaseAddress, SIZE_T dwNumberOfBytesToFlush) {
+BOOL WINAPI FlushViewOfFile(LPCVOID lpBaseAddress, SIZE_T dwNumberOfBytesToFlush) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FlushViewOfFile(%p, %zu)\n", lpBaseAddress, dwNumberOfBytesToFlush);
 
@@ -783,7 +784,7 @@ BOOL WIN_FUNC FlushViewOfFile(LPCVOID lpBaseAddress, SIZE_T dwNumberOfBytesToFlu
 	return TRUE;
 }
 
-LPVOID WIN_FUNC VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect) {
+LPVOID WINAPI VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("VirtualAlloc(%p, %zu, %u, %u)\n", lpAddress, dwSize, flAllocationType, flProtect);
 
@@ -970,7 +971,7 @@ LPVOID WIN_FUNC VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocation
 	return reinterpret_cast<LPVOID>(start);
 }
 
-BOOL WIN_FUNC VirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType) {
+BOOL WINAPI VirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("VirtualFree(%p, %zu, %u)\n", lpAddress, dwSize, dwFreeType);
 	if (!lpAddress) {
@@ -1061,7 +1062,7 @@ BOOL WIN_FUNC VirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType) {
 	return TRUE;
 }
 
-BOOL WIN_FUNC VirtualProtect(LPVOID lpAddress, SIZE_T dwSize, DWORD flNewProtect, PDWORD lpflOldProtect) {
+BOOL WINAPI VirtualProtect(LPVOID lpAddress, SIZE_T dwSize, DWORD flNewProtect, PDWORD lpflOldProtect) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("VirtualProtect(%p, %zu, %u)\n", lpAddress, dwSize, flNewProtect);
 	if (!lpAddress || dwSize == 0) {
@@ -1120,7 +1121,7 @@ BOOL WIN_FUNC VirtualProtect(LPVOID lpAddress, SIZE_T dwSize, DWORD flNewProtect
 	return TRUE;
 }
 
-SIZE_T WIN_FUNC VirtualQuery(LPCVOID lpAddress, PMEMORY_BASIC_INFORMATION lpBuffer, SIZE_T dwLength) {
+SIZE_T WINAPI VirtualQuery(LPCVOID lpAddress, PMEMORY_BASIC_INFORMATION lpBuffer, SIZE_T dwLength) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("VirtualQuery(%p, %p, %zu)\n", lpAddress, lpBuffer, dwLength);
 	if (!lpBuffer || dwLength < sizeof(MEMORY_BASIC_INFORMATION)) {
@@ -1158,7 +1159,7 @@ SIZE_T WIN_FUNC VirtualQuery(LPCVOID lpAddress, PMEMORY_BASIC_INFORMATION lpBuff
 	return 0;
 }
 
-BOOL WIN_FUNC GetProcessWorkingSetSize(HANDLE hProcess, PSIZE_T lpMinimumWorkingSetSize,
+BOOL WINAPI GetProcessWorkingSetSize(HANDLE hProcess, PSIZE_T lpMinimumWorkingSetSize,
 									   PSIZE_T lpMaximumWorkingSetSize) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetProcessWorkingSetSize(%p, %p, %p)\n", hProcess, lpMinimumWorkingSetSize, lpMaximumWorkingSetSize);
@@ -1172,7 +1173,7 @@ BOOL WIN_FUNC GetProcessWorkingSetSize(HANDLE hProcess, PSIZE_T lpMinimumWorking
 	return TRUE;
 }
 
-BOOL WIN_FUNC SetProcessWorkingSetSize(HANDLE hProcess, SIZE_T dwMinimumWorkingSetSize,
+BOOL WINAPI SetProcessWorkingSetSize(HANDLE hProcess, SIZE_T dwMinimumWorkingSetSize,
 									   SIZE_T dwMaximumWorkingSetSize) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetProcessWorkingSetSize(%p, %zu, %zu)\n", hProcess, dwMinimumWorkingSetSize, dwMaximumWorkingSetSize);

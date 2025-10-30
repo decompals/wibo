@@ -5,7 +5,7 @@
 
 namespace kernel32 {
 
-BOOL WIN_FUNC IsDebuggerPresent() {
+BOOL WINAPI IsDebuggerPresent() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: IsDebuggerPresent()\n");
 	return FALSE;

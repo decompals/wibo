@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common.h"
+#include "types.h"
 
 enum SID_NAME_USE : DWORD {
 	SidTypeUser = 1,

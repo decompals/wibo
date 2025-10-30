@@ -3,6 +3,8 @@
 #include "errors.h"
 #include "modules.h"
 
+#include <cstring>
+
 namespace {
 constexpr HRESULT E_INVALIDARG = static_cast<HRESULT>(0x80070057);
 constexpr HRESULT CO_E_CLASSSTRING = static_cast<HRESULT>(0x800401F3);

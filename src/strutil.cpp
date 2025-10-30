@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cstring>
 #include <cwctype>
 #include <sstream>
 #include <string>
@@ -223,7 +224,7 @@ std::vector<uint16_t> stringToWideString(const char *src, size_t length) {
 	if (!src) {
 		return std::vector<uint16_t>{0};
 	}
-	size_t len = length == static_cast<size_t>(-1) ? strlen(src) : length;
+	size_t len = length == static_cast<size_t>(-1) ? std::strlen(src) : length;
 	std::vector<uint16_t> res(len + 1);
 	for (size_t i = 0; i < len; ++i) {
 		res[i] = static_cast<uint16_t>(static_cast<unsigned char>(src[i]));

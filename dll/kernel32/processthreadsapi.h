@@ -1,8 +1,7 @@
 #pragma once
 
-#include "common.h"
-#include "errors.h"
 #include "minwinbase.h"
+#include "types.h"
 
 struct PROCESS_INFORMATION {
 	HANDLE hProcess;
@@ -29,7 +28,7 @@ struct STARTUPINFOA {
 	DWORD dwFlags;
 	WORD wShowWindow;
 	WORD cbReserved2;
-	unsigned char *lpReserved2;
+	LPBYTE lpReserved2;
 	HANDLE hStdInput;
 	HANDLE hStdOutput;
 	HANDLE hStdError;
@@ -52,7 +51,7 @@ struct STARTUPINFOW {
 	DWORD dwFlags;
 	WORD wShowWindow;
 	WORD cbReserved2;
-	unsigned char *lpReserved2;
+	LPBYTE lpReserved2;
 	HANDLE hStdInput;
 	HANDLE hStdOutput;
 	HANDLE hStdError;
@@ -67,44 +66,43 @@ typedef DWORD(WIN_FUNC *LPTHREAD_START_ROUTINE)(LPVOID);
 
 namespace kernel32 {
 
-HANDLE WIN_FUNC GetCurrentProcess();
-DWORD WIN_FUNC GetCurrentProcessId();
-DWORD WIN_FUNC GetCurrentThreadId();
-HANDLE WIN_FUNC GetCurrentThread();
-BOOL WIN_FUNC IsProcessorFeaturePresent(DWORD ProcessorFeature);
-BOOL WIN_FUNC GetProcessAffinityMask(HANDLE hProcess, PDWORD_PTR lpProcessAffinityMask,
-									 PDWORD_PTR lpSystemAffinityMask);
-BOOL WIN_FUNC SetProcessAffinityMask(HANDLE hProcess, DWORD_PTR dwProcessAffinityMask);
-DWORD_PTR WIN_FUNC SetThreadAffinityMask(HANDLE hThread, DWORD_PTR dwThreadAffinityMask);
-DWORD WIN_FUNC ResumeThread(HANDLE hThread);
-HRESULT WIN_FUNC SetThreadDescription(HANDLE hThread, LPCWSTR lpThreadDescription);
-void WIN_FUNC ExitProcess(UINT uExitCode);
-BOOL WIN_FUNC TerminateProcess(HANDLE hProcess, UINT uExitCode);
-BOOL WIN_FUNC GetExitCodeProcess(HANDLE hProcess, LPDWORD lpExitCode);
-DWORD WIN_FUNC TlsAlloc();
-BOOL WIN_FUNC TlsFree(DWORD dwTlsIndex);
-LPVOID WIN_FUNC TlsGetValue(DWORD dwTlsIndex);
-BOOL WIN_FUNC TlsSetValue(DWORD dwTlsIndex, LPVOID lpTlsValue);
-HANDLE WIN_FUNC CreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dwStackSize,
-							 LPTHREAD_START_ROUTINE lpStartAddress, LPVOID lpParameter, DWORD dwCreationFlags,
-							 LPDWORD lpThreadId);
-[[noreturn]] void WIN_FUNC ExitThread(DWORD dwExitCode);
-BOOL WIN_FUNC GetExitCodeThread(HANDLE hThread, LPDWORD lpExitCode);
-BOOL WIN_FUNC SetThreadPriority(HANDLE hThread, int nPriority);
-int WIN_FUNC GetThreadPriority(HANDLE hThread);
-DWORD WIN_FUNC GetPriorityClass(HANDLE hProcess);
-BOOL WIN_FUNC GetThreadTimes(HANDLE hThread, FILETIME *lpCreationTime, FILETIME *lpExitTime, FILETIME *lpKernelTime,
-							 FILETIME *lpUserTime);
-BOOL WIN_FUNC CreateProcessA(LPCSTR lpApplicationName, LPSTR lpCommandLine, LPSECURITY_ATTRIBUTES lpProcessAttributes,
-							 LPSECURITY_ATTRIBUTES lpThreadAttributes, BOOL bInheritHandles, DWORD dwCreationFlags,
-							 LPVOID lpEnvironment, LPCSTR lpCurrentDirectory, LPSTARTUPINFOA lpStartupInfo,
-							 LPPROCESS_INFORMATION lpProcessInformation);
-BOOL WIN_FUNC CreateProcessW(LPCWSTR lpApplicationName, LPWSTR lpCommandLine, LPSECURITY_ATTRIBUTES lpProcessAttributes,
-							 LPSECURITY_ATTRIBUTES lpThreadAttributes, BOOL bInheritHandles, DWORD dwCreationFlags,
-							 LPVOID lpEnvironment, LPCWSTR lpCurrentDirectory, LPSTARTUPINFOW lpStartupInfo,
-							 LPPROCESS_INFORMATION lpProcessInformation);
-void WIN_FUNC GetStartupInfoA(LPSTARTUPINFOA lpStartupInfo);
-void WIN_FUNC GetStartupInfoW(LPSTARTUPINFOW lpStartupInfo);
-BOOL WIN_FUNC SetThreadStackGuarantee(PULONG StackSizeInBytes);
+HANDLE WINAPI GetCurrentProcess();
+DWORD WINAPI GetCurrentProcessId();
+DWORD WINAPI GetCurrentThreadId();
+HANDLE WINAPI GetCurrentThread();
+BOOL WINAPI IsProcessorFeaturePresent(DWORD ProcessorFeature);
+BOOL WINAPI GetProcessAffinityMask(HANDLE hProcess, PDWORD_PTR lpProcessAffinityMask, PDWORD_PTR lpSystemAffinityMask);
+BOOL WINAPI SetProcessAffinityMask(HANDLE hProcess, DWORD_PTR dwProcessAffinityMask);
+DWORD_PTR WINAPI SetThreadAffinityMask(HANDLE hThread, DWORD_PTR dwThreadAffinityMask);
+DWORD WINAPI ResumeThread(HANDLE hThread);
+HRESULT WINAPI SetThreadDescription(HANDLE hThread, LPCWSTR lpThreadDescription);
+void WINAPI ExitProcess(UINT uExitCode);
+BOOL WINAPI TerminateProcess(HANDLE hProcess, UINT uExitCode);
+BOOL WINAPI GetExitCodeProcess(HANDLE hProcess, LPDWORD lpExitCode);
+DWORD WINAPI TlsAlloc();
+BOOL WINAPI TlsFree(DWORD dwTlsIndex);
+LPVOID WINAPI TlsGetValue(DWORD dwTlsIndex);
+BOOL WINAPI TlsSetValue(DWORD dwTlsIndex, LPVOID lpTlsValue);
+HANDLE WINAPI CreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dwStackSize,
+						   LPTHREAD_START_ROUTINE lpStartAddress, LPVOID lpParameter, DWORD dwCreationFlags,
+						   LPDWORD lpThreadId);
+[[noreturn]] void WINAPI ExitThread(DWORD dwExitCode);
+BOOL WINAPI GetExitCodeThread(HANDLE hThread, LPDWORD lpExitCode);
+BOOL WINAPI SetThreadPriority(HANDLE hThread, int nPriority);
+int WINAPI GetThreadPriority(HANDLE hThread);
+DWORD WINAPI GetPriorityClass(HANDLE hProcess);
+BOOL WINAPI GetThreadTimes(HANDLE hThread, FILETIME *lpCreationTime, FILETIME *lpExitTime, FILETIME *lpKernelTime,
+						   FILETIME *lpUserTime);
+BOOL WINAPI CreateProcessA(LPCSTR lpApplicationName, LPSTR lpCommandLine, LPSECURITY_ATTRIBUTES lpProcessAttributes,
+						   LPSECURITY_ATTRIBUTES lpThreadAttributes, BOOL bInheritHandles, DWORD dwCreationFlags,
+						   LPVOID lpEnvironment, LPCSTR lpCurrentDirectory, LPSTARTUPINFOA lpStartupInfo,
+						   LPPROCESS_INFORMATION lpProcessInformation);
+BOOL WINAPI CreateProcessW(LPCWSTR lpApplicationName, LPWSTR lpCommandLine, LPSECURITY_ATTRIBUTES lpProcessAttributes,
+						   LPSECURITY_ATTRIBUTES lpThreadAttributes, BOOL bInheritHandles, DWORD dwCreationFlags,
+						   LPVOID lpEnvironment, LPCWSTR lpCurrentDirectory, LPSTARTUPINFOW lpStartupInfo,
+						   LPPROCESS_INFORMATION lpProcessInformation);
+void WINAPI GetStartupInfoA(LPSTARTUPINFOA lpStartupInfo);
+void WINAPI GetStartupInfoW(LPSTARTUPINFOW lpStartupInfo);
+BOOL WINAPI SetThreadStackGuarantee(PULONG StackSizeInBytes);
 
 } // namespace kernel32

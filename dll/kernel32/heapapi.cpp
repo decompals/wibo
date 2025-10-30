@@ -7,6 +7,7 @@
 #include "internal.h"
 
 #include <algorithm>
+#include <cstring>
 #include <mimalloc.h>
 #include <mutex>
 #include <sys/mman.h>
@@ -75,7 +76,7 @@ HeapObject::~HeapObject() {
 
 namespace kernel32 {
 
-HANDLE WIN_FUNC HeapCreate(DWORD flOptions, SIZE_T dwInitialSize, SIZE_T dwMaximumSize) {
+HANDLE WINAPI HeapCreate(DWORD flOptions, SIZE_T dwInitialSize, SIZE_T dwMaximumSize) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("HeapCreate(%u, %zu, %zu)\n", flOptions, dwInitialSize, dwMaximumSize);
 	if (dwMaximumSize != 0 && dwInitialSize > dwMaximumSize) {
@@ -96,7 +97,7 @@ HANDLE WIN_FUNC HeapCreate(DWORD flOptions, SIZE_T dwInitialSize, SIZE_T dwMaxim
 	return wibo::handles().alloc(std::move(record), 0, 0);
 }
 
-BOOL WIN_FUNC HeapDestroy(HANDLE hHeap) {
+BOOL WINAPI HeapDestroy(HANDLE hHeap) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("HeapDestroy(%p)\n", hHeap);
 	auto record = wibo::handles().getAs<HeapObject>(hHeap);
@@ -110,15 +111,15 @@ BOOL WIN_FUNC HeapDestroy(HANDLE hHeap) {
 	return TRUE;
 }
 
-HANDLE WIN_FUNC GetProcessHeap() {
+HANDLE WINAPI GetProcessHeap() {
 	HOST_CONTEXT_GUARD();
 	ensureProcessHeapInitialized();
 	DEBUG_LOG("GetProcessHeap() -> %p\n", g_processHeapHandle);
 	return g_processHeapHandle;
 }
 
-BOOL WIN_FUNC HeapSetInformation(HANDLE HeapHandle, HEAP_INFORMATION_CLASS HeapInformationClass, PVOID HeapInformation,
-								 SIZE_T HeapInformationLength) {
+BOOL WINAPI HeapSetInformation(HANDLE HeapHandle, HEAP_INFORMATION_CLASS HeapInformationClass, PVOID HeapInformation,
+							   SIZE_T HeapInformationLength) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("HeapSetInformation(%p, %d, %p, %zu)\n", HeapHandle, static_cast<int>(HeapInformationClass),
 			  HeapInformation, HeapInformationLength);
@@ -147,7 +148,7 @@ BOOL WIN_FUNC HeapSetInformation(HANDLE HeapHandle, HEAP_INFORMATION_CLASS HeapI
 	}
 }
 
-LPVOID WIN_FUNC HeapAlloc(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes) {
+LPVOID WINAPI HeapAlloc(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("HeapAlloc(%p, 0x%x, %zu) ", hHeap, dwFlags, dwBytes);
 	auto record = wibo::handles().getAs<HeapObject>(hHeap);
@@ -161,7 +162,7 @@ LPVOID WIN_FUNC HeapAlloc(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes) {
 	return mem;
 }
 
-LPVOID WIN_FUNC HeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dwBytes) {
+LPVOID WINAPI HeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dwBytes) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("HeapReAlloc(%p, 0x%x, %p, %zu) ", hHeap, dwFlags, lpMem, dwBytes);
 	auto record = wibo::handles().getAs<HeapObject>(hHeap);
@@ -219,7 +220,7 @@ LPVOID WIN_FUNC HeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dw
 		size_t newUsable = mi_usable_size(ret);
 		if (newUsable > oldSize) {
 			size_t zeroLen = std::min<SIZE_T>(newUsable, requestSize) - oldSize;
-			memset(static_cast<char *>(ret) + oldSize, 0, zeroLen);
+			std::memset(static_cast<char *>(ret) + oldSize, 0, zeroLen);
 		}
 	}
 	if (isExecutableHeap(record.get())) {
@@ -229,7 +230,7 @@ LPVOID WIN_FUNC HeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dw
 	return ret;
 }
 
-SIZE_T WIN_FUNC HeapSize(HANDLE hHeap, DWORD dwFlags, LPCVOID lpMem) {
+SIZE_T WINAPI HeapSize(HANDLE hHeap, DWORD dwFlags, LPCVOID lpMem) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("HeapSize(%p, 0x%x, %p)\n", hHeap, dwFlags, lpMem);
 	(void)dwFlags;
@@ -253,7 +254,7 @@ SIZE_T WIN_FUNC HeapSize(HANDLE hHeap, DWORD dwFlags, LPCVOID lpMem) {
 	return static_cast<SIZE_T>(size);
 }
 
-BOOL WIN_FUNC HeapFree(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem) {
+BOOL WINAPI HeapFree(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("HeapFree(%p, 0x%x, %p)\n", hHeap, dwFlags, lpMem);
 	(void)dwFlags;

@@ -10,7 +10,7 @@
 
 namespace kernel32 {
 
-BOOL WIN_FUNC DuplicateHandle(HANDLE hSourceProcessHandle, HANDLE hSourceHandle, HANDLE hTargetProcessHandle,
+BOOL WINAPI DuplicateHandle(HANDLE hSourceProcessHandle, HANDLE hSourceHandle, HANDLE hTargetProcessHandle,
 							  LPHANDLE lpTargetHandle, DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwOptions) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("DuplicateHandle(%p, %p, %p, %p, %x, %d, %x)\n", hSourceProcessHandle, hSourceHandle,
@@ -59,7 +59,7 @@ BOOL WIN_FUNC DuplicateHandle(HANDLE hSourceProcessHandle, HANDLE hSourceHandle,
 	return TRUE;
 }
 
-BOOL WIN_FUNC CloseHandle(HANDLE hObject) {
+BOOL WINAPI CloseHandle(HANDLE hObject) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CloseHandle(%p)\n", hObject);
 	if (!wibo::handles().release(hObject)) {

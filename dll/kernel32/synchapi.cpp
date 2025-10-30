@@ -128,13 +128,13 @@ struct WaitBlock {
 
 namespace kernel32 {
 
-void WIN_FUNC Sleep(DWORD dwMilliseconds) {
+void WINAPI Sleep(DWORD dwMilliseconds) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("Sleep(%u)\n", dwMilliseconds);
 	usleep(static_cast<useconds_t>(dwMilliseconds) * 1000);
 }
 
-HANDLE WIN_FUNC CreateMutexW(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInitialOwner, LPCWSTR lpName) {
+HANDLE WINAPI CreateMutexW(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInitialOwner, LPCWSTR lpName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CreateMutexW(%p, %d, %s)\n", lpMutexAttributes, static_cast<int>(bInitialOwner),
 			  wideStringToString(lpName).c_str());
@@ -165,7 +165,7 @@ HANDLE WIN_FUNC CreateMutexW(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInit
 	return h;
 }
 
-HANDLE WIN_FUNC CreateMutexA(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInitialOwner, LPCSTR lpName) {
+HANDLE WINAPI CreateMutexA(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInitialOwner, LPCSTR lpName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CreateMutexA -> ");
 	std::vector<uint16_t> wideName;
@@ -174,7 +174,7 @@ HANDLE WIN_FUNC CreateMutexA(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInit
 						lpName ? reinterpret_cast<LPCWSTR>(wideName.data()) : nullptr);
 }
 
-BOOL WIN_FUNC ReleaseMutex(HANDLE hMutex) {
+BOOL WINAPI ReleaseMutex(HANDLE hMutex) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("ReleaseMutex(%p)\n", hMutex);
 	auto mu = wibo::handles().getAs<MutexObject>(hMutex);
@@ -203,7 +203,7 @@ BOOL WIN_FUNC ReleaseMutex(HANDLE hMutex) {
 	return TRUE;
 }
 
-HANDLE WIN_FUNC CreateEventW(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManualReset, BOOL bInitialState,
+HANDLE WINAPI CreateEventW(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManualReset, BOOL bInitialState,
 							 LPCWSTR lpName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CreateEventW(%p, %d, %d, %s)\n", lpEventAttributes, static_cast<int>(bManualReset),
@@ -230,7 +230,7 @@ HANDLE WIN_FUNC CreateEventW(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManu
 	return h;
 }
 
-HANDLE WIN_FUNC CreateEventA(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManualReset, BOOL bInitialState,
+HANDLE WINAPI CreateEventA(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManualReset, BOOL bInitialState,
 							 LPCSTR lpName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CreateEventA -> ");
@@ -240,7 +240,7 @@ HANDLE WIN_FUNC CreateEventA(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManu
 						lpName ? reinterpret_cast<LPCWSTR>(wideName.data()) : nullptr);
 }
 
-HANDLE WIN_FUNC CreateSemaphoreW(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LONG lInitialCount, LONG lMaximumCount,
+HANDLE WINAPI CreateSemaphoreW(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LONG lInitialCount, LONG lMaximumCount,
 								 LPCWSTR lpName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CreateSemaphoreW(%p, %ld, %ld, %s)\n", lpSemaphoreAttributes, lInitialCount, lMaximumCount,
@@ -267,7 +267,7 @@ HANDLE WIN_FUNC CreateSemaphoreW(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LO
 	return h;
 }
 
-HANDLE WIN_FUNC CreateSemaphoreA(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LONG lInitialCount, LONG lMaximumCount,
+HANDLE WINAPI CreateSemaphoreA(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LONG lInitialCount, LONG lMaximumCount,
 								 LPCSTR lpName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CreateSemaphoreA -> ");
@@ -277,7 +277,7 @@ HANDLE WIN_FUNC CreateSemaphoreA(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LO
 							lpName ? reinterpret_cast<LPCWSTR>(wideName.data()) : nullptr);
 }
 
-BOOL WIN_FUNC ReleaseSemaphore(HANDLE hSemaphore, LONG lReleaseCount, PLONG lpPreviousCount) {
+BOOL WINAPI ReleaseSemaphore(HANDLE hSemaphore, LONG lReleaseCount, PLONG lpPreviousCount) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("ReleaseSemaphore(%p, %ld, %p)\n", hSemaphore, lReleaseCount, lpPreviousCount);
 	if (lReleaseCount < 0) {
@@ -318,7 +318,7 @@ BOOL WIN_FUNC ReleaseSemaphore(HANDLE hSemaphore, LONG lReleaseCount, PLONG lpPr
 	return TRUE;
 }
 
-BOOL WIN_FUNC SetEvent(HANDLE hEvent) {
+BOOL WINAPI SetEvent(HANDLE hEvent) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetEvent(%p)\n", hEvent);
 	auto ev = wibo::handles().getAs<EventObject>(hEvent);
@@ -330,7 +330,7 @@ BOOL WIN_FUNC SetEvent(HANDLE hEvent) {
 	return TRUE;
 }
 
-BOOL WIN_FUNC ResetEvent(HANDLE hEvent) {
+BOOL WINAPI ResetEvent(HANDLE hEvent) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("ResetEvent(%p)\n", hEvent);
 	auto ev = wibo::handles().getAs<EventObject>(hEvent);
@@ -342,7 +342,7 @@ BOOL WIN_FUNC ResetEvent(HANDLE hEvent) {
 	return TRUE;
 }
 
-DWORD WIN_FUNC WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds) {
+DWORD WINAPI WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("WaitForSingleObject(%p, %u)\n", hHandle, dwMilliseconds);
 	HandleMeta meta{};
@@ -448,7 +448,7 @@ DWORD WIN_FUNC WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds) {
 	}
 }
 
-DWORD WIN_FUNC WaitForMultipleObjects(DWORD nCount, const HANDLE *lpHandles, BOOL bWaitAll, DWORD dwMilliseconds) {
+DWORD WINAPI WaitForMultipleObjects(DWORD nCount, const HANDLE *lpHandles, BOOL bWaitAll, DWORD dwMilliseconds) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("WaitForMultipleObjects(%u, %p, %d, %u)\n", nCount, lpHandles, static_cast<int>(bWaitAll),
 			  dwMilliseconds);
@@ -543,7 +543,7 @@ DWORD WIN_FUNC WaitForMultipleObjects(DWORD nCount, const HANDLE *lpHandles, BOO
 	return waitResult;
 }
 
-void WIN_FUNC InitializeCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
+void WINAPI InitializeCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("STUB: InitializeCriticalSection(%p)\n", lpCriticalSection);
 	if (!lpCriticalSection) {
@@ -552,7 +552,7 @@ void WIN_FUNC InitializeCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
 	std::memset(lpCriticalSection, 0, sizeof(*lpCriticalSection));
 }
 
-BOOL WIN_FUNC InitializeCriticalSectionEx(LPCRITICAL_SECTION lpCriticalSection, DWORD dwSpinCount, DWORD Flags) {
+BOOL WINAPI InitializeCriticalSectionEx(LPCRITICAL_SECTION lpCriticalSection, DWORD dwSpinCount, DWORD Flags) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: InitializeCriticalSectionEx(%p, %u, 0x%x)\n", lpCriticalSection, dwSpinCount, Flags);
 	if (!lpCriticalSection) {
@@ -568,7 +568,7 @@ BOOL WIN_FUNC InitializeCriticalSectionEx(LPCRITICAL_SECTION lpCriticalSection, 
 	return TRUE;
 }
 
-BOOL WIN_FUNC InitializeCriticalSectionAndSpinCount(LPCRITICAL_SECTION lpCriticalSection, DWORD dwSpinCount) {
+BOOL WINAPI InitializeCriticalSectionAndSpinCount(LPCRITICAL_SECTION lpCriticalSection, DWORD dwSpinCount) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: InitializeCriticalSectionAndSpinCount(%p, %u)\n", lpCriticalSection, dwSpinCount);
 	if (!lpCriticalSection) {
@@ -580,25 +580,25 @@ BOOL WIN_FUNC InitializeCriticalSectionAndSpinCount(LPCRITICAL_SECTION lpCritica
 	return TRUE;
 }
 
-void WIN_FUNC DeleteCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
+void WINAPI DeleteCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("STUB: DeleteCriticalSection(%p)\n", lpCriticalSection);
 	(void)lpCriticalSection;
 }
 
-void WIN_FUNC EnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
+void WINAPI EnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("STUB: EnterCriticalSection(%p)\n", lpCriticalSection);
 	(void)lpCriticalSection;
 }
 
-void WIN_FUNC LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
+void WINAPI LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("STUB: LeaveCriticalSection(%p)\n", lpCriticalSection);
 	(void)lpCriticalSection;
 }
 
-BOOL WIN_FUNC InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBOOL fPending, LPVOID *lpContext) {
+BOOL WINAPI InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBOOL fPending, LPVOID *lpContext) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: InitOnceBeginInitialize(%p, %u, %p, %p)\n", lpInitOnce, dwFlags, fPending, lpContext);
 	if (!lpInitOnce) {
@@ -618,7 +618,7 @@ BOOL WIN_FUNC InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBO
 	return TRUE;
 }
 
-BOOL WIN_FUNC InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpContext) {
+BOOL WINAPI InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpContext) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: InitOnceComplete(%p, %u, %p)\n", lpInitOnce, dwFlags, lpContext);
 	if (!lpInitOnce) {
@@ -633,31 +633,31 @@ BOOL WIN_FUNC InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpC
 	return TRUE;
 }
 
-void WIN_FUNC AcquireSRWLockShared(PSRWLOCK SRWLock) {
+void WINAPI AcquireSRWLockShared(PSRWLOCK SRWLock) {
 	HOST_CONTEXT_GUARD();
 	(void)SRWLock;
 	VERBOSE_LOG("STUB: AcquireSRWLockShared(%p)\n", SRWLock);
 }
 
-void WIN_FUNC ReleaseSRWLockShared(PSRWLOCK SRWLock) {
+void WINAPI ReleaseSRWLockShared(PSRWLOCK SRWLock) {
 	HOST_CONTEXT_GUARD();
 	(void)SRWLock;
 	VERBOSE_LOG("STUB: ReleaseSRWLockShared(%p)\n", SRWLock);
 }
 
-void WIN_FUNC AcquireSRWLockExclusive(PSRWLOCK SRWLock) {
+void WINAPI AcquireSRWLockExclusive(PSRWLOCK SRWLock) {
 	HOST_CONTEXT_GUARD();
 	(void)SRWLock;
 	VERBOSE_LOG("STUB: AcquireSRWLockExclusive(%p)\n", SRWLock);
 }
 
-void WIN_FUNC ReleaseSRWLockExclusive(PSRWLOCK SRWLock) {
+void WINAPI ReleaseSRWLockExclusive(PSRWLOCK SRWLock) {
 	HOST_CONTEXT_GUARD();
 	(void)SRWLock;
 	VERBOSE_LOG("STUB: ReleaseSRWLockExclusive(%p)\n", SRWLock);
 }
 
-BOOLEAN WIN_FUNC TryAcquireSRWLockExclusive(PSRWLOCK SRWLock) {
+BOOLEAN WINAPI TryAcquireSRWLockExclusive(PSRWLOCK SRWLock) {
 	HOST_CONTEXT_GUARD();
 	(void)SRWLock;
 	VERBOSE_LOG("STUB: TryAcquireSRWLockExclusive(%p)\n", SRWLock);

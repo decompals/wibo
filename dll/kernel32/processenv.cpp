@@ -41,31 +41,31 @@ std::string convertEnvValueToHost(const std::string &name, const char *rawValue)
 
 namespace kernel32 {
 
-LPSTR WIN_FUNC GetCommandLineA() {
+LPSTR WINAPI GetCommandLineA() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetCommandLineA() -> %s\n", wibo::commandLine.c_str());
 	return const_cast<LPSTR>(wibo::commandLine.c_str());
 }
 
-LPWSTR WIN_FUNC GetCommandLineW() {
+LPWSTR WINAPI GetCommandLineW() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetCommandLineW() -> %s\n", wideStringToString(wibo::commandLineW.data()).c_str());
 	return wibo::commandLineW.data();
 }
 
-HANDLE WIN_FUNC GetStdHandle(DWORD nStdHandle) {
+HANDLE WINAPI GetStdHandle(DWORD nStdHandle) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetStdHandle(%d)\n", nStdHandle);
 	return files::getStdHandle(nStdHandle);
 }
 
-BOOL WIN_FUNC SetStdHandle(DWORD nStdHandle, HANDLE hHandle) {
+BOOL WINAPI SetStdHandle(DWORD nStdHandle, HANDLE hHandle) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetStdHandle(%d, %p)\n", nStdHandle, hHandle);
 	return files::setStdHandle(nStdHandle, hHandle);
 }
 
-LPCH WIN_FUNC GetEnvironmentStrings() {
+LPCH WINAPI GetEnvironmentStrings() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetEnvironmentStrings()\n");
 
@@ -98,7 +98,7 @@ LPCH WIN_FUNC GetEnvironmentStrings() {
 	return buffer;
 }
 
-LPWCH WIN_FUNC GetEnvironmentStringsW() {
+LPWCH WINAPI GetEnvironmentStringsW() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetEnvironmentStringsW()\n");
 
@@ -133,7 +133,7 @@ LPWCH WIN_FUNC GetEnvironmentStringsW() {
 	return buffer;
 }
 
-BOOL WIN_FUNC FreeEnvironmentStringsA(LPCH penv) {
+BOOL WINAPI FreeEnvironmentStringsA(LPCH penv) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FreeEnvironmentStringsA(%p)\n", penv);
 	if (!penv) {
@@ -144,7 +144,7 @@ BOOL WIN_FUNC FreeEnvironmentStringsA(LPCH penv) {
 	return TRUE;
 }
 
-BOOL WIN_FUNC FreeEnvironmentStringsW(LPWCH penv) {
+BOOL WINAPI FreeEnvironmentStringsW(LPWCH penv) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FreeEnvironmentStringsW(%p)\n", penv);
 	if (!penv) {
@@ -155,7 +155,7 @@ BOOL WIN_FUNC FreeEnvironmentStringsW(LPWCH penv) {
 	return TRUE;
 }
 
-DWORD WIN_FUNC GetEnvironmentVariableA(LPCSTR lpName, LPSTR lpBuffer, DWORD nSize) {
+DWORD WINAPI GetEnvironmentVariableA(LPCSTR lpName, LPSTR lpBuffer, DWORD nSize) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetEnvironmentVariableA(%s, %p, %u)\n", lpName ? lpName : "(null)", lpBuffer, nSize);
 	if (!lpName) {
@@ -184,7 +184,7 @@ DWORD WIN_FUNC GetEnvironmentVariableA(LPCSTR lpName, LPSTR lpBuffer, DWORD nSiz
 	return len;
 }
 
-DWORD WIN_FUNC GetEnvironmentVariableW(LPCWSTR lpName, LPWSTR lpBuffer, DWORD nSize) {
+DWORD WINAPI GetEnvironmentVariableW(LPCWSTR lpName, LPWSTR lpBuffer, DWORD nSize) {
 	HOST_CONTEXT_GUARD();
 	std::string name = lpName ? wideStringToString(lpName) : std::string();
 	DEBUG_LOG("GetEnvironmentVariableW(%s, %p, %u)\n", name.c_str(), lpBuffer, nSize);
@@ -215,7 +215,7 @@ DWORD WIN_FUNC GetEnvironmentVariableW(LPCWSTR lpName, LPWSTR lpBuffer, DWORD nS
 	return required - 1;
 }
 
-BOOL WIN_FUNC SetEnvironmentVariableA(LPCSTR lpName, LPCSTR lpValue) {
+BOOL WINAPI SetEnvironmentVariableA(LPCSTR lpName, LPCSTR lpValue) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetEnvironmentVariableA(%s, %s)\n", lpName ? lpName : "(null)", lpValue ? lpValue : "(null)");
 	if (!lpName || std::strchr(lpName, '=')) {
@@ -241,7 +241,7 @@ BOOL WIN_FUNC SetEnvironmentVariableA(LPCSTR lpName, LPCSTR lpValue) {
 	return TRUE;
 }
 
-BOOL WIN_FUNC SetEnvironmentVariableW(LPCWSTR lpName, LPCWSTR lpValue) {
+BOOL WINAPI SetEnvironmentVariableW(LPCWSTR lpName, LPCWSTR lpValue) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetEnvironmentVariableW -> ");
 	if (!lpName) {

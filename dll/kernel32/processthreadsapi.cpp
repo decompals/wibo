@@ -124,7 +124,7 @@ void *threadTrampoline(void *param) {
 	g_currentThreadObject = data.obj;
 
 	// Install TIB
-	TIB *threadTib = nullptr;
+	TEB *threadTib = nullptr;
 	uint16_t previousFs = 0;
 	uint16_t previousGs = 0;
 	if (wibo::tibSelector) {
@@ -176,7 +176,7 @@ void *threadTrampoline(void *param) {
 
 namespace kernel32 {
 
-BOOL WIN_FUNC IsProcessorFeaturePresent(DWORD ProcessorFeature) {
+BOOL WINAPI IsProcessorFeaturePresent(DWORD ProcessorFeature) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("IsProcessorFeaturePresent(%u)\n", ProcessorFeature);
 	if (ProcessorFeature == 0) { // PF_FLOATING_POINT_PRECISION_ERRATA
@@ -192,20 +192,20 @@ BOOL WIN_FUNC IsProcessorFeaturePresent(DWORD ProcessorFeature) {
 	return TRUE;
 }
 
-HANDLE WIN_FUNC GetCurrentProcess() {
+HANDLE WINAPI GetCurrentProcess() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetCurrentProcess() -> %p\n", reinterpret_cast<void *>(static_cast<uintptr_t>(-1)));
 	return reinterpret_cast<HANDLE>(static_cast<uintptr_t>(-1));
 }
 
-DWORD WIN_FUNC GetCurrentProcessId() {
+DWORD WINAPI GetCurrentProcessId() {
 	HOST_CONTEXT_GUARD();
 	DWORD pid = static_cast<DWORD>(getpid());
 	DEBUG_LOG("GetCurrentProcessId() -> %u\n", pid);
 	return pid;
 }
 
-DWORD WIN_FUNC GetCurrentThreadId() {
+DWORD WINAPI GetCurrentThreadId() {
 	HOST_CONTEXT_GUARD();
 	pthread_t thread = pthread_self();
 	const auto threadId = static_cast<DWORD>(thread);
@@ -213,14 +213,14 @@ DWORD WIN_FUNC GetCurrentThreadId() {
 	return threadId;
 }
 
-HANDLE WIN_FUNC GetCurrentThread() {
+HANDLE WINAPI GetCurrentThread() {
 	HOST_CONTEXT_GUARD();
 	HANDLE pseudoHandle = reinterpret_cast<HANDLE>(kPseudoCurrentThreadHandleValue);
 	DEBUG_LOG("GetCurrentThread() -> %p\n", pseudoHandle);
 	return pseudoHandle;
 }
 
-BOOL WIN_FUNC GetProcessAffinityMask(HANDLE hProcess, PDWORD_PTR lpProcessAffinityMask,
+BOOL WINAPI GetProcessAffinityMask(HANDLE hProcess, PDWORD_PTR lpProcessAffinityMask,
 									 PDWORD_PTR lpSystemAffinityMask) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetProcessAffinityMask(%p, %p, %p)\n", hProcess, lpProcessAffinityMask, lpSystemAffinityMask);
@@ -252,7 +252,7 @@ BOOL WIN_FUNC GetProcessAffinityMask(HANDLE hProcess, PDWORD_PTR lpProcessAffini
 	return TRUE;
 }
 
-BOOL WIN_FUNC SetProcessAffinityMask(HANDLE hProcess, DWORD_PTR dwProcessAffinityMask) {
+BOOL WINAPI SetProcessAffinityMask(HANDLE hProcess, DWORD_PTR dwProcessAffinityMask) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetProcessAffinityMask(%p, 0x%lx)\n", hProcess, static_cast<unsigned long>(dwProcessAffinityMask));
 	if (dwProcessAffinityMask == 0) {
@@ -279,7 +279,7 @@ BOOL WIN_FUNC SetProcessAffinityMask(HANDLE hProcess, DWORD_PTR dwProcessAffinit
 	return TRUE;
 }
 
-DWORD_PTR WIN_FUNC SetThreadAffinityMask(HANDLE hThread, DWORD_PTR dwThreadAffinityMask) {
+DWORD_PTR WINAPI SetThreadAffinityMask(HANDLE hThread, DWORD_PTR dwThreadAffinityMask) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetThreadAffinityMask(%p, 0x%lx)\n", hThread, static_cast<unsigned long>(dwThreadAffinityMask));
 	if (dwThreadAffinityMask == 0) {
@@ -314,13 +314,13 @@ DWORD_PTR WIN_FUNC SetThreadAffinityMask(HANDLE hThread, DWORD_PTR dwThreadAffin
 	_exit(static_cast<int>(exitCode));
 }
 
-void WIN_FUNC ExitProcess(UINT uExitCode) {
+void WINAPI ExitProcess(UINT uExitCode) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("ExitProcess(%u)\n", uExitCode);
 	exitInternal(uExitCode);
 }
 
-BOOL WIN_FUNC TerminateProcess(HANDLE hProcess, UINT uExitCode) {
+BOOL WINAPI TerminateProcess(HANDLE hProcess, UINT uExitCode) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("TerminateProcess(%p, %u)\n", hProcess, uExitCode);
 	if (isPseudoCurrentProcessHandle(hProcess)) {
@@ -354,7 +354,7 @@ BOOL WIN_FUNC TerminateProcess(HANDLE hProcess, UINT uExitCode) {
 	return TRUE;
 }
 
-BOOL WIN_FUNC GetExitCodeProcess(HANDLE hProcess, LPDWORD lpExitCode) {
+BOOL WINAPI GetExitCodeProcess(HANDLE hProcess, LPDWORD lpExitCode) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetExitCodeProcess(%p, %p)\n", hProcess, lpExitCode);
 	if (!lpExitCode) {
@@ -379,7 +379,7 @@ BOOL WIN_FUNC GetExitCodeProcess(HANDLE hProcess, LPDWORD lpExitCode) {
 	return TRUE;
 }
 
-DWORD WIN_FUNC TlsAlloc() {
+DWORD WINAPI TlsAlloc() {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("TlsAlloc()\n");
 	DWORD index = wibo::tls::reserveSlot();
@@ -391,7 +391,7 @@ DWORD WIN_FUNC TlsAlloc() {
 	return index;
 }
 
-BOOL WIN_FUNC TlsFree(DWORD dwTlsIndex) {
+BOOL WINAPI TlsFree(DWORD dwTlsIndex) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("TlsFree(%u)\n", dwTlsIndex);
 	if (!wibo::tls::releaseSlot(dwTlsIndex)) {
@@ -402,7 +402,7 @@ BOOL WIN_FUNC TlsFree(DWORD dwTlsIndex) {
 	return TRUE;
 }
 
-LPVOID WIN_FUNC TlsGetValue(DWORD dwTlsIndex) {
+LPVOID WINAPI TlsGetValue(DWORD dwTlsIndex) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("TlsGetValue(%u)\n", dwTlsIndex);
 	if (!wibo::tls::isSlotAllocated(dwTlsIndex)) {
@@ -414,7 +414,7 @@ LPVOID WIN_FUNC TlsGetValue(DWORD dwTlsIndex) {
 	return result;
 }
 
-BOOL WIN_FUNC TlsSetValue(DWORD dwTlsIndex, LPVOID lpTlsValue) {
+BOOL WINAPI TlsSetValue(DWORD dwTlsIndex, LPVOID lpTlsValue) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("TlsSetValue(%u, %p)\n", dwTlsIndex, lpTlsValue);
 	if (!wibo::tls::isSlotAllocated(dwTlsIndex)) {
@@ -429,7 +429,7 @@ BOOL WIN_FUNC TlsSetValue(DWORD dwTlsIndex, LPVOID lpTlsValue) {
 	return TRUE;
 }
 
-DWORD WIN_FUNC ResumeThread(HANDLE hThread) {
+DWORD WINAPI ResumeThread(HANDLE hThread) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("ResumeThread(%p)\n", hThread);
 	// TODO: behavior with current thread handle?
@@ -456,7 +456,7 @@ DWORD WIN_FUNC ResumeThread(HANDLE hThread) {
 	return previous;
 }
 
-HRESULT WIN_FUNC SetThreadDescription(HANDLE hThread, LPCWSTR lpThreadDescription) {
+HRESULT WINAPI SetThreadDescription(HANDLE hThread, LPCWSTR lpThreadDescription) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: SetThreadDescription(%p, %p)\n", hThread, lpThreadDescription);
 	(void)hThread;
@@ -464,7 +464,7 @@ HRESULT WIN_FUNC SetThreadDescription(HANDLE hThread, LPCWSTR lpThreadDescriptio
 	return S_OK;
 }
 
-HANDLE WIN_FUNC CreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dwStackSize,
+HANDLE WINAPI CreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dwStackSize,
 							 LPTHREAD_START_ROUTINE lpStartAddress, LPVOID lpParameter, DWORD dwCreationFlags,
 							 LPDWORD lpThreadId) {
 	HOST_CONTEXT_GUARD();
@@ -516,7 +516,7 @@ HANDLE WIN_FUNC CreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dw
 	return wibo::handles().alloc(std::move(obj), 0 /* TODO */, 0);
 }
 
-[[noreturn]] void WIN_FUNC ExitThread(DWORD dwExitCode) {
+[[noreturn]] void WINAPI ExitThread(DWORD dwExitCode) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("ExitThread(%u)\n", dwExitCode);
 	ThreadObject *obj = g_currentThreadObject;
@@ -530,7 +530,7 @@ HANDLE WIN_FUNC CreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dw
 	pthread_exit(nullptr);
 }
 
-BOOL WIN_FUNC GetExitCodeThread(HANDLE hThread, LPDWORD lpExitCode) {
+BOOL WINAPI GetExitCodeThread(HANDLE hThread, LPDWORD lpExitCode) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetExitCodeThread(%p, %p)\n", hThread, lpExitCode);
 	if (!lpExitCode) {
@@ -551,7 +551,7 @@ BOOL WIN_FUNC GetExitCodeThread(HANDLE hThread, LPDWORD lpExitCode) {
 	return TRUE;
 }
 
-BOOL WIN_FUNC SetThreadPriority(HANDLE hThread, int nPriority) {
+BOOL WINAPI SetThreadPriority(HANDLE hThread, int nPriority) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: SetThreadPriority(%p, %d)\n", hThread, nPriority);
 	(void)hThread;
@@ -559,21 +559,21 @@ BOOL WIN_FUNC SetThreadPriority(HANDLE hThread, int nPriority) {
 	return TRUE;
 }
 
-int WIN_FUNC GetThreadPriority(HANDLE hThread) {
+int WINAPI GetThreadPriority(HANDLE hThread) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: GetThreadPriority(%p)\n", hThread);
 	(void)hThread;
 	return 0;
 }
 
-DWORD WIN_FUNC GetPriorityClass(HANDLE hProcess) {
+DWORD WINAPI GetPriorityClass(HANDLE hProcess) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetPriorityClass(%p)\n", hProcess);
 	(void)hProcess;
 	return NORMAL_PRIORITY_CLASS;
 }
 
-BOOL WIN_FUNC GetThreadTimes(HANDLE hThread, FILETIME *lpCreationTime, FILETIME *lpExitTime, FILETIME *lpKernelTime,
+BOOL WINAPI GetThreadTimes(HANDLE hThread, FILETIME *lpCreationTime, FILETIME *lpExitTime, FILETIME *lpKernelTime,
 							 FILETIME *lpUserTime) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetThreadTimes(%p, %p, %p, %p, %p)\n", hThread, lpCreationTime, lpExitTime, lpKernelTime, lpUserTime);
@@ -617,7 +617,7 @@ BOOL WIN_FUNC GetThreadTimes(HANDLE hThread, FILETIME *lpCreationTime, FILETIME 
 	return FALSE;
 }
 
-BOOL WIN_FUNC CreateProcessA(LPCSTR lpApplicationName, LPSTR lpCommandLine, LPSECURITY_ATTRIBUTES lpProcessAttributes,
+BOOL WINAPI CreateProcessA(LPCSTR lpApplicationName, LPSTR lpCommandLine, LPSECURITY_ATTRIBUTES lpProcessAttributes,
 							 LPSECURITY_ATTRIBUTES lpThreadAttributes, BOOL bInheritHandles, DWORD dwCreationFlags,
 							 LPVOID lpEnvironment, LPCSTR lpCurrentDirectory, LPSTARTUPINFOA lpStartupInfo,
 							 LPPROCESS_INFORMATION lpProcessInformation) {
@@ -671,7 +671,7 @@ BOOL WIN_FUNC CreateProcessA(LPCSTR lpApplicationName, LPSTR lpCommandLine, LPSE
 	return TRUE;
 }
 
-BOOL WIN_FUNC CreateProcessW(LPCWSTR lpApplicationName, LPWSTR lpCommandLine, LPSECURITY_ATTRIBUTES lpProcessAttributes,
+BOOL WINAPI CreateProcessW(LPCWSTR lpApplicationName, LPWSTR lpCommandLine, LPSECURITY_ATTRIBUTES lpProcessAttributes,
 							 LPSECURITY_ATTRIBUTES lpThreadAttributes, BOOL bInheritHandles, DWORD dwCreationFlags,
 							 LPVOID lpEnvironment, LPCWSTR lpCurrentDirectory, LPSTARTUPINFOW lpStartupInfo,
 							 LPPROCESS_INFORMATION lpProcessInformation) {
@@ -706,19 +706,19 @@ BOOL WIN_FUNC CreateProcessW(LPCWSTR lpApplicationName, LPWSTR lpCommandLine, LP
 						  lpProcessInformation);
 }
 
-void WIN_FUNC GetStartupInfoA(LPSTARTUPINFOA lpStartupInfo) {
+void WINAPI GetStartupInfoA(LPSTARTUPINFOA lpStartupInfo) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetStartupInfoA(%p)\n", lpStartupInfo);
 	populateStartupInfo(lpStartupInfo);
 }
 
-void WIN_FUNC GetStartupInfoW(LPSTARTUPINFOW lpStartupInfo) {
+void WINAPI GetStartupInfoW(LPSTARTUPINFOW lpStartupInfo) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetStartupInfoW(%p)\n", lpStartupInfo);
 	populateStartupInfo(lpStartupInfo);
 }
 
-BOOL WIN_FUNC SetThreadStackGuarantee(PULONG StackSizeInBytes) {
+BOOL WINAPI SetThreadStackGuarantee(PULONG StackSizeInBytes) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: SetThreadStackGuarantee(%p)\n", StackSizeInBytes);
 	(void)StackSizeInBytes;

@@ -348,7 +348,7 @@ bool tryCreateFileNamedPipeA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwS
 	return true;
 }
 
-BOOL WIN_FUNC CreatePipe(PHANDLE hReadPipe, PHANDLE hWritePipe, LPSECURITY_ATTRIBUTES lpPipeAttributes, DWORD nSize) {
+BOOL WINAPI CreatePipe(PHANDLE hReadPipe, PHANDLE hWritePipe, LPSECURITY_ATTRIBUTES lpPipeAttributes, DWORD nSize) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CreatePipe(%p, %p, %p, %u)\n", hReadPipe, hWritePipe, lpPipeAttributes, nSize);
 	if (!hReadPipe || !hWritePipe) {
@@ -383,7 +383,7 @@ BOOL WIN_FUNC CreatePipe(PHANDLE hReadPipe, PHANDLE hWritePipe, LPSECURITY_ATTRI
 	return TRUE;
 }
 
-HANDLE WIN_FUNC CreateNamedPipeA(LPCSTR lpName, DWORD dwOpenMode, DWORD dwPipeMode, DWORD nMaxInstances,
+HANDLE WINAPI CreateNamedPipeA(LPCSTR lpName, DWORD dwOpenMode, DWORD dwPipeMode, DWORD nMaxInstances,
 								 DWORD nOutBufferSize, DWORD nInBufferSize, DWORD nDefaultTimeOut,
 								 LPSECURITY_ATTRIBUTES lpSecurityAttributes) {
 	HOST_CONTEXT_GUARD();
@@ -526,7 +526,7 @@ HANDLE WIN_FUNC CreateNamedPipeA(LPCSTR lpName, DWORD dwOpenMode, DWORD dwPipeMo
 	return wibo::handles().alloc(std::move(pipeObj), grantedAccess, handleFlags);
 }
 
-BOOL WIN_FUNC ConnectNamedPipe(HANDLE hNamedPipe, LPOVERLAPPED lpOverlapped) {
+BOOL WINAPI ConnectNamedPipe(HANDLE hNamedPipe, LPOVERLAPPED lpOverlapped) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("ConnectNamedPipe(%p, %p)\n", hNamedPipe, lpOverlapped);
 

@@ -14,13 +14,13 @@ UINT g_processErrorMode = 0;
 
 namespace kernel32 {
 
-DWORD getLastError() { return wibo::getThreadTibForHost()->lastErrorValue; }
+DWORD getLastError() { return wibo::getThreadTibForHost()->LastErrorValue; }
 
-void setLastError(DWORD error) { wibo::getThreadTibForHost()->lastErrorValue = error; }
+void setLastError(DWORD error) { wibo::getThreadTibForHost()->LastErrorValue = error; }
 
 void setLastErrorFromErrno() { setLastError(wibo::winErrorFromErrno(errno)); }
 
-DWORD WIN_FUNC GetLastError() {
+DWORD WINAPI GetLastError() {
 #ifndef NDEBUG
 	{
 		HOST_CONTEXT_GUARD();
@@ -29,11 +29,11 @@ DWORD WIN_FUNC GetLastError() {
 #endif
 	// In guest context, fetch via TIB
 	DWORD err;
-	__asm__ __volatile__("movl %%fs:%c1, %0" : "=r"(err) : "i"(offsetof(TIB, lastErrorValue)));
+	__asm__ __volatile__("movl %%fs:%c1, %0" : "=r"(err) : "i"(offsetof(TEB, LastErrorValue)));
 	return err;
 }
 
-void WIN_FUNC SetLastError(DWORD dwErrCode) {
+void WINAPI SetLastError(DWORD dwErrCode) {
 #ifndef NDEBUG
 	{
 		HOST_CONTEXT_GUARD();
@@ -41,11 +41,11 @@ void WIN_FUNC SetLastError(DWORD dwErrCode) {
 	}
 #endif
 	// In guest context, store via TIB
-	__asm__ __volatile__("movl %0, %%fs:%c1" : : "r"(dwErrCode), "i"(offsetof(TIB, lastErrorValue)) : "memory");
+	__asm__ __volatile__("movl %0, %%fs:%c1" : : "r"(dwErrCode), "i"(offsetof(TEB, LastErrorValue)) : "memory");
 }
 
-void WIN_FUNC RaiseException(DWORD dwExceptionCode, DWORD dwExceptionFlags, DWORD nNumberOfArguments,
-							 const ULONG_PTR *lpArguments) {
+void WINAPI RaiseException(DWORD dwExceptionCode, DWORD dwExceptionFlags, DWORD nNumberOfArguments,
+						   const ULONG_PTR *lpArguments) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("RaiseException(0x%x, 0x%x, %u, %p)\n", dwExceptionCode, dwExceptionFlags, nNumberOfArguments,
 			  lpArguments);
@@ -55,13 +55,13 @@ void WIN_FUNC RaiseException(DWORD dwExceptionCode, DWORD dwExceptionFlags, DWOR
 	exitInternal(dwExceptionCode);
 }
 
-PVOID WIN_FUNC AddVectoredExceptionHandler(ULONG First, PVECTORED_EXCEPTION_HANDLER Handler) {
+PVOID WINAPI AddVectoredExceptionHandler(ULONG First, PVECTORED_EXCEPTION_HANDLER Handler) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: AddVectoredExceptionHandler(%u, %p)\n", First, Handler);
 	return reinterpret_cast<PVOID>(Handler);
 }
 
-LPTOP_LEVEL_EXCEPTION_FILTER WIN_FUNC
+LPTOP_LEVEL_EXCEPTION_FILTER WINAPI
 SetUnhandledExceptionFilter(LPTOP_LEVEL_EXCEPTION_FILTER lpTopLevelExceptionFilter) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: SetUnhandledExceptionFilter(%p)\n", lpTopLevelExceptionFilter);
@@ -70,13 +70,13 @@ SetUnhandledExceptionFilter(LPTOP_LEVEL_EXCEPTION_FILTER lpTopLevelExceptionFilt
 	return previous;
 }
 
-LONG WIN_FUNC UnhandledExceptionFilter(PEXCEPTION_POINTERS ExceptionInfo) {
+LONG WINAPI UnhandledExceptionFilter(PEXCEPTION_POINTERS ExceptionInfo) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: UnhandledExceptionFilter(%p)\n", ExceptionInfo);
 	return EXCEPTION_EXECUTE_HANDLER;
 }
 
-UINT WIN_FUNC SetErrorMode(UINT uMode) {
+UINT WINAPI SetErrorMode(UINT uMode) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: SetErrorMode(%u)\n", uMode);
 	UINT previous = g_processErrorMode;

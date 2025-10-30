@@ -5,6 +5,8 @@
 #include "modules.h"
 #include "resources.h"
 
+#include <cstring>
+
 namespace user32 {
 
 constexpr uint32_t RT_STRING_ID = 6;

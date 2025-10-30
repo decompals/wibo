@@ -1,7 +1,7 @@
 #pragma once
 
-#include "common.h"
 #include "minwinbase.h"
+#include "types.h"
 
 constexpr DWORD WAIT_OBJECT_0 = 0x00000000;
 constexpr DWORD WAIT_ABANDONED = 0x00000080;
@@ -16,11 +16,6 @@ constexpr DWORD INIT_ONCE_INIT_FAILED = 0x00000004UL;
 constexpr DWORD INIT_ONCE_CTX_RESERVED_BITS = 2;
 
 constexpr DWORD CRITICAL_SECTION_NO_DEBUG_INFO = 0x01000000UL;
-
-struct LIST_ENTRY {
-	LIST_ENTRY *Flink;
-	LIST_ENTRY *Blink;
-};
 
 struct RTL_CRITICAL_SECTION;
 
@@ -74,35 +69,35 @@ constexpr SRWLOCK SRWLOCK_INIT{nullptr};
 
 namespace kernel32 {
 
-void WIN_FUNC Sleep(DWORD dwMilliseconds);
-HANDLE WIN_FUNC CreateMutexA(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInitialOwner, LPCSTR lpName);
-HANDLE WIN_FUNC CreateMutexW(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInitialOwner, LPCWSTR lpName);
-BOOL WIN_FUNC ReleaseMutex(HANDLE hMutex);
-HANDLE WIN_FUNC CreateEventA(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManualReset, BOOL bInitialState,
-							 LPCSTR lpName);
-HANDLE WIN_FUNC CreateEventW(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManualReset, BOOL bInitialState,
-							 LPCWSTR lpName);
-BOOL WIN_FUNC SetEvent(HANDLE hEvent);
-BOOL WIN_FUNC ResetEvent(HANDLE hEvent);
-HANDLE WIN_FUNC CreateSemaphoreA(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LONG lInitialCount, LONG lMaximumCount,
-								 LPCSTR lpName);
-HANDLE WIN_FUNC CreateSemaphoreW(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LONG lInitialCount, LONG lMaximumCount,
-								 LPCWSTR lpName);
-BOOL WIN_FUNC ReleaseSemaphore(HANDLE hSemaphore, LONG lReleaseCount, PLONG lpPreviousCount);
-DWORD WIN_FUNC WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds);
-DWORD WIN_FUNC WaitForMultipleObjects(DWORD nCount, const HANDLE *lpHandles, BOOL bWaitAll, DWORD dwMilliseconds);
-void WIN_FUNC InitializeCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
-BOOL WIN_FUNC InitializeCriticalSectionEx(LPCRITICAL_SECTION lpCriticalSection, DWORD dwSpinCount, DWORD Flags);
-BOOL WIN_FUNC InitializeCriticalSectionAndSpinCount(LPCRITICAL_SECTION lpCriticalSection, DWORD dwSpinCount);
-void WIN_FUNC DeleteCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
-void WIN_FUNC EnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
-void WIN_FUNC LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
-BOOL WIN_FUNC InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBOOL fPending, LPVOID *lpContext);
-BOOL WIN_FUNC InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpContext);
-void WIN_FUNC AcquireSRWLockShared(PSRWLOCK SRWLock);
-void WIN_FUNC ReleaseSRWLockShared(PSRWLOCK SRWLock);
-void WIN_FUNC AcquireSRWLockExclusive(PSRWLOCK SRWLock);
-void WIN_FUNC ReleaseSRWLockExclusive(PSRWLOCK SRWLock);
-BOOLEAN WIN_FUNC TryAcquireSRWLockExclusive(PSRWLOCK SRWLock);
+void WINAPI Sleep(DWORD dwMilliseconds);
+HANDLE WINAPI CreateMutexA(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInitialOwner, LPCSTR lpName);
+HANDLE WINAPI CreateMutexW(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInitialOwner, LPCWSTR lpName);
+BOOL WINAPI ReleaseMutex(HANDLE hMutex);
+HANDLE WINAPI CreateEventA(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManualReset, BOOL bInitialState,
+						   LPCSTR lpName);
+HANDLE WINAPI CreateEventW(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManualReset, BOOL bInitialState,
+						   LPCWSTR lpName);
+BOOL WINAPI SetEvent(HANDLE hEvent);
+BOOL WINAPI ResetEvent(HANDLE hEvent);
+HANDLE WINAPI CreateSemaphoreA(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LONG lInitialCount, LONG lMaximumCount,
+							   LPCSTR lpName);
+HANDLE WINAPI CreateSemaphoreW(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LONG lInitialCount, LONG lMaximumCount,
+							   LPCWSTR lpName);
+BOOL WINAPI ReleaseSemaphore(HANDLE hSemaphore, LONG lReleaseCount, PLONG lpPreviousCount);
+DWORD WINAPI WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds);
+DWORD WINAPI WaitForMultipleObjects(DWORD nCount, const HANDLE *lpHandles, BOOL bWaitAll, DWORD dwMilliseconds);
+void WINAPI InitializeCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
+BOOL WINAPI InitializeCriticalSectionEx(LPCRITICAL_SECTION lpCriticalSection, DWORD dwSpinCount, DWORD Flags);
+BOOL WINAPI InitializeCriticalSectionAndSpinCount(LPCRITICAL_SECTION lpCriticalSection, DWORD dwSpinCount);
+void WINAPI DeleteCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
+void WINAPI EnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
+void WINAPI LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
+BOOL WINAPI InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBOOL fPending, LPVOID *lpContext);
+BOOL WINAPI InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpContext);
+void WINAPI AcquireSRWLockShared(PSRWLOCK SRWLock);
+void WINAPI ReleaseSRWLockShared(PSRWLOCK SRWLock);
+void WINAPI AcquireSRWLockExclusive(PSRWLOCK SRWLock);
+void WINAPI ReleaseSRWLockExclusive(PSRWLOCK SRWLock);
+BOOLEAN WINAPI TryAcquireSRWLockExclusive(PSRWLOCK SRWLock);
 
 } // namespace kernel32

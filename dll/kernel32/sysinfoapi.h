@@ -1,7 +1,7 @@
 #pragma once
 
-#include "common.h"
 #include "minwinbase.h"
+#include "types.h"
 
 struct SYSTEM_INFO {
 	union {
@@ -37,12 +37,12 @@ using LPOSVERSIONINFOA = OSVERSIONINFOA *;
 
 namespace kernel32 {
 
-void WIN_FUNC GetSystemInfo(LPSYSTEM_INFO lpSystemInfo);
-void WIN_FUNC GetSystemTime(LPSYSTEMTIME lpSystemTime);
-void WIN_FUNC GetLocalTime(LPSYSTEMTIME lpSystemTime);
-void WIN_FUNC GetSystemTimeAsFileTime(LPFILETIME lpSystemTimeAsFileTime);
-DWORD WIN_FUNC GetTickCount();
-DWORD WIN_FUNC GetVersion();
-BOOL WIN_FUNC GetVersionExA(LPOSVERSIONINFOA lpVersionInformation);
+void WINAPI GetSystemInfo(LPSYSTEM_INFO lpSystemInfo);
+void WINAPI GetSystemTime(LPSYSTEMTIME lpSystemTime);
+void WINAPI GetLocalTime(LPSYSTEMTIME lpSystemTime);
+void WINAPI GetSystemTimeAsFileTime(LPFILETIME lpSystemTimeAsFileTime);
+DWORD WINAPI GetTickCount();
+DWORD WINAPI GetVersion();
+BOOL WINAPI GetVersionExA(LPOSVERSIONINFOA lpVersionInformation);
 
 } // namespace kernel32

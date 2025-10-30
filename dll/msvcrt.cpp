@@ -702,7 +702,7 @@ namespace msvcrt {
 	void WIN_ENTRY _initterm(const _PVFV *ppfn, const _PVFV* end) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_initterm(%p, %p)\n", ppfn, end);
-		TIB *tib = wibo::getThreadTibForHost();
+		auto *tib = wibo::getThreadTibForHost();
 		for (; ppfn < end; ppfn++) {
 			_PVFV func = *ppfn;
 			if (func) {
@@ -718,7 +718,7 @@ namespace msvcrt {
 	int WIN_ENTRY _initterm_e(const _PIFV *ppfn, const _PIFV *end) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_initterm_e(%p, %p)\n", ppfn, end);
-		TIB *tib = wibo::getThreadTibForHost();
+		auto *tib = wibo::getThreadTibForHost();
 		for (; ppfn < end; ppfn++) {
 			_PIFV func = *ppfn;
 			if (func) {

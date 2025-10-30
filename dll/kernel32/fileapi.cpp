@@ -551,7 +551,7 @@ bool tryOpenConsoleDevice(DWORD dwDesiredAccess, DWORD dwShareMode, DWORD dwCrea
 
 namespace kernel32 {
 
-DWORD WIN_FUNC GetFileAttributesA(LPCSTR lpFileName) {
+DWORD WINAPI GetFileAttributesA(LPCSTR lpFileName) {
 	HOST_CONTEXT_GUARD();
 	if (!lpFileName) {
 		setLastError(ERROR_INVALID_PARAMETER);
@@ -587,7 +587,7 @@ DWORD WIN_FUNC GetFileAttributesA(LPCSTR lpFileName) {
 	}
 }
 
-DWORD WIN_FUNC GetFileAttributesW(LPCWSTR lpFileName) {
+DWORD WINAPI GetFileAttributesW(LPCWSTR lpFileName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetFileAttributesW -> ");
 	if (!lpFileName) {
@@ -598,21 +598,21 @@ DWORD WIN_FUNC GetFileAttributesW(LPCWSTR lpFileName) {
 	return GetFileAttributesA(str.c_str());
 }
 
-UINT WIN_FUNC GetDriveTypeA(LPCSTR lpRootPathName) {
+UINT WINAPI GetDriveTypeA(LPCSTR lpRootPathName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: GetDriveTypeA(%s)\n", lpRootPathName ? lpRootPathName : "(null)");
 	(void)lpRootPathName;
 	return DRIVE_FIXED;
 }
 
-UINT WIN_FUNC GetDriveTypeW(LPCWSTR lpRootPathName) {
+UINT WINAPI GetDriveTypeW(LPCWSTR lpRootPathName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: GetDriveTypeW(%p)\n", lpRootPathName);
 	(void)lpRootPathName;
 	return DRIVE_FIXED;
 }
 
-BOOL WIN_FUNC GetVolumeInformationA(LPCSTR lpRootPathName, LPSTR lpVolumeNameBuffer, DWORD nVolumeNameSize,
+BOOL WINAPI GetVolumeInformationA(LPCSTR lpRootPathName, LPSTR lpVolumeNameBuffer, DWORD nVolumeNameSize,
 									LPDWORD lpVolumeSerialNumber, LPDWORD lpMaximumComponentLength,
 									LPDWORD lpFileSystemFlags, LPSTR lpFileSystemNameBuffer,
 									DWORD nFileSystemNameSize) {
@@ -641,7 +641,7 @@ BOOL WIN_FUNC GetVolumeInformationA(LPCSTR lpRootPathName, LPSTR lpVolumeNameBuf
 	return TRUE;
 }
 
-BOOL WIN_FUNC GetVolumeInformationW(LPCWSTR lpRootPathName, LPWSTR lpVolumeNameBuffer, DWORD nVolumeNameSize,
+BOOL WINAPI GetVolumeInformationW(LPCWSTR lpRootPathName, LPWSTR lpVolumeNameBuffer, DWORD nVolumeNameSize,
 									LPDWORD lpVolumeSerialNumber, LPDWORD lpMaximumComponentLength,
 									LPDWORD lpFileSystemFlags, LPWSTR lpFileSystemNameBuffer,
 									DWORD nFileSystemNameSize) {
@@ -672,7 +672,7 @@ BOOL WIN_FUNC GetVolumeInformationW(LPCWSTR lpRootPathName, LPWSTR lpVolumeNameB
 	return TRUE;
 }
 
-LONG WIN_FUNC CompareFileTime(const FILETIME *lpFileTime1, const FILETIME *lpFileTime2) {
+LONG WINAPI CompareFileTime(const FILETIME *lpFileTime1, const FILETIME *lpFileTime2) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CompareFileTime(%p, %p)\n", lpFileTime1, lpFileTime2);
 	auto toInt64 = [](const FILETIME *ft) -> int64_t {
@@ -693,7 +693,7 @@ LONG WIN_FUNC CompareFileTime(const FILETIME *lpFileTime1, const FILETIME *lpFil
 	return 0;
 }
 
-BOOL WIN_FUNC WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten,
+BOOL WINAPI WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten,
 						LPOVERLAPPED lpOverlapped) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("WriteFile(%p, %p, %u, %p, %p)\n", hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten,
@@ -773,7 +773,7 @@ BOOL WIN_FUNC WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWr
 	return io.unixError == 0;
 }
 
-BOOL WIN_FUNC FlushFileBuffers(HANDLE hFile) {
+BOOL WINAPI FlushFileBuffers(HANDLE hFile) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FlushFileBuffers(%p)\n", hFile);
 	auto file = wibo::handles().getAs<FileObject>(hFile);
@@ -788,7 +788,7 @@ BOOL WIN_FUNC FlushFileBuffers(HANDLE hFile) {
 	return TRUE;
 }
 
-BOOL WIN_FUNC ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead,
+BOOL WINAPI ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead,
 					   LPOVERLAPPED lpOverlapped) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("ReadFile(%p, %p, %u, %p, %p)\n", hFile, lpBuffer, nNumberOfBytesToRead, lpNumberOfBytesRead,
@@ -876,7 +876,7 @@ BOOL WIN_FUNC ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead
 	return io.unixError == 0;
 }
 
-HANDLE WIN_FUNC CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
+HANDLE WINAPI CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
 							LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition,
 							DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
 	HOST_CONTEXT_GUARD();
@@ -1103,7 +1103,7 @@ HANDLE WIN_FUNC CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwSh
 	return handle;
 }
 
-HANDLE WIN_FUNC CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
+HANDLE WINAPI CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
 							LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition,
 							DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
 	HOST_CONTEXT_GUARD();
@@ -1117,7 +1117,7 @@ HANDLE WIN_FUNC CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwS
 					   dwFlagsAndAttributes, hTemplateFile);
 }
 
-BOOL WIN_FUNC DeleteFileA(LPCSTR lpFileName) {
+BOOL WINAPI DeleteFileA(LPCSTR lpFileName) {
 	HOST_CONTEXT_GUARD();
 	if (!lpFileName) {
 		setLastError(ERROR_INVALID_PARAMETER);
@@ -1133,7 +1133,7 @@ BOOL WIN_FUNC DeleteFileA(LPCSTR lpFileName) {
 	return TRUE;
 }
 
-BOOL WIN_FUNC DeleteFileW(LPCWSTR lpFileName) {
+BOOL WINAPI DeleteFileW(LPCWSTR lpFileName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("DeleteFileW -> ");
 	if (!lpFileName) {
@@ -1144,7 +1144,7 @@ BOOL WIN_FUNC DeleteFileW(LPCWSTR lpFileName) {
 	return DeleteFileA(name.c_str());
 }
 
-BOOL WIN_FUNC MoveFileA(LPCSTR lpExistingFileName, LPCSTR lpNewFileName) {
+BOOL WINAPI MoveFileA(LPCSTR lpExistingFileName, LPCSTR lpNewFileName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("MoveFileA(%s, %s)\n", lpExistingFileName ? lpExistingFileName : "(null)",
 			  lpNewFileName ? lpNewFileName : "(null)");
@@ -1171,7 +1171,7 @@ BOOL WIN_FUNC MoveFileA(LPCSTR lpExistingFileName, LPCSTR lpNewFileName) {
 	return TRUE;
 }
 
-BOOL WIN_FUNC MoveFileW(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName) {
+BOOL WINAPI MoveFileW(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("MoveFileW -> ");
 	if (!lpExistingFileName || !lpNewFileName) {
@@ -1183,7 +1183,7 @@ BOOL WIN_FUNC MoveFileW(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName) {
 	return MoveFileA(from.c_str(), to.c_str());
 }
 
-DWORD WIN_FUNC SetFilePointer(HANDLE hFile, LONG lDistanceToMove, PLONG lpDistanceToMoveHigh, DWORD dwMoveMethod) {
+DWORD WINAPI SetFilePointer(HANDLE hFile, LONG lDistanceToMove, PLONG lpDistanceToMoveHigh, DWORD dwMoveMethod) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetFilePointer(%p, %ld, %p, %u)\n", hFile, static_cast<long>(lDistanceToMove), lpDistanceToMoveHigh,
 			  dwMoveMethod);
@@ -1223,7 +1223,7 @@ DWORD WIN_FUNC SetFilePointer(HANDLE hFile, LONG lDistanceToMove, PLONG lpDistan
 	return static_cast<DWORD>(static_cast<uint64_t>(position) & 0xFFFFFFFFu);
 }
 
-BOOL WIN_FUNC SetFilePointerEx(HANDLE hFile, LARGE_INTEGER liDistanceToMove, PLARGE_INTEGER lpNewFilePointer,
+BOOL WINAPI SetFilePointerEx(HANDLE hFile, LARGE_INTEGER liDistanceToMove, PLARGE_INTEGER lpNewFilePointer,
 							   DWORD dwMoveMethod) {
 	HOST_CONTEXT_GUARD();
 	if (hFile == nullptr) {
@@ -1270,7 +1270,7 @@ BOOL WIN_FUNC SetFilePointerEx(HANDLE hFile, LARGE_INTEGER liDistanceToMove, PLA
 	return TRUE;
 }
 
-BOOL WIN_FUNC SetEndOfFile(HANDLE hFile) {
+BOOL WINAPI SetEndOfFile(HANDLE hFile) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetEndOfFile(%p)\n", hFile);
 	HandleMeta meta{};
@@ -1292,7 +1292,7 @@ BOOL WIN_FUNC SetEndOfFile(HANDLE hFile) {
 	return TRUE;
 }
 
-BOOL WIN_FUNC CreateDirectoryA(LPCSTR lpPathName, LPSECURITY_ATTRIBUTES lpSecurityAttributes) {
+BOOL WINAPI CreateDirectoryA(LPCSTR lpPathName, LPSECURITY_ATTRIBUTES lpSecurityAttributes) {
 	HOST_CONTEXT_GUARD();
 	(void)lpSecurityAttributes;
 	if (!lpPathName) {
@@ -1308,7 +1308,7 @@ BOOL WIN_FUNC CreateDirectoryA(LPCSTR lpPathName, LPSECURITY_ATTRIBUTES lpSecuri
 	return TRUE;
 }
 
-BOOL WIN_FUNC RemoveDirectoryA(LPCSTR lpPathName) {
+BOOL WINAPI RemoveDirectoryA(LPCSTR lpPathName) {
 	HOST_CONTEXT_GUARD();
 	if (!lpPathName) {
 		setLastError(ERROR_INVALID_PARAMETER);
@@ -1323,7 +1323,7 @@ BOOL WIN_FUNC RemoveDirectoryA(LPCSTR lpPathName) {
 	return TRUE;
 }
 
-BOOL WIN_FUNC SetFileAttributesA(LPCSTR lpFileName, DWORD dwFileAttributes) {
+BOOL WINAPI SetFileAttributesA(LPCSTR lpFileName, DWORD dwFileAttributes) {
 	HOST_CONTEXT_GUARD();
 	(void)dwFileAttributes;
 	if (!lpFileName) {
@@ -1334,7 +1334,7 @@ BOOL WIN_FUNC SetFileAttributesA(LPCSTR lpFileName, DWORD dwFileAttributes) {
 	return TRUE;
 }
 
-DWORD WIN_FUNC GetFileSize(HANDLE hFile, LPDWORD lpFileSizeHigh) {
+DWORD WINAPI GetFileSize(HANDLE hFile, LPDWORD lpFileSizeHigh) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetFileSize(%p, %p) ", hFile, lpFileSizeHigh);
 	// TODO access check
@@ -1360,7 +1360,7 @@ DWORD WIN_FUNC GetFileSize(HANDLE hFile, LPDWORD lpFileSizeHigh) {
 	return static_cast<DWORD>(uSize & 0xFFFFFFFFu);
 }
 
-BOOL WIN_FUNC GetFileTime(HANDLE hFile, LPFILETIME lpCreationTime, LPFILETIME lpLastAccessTime,
+BOOL WINAPI GetFileTime(HANDLE hFile, LPFILETIME lpCreationTime, LPFILETIME lpLastAccessTime,
 						  LPFILETIME lpLastWriteTime) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetFileTime(%p, %p, %p, %p)\n", hFile, lpCreationTime, lpLastAccessTime, lpLastWriteTime);
@@ -1402,7 +1402,7 @@ BOOL WIN_FUNC GetFileTime(HANDLE hFile, LPFILETIME lpCreationTime, LPFILETIME lp
 	return TRUE;
 }
 
-BOOL WIN_FUNC SetFileTime(HANDLE hFile, const FILETIME *lpCreationTime, const FILETIME *lpLastAccessTime,
+BOOL WINAPI SetFileTime(HANDLE hFile, const FILETIME *lpCreationTime, const FILETIME *lpLastAccessTime,
 						  const FILETIME *lpLastWriteTime) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetFileTime(%p, %p, %p, %p)\n", hFile, lpCreationTime, lpLastAccessTime, lpLastWriteTime);
@@ -1472,7 +1472,7 @@ BOOL WIN_FUNC SetFileTime(HANDLE hFile, const FILETIME *lpCreationTime, const FI
 	return TRUE;
 }
 
-BOOL WIN_FUNC GetFileInformationByHandle(HANDLE hFile, LPBY_HANDLE_FILE_INFORMATION lpFileInformation) {
+BOOL WINAPI GetFileInformationByHandle(HANDLE hFile, LPBY_HANDLE_FILE_INFORMATION lpFileInformation) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetFileInformationByHandle(%p, %p)\n", hFile, lpFileInformation);
 	if (!lpFileInformation) {
@@ -1510,7 +1510,7 @@ BOOL WIN_FUNC GetFileInformationByHandle(HANDLE hFile, LPBY_HANDLE_FILE_INFORMAT
 	return TRUE;
 }
 
-DWORD WIN_FUNC GetFileType(HANDLE hFile) {
+DWORD WINAPI GetFileType(HANDLE hFile) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetFileType(%p) ", hFile);
 	auto file = wibo::handles().getAs<FileObject>(hFile);
@@ -1539,7 +1539,7 @@ DWORD WIN_FUNC GetFileType(HANDLE hFile) {
 	return type;
 }
 
-DWORD WIN_FUNC GetFullPathNameA(LPCSTR lpFileName, DWORD nBufferLength, LPSTR lpBuffer, LPSTR *lpFilePart) {
+DWORD WINAPI GetFullPathNameA(LPCSTR lpFileName, DWORD nBufferLength, LPSTR lpBuffer, LPSTR *lpFilePart) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetFullPathNameA(%s, %u)\n", lpFileName ? lpFileName : "(null)", nBufferLength);
 
@@ -1591,7 +1591,7 @@ DWORD WIN_FUNC GetFullPathNameA(LPCSTR lpFileName, DWORD nBufferLength, LPSTR lp
 	return static_cast<DWORD>(pathLen);
 }
 
-DWORD WIN_FUNC GetFullPathNameW(LPCWSTR lpFileName, DWORD nBufferLength, LPWSTR lpBuffer, LPWSTR *lpFilePart) {
+DWORD WINAPI GetFullPathNameW(LPCWSTR lpFileName, DWORD nBufferLength, LPWSTR lpBuffer, LPWSTR *lpFilePart) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetFullPathNameW(%p, %u)\n", lpFileName, nBufferLength);
 
@@ -1644,7 +1644,7 @@ DWORD WIN_FUNC GetFullPathNameW(LPCWSTR lpFileName, DWORD nBufferLength, LPWSTR 
 	return static_cast<DWORD>(wideLen - 1);
 }
 
-DWORD WIN_FUNC GetShortPathNameA(LPCSTR lpszLongPath, LPSTR lpszShortPath, DWORD cchBuffer) {
+DWORD WINAPI GetShortPathNameA(LPCSTR lpszLongPath, LPSTR lpszShortPath, DWORD cchBuffer) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetShortPathNameA(%s)\n", lpszLongPath ? lpszLongPath : "(null)");
 	if (!lpszLongPath || !lpszShortPath) {
@@ -1664,7 +1664,7 @@ DWORD WIN_FUNC GetShortPathNameA(LPCSTR lpszLongPath, LPSTR lpszShortPath, DWORD
 	return required - 1;
 }
 
-DWORD WIN_FUNC GetShortPathNameW(LPCWSTR lpszLongPath, LPWSTR lpszShortPath, DWORD cchBuffer) {
+DWORD WINAPI GetShortPathNameW(LPCWSTR lpszLongPath, LPWSTR lpszShortPath, DWORD cchBuffer) {
 	HOST_CONTEXT_GUARD();
 	if (!lpszLongPath || !lpszShortPath) {
 		setLastError(ERROR_INVALID_PARAMETER);
@@ -1685,7 +1685,7 @@ DWORD WIN_FUNC GetShortPathNameW(LPCWSTR lpszLongPath, LPWSTR lpszShortPath, DWO
 	return static_cast<DWORD>(len);
 }
 
-UINT WIN_FUNC GetTempFileNameA(LPCSTR lpPathName, LPCSTR lpPrefixString, UINT uUnique, LPSTR lpTempFileName) {
+UINT WINAPI GetTempFileNameA(LPCSTR lpPathName, LPCSTR lpPrefixString, UINT uUnique, LPSTR lpTempFileName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetTempFileNameA(%s, %s, %u)\n", lpPathName ? lpPathName : "(null)",
 			  lpPrefixString ? lpPrefixString : "(null)", uUnique);
@@ -1727,7 +1727,7 @@ UINT WIN_FUNC GetTempFileNameA(LPCSTR lpPathName, LPCSTR lpPrefixString, UINT uU
 	return uUnique;
 }
 
-DWORD WIN_FUNC GetTempPathA(DWORD nBufferLength, LPSTR lpBuffer) {
+DWORD WINAPI GetTempPathA(DWORD nBufferLength, LPSTR lpBuffer) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetTempPathA(%u, %p)\n", nBufferLength, lpBuffer);
 
@@ -1754,7 +1754,7 @@ DWORD WIN_FUNC GetTempPathA(DWORD nBufferLength, LPSTR lpBuffer) {
 	return static_cast<DWORD>(len);
 }
 
-HANDLE WIN_FUNC FindFirstFileA(LPCSTR lpFileName, LPWIN32_FIND_DATAA lpFindFileData) {
+HANDLE WINAPI FindFirstFileA(LPCSTR lpFileName, LPWIN32_FIND_DATAA lpFindFileData) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FindFirstFileA(%s, %p)", lpFileName ? lpFileName : "(null)", lpFindFileData);
 	if (!lpFindFileData) {
@@ -1773,7 +1773,7 @@ HANDLE WIN_FUNC FindFirstFileA(LPCSTR lpFileName, LPWIN32_FIND_DATAA lpFindFileD
 	return handle;
 }
 
-HANDLE WIN_FUNC FindFirstFileW(LPCWSTR lpFileName, LPWIN32_FIND_DATAW lpFindFileData) {
+HANDLE WINAPI FindFirstFileW(LPCWSTR lpFileName, LPWIN32_FIND_DATAW lpFindFileData) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FindFirstFileW(%p, %p)", lpFileName, lpFindFileData);
 	if (!lpFindFileData) {
@@ -1793,7 +1793,7 @@ HANDLE WIN_FUNC FindFirstFileW(LPCWSTR lpFileName, LPWIN32_FIND_DATAW lpFindFile
 	return handle;
 }
 
-HANDLE WIN_FUNC FindFirstFileExA(LPCSTR lpFileName, FINDEX_INFO_LEVELS fInfoLevelId, LPVOID lpFindFileData,
+HANDLE WINAPI FindFirstFileExA(LPCSTR lpFileName, FINDEX_INFO_LEVELS fInfoLevelId, LPVOID lpFindFileData,
 								 FINDEX_SEARCH_OPS fSearchOp, LPVOID lpSearchFilter, DWORD dwAdditionalFlags) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FindFirstFileExA(%s, %d, %p, %d, %p, 0x%x)", lpFileName ? lpFileName : "(null)", fInfoLevelId,
@@ -1833,7 +1833,7 @@ HANDLE WIN_FUNC FindFirstFileExA(LPCSTR lpFileName, FINDEX_INFO_LEVELS fInfoLeve
 	return findFirstFileCommon(std::string(lpFileName), findData);
 }
 
-BOOL WIN_FUNC FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileData) {
+BOOL WINAPI FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileData) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FindNextFileA(%p, %p)\n", hFindFile, lpFindFileData);
 	if (!lpFindFileData) {
@@ -1858,7 +1858,7 @@ BOOL WIN_FUNC FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileData)
 	return TRUE;
 }
 
-BOOL WIN_FUNC FindNextFileW(HANDLE hFindFile, LPWIN32_FIND_DATAW lpFindFileData) {
+BOOL WINAPI FindNextFileW(HANDLE hFindFile, LPWIN32_FIND_DATAW lpFindFileData) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FindNextFileW(%p, %p)\n", hFindFile, lpFindFileData);
 	if (!lpFindFileData) {
@@ -1882,7 +1882,7 @@ BOOL WIN_FUNC FindNextFileW(HANDLE hFindFile, LPWIN32_FIND_DATAW lpFindFileData)
 	return TRUE;
 }
 
-BOOL WIN_FUNC FindClose(HANDLE hFindFile) {
+BOOL WINAPI FindClose(HANDLE hFindFile) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FindClose(%p)\n", hFindFile);
 	if (hFindFile == nullptr) {

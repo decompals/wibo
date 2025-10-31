@@ -2,9 +2,13 @@
 
 #include "common.h"
 #include "context.h"
+#include "entry.h"
+#include "entry_trampolines.h"
 #include "errors.h"
 #include "files.h"
 #include "kernel32/internal.h"
+#include "msvcrt.h"
+#include "msvcrt_trampolines.h"
 #include "strutil.h"
 #include "tls.h"
 
@@ -346,18 +350,11 @@ void runModuleTlsCallbacks(wibo::ModuleInfo &module, DWORD reason) {
 	if (!module.tlsInfo.hasTls || module.tlsInfo.callbacks.empty()) {
 		return;
 	}
-	TEB *tib = wibo::getThreadTibForHost();
-	if (!tib) {
-		return;
-	}
-	GUEST_CONTEXT_GUARD(tib);
-	using TlsCallback = void(WIN_FUNC *)(void *, DWORD, void *);
-	for (void *callbackAddr : module.tlsInfo.callbacks) {
-		if (!callbackAddr) {
+	for (auto *callback : module.tlsInfo.callbacks) {
+		if (!callback) {
 			continue;
 		}
-		auto callback = reinterpret_cast<TlsCallback>(callbackAddr);
-		callback(module.handle, reason, nullptr);
+		call_PIMAGE_TLS_CALLBACK(callback, module.handle, reason, nullptr);
 	}
 }
 
@@ -565,8 +562,7 @@ BOOL callDllMain(wibo::ModuleInfo &info, DWORD reason, LPVOID reserved) {
 	// Reset last error
 	kernel32::setLastError(ERROR_SUCCESS);
 
-	using DllMainFunc = BOOL(WIN_FUNC *)(HMODULE, DWORD, LPVOID);
-	auto dllMain = reinterpret_cast<DllMainFunc>(entry);
+	auto dllMain = reinterpret_cast<DllEntryProc>(entry);
 
 	auto invokeWithGuestTIB = [&](DWORD callReason, LPVOID callReserved, bool force) -> BOOL {
 		if (!force) {
@@ -586,14 +582,8 @@ BOOL callDllMain(wibo::ModuleInfo &info, DWORD reason, LPVOID reserved) {
 				  reinterpret_cast<HMODULE>(info.executable->imageBase), callReason, callReserved,
 				  info.normalizedName.c_str());
 
-		BOOL result = TRUE;
-		if (!wibo::tibSelector) {
-			result = dllMain(reinterpret_cast<HMODULE>(info.executable->imageBase), callReason, callReserved);
-		} else {
-			TEB *tib = wibo::getThreadTibForHost();
-			GUEST_CONTEXT_GUARD(tib);
-			result = dllMain(reinterpret_cast<HMODULE>(info.executable->imageBase), callReason, callReserved);
-		}
+		BOOL result =
+			call_DllEntryProc(dllMain, reinterpret_cast<HMODULE>(info.executable->imageBase), callReason, callReserved);
 		DEBUG_LOG("  callDllMain: %s DllMain returned %d\n", info.normalizedName.c_str(), result);
 		return result;
 	};
@@ -873,7 +863,7 @@ void registerOnExitTable(void *table) {
 	}
 }
 
-void addOnExitFunction(void *table, void (*func)()) {
+void addOnExitFunction(void *table, _PVFV func) {
 	if (!func)
 		return;
 	auto reg = registry();
@@ -887,17 +877,15 @@ void addOnExitFunction(void *table, void (*func)()) {
 			reg->onExitTables[table] = info;
 	}
 	if (info) {
-		info->onExitFunctions.push_back(reinterpret_cast<void *>(func));
+		info->onExitFunctions.push_back(func);
 	}
 }
 
 void runPendingOnExit(ModuleInfo &info) {
-	TEB *tib = wibo::getThreadTibForHost();
 	for (auto it = info.onExitFunctions.rbegin(); it != info.onExitFunctions.rend(); ++it) {
-		auto fn = reinterpret_cast<void (*)()>(*it);
+		auto *fn = *it;
 		if (fn) {
-			GUEST_CONTEXT_GUARD(tib);
-			fn();
+			call__PVFV(fn);
 		}
 	}
 	info.onExitFunctions.clear();
@@ -932,7 +920,7 @@ bool initializeModuleTls(ModuleInfo &module) {
 	if (callbacksArray) {
 		auto callbackPtr = reinterpret_cast<uintptr_t *>(callbacksArray);
 		while (callbackPtr && *callbackPtr) {
-			info.callbacks.push_back(reinterpret_cast<void *>(resolveModuleAddress(exec, *callbackPtr)));
+			info.callbacks.push_back(reinterpret_cast<PIMAGE_TLS_CALLBACK>(resolveModuleAddress(exec, *callbackPtr)));
 			++callbackPtr;
 		}
 	}
@@ -1068,10 +1056,9 @@ void notifyDllThreadAttach() {
 			targets.push_back(info);
 		}
 	}
-	TEB *tib = wibo::getThreadTibForHost();
 	for (wibo::ModuleInfo *info : targets) {
-		if (info && info->tlsInfo.hasTls && tib) {
-			if (!allocateModuleTlsForThread(*info, tib)) {
+		if (info && info->tlsInfo.hasTls) {
+			if (!allocateModuleTlsForThread(*info, currentThreadTeb)) {
 				DEBUG_LOG("notifyDllThreadAttach: failed to allocate TLS for %s\n", info->originalName.c_str());
 			}
 			runModuleTlsCallbacks(*info, TLS_THREAD_ATTACH);
@@ -1093,9 +1080,8 @@ void notifyDllThreadDetach() {
 			targets.push_back(info);
 		}
 	}
-	TEB *tib = wibo::getThreadTibForHost();
 	for (auto it = targets.rbegin(); it != targets.rend(); ++it) {
-		if (*it && (*it)->tlsInfo.hasTls && tib) {
+		if (*it && (*it)->tlsInfo.hasTls) {
 			runModuleTlsCallbacks(**it, TLS_THREAD_DETACH);
 		}
 	}
@@ -1103,8 +1089,8 @@ void notifyDllThreadDetach() {
 		callDllMain(**it, DLL_THREAD_DETACH, nullptr);
 	}
 	for (auto it = targets.rbegin(); it != targets.rend(); ++it) {
-		if (*it && (*it)->tlsInfo.hasTls && tib) {
-			freeModuleTlsForThread(**it, tib);
+		if (*it && (*it)->tlsInfo.hasTls) {
+			freeModuleTlsForThread(**it, currentThreadTeb);
 		}
 	}
 	kernel32::setLastError(ERROR_SUCCESS);

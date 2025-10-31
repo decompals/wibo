@@ -84,7 +84,7 @@ LUID lookupOrGeneratePrivilegeLuid(const std::string &normalizedName) {
 
 namespace advapi32 {
 
-BOOL WIN_FUNC LookupAccountSidW(LPCWSTR lpSystemName, PSID Sid, LPWSTR Name, LPDWORD cchName,
+BOOL WINAPI LookupAccountSidW(LPCWSTR lpSystemName, PSID Sid, LPWSTR Name, LPDWORD cchName,
 								LPWSTR ReferencedDomainName, LPDWORD cchReferencedDomainName, SID_NAME_USE *peUse) {
 	HOST_CONTEXT_GUARD();
 	std::string systemName = lpSystemName ? wideStringToString(lpSystemName) : std::string("(null)");
@@ -115,7 +115,7 @@ BOOL WIN_FUNC LookupAccountSidW(LPCWSTR lpSystemName, PSID Sid, LPWSTR Name, LPD
 	return TRUE;
 }
 
-BOOL WIN_FUNC LookupPrivilegeValueA(LPCSTR lpSystemName, LPCSTR lpName, PLUID lpLuid) {
+BOOL WINAPI LookupPrivilegeValueA(LPCSTR lpSystemName, LPCSTR lpName, PLUID lpLuid) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("LookupPrivilegeValueA(%s, %s, %p)\n", lpSystemName ? lpSystemName : "(null)", lpName ? lpName : "(null)",
 			  lpLuid);
@@ -130,7 +130,7 @@ BOOL WIN_FUNC LookupPrivilegeValueA(LPCSTR lpSystemName, LPCSTR lpName, PLUID lp
 	return TRUE;
 }
 
-BOOL WIN_FUNC LookupPrivilegeValueW(LPCWSTR lpSystemName, LPCWSTR lpName, PLUID lpLuid) {
+BOOL WINAPI LookupPrivilegeValueW(LPCWSTR lpSystemName, LPCWSTR lpName, PLUID lpLuid) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("LookupPrivilegeValueW(%p, %p, %p)\n", lpSystemName, lpName, lpLuid);
 	(void)lpSystemName; // only local lookup supported
@@ -145,7 +145,7 @@ BOOL WIN_FUNC LookupPrivilegeValueW(LPCWSTR lpSystemName, LPCWSTR lpName, PLUID 
 	return TRUE;
 }
 
-BOOL WIN_FUNC GetUserNameA(LPSTR lpBuffer, LPDWORD pcbBuffer) {
+BOOL WINAPI GetUserNameA(LPSTR lpBuffer, LPDWORD pcbBuffer) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetUserNameA(%p, %p)\n", lpBuffer, pcbBuffer);
 	if (!pcbBuffer) {
@@ -164,7 +164,7 @@ BOOL WIN_FUNC GetUserNameA(LPSTR lpBuffer, LPDWORD pcbBuffer) {
 	return TRUE;
 }
 
-BOOL WIN_FUNC GetUserNameW(LPWSTR lpBuffer, LPDWORD pcbBuffer) {
+BOOL WINAPI GetUserNameW(LPWSTR lpBuffer, LPDWORD pcbBuffer) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetUserNameW(%p, %p)\n", lpBuffer, pcbBuffer);
 	if (!pcbBuffer) {

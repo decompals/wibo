@@ -1,3 +1,5 @@
+#include "ntdll.h"
+
 #include "common.h"
 #include "context.h"
 #include "errors.h"
@@ -8,6 +10,7 @@
 #include "modules.h"
 #include "processes.h"
 #include "strutil.h"
+#include "types.h"
 
 #include <cerrno>
 #include <cstring>
@@ -17,23 +20,7 @@
 
 #include <optional>
 
-using PIO_APC_ROUTINE = void *;
-
-typedef struct _IO_STATUS_BLOCK {
-	union {
-		NTSTATUS Status;
-		PVOID Pointer;
-	};
-	ULONG_PTR Information;
-} IO_STATUS_BLOCK, *PIO_STATUS_BLOCK;
-
 namespace {
-
-enum PROCESSINFOCLASS {
-	ProcessBasicInformation = 0,
-	ProcessWow64Information = 26,
-	ProcessImageFileName = 27,
-};
 
 struct PROCESS_BASIC_INFORMATION {
 	NTSTATUS ExitStatus;
@@ -52,17 +39,6 @@ struct ProcessHandleDetails {
 };
 
 constexpr LONG kDefaultBasePriority = 8;
-
-struct RTL_OSVERSIONINFOW {
-	ULONG dwOSVersionInfoSize;
-	ULONG dwMajorVersion;
-	ULONG dwMinorVersion;
-	ULONG dwBuildNumber;
-	ULONG dwPlatformId;
-	WCHAR szCSDVersion[128];
-};
-
-using PRTL_OSVERSIONINFOW = RTL_OSVERSIONINFOW *;
 
 struct RTL_OSVERSIONINFOEXW : RTL_OSVERSIONINFOW {
 	WORD wServicePackMajor;
@@ -124,17 +100,17 @@ BOOL WIN_FUNC ResetEvent(HANDLE hEvent);
 
 namespace ntdll {
 
-constexpr LARGE_INTEGER FILE_WRITE_TO_END_OF_FILE = static_cast<LARGE_INTEGER>(-1);
-constexpr LARGE_INTEGER FILE_USE_FILE_POINTER_POSITION = static_cast<LARGE_INTEGER>(-2);
+constexpr LARGE_INTEGER FILE_WRITE_TO_END_OF_FILE = {.QuadPart = -1};
+constexpr LARGE_INTEGER FILE_USE_FILE_POINTER_POSITION = {.QuadPart = -2};
 
-void *WIN_ENTRY memset(void *dest, int ch, size_t count) {
+PVOID CDECL memset(PVOID dest, int ch, SIZE_T count) {
 	VERBOSE_LOG("ntdll::memset(%p, %i, %zu)\n", dest, ch, count);
 	return std::memset(dest, ch, count);
 }
 
-NTSTATUS WIN_FUNC NtReadFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext,
-							 PIO_STATUS_BLOCK IoStatusBlock, PVOID Buffer, ULONG Length, PLARGE_INTEGER ByteOffset,
-							 PULONG Key) {
+NTSTATUS WINAPI NtReadFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext,
+						   PIO_STATUS_BLOCK IoStatusBlock, PVOID Buffer, ULONG Length, PLARGE_INTEGER ByteOffset,
+						   PULONG Key) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("NtReadFile(%p, %p, %p, %p, %p, %p, %u, %p, %p) ", FileHandle, Event, ApcRoutine, ApcContext,
 			  IoStatusBlock, Buffer, Length, ByteOffset, Key);
@@ -156,13 +132,13 @@ NTSTATUS WIN_FUNC NtReadFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE Ap
 
 	bool useOverlapped = file->overlapped;
 	bool useCurrentFilePosition = (ByteOffset == nullptr);
-	if (!useCurrentFilePosition && *ByteOffset == FILE_USE_FILE_POINTER_POSITION) {
+	if (!useCurrentFilePosition && ByteOffset->QuadPart == FILE_USE_FILE_POINTER_POSITION.QuadPart) {
 		useCurrentFilePosition = true;
 	}
 
 	std::optional<off_t> offset;
 	if (!useCurrentFilePosition) {
-		offset = static_cast<off_t>(*ByteOffset);
+		offset = static_cast<off_t>(ByteOffset->QuadPart);
 	}
 
 	if (useOverlapped && useCurrentFilePosition) {
@@ -202,9 +178,9 @@ NTSTATUS WIN_FUNC NtReadFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE Ap
 	return status;
 }
 
-NTSTATUS WIN_FUNC NtWriteFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext,
-							  PIO_STATUS_BLOCK IoStatusBlock, PVOID Buffer, ULONG Length, PLARGE_INTEGER ByteOffset,
-							  PULONG Key) {
+NTSTATUS WINAPI NtWriteFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext,
+							PIO_STATUS_BLOCK IoStatusBlock, PVOID Buffer, ULONG Length, PLARGE_INTEGER ByteOffset,
+							PULONG Key) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("NtWriteFile(%p, %p, %p, %p, %p, %p, %u, %p, %p) ", FileHandle, Event, ApcRoutine, ApcContext,
 			  IoStatusBlock, Buffer, Length, ByteOffset, Key);
@@ -227,16 +203,16 @@ NTSTATUS WIN_FUNC NtWriteFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE A
 	bool useCurrentFilePosition = (ByteOffset == nullptr);
 	bool writeToEndOfFile = false;
 	if (ByteOffset) {
-		if (*ByteOffset == FILE_USE_FILE_POINTER_POSITION) {
+		if (ByteOffset->QuadPart == FILE_USE_FILE_POINTER_POSITION.QuadPart) {
 			useCurrentFilePosition = true;
-		} else if (*ByteOffset == FILE_WRITE_TO_END_OF_FILE) {
+		} else if (ByteOffset->QuadPart == FILE_WRITE_TO_END_OF_FILE.QuadPart) {
 			writeToEndOfFile = true;
 		}
 	}
 
 	std::optional<off_t> offset;
 	if (!useCurrentFilePosition && !writeToEndOfFile) {
-		offset = static_cast<off_t>(*ByteOffset);
+		offset = static_cast<off_t>(ByteOffset->QuadPart);
 	}
 
 	if (useOverlapped && useCurrentFilePosition) {
@@ -286,8 +262,8 @@ NTSTATUS WIN_FUNC NtWriteFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE A
 	return status;
 }
 
-NTSTATUS WIN_FUNC NtAllocateVirtualMemory(HANDLE ProcessHandle, PVOID *BaseAddress, ULONG_PTR ZeroBits,
-										  PSIZE_T RegionSize, ULONG AllocationType, ULONG Protect) {
+NTSTATUS WINAPI NtAllocateVirtualMemory(HANDLE ProcessHandle, PVOID *BaseAddress, ULONG_PTR ZeroBits,
+										PSIZE_T RegionSize, ULONG AllocationType, ULONG Protect) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("NtAllocateVirtualMemory(%p, %p, %lu, %p, %lu, %lu) ", ProcessHandle, BaseAddress, ZeroBits, RegionSize,
 			  AllocationType, Protect);
@@ -325,8 +301,8 @@ NTSTATUS WIN_FUNC NtAllocateVirtualMemory(HANDLE ProcessHandle, PVOID *BaseAddre
 	return STATUS_SUCCESS;
 }
 
-NTSTATUS WIN_FUNC NtProtectVirtualMemory(HANDLE ProcessHandle, PVOID *BaseAddress, PSIZE_T NumberOfBytesToProtect,
-										 ULONG NewAccessProtection, PULONG OldAccessProtection) {
+NTSTATUS WINAPI NtProtectVirtualMemory(HANDLE ProcessHandle, PVOID *BaseAddress, PSIZE_T NumberOfBytesToProtect,
+									   ULONG NewAccessProtection, PULONG OldAccessProtection) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("NtProtectVirtualMemory(%p, %p, %p, %lu, %p) ", ProcessHandle, BaseAddress, NumberOfBytesToProtect,
 			  NewAccessProtection, OldAccessProtection);
@@ -366,7 +342,7 @@ NTSTATUS WIN_FUNC NtProtectVirtualMemory(HANDLE ProcessHandle, PVOID *BaseAddres
 	return STATUS_SUCCESS;
 }
 
-NTSTATUS WIN_FUNC RtlGetVersion(PRTL_OSVERSIONINFOW lpVersionInformation) {
+NTSTATUS WINAPI RtlGetVersion(PRTL_OSVERSIONINFOW lpVersionInformation) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("RtlGetVersion(%p) ", lpVersionInformation);
 	if (!lpVersionInformation) {
@@ -396,9 +372,9 @@ NTSTATUS WIN_FUNC RtlGetVersion(PRTL_OSVERSIONINFOW lpVersionInformation) {
 	return STATUS_SUCCESS;
 }
 
-NTSTATUS WIN_FUNC NtQueryInformationProcess(HANDLE ProcessHandle, PROCESSINFOCLASS ProcessInformationClass,
-											PVOID ProcessInformation, ULONG ProcessInformationLength,
-											PULONG ReturnLength) {
+NTSTATUS WINAPI NtQueryInformationProcess(HANDLE ProcessHandle, PROCESSINFOCLASS ProcessInformationClass,
+										  PVOID ProcessInformation, ULONG ProcessInformationLength,
+										  PULONG ReturnLength) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("NtQueryInformationProcess(%p, %u, %p, %u, %p) ", ProcessHandle, ProcessInformationClass,
 			  ProcessInformation, ProcessInformationLength, ReturnLength);
@@ -501,29 +477,13 @@ NTSTATUS WIN_FUNC NtQueryInformationProcess(HANDLE ProcessHandle, PROCESSINFOCLA
 
 } // namespace ntdll
 
-static void *resolveByName(const char *name) {
-	if (strcmp(name, "NtReadFile") == 0)
-		return (void *)ntdll::NtReadFile;
-	if (strcmp(name, "NtWriteFile") == 0)
-		return (void *)ntdll::NtWriteFile;
-	if (strcmp(name, "NtAllocateVirtualMemory") == 0)
-		return (void *)ntdll::NtAllocateVirtualMemory;
-	if (strcmp(name, "NtProtectVirtualMemory") == 0)
-		return (void *)ntdll::NtProtectVirtualMemory;
-	if (strcmp(name, "RtlGetVersion") == 0)
-		return (void *)ntdll::RtlGetVersion;
-	if (strcmp(name, "NtQueryInformationProcess") == 0)
-		return (void *)ntdll::NtQueryInformationProcess;
-	if (strcmp(name, "memset") == 0)
-		return (void *)ntdll::memset;
-	return nullptr;
-}
+#include "ntdll_trampolines.h"
 
 extern const wibo::ModuleStub lib_ntdll = {
 	(const char *[]){
 		"ntdll",
 		nullptr,
 	},
-	resolveByName,
+	ntdllThunkByName,
 	nullptr,
 };

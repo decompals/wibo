@@ -39,6 +39,8 @@ static void create_file_with_content(const char *path, const char *content) {
 }
 
 static void setup_fixture(void) {
+	TEST_CHECK_EQ(2, sizeof(wint_t));
+
 	DWORD len = GetCurrentDirectoryA(sizeof(g_original_dir), g_original_dir);
 	TEST_CHECK(len > 0 && len < sizeof(g_original_dir));
 

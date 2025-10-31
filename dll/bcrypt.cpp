@@ -85,6 +85,6 @@ extern const wibo::ModuleStub lib_bcrypt = {
 		"bcryptprimitives",
 		nullptr,
 	},
-	bcrypt_trampoline_by_name,
+	bcryptThunkByName,
 	nullptr,
 };

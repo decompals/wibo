@@ -60,7 +60,7 @@ DWORD hashSizeForAlgid(ALG_ID algid) {
 
 namespace advapi32 {
 
-BOOL WIN_FUNC CryptReleaseContext(HCRYPTPROV hProv, DWORD dwFlags) {
+BOOL WINAPI CryptReleaseContext(HCRYPTPROV hProv, DWORD dwFlags) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: CryptReleaseContext(%p, %u)\n", reinterpret_cast<void *>(static_cast<uintptr_t>(hProv)), dwFlags);
 	(void)hProv;
@@ -68,7 +68,7 @@ BOOL WIN_FUNC CryptReleaseContext(HCRYPTPROV hProv, DWORD dwFlags) {
 	return TRUE;
 }
 
-BOOL WIN_FUNC CryptAcquireContextW(HCRYPTPROV *phProv, LPCWSTR pszContainer, LPCWSTR pszProvider, DWORD dwProvType,
+BOOL WINAPI CryptAcquireContextW(HCRYPTPROV *phProv, LPCWSTR pszContainer, LPCWSTR pszProvider, DWORD dwProvType,
 								   DWORD dwFlags) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: CryptAcquireContextW(%p, %p, %p, %u, %u)\n", phProv, pszContainer, pszProvider, dwProvType,
@@ -83,7 +83,7 @@ BOOL WIN_FUNC CryptAcquireContextW(HCRYPTPROV *phProv, LPCWSTR pszContainer, LPC
 	return TRUE;
 }
 
-BOOL WIN_FUNC CryptGenRandom(HCRYPTPROV hProv, DWORD dwLen, BYTE *pbBuffer) {
+BOOL WINAPI CryptGenRandom(HCRYPTPROV hProv, DWORD dwLen, BYTE *pbBuffer) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CryptGenRandom(%p)\n", reinterpret_cast<void *>(static_cast<uintptr_t>(hProv)));
 	(void)hProv;
@@ -101,7 +101,7 @@ BOOL WIN_FUNC CryptGenRandom(HCRYPTPROV hProv, DWORD dwLen, BYTE *pbBuffer) {
 	return TRUE;
 }
 
-BOOL WIN_FUNC CryptCreateHash(HCRYPTPROV hProv, ALG_ID Algid, HCRYPTKEY hKey, DWORD dwFlags, HCRYPTHASH *phHash) {
+BOOL WINAPI CryptCreateHash(HCRYPTPROV hProv, ALG_ID Algid, HCRYPTKEY hKey, DWORD dwFlags, HCRYPTHASH *phHash) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CryptCreateHash(%p, %u, %p, %u, %p)\n", reinterpret_cast<void *>(static_cast<uintptr_t>(hProv)), Algid,
 			  reinterpret_cast<void *>(static_cast<uintptr_t>(hKey)), dwFlags, phHash);
@@ -133,7 +133,7 @@ BOOL WIN_FUNC CryptCreateHash(HCRYPTPROV hProv, ALG_ID Algid, HCRYPTKEY hKey, DW
 	return TRUE;
 }
 
-BOOL WIN_FUNC CryptHashData(HCRYPTHASH hHash, const BYTE *pbData, DWORD dwDataLen, DWORD dwFlags) {
+BOOL WINAPI CryptHashData(HCRYPTHASH hHash, const BYTE *pbData, DWORD dwDataLen, DWORD dwFlags) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CryptHashData(%p, %p, %u, %u)\n", reinterpret_cast<void *>(static_cast<uintptr_t>(hHash)), pbData,
 			  dwDataLen, dwFlags);
@@ -156,7 +156,7 @@ BOOL WIN_FUNC CryptHashData(HCRYPTHASH hHash, const BYTE *pbData, DWORD dwDataLe
 	return TRUE;
 }
 
-BOOL WIN_FUNC CryptGetHashParam(HCRYPTHASH hHash, DWORD dwParam, BYTE *pbData, DWORD *pdwDataLen, DWORD dwFlags) {
+BOOL WINAPI CryptGetHashParam(HCRYPTHASH hHash, DWORD dwParam, BYTE *pbData, DWORD *pdwDataLen, DWORD dwFlags) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CryptGetHashParam(%p, %u, %p, %p, %u)\n", reinterpret_cast<void *>(static_cast<uintptr_t>(hHash)),
 			  dwParam, pbData, pdwDataLen, dwFlags);
@@ -234,7 +234,7 @@ BOOL WIN_FUNC CryptGetHashParam(HCRYPTHASH hHash, DWORD dwParam, BYTE *pbData, D
 	}
 }
 
-BOOL WIN_FUNC CryptDestroyHash(HCRYPTHASH hHash) {
+BOOL WINAPI CryptDestroyHash(HCRYPTHASH hHash) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CryptDestroyHash(%p)\n", reinterpret_cast<void *>(static_cast<uintptr_t>(hHash)));
 	auto *hash = hashObjectFromHandle(hHash);

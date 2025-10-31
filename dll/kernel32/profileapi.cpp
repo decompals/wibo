@@ -14,7 +14,7 @@ BOOL WINAPI QueryPerformanceCounter(LARGE_INTEGER *lpPerformanceCount) {
 		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
-	*lpPerformanceCount = 0;
+	lpPerformanceCount->QuadPart = 0;
 	return TRUE;
 }
 
@@ -25,7 +25,7 @@ BOOL WINAPI QueryPerformanceFrequency(LARGE_INTEGER *lpFrequency) {
 		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
-	*lpFrequency = 1;
+	lpFrequency->QuadPart = 1;
 	return TRUE;
 }
 

@@ -2,7 +2,7 @@
 
 #include "types.h"
 
-using PFLS_CALLBACK_FUNCTION = void (*)(void *);
+typedef void (_CC_STDCALL *PFLS_CALLBACK_FUNCTION)(void *);
 constexpr DWORD FLS_OUT_OF_INDEXES = 0xFFFFFFFF;
 
 namespace kernel32 {

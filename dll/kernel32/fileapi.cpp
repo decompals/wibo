@@ -613,9 +613,8 @@ UINT WINAPI GetDriveTypeW(LPCWSTR lpRootPathName) {
 }
 
 BOOL WINAPI GetVolumeInformationA(LPCSTR lpRootPathName, LPSTR lpVolumeNameBuffer, DWORD nVolumeNameSize,
-									LPDWORD lpVolumeSerialNumber, LPDWORD lpMaximumComponentLength,
-									LPDWORD lpFileSystemFlags, LPSTR lpFileSystemNameBuffer,
-									DWORD nFileSystemNameSize) {
+								  LPDWORD lpVolumeSerialNumber, LPDWORD lpMaximumComponentLength,
+								  LPDWORD lpFileSystemFlags, LPSTR lpFileSystemNameBuffer, DWORD nFileSystemNameSize) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: GetVolumeInformationA(%s)\n", lpRootPathName ? lpRootPathName : "(null)");
 	if (lpVolumeNameBuffer && nVolumeNameSize > 0) {
@@ -642,9 +641,8 @@ BOOL WINAPI GetVolumeInformationA(LPCSTR lpRootPathName, LPSTR lpVolumeNameBuffe
 }
 
 BOOL WINAPI GetVolumeInformationW(LPCWSTR lpRootPathName, LPWSTR lpVolumeNameBuffer, DWORD nVolumeNameSize,
-									LPDWORD lpVolumeSerialNumber, LPDWORD lpMaximumComponentLength,
-									LPDWORD lpFileSystemFlags, LPWSTR lpFileSystemNameBuffer,
-									DWORD nFileSystemNameSize) {
+								  LPDWORD lpVolumeSerialNumber, LPDWORD lpMaximumComponentLength,
+								  LPDWORD lpFileSystemFlags, LPWSTR lpFileSystemNameBuffer, DWORD nFileSystemNameSize) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: GetVolumeInformationW(%p)\n", lpRootPathName);
 	if (lpVolumeNameBuffer && nVolumeNameSize > 0) {
@@ -694,7 +692,7 @@ LONG WINAPI CompareFileTime(const FILETIME *lpFileTime1, const FILETIME *lpFileT
 }
 
 BOOL WINAPI WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten,
-						LPOVERLAPPED lpOverlapped) {
+					  LPOVERLAPPED lpOverlapped) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("WriteFile(%p, %p, %u, %p, %p)\n", hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten,
 			  lpOverlapped);
@@ -789,7 +787,7 @@ BOOL WINAPI FlushFileBuffers(HANDLE hFile) {
 }
 
 BOOL WINAPI ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead,
-					   LPOVERLAPPED lpOverlapped) {
+					 LPOVERLAPPED lpOverlapped) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("ReadFile(%p, %p, %u, %p, %p)\n", hFile, lpBuffer, nNumberOfBytesToRead, lpNumberOfBytesRead,
 			  lpOverlapped);
@@ -877,8 +875,8 @@ BOOL WINAPI ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, 
 }
 
 HANDLE WINAPI CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
-							LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition,
-							DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
+						  LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition,
+						  DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
 	HOST_CONTEXT_GUARD();
 	(void)hTemplateFile;
 	if (!lpFileName) {
@@ -1104,8 +1102,8 @@ HANDLE WINAPI CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShar
 }
 
 HANDLE WINAPI CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
-							LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition,
-							DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
+						  LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition,
+						  DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CreateFileW -> ");
 	if (!lpFileName) {
@@ -1224,7 +1222,7 @@ DWORD WINAPI SetFilePointer(HANDLE hFile, LONG lDistanceToMove, PLONG lpDistance
 }
 
 BOOL WINAPI SetFilePointerEx(HANDLE hFile, LARGE_INTEGER liDistanceToMove, PLARGE_INTEGER lpNewFilePointer,
-							   DWORD dwMoveMethod) {
+							 DWORD dwMoveMethod) {
 	HOST_CONTEXT_GUARD();
 	if (hFile == nullptr) {
 		setLastError(ERROR_INVALID_HANDLE);
@@ -1239,7 +1237,7 @@ BOOL WINAPI SetFilePointerEx(HANDLE hFile, LARGE_INTEGER liDistanceToMove, PLARG
 	// TODO access check
 	std::lock_guard lk(file->m);
 	off_t position = 0;
-	off_t offset = static_cast<off_t>(liDistanceToMove);
+	off_t offset = static_cast<off_t>(liDistanceToMove.QuadPart);
 	if (dwMoveMethod == FILE_BEGIN) {
 		position = offset;
 	} else if (dwMoveMethod == FILE_CURRENT) {
@@ -1265,7 +1263,7 @@ BOOL WINAPI SetFilePointerEx(HANDLE hFile, LARGE_INTEGER liDistanceToMove, PLARG
 		return FALSE;
 	}
 	if (lpNewFilePointer) {
-		*lpNewFilePointer = static_cast<LARGE_INTEGER>(position);
+		lpNewFilePointer->QuadPart = position;
 	}
 	return TRUE;
 }
@@ -1361,7 +1359,7 @@ DWORD WINAPI GetFileSize(HANDLE hFile, LPDWORD lpFileSizeHigh) {
 }
 
 BOOL WINAPI GetFileTime(HANDLE hFile, LPFILETIME lpCreationTime, LPFILETIME lpLastAccessTime,
-						  LPFILETIME lpLastWriteTime) {
+						LPFILETIME lpLastWriteTime) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetFileTime(%p, %p, %p, %p)\n", hFile, lpCreationTime, lpLastAccessTime, lpLastWriteTime);
 	HandleMeta meta{};
@@ -1403,7 +1401,7 @@ BOOL WINAPI GetFileTime(HANDLE hFile, LPFILETIME lpCreationTime, LPFILETIME lpLa
 }
 
 BOOL WINAPI SetFileTime(HANDLE hFile, const FILETIME *lpCreationTime, const FILETIME *lpLastAccessTime,
-						  const FILETIME *lpLastWriteTime) {
+						const FILETIME *lpLastWriteTime) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetFileTime(%p, %p, %p, %p)\n", hFile, lpCreationTime, lpLastAccessTime, lpLastWriteTime);
 	HandleMeta meta{};
@@ -1794,7 +1792,7 @@ HANDLE WINAPI FindFirstFileW(LPCWSTR lpFileName, LPWIN32_FIND_DATAW lpFindFileDa
 }
 
 HANDLE WINAPI FindFirstFileExA(LPCSTR lpFileName, FINDEX_INFO_LEVELS fInfoLevelId, LPVOID lpFindFileData,
-								 FINDEX_SEARCH_OPS fSearchOp, LPVOID lpSearchFilter, DWORD dwAdditionalFlags) {
+							   FINDEX_SEARCH_OPS fSearchOp, LPVOID lpSearchFilter, DWORD dwAdditionalFlags) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FindFirstFileExA(%s, %d, %p, %d, %p, 0x%x)", lpFileName ? lpFileName : "(null)", fInfoLevelId,
 			  lpFindFileData, fSearchOp, lpSearchFilter, dwAdditionalFlags);

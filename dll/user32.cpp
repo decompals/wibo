@@ -1,3 +1,5 @@
+#include "user32.h"
+
 #include "common.h"
 #include "context.h"
 #include "errors.h"
@@ -20,7 +22,7 @@ struct USEROBJECTFLAGS {
 	DWORD dwFlags;
 };
 
-int WIN_FUNC LoadStringA(void *hInstance, unsigned int uID, char *lpBuffer, int cchBufferMax) {
+int WINAPI LoadStringA(HMODULE hInstance, UINT uID, LPSTR lpBuffer, int cchBufferMax) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("LoadStringA(%p, %u, %p, %d)\n", hInstance, uID, lpBuffer, cchBufferMax);
 	if (!lpBuffer || cchBufferMax <= 0) {
@@ -68,7 +70,7 @@ int WIN_FUNC LoadStringA(void *hInstance, unsigned int uID, char *lpBuffer, int 
 	return copyLength;
 }
 
-int WIN_FUNC LoadStringW(void *hInstance, unsigned int uID, uint16_t *lpBuffer, int cchBufferMax) {
+int WINAPI LoadStringW(HMODULE hInstance, UINT uID, LPWSTR lpBuffer, int cchBufferMax) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("LoadStringW(%p, %u, %p, %d)\n", hInstance, uID, lpBuffer, cchBufferMax);
 	wibo::Executable *mod = wibo::executableFromModule((HMODULE)hInstance);
@@ -122,7 +124,7 @@ int WIN_FUNC LoadStringW(void *hInstance, unsigned int uID, uint16_t *lpBuffer, 
 	return copyLength;
 }
 
-int WIN_FUNC MessageBoxA(void *hwnd, const char *lpText, const char *lpCaption, unsigned int uType) {
+int WINAPI MessageBoxA(HWND hwnd, LPCSTR lpText, LPCSTR lpCaption, UINT uType) {
 	HOST_CONTEXT_GUARD();
 	(void)hwnd;
 	(void)uType;
@@ -131,20 +133,20 @@ int WIN_FUNC MessageBoxA(void *hwnd, const char *lpText, const char *lpCaption, 
 	return 1;
 }
 
-HKL WIN_FUNC GetKeyboardLayout(DWORD idThread) {
+HKL WINAPI GetKeyboardLayout(DWORD idThread) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetKeyboardLayout(%u)\n", idThread);
 	(void)idThread;
 	return reinterpret_cast<HKL>(kDefaultKeyboardLayout);
 }
 
-HWINSTA WIN_FUNC GetProcessWindowStation() {
+HWINSTA WINAPI GetProcessWindowStation() {
 	DEBUG_LOG("GetProcessWindowStation()\n");
 	static int kWindowStationStub;
 	return reinterpret_cast<HWINSTA>(&kWindowStationStub);
 }
 
-BOOL WIN_FUNC GetUserObjectInformationA(HANDLE hObj, int nIndex, PVOID pvInfo, DWORD nLength, LPDWORD lpnLengthNeeded) {
+BOOL WINAPI GetUserObjectInformationA(HANDLE hObj, int nIndex, PVOID pvInfo, DWORD nLength, LPDWORD lpnLengthNeeded) {
 	DEBUG_LOG("GetUserObjectInformationA(%p, %d, %p, %u, %p)\n", hObj, nIndex, pvInfo, nLength, lpnLengthNeeded);
 	(void)hObj;
 
@@ -169,36 +171,20 @@ BOOL WIN_FUNC GetUserObjectInformationA(HANDLE hObj, int nIndex, PVOID pvInfo, D
 	return TRUE;
 }
 
-HWND WIN_FUNC GetActiveWindow() {
+HWND WINAPI GetActiveWindow() {
 	DEBUG_LOG("GetActiveWindow()\n");
 	return nullptr;
 }
 
 } // namespace user32
 
-static void *resolveByName(const char *name) {
-	if (strcmp(name, "LoadStringA") == 0)
-		return (void *)user32::LoadStringA;
-	if (strcmp(name, "LoadStringW") == 0)
-		return (void *)user32::LoadStringW;
-	if (strcmp(name, "MessageBoxA") == 0)
-		return (void *)user32::MessageBoxA;
-	if (strcmp(name, "GetKeyboardLayout") == 0)
-		return (void *)user32::GetKeyboardLayout;
-	if (strcmp(name, "GetProcessWindowStation") == 0)
-		return (void *)user32::GetProcessWindowStation;
-	if (strcmp(name, "GetUserObjectInformationA") == 0)
-		return (void *)user32::GetUserObjectInformationA;
-	if (strcmp(name, "GetActiveWindow") == 0)
-		return (void *)user32::GetActiveWindow;
-	return nullptr;
-}
+#include "user32_trampolines.h"
 
 extern const wibo::ModuleStub lib_user32 = {
 	(const char *[]){
 		"user32",
 		nullptr,
 	},
-	resolveByName,
+	user32ThunkByName,
 	nullptr,
 };

@@ -357,9 +357,9 @@ bool setValue(TEB *tib, DWORD index, void *value) {
 	return true;
 }
 
-void *getValue(DWORD index) { return getValue(getThreadTibForHost(), index); }
+void *getValue(DWORD index) { return getValue(currentThreadTeb, index); }
 
-bool setValue(DWORD index, void *value) { return setValue(getThreadTibForHost(), index, value); }
+bool setValue(DWORD index, void *value) { return setValue(currentThreadTeb, index, value); }
 
 void forEachTib(void (*callback)(TEB *, void *), void *context) {
 	if (!callback) {

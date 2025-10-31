@@ -24,7 +24,7 @@ struct CONSOLE_SCREEN_BUFFER_INFO {
 
 struct INPUT_RECORD;
 
-using PHANDLER_ROUTINE = BOOL(WIN_FUNC *)(DWORD CtrlType);
+typedef BOOL (_CC_STDCALL *PHANDLER_ROUTINE)(DWORD CtrlType);
 
 namespace kernel32 {
 

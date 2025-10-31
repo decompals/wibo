@@ -1,5 +1,7 @@
 #include "common.h"
 #include "context.h"
+#include "entry.h"
+#include "entry_trampolines.h"
 #include "files.h"
 #include "modules.h"
 #include "processes.h"
@@ -8,7 +10,6 @@
 #include "version_info.h"
 
 #include <asm/ldt.h>
-#include <charconv>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -19,7 +20,6 @@
 #include <pthread.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
-#include <system_error>
 #include <threads.h>
 #include <unistd.h>
 #include <vector>
@@ -32,9 +32,9 @@ std::vector<uint16_t> wibo::commandLineW;
 wibo::ModuleInfo *wibo::mainModule = nullptr;
 bool wibo::debugEnabled = false;
 unsigned int wibo::debugIndent = 0;
-uint16_t wibo::tibSelector = 0;
 int wibo::tibEntryNumber = -1;
 PEB *wibo::processPeb = nullptr;
+thread_local TEB *currentThreadTeb = nullptr;
 
 void wibo::debug_log(const char *fmt, ...) {
 	va_list args;
@@ -74,27 +74,24 @@ void wibo::initializeTibStackInfo(TEB *tibPtr) {
 	if (!tibPtr) {
 		return;
 	}
-	pthread_attr_t attr;
-	if (pthread_getattr_np(pthread_self(), &attr) != 0) {
-		perror("Failed to get thread attributes");
-		return;
+	// Allocate a stack for the thread in the guest address space (below 2GB)
+	void *guestLimit = nullptr;
+	void *guestBase = nullptr;
+	if (!wibo::heap::reserveGuestStack(1 * 1024 * 1024, &guestLimit, &guestBase)) {
+		fprintf(stderr, "Failed to reserve guest stack\n");
+		std::abort();
 	}
-	void *stackAddr = nullptr;
-	size_t stackSize = 0;
-	if (pthread_attr_getstack(&attr, &stackAddr, &stackSize) == 0 && stackAddr && stackSize > 0) {
-		tibPtr->Tib.StackLimit = stackAddr;
-		tibPtr->Tib.StackBase = static_cast<char *>(stackAddr) + stackSize;
-	} else {
-		perror("Failed to get thread stack info");
-	}
-	DEBUG_LOG("initializeTibStackInfo: stackBase=%p stackLimit=%p\n", tibPtr->Tib.StackBase, tibPtr->Tib.StackLimit);
-	pthread_attr_destroy(&attr);
+	tibPtr->Tib.StackLimit = guestLimit;
+	tibPtr->Tib.StackBase = guestBase;
+	DEBUG_LOG("initializeTibStackInfo: using guest stack base=%p limit=%p\n", tibPtr->Tib.StackBase,
+			  tibPtr->Tib.StackLimit);
 }
 
 bool wibo::installTibForCurrentThread(TEB *tibPtr) {
 	if (!tibPtr) {
 		return false;
 	}
+
 	struct user_desc desc;
 	std::memset(&desc, 0, sizeof(desc));
 	desc.entry_number = tibEntryNumber;
@@ -110,20 +107,21 @@ bool wibo::installTibForCurrentThread(TEB *tibPtr) {
 		perror("set_thread_area failed");
 		return false;
 	}
-	if (tibSelector == 0) {
+	if (tibEntryNumber != static_cast<int>(desc.entry_number)) {
 		tibEntryNumber = static_cast<int>(desc.entry_number);
-		tibSelector = static_cast<uint16_t>((desc.entry_number << 3) | 3);
-		DEBUG_LOG("set_thread_area: allocated selector=0x%x entry=%d base=%p\n", tibSelector, tibEntryNumber, tibPtr);
+		DEBUG_LOG("set_thread_area: allocated entry=%d base=%p\n", tibEntryNumber, tibPtr);
 	} else {
-		DEBUG_LOG("set_thread_area: reused selector=0x%x entry=%d base=%p\n", tibSelector, tibEntryNumber, tibPtr);
+		DEBUG_LOG("set_thread_area: reused entry=%d base=%p\n", tibEntryNumber, tibPtr);
 	}
+
+	tibPtr->HostFsSelector = static_cast<uint16_t>((desc.entry_number << 3) | 3);
+	tibPtr->HostGsSelector = 0;
+	currentThreadTeb = tibPtr;
 	return true;
 }
 
 // Make this global to ease debugging
 TEB tib;
-
-const size_t MAPS_BUFFER_SIZE = 0x10000;
 
 static std::string getExeName(const char *argv0) {
 	std::filesystem::path exePath(argv0 ? argv0 : "wibo");
@@ -248,108 +246,6 @@ static int handlePathCommand(int argc, char **argv, const char *argv0) {
 	return 0;
 }
 
-/**
- * Read /proc/self/maps into a buffer.
- *
- * While reading /proc/self/maps, we need to be extremely careful not to allocate any memory,
- * as that could cause libc to modify memory mappings while we're attempting to fill them.
- * To accomplish this, we use Linux syscalls directly.
- *
- * @param buffer The buffer to read into.
- * @return The number of bytes read.
- */
-static size_t readMaps(char *buffer) {
-	int fd = open("/proc/self/maps", O_RDONLY);
-	if (fd == -1) {
-		perror("Failed to open /proc/self/maps");
-		exit(1);
-	}
-
-	char *cur = buffer;
-	char *bufferEnd = buffer + MAPS_BUFFER_SIZE;
-	while (cur < bufferEnd) {
-		int ret = read(fd, cur, static_cast<size_t>(bufferEnd - cur));
-		if (ret == -1) {
-			if (errno == EINTR) {
-				continue;
-			}
-			perror("Failed to read /proc/self/maps");
-			exit(1);
-		} else if (ret == 0) {
-			break;
-		}
-		cur += ret;
-	}
-	close(fd);
-
-	if (cur == bufferEnd) {
-		fprintf(stderr, "Buffer too small while reading /proc/self/maps\n");
-		exit(1);
-	}
-	*cur = '\0';
-	return static_cast<size_t>(cur - buffer);
-}
-
-/**
- * Map the upper 2GB of memory to prevent libc from allocating there.
- *
- * This is necessary because 32-bit windows only reserves the lowest 2GB of memory for use by a process
- * (https://www.tenouk.com/WinVirtualAddressSpace.html). Linux, on the other hand, will happily allow
- * nearly the entire 4GB address space to be used. Some Windows programs rely on heap allocations to be
- * in the lower 2GB of memory, otherwise they misbehave or crash.
- *
- * Between reading /proc/self/maps and mmap-ing the upper 2GB, we must be extremely careful not to allocate
- * any memory, as that could cause libc to modify memory mappings while we're attempting to fill them.
- */
-static void blockUpper2GB() {
-	const unsigned int FILL_MEMORY_ABOVE = 0x80000000; // 2GB
-
-	DEBUG_LOG("Blocking upper 2GB address space\n");
-
-	// Buffer lives on the stack to avoid heap allocation
-	char buffer[MAPS_BUFFER_SIZE];
-	size_t len = readMaps(buffer);
-	std::string_view procLine(buffer, len);
-	unsigned int lastMapEnd = 0;
-	while (true) {
-		size_t newline = procLine.find('\n');
-		if (newline == std::string::npos) {
-			break;
-		}
-
-		unsigned int mapStart = 0;
-		auto result = std::from_chars(procLine.data(), procLine.data() + procLine.size(), mapStart, 16);
-		if (result.ec != std::errc()) {
-			break;
-		}
-		unsigned int mapEnd = 0;
-		result = std::from_chars(result.ptr + 1, procLine.data() + procLine.size(), mapEnd, 16);
-		if (result.ec != std::errc()) {
-			break;
-		}
-
-		// The empty space we want to map out is now between lastMapEnd and mapStart
-		unsigned int holdingMapStart = lastMapEnd;
-		unsigned int holdingMapEnd = mapStart;
-
-		if ((holdingMapEnd - holdingMapStart) != 0 && holdingMapEnd > FILL_MEMORY_ABOVE) {
-			holdingMapStart = std::max(holdingMapStart, FILL_MEMORY_ABOVE);
-
-			// DEBUG_LOG("Mapping %08x-%08x\n", holdingMapStart, holdingMapEnd);
-			void *holdingMap = mmap((void *)holdingMapStart, holdingMapEnd - holdingMapStart, PROT_READ | PROT_WRITE,
-									MAP_ANONYMOUS | MAP_FIXED | MAP_PRIVATE, -1, 0);
-
-			if (holdingMap == MAP_FAILED) {
-				perror("Failed to create holding map");
-				exit(1);
-			}
-		}
-
-		lastMapEnd = mapEnd;
-		procLine = procLine.substr(newline + 1);
-	}
-}
-
 int main(int argc, char **argv) {
 	if (argc >= 2 && strcmp(argv[1], "path") == 0) {
 		return handlePathCommand(argc - 2, argv + 2, argv[0]);
@@ -447,7 +343,6 @@ int main(int argc, char **argv) {
 		wibo::debugIndent = std::stoul(debugIndentEnv);
 	}
 
-	blockUpper2GB();
 	files::init();
 
 	// Create TIB
@@ -463,7 +358,6 @@ int main(int argc, char **argv) {
 		fprintf(stderr, "Failed to install TIB for main thread\n");
 		return 1;
 	}
-	wibo::setThreadTibForHost(&tib);
 
 	// Determine the guest program name
 	auto guestArgs = wibo::splitCommandLine(cmdLine.c_str());
@@ -579,7 +473,7 @@ int main(int argc, char **argv) {
 	}
 	fclose(f);
 
-	const auto entryPoint = executable->entryPoint;
+	const auto entryPoint = reinterpret_cast<EntryProc>(executable->entryPoint);
 	if (!entryPoint) {
 		fprintf(stderr, "Executable %s has no entry point\n", resolvedGuestPath.c_str());
 		return 1;
@@ -609,7 +503,7 @@ int main(int argc, char **argv) {
 	// Invoke the damn thing
 	{
 		GUEST_CONTEXT_GUARD(&tib);
-		asm volatile("call *%0" : : "r"(entryPoint) : "memory");
+		call_EntryProc(entryPoint);
 	}
 	DEBUG_LOG("We came back\n");
 	wibo::shutdownModuleRegistry();

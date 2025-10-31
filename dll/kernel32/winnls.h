@@ -12,7 +12,7 @@ struct CPINFO {
 };
 
 using LPCPINFO = CPINFO *;
-using LOCALE_ENUMPROCA = BOOL(WIN_FUNC *)(LPSTR);
+typedef BOOL (_CC_STDCALL *LOCALE_ENUMPROCA)(LPSTR);
 
 namespace kernel32 {
 

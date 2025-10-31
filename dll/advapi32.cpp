@@ -7,6 +7,6 @@ extern const wibo::ModuleStub lib_advapi32 = {
 		"advapi32",
 		nullptr,
 	},
-	advapi32_trampoline_by_name,
+	advapi32ThunkByName,
 	nullptr,
 };

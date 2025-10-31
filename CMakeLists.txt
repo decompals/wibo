@@ -170,7 +170,6 @@ add_executable(wibo
     src/access.cpp
     src/async_io.cpp
     src/async_io_epoll.cpp
-    src/context.cpp
     src/errors.cpp
     src/files.cpp
     src/handles.cpp
@@ -260,6 +259,17 @@ wibo_codegen_module(NAME advapi32 HEADERS
     dll/advapi32/winreg.h
 )
 wibo_codegen_module(NAME bcrypt HEADERS dll/bcrypt.h)
+wibo_codegen_module(NAME entry HEADERS src/entry.h)
+wibo_codegen_module(NAME crt HEADERS dll/crt.h)
+wibo_codegen_module(NAME mscoree HEADERS dll/mscoree.h)
+wibo_codegen_module(NAME msvcrt HEADERS dll/msvcrt.h)
+wibo_codegen_module(NAME version HEADERS dll/version.h)
+wibo_codegen_module(NAME rpcrt4 HEADERS dll/rpcrt4.h)
+wibo_codegen_module(NAME vcruntime HEADERS dll/vcruntime.h)
+wibo_codegen_module(NAME lmgr HEADERS dll/lmgr.h)
+wibo_codegen_module(NAME ole32 HEADERS dll/ole32.h)
+wibo_codegen_module(NAME user32 HEADERS dll/user32.h)
+wibo_codegen_module(NAME ntdll HEADERS dll/ntdll.h)
 wibo_codegen_module(NAME kernel32 HEADERS
     dll/kernel32/debugapi.h
     dll/kernel32/errhandlingapi.h

@@ -1,12 +1,12 @@
-#include "modules.h"
+#include "kernel32.h"
 
-#include "kernel32_trampolines.h"
+#include "modules.h"
 
 extern const wibo::ModuleStub lib_kernel32 = {
 	(const char *[]){
 		"kernel32",
 		nullptr,
 	},
-	kernel32_trampoline_by_name,
+	kernel32ThunkByName,
 	nullptr,
 };

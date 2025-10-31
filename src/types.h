@@ -28,10 +28,16 @@
 #define _Out_writes_bytes_(n) WIBO_ANNOTATE("SAL:out_bcount(" #n ")")
 
 // Codegen annotation for calling convention
+#define _CC_CDECL WIBO_ANNOTATE("CC:cdecl")
 #define _CC_STDCALL WIBO_ANNOTATE("CC:stdcall")
 
-// Instructs codegen to convert stdcall to fastcall
+// Instructs codegen to convert between calling conventions
 #define WINAPI _CC_STDCALL __attribute__((fastcall))
+#define CDECL _CC_CDECL __attribute__((fastcall))
+#define CDECL_NO_CONV _CC_CDECL __attribute__((cdecl, force_align_arg_pointer))
+
+// Used for host-to-guest calls
+#define GUEST_STDCALL __attribute__((stdcall))
 
 using VOID = void;
 using HANDLE = VOID *;
@@ -39,6 +45,7 @@ using HMODULE = VOID *;
 using HGLOBAL = HANDLE;
 using HLOCAL = HANDLE;
 using HRSRC = HANDLE;
+using HINSTANCE = HANDLE;
 using LPHANDLE = HANDLE *;
 using PHANDLE = HANDLE *;
 using HKL = HANDLE;
@@ -57,13 +64,13 @@ using LONG = int;
 using PLONG = LONG *;
 using ULONG = unsigned int;
 using PULONG = ULONG *;
-using LARGE_INTEGER = long long;
-using PLARGE_INTEGER = LARGE_INTEGER *;
-using ULARGE_INTEGER = unsigned long long;
-using PULARGE_INTEGER = ULARGE_INTEGER *;
+using LONGLONG = long long;
+using ULONGLONG = unsigned long long;
+using LONG_PTR = long;
+static_assert(sizeof(LONG_PTR) == sizeof(void *), "LONG_PTR must be pointer-sized");
 using ULONG_PTR = unsigned long;
-using UINT_PTR = unsigned long;
 static_assert(sizeof(ULONG_PTR) == sizeof(void *), "ULONG_PTR must be pointer-sized");
+using UINT_PTR = unsigned long;
 static_assert(sizeof(UINT_PTR) == sizeof(void *), "UINT_PTR must be pointer-sized");
 using DWORD_PTR = ULONG_PTR;
 using PDWORD_PTR = DWORD_PTR *;
@@ -89,6 +96,7 @@ using PSIZE_T = SIZE_T *;
 using BYTE = unsigned char;
 using BOOLEAN = unsigned char;
 using UINT = unsigned int;
+using PUINT = UINT *;
 using HKEY = VOID *;
 using PHKEY = HKEY *;
 using PSID = VOID *;
@@ -104,6 +112,30 @@ using PWSTR = WCHAR *;
 
 using NTSTATUS = LONG;
 using HRESULT = LONG;
+
+typedef union _LARGE_INTEGER {
+	struct {
+		DWORD LowPart;
+		LONG HighPart;
+	} DUMMYSTRUCTNAME;
+	struct {
+		DWORD LowPart;
+		LONG HighPart;
+	} u;
+	LONGLONG QuadPart;
+} LARGE_INTEGER, *PLARGE_INTEGER;
+
+typedef union _ULARGE_INTEGER {
+	struct {
+		DWORD LowPart;
+		DWORD HighPart;
+	} DUMMYSTRUCTNAME;
+	struct {
+		DWORD LowPart;
+		DWORD HighPart;
+	} u;
+	ULONGLONG QuadPart;
+} ULARGE_INTEGER, *PULARGE_INTEGER;
 
 struct GUID {
 	DWORD Data1;
@@ -260,7 +292,7 @@ typedef struct _PEB_LDR_DATA {
 	LIST_ENTRY InMemoryOrderModuleList;
 } PEB_LDR_DATA, *PPEB_LDR_DATA;
 
-using PS_POST_PROCESS_INIT_ROUTINE = void(WIN_FUNC *)(void);
+typedef void(_CC_STDCALL *PS_POST_PROCESS_INIT_ROUTINE)();
 using PPS_POST_PROCESS_INIT_ROUTINE = PS_POST_PROCESS_INIT_ROUTINE *;
 
 typedef struct _PEB {
@@ -327,69 +359,70 @@ typedef struct _NT_TIB {
 } NT_TIB, *PNT_TIB;
 
 typedef struct _TEB {
-	NT_TIB Tib;							 /* 000 */
-	PVOID EnvironmentPointer;			 /* 01c */
-	CLIENT_ID ClientId;					 /* 020 */
-	PVOID ActiveRpcHandle;				 /* 028 */
-	PVOID ThreadLocalStoragePointer;	 /* 02c */
-	PPEB Peb;							 /* 030 */
-	ULONG LastErrorValue;				 /* 034 */
-	ULONG CountOfOwnedCriticalSections;	 /* 038 */
-	PVOID CsrClientThread;				 /* 03c */
-	PVOID Win32ThreadInfo;				 /* 040 */
-	ULONG Win32ClientInfo[31];			 /* 044 used for user32 private data in Wine */
-	PVOID WOW32Reserved;				 /* 0c0 */
-	ULONG CurrentLocale;				 /* 0c4 */
-	ULONG FpSoftwareStatusRegister;		 /* 0c8 */
-	PVOID SystemReserved1[54];			 /* 0cc used for kernel32 private data in Wine */
-	PVOID Spare1;						 /* 1a4 */
-	LONG ExceptionCode;					 /* 1a8 */
-	PVOID ActivationContextStackPointer; /* 1a8/02c8 */
-	BYTE SpareBytes1[36];				 /* 1ac */
-	PVOID SystemReserved2[10];			 /* 1d4 used for ntdll private data in Wine */
-	GDI_TEB_BATCH GdiTebBatch;			 /* 1fc */
-	ULONG gdiRgn;						 /* 6dc */
-	ULONG gdiPen;						 /* 6e0 */
-	ULONG gdiBrush;						 /* 6e4 */
-	CLIENT_ID RealClientId;				 /* 6e8 */
-	HANDLE GdiCachedProcessHandle;		 /* 6f0 */
-	ULONG GdiClientPID;					 /* 6f4 */
-	ULONG GdiClientTID;					 /* 6f8 */
-	PVOID GdiThreadLocaleInfo;			 /* 6fc */
-	PVOID UserReserved[5];				 /* 700 */
-	PVOID glDispatchTable[280];			 /* 714 */
-	ULONG glReserved1[26];				 /* b74 */
-	PVOID glReserved2;					 /* bdc */
-	PVOID glSectionInfo;				 /* be0 */
-	PVOID glSection;					 /* be4 */
-	PVOID glTable;						 /* be8 */
-	PVOID glCurrentRC;					 /* bec */
-	PVOID glContext;					 /* bf0 */
-	ULONG LastStatusValue;				 /* bf4 */
-	UNICODE_STRING StaticUnicodeString;	 /* bf8 used by advapi32 */
-	WCHAR StaticUnicodeBuffer[261];		 /* c00 used by advapi32 */
-	PVOID DeallocationStack;			 /* e0c */
-	PVOID TlsSlots[64];					 /* e10 */
-	LIST_ENTRY TlsLinks;				 /* f10 */
-	PVOID Vdm;							 /* f18 */
-	PVOID ReservedForNtRpc;				 /* f1c */
-	PVOID DbgSsReserved[2];				 /* f20 */
-	ULONG HardErrorDisabled;			 /* f28 */
-	PVOID Instrumentation[16];			 /* f2c */
-	PVOID WinSockData;					 /* f6c */
-	ULONG GdiBatchCount;				 /* f70 */
-	ULONG Spare2;						 /* f74 */
-	ULONG Spare3;						 /* f78 */
-	ULONG Spare4;						 /* f7c */
-	PVOID ReservedForOle;				 /* f80 */
-	ULONG WaitingOnLoaderLock;			 /* f84 */
-	PVOID Reserved5[3];					 /* f88 */
-	PVOID *TlsExpansionSlots;			 /* f94 */
-	// Custom
-	unsigned short hostFsSelector;
-	unsigned short hostGsSelector;
-	bool hostSegmentsValid;
-	unsigned char padding[3];
+	NT_TIB Tib;
+	PVOID EnvironmentPointer;
+	CLIENT_ID ClientId;
+	PVOID ActiveRpcHandle;
+	PVOID ThreadLocalStoragePointer;
+	PPEB Peb;
+	ULONG LastErrorValue;
+	ULONG CountOfOwnedCriticalSections;
+	PVOID CsrClientThread;
+	PVOID Win32ThreadInfo;
+	ULONG Win32ClientInfo[31]; /* used for user32 private data in Wine */
+	PVOID WOW32Reserved;
+	ULONG CurrentLocale;
+	ULONG FpSoftwareStatusRegister;
+	PVOID SystemReserved1[54]; /* used for kernel32 private data in Wine */
+	PVOID Spare1;
+	LONG ExceptionCode;
+	PVOID ActivationContextStackPointer;
+	BYTE SpareBytes1[36];
+	PVOID SystemReserved2[10]; /* used for ntdll private data in Wine */
+	GDI_TEB_BATCH GdiTebBatch;
+	ULONG gdiRgn;
+	ULONG gdiPen;
+	ULONG gdiBrush;
+	CLIENT_ID RealClientId;
+	HANDLE GdiCachedProcessHandle;
+	ULONG GdiClientPID;
+	ULONG GdiClientTID;
+	PVOID GdiThreadLocaleInfo;
+	PVOID UserReserved[5];
+	PVOID glDispatchTable[280];
+	ULONG glReserved1[26];
+	PVOID glReserved2;
+	PVOID glSectionInfo;
+	PVOID glSection;
+	PVOID glTable;
+	PVOID glCurrentRC;
+	PVOID glContext;
+	ULONG LastStatusValue;
+	UNICODE_STRING StaticUnicodeString;
+	WCHAR StaticUnicodeBuffer[261];
+	PVOID DeallocationStack;
+	PVOID TlsSlots[64];
+	LIST_ENTRY TlsLinks;
+	PVOID Vdm;
+	PVOID ReservedForNtRpc;
+	PVOID DbgSsReserved[2];
+	ULONG HardErrorDisabled;
+	PVOID Instrumentation[16];
+	PVOID WinSockData;
+	ULONG GdiBatchCount;
+	ULONG Spare2;
+	ULONG Spare3;
+	ULONG Spare4;
+	PVOID ReservedForOle;
+	ULONG WaitingOnLoaderLock;
+	PVOID Reserved5[3];
+	PVOID *TlsExpansionSlots;
+	// wibo
+	WORD HostFsSelector;
+	WORD HostGsSelector;
+	PVOID HostStackBase;
+	PVOID HostStackLimit;
+	PVOID HostStackPointer;
 } TEB, *PTEB;
 
 #ifndef offsetof

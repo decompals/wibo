@@ -103,7 +103,7 @@ bool writeLocalSystemSid(Sid *sid) {
 
 namespace advapi32 {
 
-BOOL WIN_FUNC InitializeAcl(PACL pAcl, DWORD nAclLength, DWORD dwAclRevision) {
+BOOL WINAPI InitializeAcl(PACL pAcl, DWORD nAclLength, DWORD dwAclRevision) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("InitializeAcl(%p, %u, %u)\n", pAcl, nAclLength, dwAclRevision);
 	if (!pAcl) {
@@ -133,7 +133,7 @@ BOOL WIN_FUNC InitializeAcl(PACL pAcl, DWORD nAclLength, DWORD dwAclRevision) {
 	return TRUE;
 }
 
-BOOL WIN_FUNC AddAccessAllowedAce(PACL pAcl, DWORD dwAceRevision, DWORD AccessMask, PSID pSid) {
+BOOL WINAPI AddAccessAllowedAce(PACL pAcl, DWORD dwAceRevision, DWORD AccessMask, PSID pSid) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("AddAccessAllowedAce(%p, %u, 0x%x, %p)\n", pAcl, dwAceRevision, AccessMask, pSid);
 	if (!pAcl || !pSid) {
@@ -202,7 +202,7 @@ BOOL WIN_FUNC AddAccessAllowedAce(PACL pAcl, DWORD dwAceRevision, DWORD AccessMa
 	return TRUE;
 }
 
-BOOL WIN_FUNC FindFirstFreeAce(PACL pAcl, LPVOID *pAce) {
+BOOL WINAPI FindFirstFreeAce(PACL pAcl, LPVOID *pAce) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FindFirstFreeAce(%p, %p)\n", pAcl, pAce);
 	if (!pAce) {
@@ -225,7 +225,7 @@ BOOL WIN_FUNC FindFirstFreeAce(PACL pAcl, LPVOID *pAce) {
 	return TRUE;
 }
 
-BOOL WIN_FUNC GetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR pSecurityDescriptor, LPBOOL lpbDaclPresent, PACL *pDacl,
+BOOL WINAPI GetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR pSecurityDescriptor, LPBOOL lpbDaclPresent, PACL *pDacl,
 										LPBOOL lpbDaclDefaulted) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetSecurityDescriptorDacl(%p, %p, %p, %p)\n", pSecurityDescriptor, lpbDaclPresent, pDacl,
@@ -262,7 +262,7 @@ BOOL WIN_FUNC GetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR pSecurityDescriptor
 	return TRUE;
 }
 
-PSID_IDENTIFIER_AUTHORITY WIN_FUNC GetSidIdentifierAuthority(PSID pSid) {
+PSID_IDENTIFIER_AUTHORITY WINAPI GetSidIdentifierAuthority(PSID pSid) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetSidIdentifierAuthority(%p)\n", pSid);
 	if (!pSid) {
@@ -277,7 +277,7 @@ PSID_IDENTIFIER_AUTHORITY WIN_FUNC GetSidIdentifierAuthority(PSID pSid) {
 	return reinterpret_cast<PSID_IDENTIFIER_AUTHORITY>(&sid->IdentifierAuthority);
 }
 
-PUCHAR WIN_FUNC GetSidSubAuthorityCount(PSID pSid) {
+PUCHAR WINAPI GetSidSubAuthorityCount(PSID pSid) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetSidSubAuthorityCount(%p)\n", pSid);
 	if (!pSid) {
@@ -292,7 +292,7 @@ PUCHAR WIN_FUNC GetSidSubAuthorityCount(PSID pSid) {
 	return &sid->SubAuthorityCount;
 }
 
-PDWORD WIN_FUNC GetSidSubAuthority(PSID pSid, DWORD nSubAuthority) {
+PDWORD WINAPI GetSidSubAuthority(PSID pSid, DWORD nSubAuthority) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetSidSubAuthority(%p, %u)\n", pSid, nSubAuthority);
 	if (!pSid) {
@@ -307,14 +307,14 @@ PDWORD WIN_FUNC GetSidSubAuthority(PSID pSid, DWORD nSubAuthority) {
 	return &sid->SubAuthority[nSubAuthority];
 }
 
-BOOL WIN_FUNC ImpersonateLoggedOnUser(HANDLE hToken) {
+BOOL WINAPI ImpersonateLoggedOnUser(HANDLE hToken) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: ImpersonateLoggedOnUser(%p)\n", hToken);
 	(void)hToken;
 	return TRUE;
 }
 
-BOOL WIN_FUNC DuplicateTokenEx(HANDLE hExistingToken, DWORD dwDesiredAccess, void *lpTokenAttributes,
+BOOL WINAPI DuplicateTokenEx(HANDLE hExistingToken, DWORD dwDesiredAccess, void *lpTokenAttributes,
 							   DWORD ImpersonationLevel, DWORD TokenType, PHANDLE phNewToken) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("DuplicateTokenEx(%p, 0x%x, %p, %u, %u, %p)\n", hExistingToken, dwDesiredAccess, lpTokenAttributes,
@@ -337,7 +337,7 @@ BOOL WIN_FUNC DuplicateTokenEx(HANDLE hExistingToken, DWORD dwDesiredAccess, voi
 	return TRUE;
 }
 
-BOOL WIN_FUNC CopySid(DWORD nDestinationSidLength, PSID pDestinationSid, PSID pSourceSid) {
+BOOL WINAPI CopySid(DWORD nDestinationSidLength, PSID pDestinationSid, PSID pSourceSid) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CopySid(%u, %p, %p)\n", nDestinationSidLength, pDestinationSid, pSourceSid);
 	if (!pDestinationSid || !pSourceSid) {
@@ -354,7 +354,7 @@ BOOL WIN_FUNC CopySid(DWORD nDestinationSidLength, PSID pDestinationSid, PSID pS
 	return TRUE;
 }
 
-BOOL WIN_FUNC InitializeSid(PSID sid, PSID_IDENTIFIER_AUTHORITY pIdentifierAuthority, BYTE nSubAuthorityCount) {
+BOOL WINAPI InitializeSid(PSID sid, PSID_IDENTIFIER_AUTHORITY pIdentifierAuthority, BYTE nSubAuthorityCount) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("InitializeSid(%p, %p, %u)\n", sid, pIdentifierAuthority, nSubAuthorityCount);
 	if (!sid || !pIdentifierAuthority) {
@@ -375,7 +375,7 @@ BOOL WIN_FUNC InitializeSid(PSID sid, PSID_IDENTIFIER_AUTHORITY pIdentifierAutho
 	return TRUE;
 }
 
-BOOL WIN_FUNC EqualSid(PSID pSid1, PSID pSid2) {
+BOOL WINAPI EqualSid(PSID pSid1, PSID pSid2) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("EqualSid(%p, %p)\n", pSid1, pSid2);
 	if (!pSid1 || !pSid2) {
@@ -398,7 +398,7 @@ BOOL WIN_FUNC EqualSid(PSID pSid1, PSID pSid2) {
 	return equal ? TRUE : FALSE;
 }
 
-BOOL WIN_FUNC SetKernelObjectSecurity(HANDLE Handle, SECURITY_INFORMATION SecurityInformation,
+BOOL WINAPI SetKernelObjectSecurity(HANDLE Handle, SECURITY_INFORMATION SecurityInformation,
 									  PSECURITY_DESCRIPTOR SecurityDescriptor) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: SetKernelObjectSecurity(%p, 0x%x, %p)\n", Handle, SecurityInformation, SecurityDescriptor);
@@ -415,7 +415,7 @@ BOOL WIN_FUNC SetKernelObjectSecurity(HANDLE Handle, SECURITY_INFORMATION Securi
 	return TRUE;
 }
 
-BOOL WIN_FUNC InitializeSecurityDescriptor(PSECURITY_DESCRIPTOR pSecurityDescriptor, DWORD dwRevision) {
+BOOL WINAPI InitializeSecurityDescriptor(PSECURITY_DESCRIPTOR pSecurityDescriptor, DWORD dwRevision) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("InitializeSecurityDescriptor(%p, %u)\n", pSecurityDescriptor, dwRevision);
 	if (!pSecurityDescriptor || dwRevision != SECURITY_DESCRIPTOR_REVISION) {
@@ -432,7 +432,7 @@ BOOL WIN_FUNC InitializeSecurityDescriptor(PSECURITY_DESCRIPTOR pSecurityDescrip
 	return TRUE;
 }
 
-BOOL WIN_FUNC SetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR pSecurityDescriptor, BOOL bDaclPresent, PACL pDacl,
+BOOL WINAPI SetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR pSecurityDescriptor, BOOL bDaclPresent, PACL pDacl,
 										BOOL bDaclDefaulted) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetSecurityDescriptorDacl(%p, %u, %p, %u)\n", pSecurityDescriptor, bDaclPresent, pDacl, bDaclDefaulted);
@@ -454,7 +454,7 @@ BOOL WIN_FUNC SetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR pSecurityDescriptor
 	return TRUE;
 }
 
-BOOL WIN_FUNC GetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS TokenInformationClass,
+BOOL WINAPI GetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS TokenInformationClass,
 								  LPVOID TokenInformation, DWORD TokenInformationLength, LPDWORD ReturnLength) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: GetTokenInformation(%p, %u, %p, %u, %p)\n", TokenHandle, TokenInformationClass, TokenInformation,
@@ -534,7 +534,7 @@ BOOL WIN_FUNC GetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS To
 	return FALSE;
 }
 
-BOOL WIN_FUNC AdjustTokenPrivileges(HANDLE TokenHandle, BOOL DisableAllPrivileges, PTOKEN_PRIVILEGES NewState,
+BOOL WINAPI AdjustTokenPrivileges(HANDLE TokenHandle, BOOL DisableAllPrivileges, PTOKEN_PRIVILEGES NewState,
 									DWORD BufferLength, PTOKEN_PRIVILEGES PreviousState, LPDWORD ReturnLength) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("AdjustTokenPrivileges(%p, %u, %p, %u, %p, %p)\n", TokenHandle, DisableAllPrivileges, NewState,
@@ -548,7 +548,7 @@ BOOL WIN_FUNC AdjustTokenPrivileges(HANDLE TokenHandle, BOOL DisableAllPrivilege
 	return TRUE;
 }
 
-BOOL WIN_FUNC SetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS TokenInformationClass,
+BOOL WINAPI SetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS TokenInformationClass,
 								  LPVOID TokenInformation, DWORD TokenInformationLength) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: SetTokenInformation(%p, %u, %p, %u)\n", TokenHandle, TokenInformationClass, TokenInformation,

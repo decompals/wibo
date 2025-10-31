@@ -83,30 +83,30 @@ enum TOKEN_INFORMATION_CLASS : DWORD {
 
 namespace advapi32 {
 
-BOOL WIN_FUNC InitializeAcl(PACL pAcl, DWORD nAclLength, DWORD dwAclRevision);
-BOOL WIN_FUNC AddAccessAllowedAce(PACL pAcl, DWORD dwAceRevision, DWORD AccessMask, PSID pSid);
-BOOL WIN_FUNC FindFirstFreeAce(PACL pAcl, LPVOID *pAce);
-PSID_IDENTIFIER_AUTHORITY WIN_FUNC GetSidIdentifierAuthority(PSID pSid);
-PUCHAR WIN_FUNC GetSidSubAuthorityCount(PSID pSid);
-PDWORD WIN_FUNC GetSidSubAuthority(PSID pSid, DWORD nSubAuthority);
-BOOL WIN_FUNC ImpersonateLoggedOnUser(HANDLE hToken);
-BOOL WIN_FUNC DuplicateTokenEx(HANDLE hExistingToken, DWORD dwDesiredAccess, void *lpTokenAttributes,
+BOOL WINAPI InitializeAcl(PACL pAcl, DWORD nAclLength, DWORD dwAclRevision);
+BOOL WINAPI AddAccessAllowedAce(PACL pAcl, DWORD dwAceRevision, DWORD AccessMask, PSID pSid);
+BOOL WINAPI FindFirstFreeAce(PACL pAcl, LPVOID *pAce);
+PSID_IDENTIFIER_AUTHORITY WINAPI GetSidIdentifierAuthority(PSID pSid);
+PUCHAR WINAPI GetSidSubAuthorityCount(PSID pSid);
+PDWORD WINAPI GetSidSubAuthority(PSID pSid, DWORD nSubAuthority);
+BOOL WINAPI ImpersonateLoggedOnUser(HANDLE hToken);
+BOOL WINAPI DuplicateTokenEx(HANDLE hExistingToken, DWORD dwDesiredAccess, void *lpTokenAttributes,
 							   DWORD ImpersonationLevel, DWORD TokenType, PHANDLE phNewToken);
-BOOL WIN_FUNC CopySid(DWORD nDestinationSidLength, PSID pDestinationSid, PSID pSourceSid);
-BOOL WIN_FUNC InitializeSid(PSID sid, PSID_IDENTIFIER_AUTHORITY pIdentifierAuthority, BYTE nSubAuthorityCount);
-BOOL WIN_FUNC EqualSid(PSID pSid1, PSID pSid2);
-BOOL WIN_FUNC GetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR pSecurityDescriptor, LPBOOL lpbDaclPresent, PACL *pDacl,
+BOOL WINAPI CopySid(DWORD nDestinationSidLength, PSID pDestinationSid, PSID pSourceSid);
+BOOL WINAPI InitializeSid(PSID sid, PSID_IDENTIFIER_AUTHORITY pIdentifierAuthority, BYTE nSubAuthorityCount);
+BOOL WINAPI EqualSid(PSID pSid1, PSID pSid2);
+BOOL WINAPI GetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR pSecurityDescriptor, LPBOOL lpbDaclPresent, PACL *pDacl,
 										LPBOOL lpbDaclDefaulted);
-BOOL WIN_FUNC SetKernelObjectSecurity(HANDLE Handle, SECURITY_INFORMATION SecurityInformation,
+BOOL WINAPI SetKernelObjectSecurity(HANDLE Handle, SECURITY_INFORMATION SecurityInformation,
 									  PSECURITY_DESCRIPTOR SecurityDescriptor);
-BOOL WIN_FUNC InitializeSecurityDescriptor(PSECURITY_DESCRIPTOR pSecurityDescriptor, DWORD dwRevision);
-BOOL WIN_FUNC SetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR pSecurityDescriptor, BOOL bDaclPresent, PACL pDacl,
+BOOL WINAPI InitializeSecurityDescriptor(PSECURITY_DESCRIPTOR pSecurityDescriptor, DWORD dwRevision);
+BOOL WINAPI SetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR pSecurityDescriptor, BOOL bDaclPresent, PACL pDacl,
 										BOOL bDaclDefaulted);
-BOOL WIN_FUNC GetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS TokenInformationClass,
+BOOL WINAPI GetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS TokenInformationClass,
 								  LPVOID TokenInformation, DWORD TokenInformationLength, LPDWORD ReturnLength);
-BOOL WIN_FUNC AdjustTokenPrivileges(HANDLE TokenHandle, BOOL DisableAllPrivileges, PTOKEN_PRIVILEGES NewState,
+BOOL WINAPI AdjustTokenPrivileges(HANDLE TokenHandle, BOOL DisableAllPrivileges, PTOKEN_PRIVILEGES NewState,
 									DWORD BufferLength, PTOKEN_PRIVILEGES PreviousState, LPDWORD ReturnLength);
-BOOL WIN_FUNC SetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS TokenInformationClass,
+BOOL WINAPI SetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS TokenInformationClass,
 								  LPVOID TokenInformation, DWORD TokenInformationLength);
 
 } // namespace advapi32

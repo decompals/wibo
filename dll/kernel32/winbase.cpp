@@ -7,6 +7,7 @@
 #include "internal.h"
 #include "modules.h"
 #include "strutil.h"
+#include "types.h"
 
 #include <algorithm>
 #include <cassert>
@@ -1141,8 +1142,8 @@ BOOL WINAPI GetDiskFreeSpaceW(LPCWSTR lpRootPathName, LPDWORD lpSectorsPerCluste
 							 lpNumberOfFreeClusters, lpTotalNumberOfClusters);
 }
 
-BOOL WINAPI GetDiskFreeSpaceExA(LPCSTR lpDirectoryName, uint64_t *lpFreeBytesAvailableToCaller,
-								uint64_t *lpTotalNumberOfBytes, uint64_t *lpTotalNumberOfFreeBytes) {
+BOOL WINAPI GetDiskFreeSpaceExA(LPCSTR lpDirectoryName, PULARGE_INTEGER lpFreeBytesAvailableToCaller,
+								PULARGE_INTEGER lpTotalNumberOfBytes, PULARGE_INTEGER lpTotalNumberOfFreeBytes) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetDiskFreeSpaceExA(%s)\n", lpDirectoryName ? lpDirectoryName : "(null)");
 	struct statvfs buf{};
@@ -1161,13 +1162,13 @@ BOOL WINAPI GetDiskFreeSpaceExA(LPCSTR lpDirectoryName, uint64_t *lpFreeBytesAva
 	uint64_t totalFree = static_cast<uint64_t>(buf.f_bfree) * blockSize;
 
 	if (lpFreeBytesAvailableToCaller) {
-		*lpFreeBytesAvailableToCaller = freeToCaller;
+		lpFreeBytesAvailableToCaller->QuadPart = freeToCaller;
 	}
 	if (lpTotalNumberOfBytes) {
-		*lpTotalNumberOfBytes = totalBytes;
+		lpTotalNumberOfBytes->QuadPart = totalBytes;
 	}
 	if (lpTotalNumberOfFreeBytes) {
-		*lpTotalNumberOfFreeBytes = totalFree;
+		lpTotalNumberOfFreeBytes->QuadPart = totalFree;
 	}
 
 	DEBUG_LOG("\t-> host %s, free %llu, total %llu, total free %llu\n", resolvedPath.c_str(),
@@ -1176,8 +1177,8 @@ BOOL WINAPI GetDiskFreeSpaceExA(LPCSTR lpDirectoryName, uint64_t *lpFreeBytesAva
 	return TRUE;
 }
 
-BOOL WINAPI GetDiskFreeSpaceExW(LPCWSTR lpDirectoryName, uint64_t *lpFreeBytesAvailableToCaller,
-								uint64_t *lpTotalNumberOfBytes, uint64_t *lpTotalNumberOfFreeBytes) {
+BOOL WINAPI GetDiskFreeSpaceExW(LPCWSTR lpDirectoryName, PULARGE_INTEGER lpFreeBytesAvailableToCaller,
+								PULARGE_INTEGER lpTotalNumberOfBytes, PULARGE_INTEGER lpTotalNumberOfFreeBytes) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetDiskFreeSpaceExW -> ");
 	std::string directoryName = wideStringToString(lpDirectoryName);

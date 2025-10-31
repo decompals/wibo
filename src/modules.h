@@ -1,6 +1,8 @@
 #pragma once
 
 #include "common.h"
+#include "entry.h"
+#include "msvcrt.h"
 #include "tls.h"
 
 #include <optional>
@@ -73,7 +75,7 @@ struct ModuleTlsInfo {
 	size_t zeroFillSize = 0;
 	uint32_t characteristics = 0;
 	size_t allocationSize = 0;
-	std::vector<void *> callbacks;
+	std::vector<PIMAGE_TLS_CALLBACK> callbacks;
 	std::unordered_map<TEB *, void *> threadAllocations;
 };
 
@@ -100,7 +102,7 @@ struct ModuleInfo {
 	std::vector<void *> exportsByOrdinal;
 	std::unordered_map<std::string, uint16_t> exportNameToOrdinal;
 	bool exportsInitialized = false;
-	std::vector<void *> onExitFunctions;
+	std::vector<_PVFV> onExitFunctions;
 	ModuleTlsInfo tlsInfo;
 };
 extern ModuleInfo *mainModule;
@@ -115,7 +117,7 @@ void clearDllDirectoryOverride();
 std::optional<std::filesystem::path> dllDirectoryOverride();
 ModuleInfo *findLoadedModule(const char *name);
 void registerOnExitTable(void *table);
-void addOnExitFunction(void *table, void (*func)());
+void addOnExitFunction(void *table, _PVFV func);
 void executeOnExitTable(void *table);
 void runPendingOnExit(ModuleInfo &info);
 void notifyDllThreadAttach();

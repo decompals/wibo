@@ -1,3 +1,5 @@
+#include "version.h"
+
 #include "common.h"
 #include "context.h"
 #include "errors.h"
@@ -200,7 +202,7 @@ bool loadVersionResource(const char *fileName, std::vector<uint8_t> &buffer) {
 
 namespace version {
 
-unsigned int WIN_FUNC GetFileVersionInfoSizeA(const char *lptstrFilename, unsigned int *lpdwHandle) {
+UINT WINAPI GetFileVersionInfoSizeA(LPCSTR lptstrFilename, LPDWORD lpdwHandle) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetFileVersionInfoSizeA(%s, %p)\n", lptstrFilename, lpdwHandle);
 	if (lpdwHandle)
@@ -212,8 +214,7 @@ unsigned int WIN_FUNC GetFileVersionInfoSizeA(const char *lptstrFilename, unsign
 	return static_cast<unsigned int>(buffer.size());
 }
 
-unsigned int WIN_FUNC GetFileVersionInfoA(const char *lptstrFilename, unsigned int dwHandle, unsigned int dwLen,
-										  void *lpData) {
+UINT WINAPI GetFileVersionInfoA(LPCSTR lptstrFilename, DWORD dwHandle, DWORD dwLen, LPVOID lpData) {
 	HOST_CONTEXT_GUARD();
 	(void)dwHandle;
 	DEBUG_LOG("GetFileVersionInfoA(%s, %u, %p)\n", lptstrFilename, dwLen, lpData);
@@ -276,8 +277,7 @@ static unsigned int VerQueryValueImpl(const void *pBlock, const std::string &sub
 	return 1;
 }
 
-unsigned int WIN_FUNC VerQueryValueA(const void *pBlock, const char *lpSubBlock, void **lplpBuffer,
-									 unsigned int *puLen) {
+UINT WINAPI VerQueryValueA(LPCVOID pBlock, LPCSTR lpSubBlock, LPVOID *lplpBuffer, PUINT puLen) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("VerQueryValueA(%p, %s, %p, %p)\n", pBlock, lpSubBlock ? lpSubBlock : "(null)", lplpBuffer, puLen);
 	if (!lpSubBlock)
@@ -285,23 +285,21 @@ unsigned int WIN_FUNC VerQueryValueA(const void *pBlock, const char *lpSubBlock,
 	return VerQueryValueImpl(pBlock, lpSubBlock, lplpBuffer, puLen);
 }
 
-unsigned int WIN_FUNC GetFileVersionInfoSizeW(const uint16_t *lptstrFilename, unsigned int *lpdwHandle) {
+UINT WINAPI GetFileVersionInfoSizeW(LPCWSTR lptstrFilename, LPDWORD lpdwHandle) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetFileVersionInfoSizeW -> ");
 	auto narrow = wideStringToString(lptstrFilename);
 	return GetFileVersionInfoSizeA(narrow.c_str(), lpdwHandle);
 }
 
-unsigned int WIN_FUNC GetFileVersionInfoW(const uint16_t *lptstrFilename, unsigned int dwHandle, unsigned int dwLen,
-										  void *lpData) {
+UINT WINAPI GetFileVersionInfoW(LPCWSTR lptstrFilename, DWORD dwHandle, DWORD dwLen, LPVOID lpData) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetFileVersionInfoW -> ");
 	auto narrow = wideStringToString(lptstrFilename);
 	return GetFileVersionInfoA(narrow.c_str(), dwHandle, dwLen, lpData);
 }
 
-unsigned int WIN_FUNC VerQueryValueW(const void *pBlock, const uint16_t *lpSubBlock, void **lplpBuffer,
-									 unsigned int *puLen) {
+UINT WINAPI VerQueryValueW(LPCVOID pBlock, LPCWSTR lpSubBlock, LPVOID *lplpBuffer, PUINT puLen) {
 	HOST_CONTEXT_GUARD();
 	if (!lpSubBlock)
 		return 0;
@@ -312,27 +310,13 @@ unsigned int WIN_FUNC VerQueryValueW(const void *pBlock, const uint16_t *lpSubBl
 
 } // namespace version
 
-static void *resolveByName(const char *name) {
-	if (strcmp(name, "GetFileVersionInfoSizeA") == 0)
-		return (void *)version::GetFileVersionInfoSizeA;
-	if (strcmp(name, "GetFileVersionInfoA") == 0)
-		return (void *)version::GetFileVersionInfoA;
-	if (strcmp(name, "VerQueryValueA") == 0)
-		return (void *)version::VerQueryValueA;
-	if (strcmp(name, "GetFileVersionInfoSizeW") == 0)
-		return (void *)version::GetFileVersionInfoSizeW;
-	if (strcmp(name, "GetFileVersionInfoW") == 0)
-		return (void *)version::GetFileVersionInfoW;
-	if (strcmp(name, "VerQueryValueW") == 0)
-		return (void *)version::VerQueryValueW;
-	return nullptr;
-}
+#include "version_trampolines.h"
 
 extern const wibo::ModuleStub lib_version = {
 	(const char *[]){
 		"version",
 		nullptr,
 	},
-	resolveByName,
+	versionThunkByName,
 	nullptr,
 };

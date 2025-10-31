@@ -1,3 +1,5 @@
+#include "rpcrt4.h"
+
 #include "common.h"
 #include "context.h"
 #include "modules.h"
@@ -11,29 +13,12 @@
 
 namespace {
 
-using RPC_STATUS = unsigned long;
-using RPC_WSTR = uint16_t *;
-using RPC_BINDING_HANDLE = void *;
-using RPC_AUTH_IDENTITY_HANDLE = void *;
-using LONG_PTR = intptr_t;
-using PMIDL_STUB_DESC = void *;
-using PFORMAT_STRING = unsigned char *;
-using PRPC_MESSAGE = void *;
-
 constexpr RPC_STATUS RPC_S_OK = 0;
 constexpr RPC_STATUS RPC_S_INVALID_STRING_BINDING = 1700;
 constexpr RPC_STATUS RPC_S_INVALID_BINDING = 1702;
 constexpr RPC_STATUS RPC_S_SERVER_UNAVAILABLE = 1722;
 constexpr RPC_STATUS RPC_S_INVALID_ARG = 87;
 constexpr RPC_STATUS RPC_S_OUT_OF_MEMORY = 14;
-
-struct RPC_SECURITY_QOS {
-	unsigned long Version = 0;
-	unsigned long Capabilities = 0;
-	unsigned long IdentityTracking = 0;
-	unsigned long ImpersonationType = 0;
-	void *AdditionalSecurityInfo = nullptr;
-};
 
 struct BindingComponents {
 	std::u16string objectUuid;
@@ -55,11 +40,6 @@ struct BindingHandleData {
 	bool hasSecurityQos = false;
 	RPC_SECURITY_QOS securityQos = {};
 	bool serverReachable = false;
-};
-
-union CLIENT_CALL_RETURN {
-	void *Pointer;
-	LONG_PTR Simple;
 };
 
 std::unordered_map<RPC_WSTR, BindingComponents> g_stringBindings;
@@ -128,10 +108,10 @@ BindingHandleData *getBinding(RPC_BINDING_HANDLE handle) {
 
 } // namespace
 
-extern "C" {
+namespace rpcrt4 {
 
-RPC_STATUS WIN_FUNC RpcStringBindingComposeW(RPC_WSTR objUuid, RPC_WSTR protSeq, RPC_WSTR networkAddr,
-											 RPC_WSTR endpoint, RPC_WSTR options, RPC_WSTR *stringBinding) {
+RPC_STATUS WINAPI RpcStringBindingComposeW(RPC_WSTR objUuid, RPC_WSTR protSeq, RPC_WSTR networkAddr, RPC_WSTR endpoint,
+										   RPC_WSTR options, RPC_WSTR *stringBinding) {
 	HOST_CONTEXT_GUARD();
 	BindingComponents components;
 	components.objectUuid = toU16(objUuid);
@@ -161,7 +141,7 @@ RPC_STATUS WIN_FUNC RpcStringBindingComposeW(RPC_WSTR objUuid, RPC_WSTR protSeq,
 	return RPC_S_OK;
 }
 
-RPC_STATUS WIN_FUNC RpcBindingFromStringBindingW(RPC_WSTR stringBinding, RPC_BINDING_HANDLE *binding) {
+RPC_STATUS WINAPI RpcBindingFromStringBindingW(RPC_WSTR stringBinding, RPC_BINDING_HANDLE *binding) {
 	HOST_CONTEXT_GUARD();
 	if (!binding) {
 		return RPC_S_INVALID_ARG;
@@ -185,10 +165,9 @@ RPC_STATUS WIN_FUNC RpcBindingFromStringBindingW(RPC_WSTR stringBinding, RPC_BIN
 	return RPC_S_OK;
 }
 
-RPC_STATUS WIN_FUNC RpcBindingSetAuthInfoExW(RPC_BINDING_HANDLE binding, RPC_WSTR serverPrincName,
-											 unsigned long authnLevel, unsigned long authnSvc,
-											 RPC_AUTH_IDENTITY_HANDLE authIdentity, unsigned long authzSvc,
-											 RPC_SECURITY_QOS *securityQos) {
+RPC_STATUS WINAPI RpcBindingSetAuthInfoExW(RPC_BINDING_HANDLE binding, RPC_WSTR serverPrincName, ULONG authnLevel,
+										   ULONG authnSvc, RPC_AUTH_IDENTITY_HANDLE authIdentity, ULONG authzSvc,
+										   RPC_SECURITY_QOS *securityQos) {
 	HOST_CONTEXT_GUARD();
 	BindingHandleData *data = getBinding(binding);
 	if (!data) {
@@ -210,7 +189,7 @@ RPC_STATUS WIN_FUNC RpcBindingSetAuthInfoExW(RPC_BINDING_HANDLE binding, RPC_WST
 	return RPC_S_OK;
 }
 
-RPC_STATUS WIN_FUNC RpcBindingFree(RPC_BINDING_HANDLE *binding) {
+RPC_STATUS WINAPI RpcBindingFree(RPC_BINDING_HANDLE *binding) {
 	HOST_CONTEXT_GUARD();
 	if (!binding) {
 		return RPC_S_INVALID_ARG;
@@ -229,7 +208,7 @@ RPC_STATUS WIN_FUNC RpcBindingFree(RPC_BINDING_HANDLE *binding) {
 	return RPC_S_OK;
 }
 
-RPC_STATUS WIN_FUNC RpcStringFreeW(RPC_WSTR *string) {
+RPC_STATUS WINAPI RpcStringFreeW(RPC_WSTR *string) {
 	HOST_CONTEXT_GUARD();
 	if (!string) {
 		return RPC_S_INVALID_ARG;
@@ -247,7 +226,7 @@ RPC_STATUS WIN_FUNC RpcStringFreeW(RPC_WSTR *string) {
 	return RPC_S_OK;
 }
 
-CLIENT_CALL_RETURN WIN_ENTRY NdrClientCall2(PMIDL_STUB_DESC stubDescriptor, PFORMAT_STRING format, ...) {
+CLIENT_CALL_RETURN CDECL_NO_CONV NdrClientCall2(PMIDL_STUB_DESC stubDescriptor, PFORMAT_STRING format, ...) {
 	DEBUG_LOG("STUB: NdrClientCall2 stubDescriptor=%p format=%p\n", stubDescriptor, format);
 	CLIENT_CALL_RETURN result = {};
 	result.Simple = RPC_S_SERVER_UNAVAILABLE;
@@ -255,37 +234,17 @@ CLIENT_CALL_RETURN WIN_ENTRY NdrClientCall2(PMIDL_STUB_DESC stubDescriptor, PFOR
 	return result;
 }
 
-void WIN_FUNC NdrServerCall2(PRPC_MESSAGE message) {
+VOID WINAPI NdrServerCall2(PRPC_MESSAGE message) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: NdrServerCall2 message=%p\n", message);
 }
 
-} // extern "C"
+} // namespace rpcrt4
 
-namespace {
-
-void *resolveByName(const char *name) {
-	if (std::strcmp(name, "RpcStringBindingComposeW") == 0)
-		return (void *)RpcStringBindingComposeW;
-	if (std::strcmp(name, "RpcBindingFromStringBindingW") == 0)
-		return (void *)RpcBindingFromStringBindingW;
-	if (std::strcmp(name, "RpcStringFreeW") == 0)
-		return (void *)RpcStringFreeW;
-	if (std::strcmp(name, "RpcBindingFree") == 0)
-		return (void *)RpcBindingFree;
-	if (std::strcmp(name, "RpcBindingSetAuthInfoExW") == 0)
-		return (void *)RpcBindingSetAuthInfoExW;
-	if (std::strcmp(name, "NdrClientCall2") == 0)
-		return (void *)NdrClientCall2;
-	if (std::strcmp(name, "NdrServerCall2") == 0)
-		return (void *)NdrServerCall2;
-	return nullptr;
-}
-
-} // namespace
+#include "rpcrt4_trampolines.h"
 
 extern const wibo::ModuleStub lib_rpcrt4 = {
 	(const char *[]){"rpcrt4", nullptr},
-	resolveByName,
+	rpcrt4ThunkByName,
 	nullptr,
 };

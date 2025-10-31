@@ -1,3 +1,5 @@
+#include "ole32.h"
+
 #include "common.h"
 #include "context.h"
 #include "errors.h"
@@ -108,15 +110,16 @@ HRESULT parseGuidString(const uint16_t *first, const uint16_t *last, GUID &out) 
 } // namespace
 
 namespace ole32 {
-int WIN_FUNC CoInitialize(void *pvReserved) {
+
+HRESULT WINAPI CoInitialize(LPVOID pvReserved) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: CoInitialize(%p)\n", pvReserved);
 	(void)pvReserved;
 	return 0; // S_OK
 }
 
-int WIN_FUNC CoCreateInstance(const GUID *rclsid, void *pUnkOuter, unsigned int dwClsContext, const GUID *riid,
-							  void **ppv) {
+HRESULT WINAPI CoCreateInstance(const GUID *rclsid, LPVOID pUnkOuter, DWORD dwClsContext, const GUID *riid,
+								LPVOID *ppv) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: CoCreateInstance(0x%x, %p, %d, 0x%x, %p)\n", rclsid->Data1, pUnkOuter, dwClsContext, riid->Data1,
 			  *ppv);
@@ -126,7 +129,7 @@ int WIN_FUNC CoCreateInstance(const GUID *rclsid, void *pUnkOuter, unsigned int 
 	return 0x80004003; // E_POINTER
 }
 
-int WIN_FUNC CLSIDFromString(const uint16_t *lpsz, GUID *pclsid) {
+HRESULT WINAPI CLSIDFromString(LPCWSTR lpsz, GUID *pclsid) {
 	HOST_CONTEXT_GUARD();
 
 	if (pclsid == nullptr) {
@@ -150,23 +153,16 @@ int WIN_FUNC CLSIDFromString(const uint16_t *lpsz, GUID *pclsid) {
 
 	return parseGuidString(begin, end, *pclsid);
 }
+
 } // namespace ole32
 
-static void *resolveByName(const char *name) {
-	if (strcmp(name, "CoInitialize") == 0)
-		return (void *)ole32::CoInitialize;
-	if (strcmp(name, "CoCreateInstance") == 0)
-		return (void *)ole32::CoCreateInstance;
-	if (strcmp(name, "CLSIDFromString") == 0)
-		return (void *)ole32::CLSIDFromString;
-	return nullptr;
-}
+#include "ole32_trampolines.h"
 
 extern const wibo::ModuleStub lib_ole32 = {
 	(const char *[]){
 		"ole32",
 		nullptr,
 	},
-	resolveByName,
+	ole32ThunkByName,
 	nullptr,
 };

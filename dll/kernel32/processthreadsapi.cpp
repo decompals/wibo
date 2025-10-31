@@ -6,6 +6,8 @@
 #include "files.h"
 #include "handles.h"
 #include "internal.h"
+#include "kernel32.h"
+#include "kernel32_trampolines.h"
 #include "modules.h"
 #include "processes.h"
 #include "strutil.h"
@@ -107,7 +109,7 @@ void threadCleanup(void *param) {
 	}
 	g_currentThreadObject = nullptr;
 	wibo::notifyDllThreadDetach();
-	wibo::setThreadTibForHost(nullptr);
+	currentThreadTeb = nullptr;
 	// TODO: mark mutexes owned by this thread as abandoned
 	obj->cv.notify_all();
 	obj->notifyWaiters(false);
@@ -124,26 +126,12 @@ void *threadTrampoline(void *param) {
 	g_currentThreadObject = data.obj;
 
 	// Install TIB
-	TEB *threadTib = nullptr;
-	uint16_t previousFs = 0;
-	uint16_t previousGs = 0;
-	if (wibo::tibSelector) {
-		asm volatile("mov %%fs, %0" : "=r"(previousFs));
-		asm volatile("mov %%gs, %0" : "=r"(previousGs));
-		threadTib = wibo::allocateTib();
-		if (threadTib) {
-			wibo::initializeTibStackInfo(threadTib);
-			if (wibo::installTibForCurrentThread(threadTib)) {
-				threadTib->hostFsSelector = previousFs;
-				threadTib->hostGsSelector = previousGs;
-				threadTib->hostSegmentsValid = 1;
-				wibo::setThreadTibForHost(threadTib);
-			} else {
-				fprintf(stderr, "!!! Failed to install TIB for new thread\n");
-				wibo::destroyTib(threadTib);
-				threadTib = nullptr;
-			}
-		}
+	TEB *threadTib = wibo::allocateTib();
+	wibo::initializeTibStackInfo(threadTib);
+	if (!wibo::installTibForCurrentThread(threadTib)) {
+		fprintf(stderr, "!!! Failed to install TIB for new thread\n");
+		wibo::destroyTib(threadTib);
+		threadTib = nullptr;
 	}
 
 	// Wait until resumed (if suspended at start)
@@ -161,7 +149,7 @@ void *threadTrampoline(void *param) {
 	DWORD result = 0;
 	if (data.entry) {
 		GUEST_CONTEXT_GUARD(threadTib);
-		result = data.entry(data.userData);
+		result = call_LPTHREAD_START_ROUTINE(data.entry, data.userData);
 	}
 	DEBUG_LOG("Thread exiting with code %u\n", result);
 	{
@@ -220,8 +208,7 @@ HANDLE WINAPI GetCurrentThread() {
 	return pseudoHandle;
 }
 
-BOOL WINAPI GetProcessAffinityMask(HANDLE hProcess, PDWORD_PTR lpProcessAffinityMask,
-									 PDWORD_PTR lpSystemAffinityMask) {
+BOOL WINAPI GetProcessAffinityMask(HANDLE hProcess, PDWORD_PTR lpProcessAffinityMask, PDWORD_PTR lpSystemAffinityMask) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetProcessAffinityMask(%p, %p, %p)\n", hProcess, lpProcessAffinityMask, lpSystemAffinityMask);
 	if (!lpProcessAffinityMask || !lpSystemAffinityMask) {
@@ -465,8 +452,8 @@ HRESULT WINAPI SetThreadDescription(HANDLE hThread, LPCWSTR lpThreadDescription)
 }
 
 HANDLE WINAPI CreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dwStackSize,
-							 LPTHREAD_START_ROUTINE lpStartAddress, LPVOID lpParameter, DWORD dwCreationFlags,
-							 LPDWORD lpThreadId) {
+						   LPTHREAD_START_ROUTINE lpStartAddress, LPVOID lpParameter, DWORD dwCreationFlags,
+						   LPDWORD lpThreadId) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CreateThread(%p, %zu, %p, %p, %u, %p)\n", lpThreadAttributes, dwStackSize, lpStartAddress, lpParameter,
 			  dwCreationFlags, lpThreadId);
@@ -574,7 +561,7 @@ DWORD WINAPI GetPriorityClass(HANDLE hProcess) {
 }
 
 BOOL WINAPI GetThreadTimes(HANDLE hThread, FILETIME *lpCreationTime, FILETIME *lpExitTime, FILETIME *lpKernelTime,
-							 FILETIME *lpUserTime) {
+						   FILETIME *lpUserTime) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetThreadTimes(%p, %p, %p, %p, %p)\n", hThread, lpCreationTime, lpExitTime, lpKernelTime, lpUserTime);
 
@@ -618,9 +605,9 @@ BOOL WINAPI GetThreadTimes(HANDLE hThread, FILETIME *lpCreationTime, FILETIME *l
 }
 
 BOOL WINAPI CreateProcessA(LPCSTR lpApplicationName, LPSTR lpCommandLine, LPSECURITY_ATTRIBUTES lpProcessAttributes,
-							 LPSECURITY_ATTRIBUTES lpThreadAttributes, BOOL bInheritHandles, DWORD dwCreationFlags,
-							 LPVOID lpEnvironment, LPCSTR lpCurrentDirectory, LPSTARTUPINFOA lpStartupInfo,
-							 LPPROCESS_INFORMATION lpProcessInformation) {
+						   LPSECURITY_ATTRIBUTES lpThreadAttributes, BOOL bInheritHandles, DWORD dwCreationFlags,
+						   LPVOID lpEnvironment, LPCSTR lpCurrentDirectory, LPSTARTUPINFOA lpStartupInfo,
+						   LPPROCESS_INFORMATION lpProcessInformation) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CreateProcessA %s \"%s\" %p %p %d 0x%x %p %s %p %p\n", lpApplicationName ? lpApplicationName : "<null>",
 			  lpCommandLine ? lpCommandLine : "<null>", lpProcessAttributes, lpThreadAttributes, bInheritHandles,
@@ -672,9 +659,9 @@ BOOL WINAPI CreateProcessA(LPCSTR lpApplicationName, LPSTR lpCommandLine, LPSECU
 }
 
 BOOL WINAPI CreateProcessW(LPCWSTR lpApplicationName, LPWSTR lpCommandLine, LPSECURITY_ATTRIBUTES lpProcessAttributes,
-							 LPSECURITY_ATTRIBUTES lpThreadAttributes, BOOL bInheritHandles, DWORD dwCreationFlags,
-							 LPVOID lpEnvironment, LPCWSTR lpCurrentDirectory, LPSTARTUPINFOW lpStartupInfo,
-							 LPPROCESS_INFORMATION lpProcessInformation) {
+						   LPSECURITY_ATTRIBUTES lpThreadAttributes, BOOL bInheritHandles, DWORD dwCreationFlags,
+						   LPVOID lpEnvironment, LPCWSTR lpCurrentDirectory, LPSTARTUPINFOW lpStartupInfo,
+						   LPPROCESS_INFORMATION lpProcessInformation) {
 	HOST_CONTEXT_GUARD();
 	std::string applicationUtf8;
 	if (lpApplicationName) {

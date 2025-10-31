@@ -125,7 +125,7 @@ bool isPredefinedKeyHandle(HKEY hKey) {
 
 namespace advapi32 {
 
-LSTATUS WIN_FUNC RegCreateKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD Reserved, LPWSTR lpClass, DWORD dwOptions,
+LSTATUS WINAPI RegCreateKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD Reserved, LPWSTR lpClass, DWORD dwOptions,
 								 REGSAM samDesired, void *lpSecurityAttributes, PHKEY phkResult,
 								 LPDWORD lpdwDisposition) {
 	HOST_CONTEXT_GUARD();
@@ -192,7 +192,7 @@ LSTATUS WIN_FUNC RegCreateKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD Reserved, LP
 	return ERROR_SUCCESS;
 }
 
-LSTATUS WIN_FUNC RegCreateKeyExA(HKEY hKey, LPCSTR lpSubKey, DWORD Reserved, LPSTR lpClass, DWORD dwOptions,
+LSTATUS WINAPI RegCreateKeyExA(HKEY hKey, LPCSTR lpSubKey, DWORD Reserved, LPSTR lpClass, DWORD dwOptions,
 								 REGSAM samDesired, void *lpSecurityAttributes, PHKEY phkResult,
 								 LPDWORD lpdwDisposition) {
 	HOST_CONTEXT_GUARD();
@@ -212,7 +212,7 @@ LSTATUS WIN_FUNC RegCreateKeyExA(HKEY hKey, LPCSTR lpSubKey, DWORD Reserved, LPS
 						   lpSecurityAttributes, phkResult, lpdwDisposition);
 }
 
-LSTATUS WIN_FUNC RegOpenKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD ulOptions, REGSAM samDesired, PHKEY phkResult) {
+LSTATUS WINAPI RegOpenKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD ulOptions, REGSAM samDesired, PHKEY phkResult) {
 	HOST_CONTEXT_GUARD();
 	std::string subKeyString = lpSubKey ? wideStringToString(lpSubKey) : std::string("(null)");
 	DEBUG_LOG("RegOpenKeyExW(%p, %s, %u, 0x%x, %p)\n", hKey, subKeyString.c_str(), ulOptions, samDesired, phkResult);
@@ -269,7 +269,7 @@ LSTATUS WIN_FUNC RegOpenKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD ulOptions, REG
 	return ERROR_SUCCESS;
 }
 
-LSTATUS WIN_FUNC RegOpenKeyExA(HKEY hKey, LPCSTR lpSubKey, DWORD ulOptions, REGSAM samDesired, PHKEY phkResult) {
+LSTATUS WINAPI RegOpenKeyExA(HKEY hKey, LPCSTR lpSubKey, DWORD ulOptions, REGSAM samDesired, PHKEY phkResult) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("RegOpenKeyExA(%p, %s, %u, 0x%x, %p)\n", hKey, lpSubKey ? lpSubKey : "(null)", ulOptions, samDesired,
 			  phkResult);
@@ -282,7 +282,7 @@ LSTATUS WIN_FUNC RegOpenKeyExA(HKEY hKey, LPCSTR lpSubKey, DWORD ulOptions, REGS
 	return RegOpenKeyExW(hKey, widePtr, ulOptions, samDesired, phkResult);
 }
 
-LSTATUS WIN_FUNC RegQueryValueExW(HKEY hKey, LPCWSTR lpValueName, LPDWORD lpReserved, LPDWORD lpType, BYTE *lpData,
+LSTATUS WINAPI RegQueryValueExW(HKEY hKey, LPCWSTR lpValueName, LPDWORD lpReserved, LPDWORD lpType, BYTE *lpData,
 								  LPDWORD lpcbData) {
 	HOST_CONTEXT_GUARD();
 	std::string valueName = lpValueName ? wideStringToString(lpValueName) : std::string("(default)");
@@ -304,7 +304,7 @@ LSTATUS WIN_FUNC RegQueryValueExW(HKEY hKey, LPCWSTR lpValueName, LPDWORD lpRese
 	return ERROR_FILE_NOT_FOUND;
 }
 
-LSTATUS WIN_FUNC RegQueryValueExA(HKEY hKey, LPCSTR lpValueName, LPDWORD lpReserved, LPDWORD lpType, BYTE *lpData,
+LSTATUS WINAPI RegQueryValueExA(HKEY hKey, LPCSTR lpValueName, LPDWORD lpReserved, LPDWORD lpType, BYTE *lpData,
 								  LPDWORD lpcbData) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("RegQueryValueExA(%p, %s, %p, %p, %p, %p)\n", hKey, lpValueName ? lpValueName : "(null)", lpReserved,
@@ -317,7 +317,7 @@ LSTATUS WIN_FUNC RegQueryValueExA(HKEY hKey, LPCSTR lpValueName, LPDWORD lpReser
 							lpReserved, lpType, lpData, lpcbData);
 }
 
-LSTATUS WIN_FUNC RegEnumKeyExW(HKEY hKey, DWORD dwIndex, LPWSTR lpName, LPDWORD lpcchName, LPDWORD lpReserved,
+LSTATUS WINAPI RegEnumKeyExW(HKEY hKey, DWORD dwIndex, LPWSTR lpName, LPDWORD lpcchName, LPDWORD lpReserved,
 							   LPWSTR lpClass, LPDWORD lpcchClass, FILETIME *lpftLastWriteTime) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("RegEnumKeyExW(%p, %u, %p, %p, %p, %p, %p, %p)\n", hKey, dwIndex, lpName, lpcchName, lpReserved, lpClass,
@@ -345,7 +345,7 @@ LSTATUS WIN_FUNC RegEnumKeyExW(HKEY hKey, DWORD dwIndex, LPWSTR lpName, LPDWORD 
 	return ERROR_NO_MORE_ITEMS;
 }
 
-LSTATUS WIN_FUNC RegEnumKeyExA(HKEY hKey, DWORD dwIndex, LPSTR lpName, LPDWORD lpcchName, LPDWORD lpReserved,
+LSTATUS WINAPI RegEnumKeyExA(HKEY hKey, DWORD dwIndex, LPSTR lpName, LPDWORD lpcchName, LPDWORD lpReserved,
 							   LPSTR lpClass, LPDWORD lpcchClass, FILETIME *lpftLastWriteTime) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("RegEnumKeyExA(%p, %u, %p, %p, %p, %p, %p, %p)\n", hKey, dwIndex, lpName, lpcchName, lpReserved, lpClass,
@@ -373,7 +373,7 @@ LSTATUS WIN_FUNC RegEnumKeyExA(HKEY hKey, DWORD dwIndex, LPSTR lpName, LPDWORD l
 	return ERROR_NO_MORE_ITEMS;
 }
 
-LSTATUS WIN_FUNC RegCloseKey(HKEY hKey) {
+LSTATUS WINAPI RegCloseKey(HKEY hKey) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("RegCloseKey(%p)\n", hKey);
 	if (isPredefinedKeyHandle(hKey)) {

@@ -1,8 +1,11 @@
+#include "msvcrt.h"
+
 #include "common.h"
 #include "context.h"
 #include "files.h"
 #include "kernel32/internal.h"
 #include "modules.h"
+#include "msvcrt_trampolines.h"
 #include "processes.h"
 #include "strutil.h"
 
@@ -46,23 +49,7 @@
 #define O_BINARY 0
 #endif
 
-typedef void (*_PVFV)();
-typedef int (*_PIFV)();
 using _onexit_t = _PIFV;
-
-extern "C" char **environ;
-
-struct _utimbuf {
-	long actime;
-	long modtime;
-};
-
-struct _timeb {
-	time_t time;
-	unsigned short millitm;
-	short timezone;
-	short dstflag;
-};
 
 namespace msvcrt {
 	int _commode;
@@ -211,18 +198,7 @@ namespace msvcrt {
 		return table;
 	}
 
-	struct IOBProxy {
-		char *_ptr;
-		int _cnt;
-		char *_base;
-		int _flag;
-		int _file;
-		int _charbuf;
-		int _bufsiz;
-		char *_tmpfname;
-	};
-
-	int WIN_ENTRY _except_handler4_common(void *, void *, void *, void *);
+	int CDECL _except_handler4_common(void *, void *, void *, void *);
 	std::vector<std::string> &putenvStorage() {
 		static std::vector<std::string> storage;
 		return storage;
@@ -233,12 +209,12 @@ namespace msvcrt {
 		return entries;
 	}
 
-	IOBProxy *WIN_ENTRY __iob_func() {
+	IOBProxy *CDECL __iob_func() {
 		HOST_CONTEXT_GUARD();
 		return standardIobEntries();
 	}
 
-	IOBProxy *WIN_ENTRY __p__iob() {
+	IOBProxy *CDECL __p__iob() {
 		HOST_CONTEXT_GUARD();
 		return standardIobEntries();
 	}
@@ -273,7 +249,7 @@ namespace msvcrt {
 		return stream;
 	}
 
-	void WIN_ENTRY setbuf(FILE *stream, char *buffer) {
+	void CDECL setbuf(FILE *stream, char *buffer) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("setbuf(%p, %p)\n", stream, buffer);
 		if (!stream) {
@@ -287,7 +263,7 @@ namespace msvcrt {
 		}
 	}
 
-	void WIN_ENTRY _splitpath(const char *path, char *drive, char *dir, char *fname, char *ext) {
+	void CDECL _splitpath(const char *path, char *drive, char *dir, char *fname, char *ext) {
 		HOST_CONTEXT_GUARD();
 		if (drive) drive[0] = '\0';
 		if (dir) dir[0] = '\0';
@@ -319,7 +295,7 @@ namespace msvcrt {
 		const char *filename = cursor;
 		if (dirEnd) {
 			if (dir) {
-				size_t dirLen = static_cast<size_t>(dirEnd - cursor);
+				SIZE_T dirLen = static_cast<SIZE_T>(dirEnd - cursor);
 				std::memcpy(dir, cursor, dirLen);
 				dir[dirLen] = '\0';
 			}
@@ -336,7 +312,7 @@ namespace msvcrt {
 		const char *nameEnd = extStart ? extStart : filename + std::strlen(filename);
 
 		if (fname) {
-			auto nameLen = static_cast<size_t>(nameEnd - filename);
+			auto nameLen = static_cast<SIZE_T>(nameEnd - filename);
 			std::memcpy(fname, filename, nameLen);
 			fname[nameLen] = '\0';
 		}
@@ -352,7 +328,7 @@ namespace msvcrt {
 				  ext ? ext : "");
 	}
 
-	int WIN_ENTRY _fileno(FILE *stream) {
+	int CDECL _fileno(FILE *stream) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_fileno(%p)\n", stream);
 		if (!stream) {
@@ -389,21 +365,21 @@ namespace msvcrt {
 		mbCurMaxValue = mbCurMaxForCodePage(mbCodePageSetting);
 	}
 
-	int WIN_ENTRY _getmbcp() {
+	int CDECL _getmbcp() {
 		HOST_CONTEXT_GUARD();
 		ensureMbctypeInitialized();
 		DEBUG_LOG("_getmbcp() -> %d\n", mbCodePageSetting);
 		return mbCodePageSetting;
 	}
 
-	unsigned int* WIN_ENTRY __p___mb_cur_max() {
+	unsigned int* CDECL __p___mb_cur_max() {
 		HOST_CONTEXT_GUARD();
 		ensureMbctypeInitialized();
 		DEBUG_LOG("__p___mb_cur_max() -> %u\n", mbCurMaxValue);
 		return &mbCurMaxValue;
 	}
 
-	int WIN_ENTRY _setmbcp(int codepage) {
+	int CDECL _setmbcp(int codepage) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_setmbcp(%d)\n", codepage);
 		ensureMbctypeInitialized();
@@ -429,14 +405,14 @@ namespace msvcrt {
 		return 0;
 	}
 
-	unsigned char *WIN_ENTRY __p__mbctype() {
+	unsigned char *CDECL __p__mbctype() {
 		HOST_CONTEXT_GUARD();
 		ensureMbctypeInitialized();
 		DEBUG_LOG("__p__mbctype() -> %p\n", mbctypeTable().data());
 		return mbctypeTable().data();
 	}
 
-	unsigned short **WIN_ENTRY __p__pctype() {
+	unsigned short **CDECL __p__pctype() {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("__p__pctype()\n");
 		static unsigned short *pointer = nullptr;
@@ -444,7 +420,7 @@ namespace msvcrt {
 		return &pointer;
 	}
 
-	int WIN_ENTRY _isctype(int ch, int mask) {
+	int CDECL _isctype(int ch, int mask) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_isctype(%d, %d)\n", ch, mask);
 		if (ch == EOF) {
@@ -453,7 +429,7 @@ namespace msvcrt {
 		if (ch < 0 || ch > 255) {
 			return 0;
 		}
-		return (pctypeTable()[static_cast<size_t>(ch) + 1] & mask) != 0;
+		return (pctypeTable()[static_cast<SIZE_T>(ch) + 1] & mask) != 0;
 	}
 
 	namespace {
@@ -464,7 +440,7 @@ namespace msvcrt {
 			bool registered;
 		};
 
-		constexpr size_t LOCK_TABLE_SIZE = 64;
+		constexpr SIZE_T LOCK_TABLE_SIZE = 64;
 		std::array<std::recursive_mutex, LOCK_TABLE_SIZE> &lockTable() {
 			static std::array<std::recursive_mutex, LOCK_TABLE_SIZE> table;
 			return table;
@@ -516,9 +492,9 @@ namespace msvcrt {
 					std::string loweredResult = stringToLower(result);
 					std::string loweredExe = stringToLower(exeDir);
 					bool present = false;
-					size_t start = 0;
+					SIZE_T start = 0;
 					while (start <= loweredResult.size()) {
-						size_t end = loweredResult.find(';', start);
+						SIZE_T end = loweredResult.find(';', start);
 						if (end == std::string::npos) {
 							end = loweredResult.size();
 						}
@@ -556,7 +532,7 @@ namespace msvcrt {
 					return nullptr;
 				}
 
-				size_t count = 0;
+				SIZE_T count = 0;
 				while (source[count]) {
 					++count;
 				}
@@ -565,7 +541,7 @@ namespace msvcrt {
 				strings.reserve(count);
 				pointers = std::make_unique<CharT *[]>(count + 1);
 
-				for (size_t i = 0; i < count; ++i) {
+				for (SIZE_T i = 0; i < count; ++i) {
 					auto data = convert(source[i]);
 					auto buffer = std::make_unique<CharT[]>(data.size());
 					std::copy(data.begin(), data.end(), buffer.get());
@@ -581,7 +557,7 @@ namespace msvcrt {
 
 		std::vector<char> copyNarrowString(const char *src) {
 			std::string normalized = normalizeEnvStringForWindows(src);
-			size_t len = normalized.size();
+			SIZE_T len = normalized.size();
 			std::vector<char> result(len + 1);
 			if (len > 0) {
 				std::memcpy(result.data(), normalized.data(), len);
@@ -624,7 +600,7 @@ namespace msvcrt {
 		}
 
 		template <typename CharT>
-		size_t envStringLength(const CharT *str) {
+		SIZE_T envStringLength(const CharT *str) {
 			if (!str) {
 				return 0;
 			}
@@ -636,7 +612,7 @@ namespace msvcrt {
 		}
 
 		template <typename CharT>
-		int envStringCompare(const CharT *lhs, const CharT *rhs, size_t count) {
+		int envStringCompare(const CharT *lhs, const CharT *rhs, SIZE_T count) {
 			if constexpr (std::is_same_v<CharT, char>) {
 				return std::strncmp(lhs, rhs, count);
 			} else {
@@ -647,7 +623,7 @@ namespace msvcrt {
 		template <typename CharT>
 		struct EnvLookupResult {
 			const CharT *value;
-			size_t length;
+			SIZE_T length;
 		};
 
 		template <typename CharT>
@@ -656,7 +632,7 @@ namespace msvcrt {
 				return std::nullopt;
 			}
 
-			size_t nameLength = envStringLength(varname);
+			SIZE_T nameLength = envStringLength(varname);
 			if (nameLength == 0) {
 				return std::nullopt;
 			}
@@ -681,52 +657,43 @@ namespace msvcrt {
 	} // namespace
 
 	// Stub because we're only ever a console application
-	void WIN_ENTRY __set_app_type(int at) {
+	void CDECL __set_app_type(int at) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("STUB: __set_app_type(%d)\n", at);
 		(void)at;
 	}
 
-	int* WIN_FUNC __p__fmode() {
+	int* CDECL __p__fmode() {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("__p__fmode() -> %p\n", &_fmode);
 		return &_fmode;
 	}
 
-	int* WIN_FUNC __p__commode() {
+	int* CDECL __p__commode() {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("__p__commode() -> %p\n", &_commode);
 		return &_commode;
 	}
 
-	void WIN_ENTRY _initterm(const _PVFV *ppfn, const _PVFV* end) {
+	void CDECL _initterm(const _PVFV *ppfn, const _PVFV* end) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_initterm(%p, %p)\n", ppfn, end);
-		auto *tib = wibo::getThreadTibForHost();
 		for (; ppfn < end; ppfn++) {
 			_PVFV func = *ppfn;
 			if (func) {
 				DEBUG_LOG("_initterm: calling %p\n", func);
-				{
-					GUEST_CONTEXT_GUARD(tib);
-					func();
-				}
+				call__PVFV(func);
 			}
 		}
 	}
 
-	int WIN_ENTRY _initterm_e(const _PIFV *ppfn, const _PIFV *end) {
+	int CDECL _initterm_e(const _PIFV *ppfn, const _PIFV *end) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_initterm_e(%p, %p)\n", ppfn, end);
-		auto *tib = wibo::getThreadTibForHost();
 		for (; ppfn < end; ppfn++) {
 			_PIFV func = *ppfn;
 			if (func) {
-				int err = 0;
-				{
-					GUEST_CONTEXT_GUARD(tib);
-					err = func();
-				}
+				int err = call__PIFV(func);
 				DEBUG_LOG("_initterm_e: calling %p -> %d\n", func, err);
 				if (err != 0)
 					return err;
@@ -735,7 +702,7 @@ namespace msvcrt {
 		return 0;
 	}
 
-	unsigned int WIN_ENTRY _controlfp(unsigned int newControl, unsigned int mask) {
+	unsigned int CDECL _controlfp(unsigned int newControl, unsigned int mask) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_controlfp(newControl=%08x, mask=%08x)\n", newControl, mask);
 		unsigned int previous = floatingPointControlWord;
@@ -745,7 +712,7 @@ namespace msvcrt {
 		return previous;
 	}
 
-	int WIN_ENTRY _controlfp_s(unsigned int *currentControl, unsigned int newControl, unsigned int mask) {
+	int CDECL _controlfp_s(unsigned int *currentControl, unsigned int newControl, unsigned int mask) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_controlfp_s(currentControl=%p, newControl=%08x, mask=%08x)\n", currentControl, newControl, mask);
 		if (mask != 0 && (mask & 0xFF000000) != 0) {
@@ -761,7 +728,7 @@ namespace msvcrt {
 		return 0;
 	}
 
-	_PIFV WIN_ENTRY _onexit(_PIFV func) {
+	_PIFV CDECL _onexit(_PIFV func) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_onexit(%p)\n", func);
 		if(!func) return nullptr;
@@ -770,7 +737,7 @@ namespace msvcrt {
 	}
 
 	// NOLINTNEXTLINE(readability-non-const-parameter)
-	int WIN_ENTRY __wgetmainargs(int *wargc, uint16_t ***wargv, uint16_t ***wenv, int doWildcard, int *startInfo) {
+	int CDECL __wgetmainargs(int *wargc, uint16_t ***wargv, uint16_t ***wenv, int doWildcard, int *startInfo) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("__wgetmainargs(doWildcard=%d)\n", doWildcard);
 		(void)startInfo;
@@ -783,7 +750,7 @@ namespace msvcrt {
 	}
 
 	// NOLINTNEXTLINE(readability-non-const-parameter)
-	int WIN_ENTRY __getmainargs(int *argc, char ***argv, char ***env, int doWildcard, int *startInfo) {
+	int CDECL __getmainargs(int *argc, char ***argv, char ***env, int doWildcard, int *startInfo) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("__getmainargs(doWildcard=%d)\n", doWildcard);
 		(void)startInfo;
@@ -793,31 +760,31 @@ namespace msvcrt {
 		return getMainArgsCommon<char>(argc, argv, env, copyNarrowString);
 	}
 
-	char* WIN_ENTRY getenv(const char *varname){
+	char* CDECL getenv(const char *varname){
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("getenv(%s)\n", varname);
 		return std::getenv(varname);
 	}
 
-	char*** WIN_ENTRY __p___initenv() {
+	char*** CDECL __p___initenv() {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("__p___initenv() -> %p\n", &__initenv);
 		return &__initenv;
 	}
 
-	char* WIN_ENTRY strcat(char *dest, const char *src) {
+	char* CDECL strcat(char *dest, const char *src) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("strcat(%p, %s)\n", dest, src);
 		return std::strcat(dest, src);
 	}
 
-	char* WIN_ENTRY strcpy(char *dest, const char *src) {
+	char* CDECL strcpy(char *dest, const char *src) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("strcpy(%p, %s)\n", dest, src);
 		return std::strcpy(dest, src);
 	}
 
-	int WIN_ENTRY _access(const char *path, int mode) {
+	int CDECL _access(const char *path, int mode) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_access(%s, %d)\n", path ? path : "(null)", mode);
 		if (!path) {
@@ -844,7 +811,7 @@ namespace msvcrt {
 		return -1;
 	}
 
-	int WIN_ENTRY _ismbblead(unsigned int c) {
+	int CDECL _ismbblead(unsigned int c) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_ismbblead(%d)\n", c);
 		if (c > 0xFF) {
@@ -853,7 +820,7 @@ namespace msvcrt {
 		return isLeadByte(static_cast<unsigned char>(c)) ? 1 : 0;
 	}
 
-	int WIN_ENTRY _ismbbtrail(unsigned int c) {
+	int CDECL _ismbbtrail(unsigned int c) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_ismbbtrail(%d)\n", c);
 		if (c > 0xFF) {
@@ -862,7 +829,7 @@ namespace msvcrt {
 		return isTrailByte(static_cast<unsigned char>(c)) ? 1 : 0;
 	}
 
-	int WIN_ENTRY _ismbcspace(unsigned int c) {
+	int CDECL _ismbcspace(unsigned int c) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_ismbcspace(%d)\n", c);
 		if (c <= 0xFF) {
@@ -880,7 +847,7 @@ namespace msvcrt {
 		return 0;
 	}
 
-	void WIN_ENTRY _mbccpy(unsigned char *dest, const unsigned char *src) {
+	void CDECL _mbccpy(unsigned char *dest, const unsigned char *src) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbccpy(%p, %s)\n", dest, src);
 		if (!dest || !src) {
@@ -893,7 +860,7 @@ namespace msvcrt {
 		}
 	}
 
-	unsigned char* WIN_ENTRY _mbsinc(const unsigned char *str) {
+	unsigned char* CDECL _mbsinc(const unsigned char *str) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbsinc(%p)\n", str);
 		if (!str) {
@@ -908,7 +875,7 @@ namespace msvcrt {
 		return const_cast<unsigned char *>(str + 1);
 	}
 
-	unsigned char* WIN_ENTRY _mbsdec(const unsigned char *start, const unsigned char *current) {
+	unsigned char* CDECL _mbsdec(const unsigned char *start, const unsigned char *current) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbsdec(%p, %p)\n", start, current);
 		if (!start || !current || current <= start) {
@@ -945,7 +912,7 @@ namespace msvcrt {
 		return const_cast<unsigned char *>(prev);
 	}
 
-	unsigned int WIN_ENTRY _mbclen(const unsigned char *str) {
+	unsigned int CDECL _mbclen(const unsigned char *str) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbclen(%s)\n", str);
 		if (!str || *str == '\0') {
@@ -954,7 +921,7 @@ namespace msvcrt {
 		return (isLeadByte(*str) && str[1] != '\0') ? 2U : 1U;
 	}
 
-	int WIN_ENTRY _mbscmp(const unsigned char *lhs, const unsigned char *rhs) {
+	int CDECL _mbscmp(const unsigned char *lhs, const unsigned char *rhs) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbscmp(%s, %s)\n", lhs, rhs);
 		if (!lhs || !rhs) {
@@ -963,7 +930,7 @@ namespace msvcrt {
 		return std::strcmp(reinterpret_cast<const char *>(lhs), reinterpret_cast<const char *>(rhs));
 	}
 
-	int WIN_ENTRY _mbsicmp(const unsigned char *lhs, const unsigned char *rhs) {
+	int CDECL _mbsicmp(const unsigned char *lhs, const unsigned char *rhs) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbsicmp(%s, %s)\n", lhs, rhs);
 		if (!lhs || !rhs) {
@@ -972,7 +939,7 @@ namespace msvcrt {
 		return strcasecmp(reinterpret_cast<const char *>(lhs), reinterpret_cast<const char *>(rhs));
 	}
 
-	unsigned char* WIN_ENTRY _mbsstr(const unsigned char *haystack, const unsigned char *needle) {
+	unsigned char* CDECL _mbsstr(const unsigned char *haystack, const unsigned char *needle) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbsstr(%s, %s)\n", haystack, needle);
 		if (!haystack || !needle) {
@@ -982,7 +949,7 @@ namespace msvcrt {
 		return result ? reinterpret_cast<unsigned char *>(const_cast<char *>(result)) : nullptr;
 	}
 
-	unsigned char* WIN_ENTRY _mbschr(const unsigned char *str, unsigned int ch) {
+	unsigned char* CDECL _mbschr(const unsigned char *str, unsigned int ch) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbschr(%s, %d)\n", str, ch);
 		if (!str) {
@@ -993,7 +960,7 @@ namespace msvcrt {
 		return result ? reinterpret_cast<unsigned char *>(const_cast<char *>(result)) : nullptr;
 	}
 
-	unsigned char* WIN_ENTRY _mbsrchr(const unsigned char *str, unsigned int ch) {
+	unsigned char* CDECL _mbsrchr(const unsigned char *str, unsigned int ch) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbsrchr(%s, %d)\n", str, ch);
 		if (!str) {
@@ -1004,7 +971,7 @@ namespace msvcrt {
 		return result ? reinterpret_cast<unsigned char *>(const_cast<char *>(result)) : nullptr;
 	}
 
-	unsigned char* WIN_ENTRY _mbslwr(unsigned char *str) {
+	unsigned char* CDECL _mbslwr(unsigned char *str) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbslwr(%p)\n", str);
 		if (!str) {
@@ -1016,7 +983,7 @@ namespace msvcrt {
 		return str;
 	}
 
-	unsigned char* WIN_ENTRY _mbsupr(unsigned char *str) {
+	unsigned char* CDECL _mbsupr(unsigned char *str) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbsupr(%p)\n", str);
 		if (!str) {
@@ -1028,19 +995,19 @@ namespace msvcrt {
 		return str;
 	}
 
-	unsigned char *WIN_ENTRY _mbsinc_l(const unsigned char *str, void *) {
+	unsigned char *CDECL _mbsinc_l(const unsigned char *str, void *) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbsinc_l(%p)\n", str);
 		return _mbsinc(str);
 	}
 
-	unsigned char *WIN_ENTRY _mbsdec_l(const unsigned char *start, const unsigned char *current, void *locale) {
+	unsigned char *CDECL _mbsdec_l(const unsigned char *start, const unsigned char *current, void *locale) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbsdec_l(%p, %p, %p)\n", start, current, locale);
 		return _mbsdec(start, current);
 	}
 
-	int WIN_ENTRY _mbsncmp(const unsigned char *lhs, const unsigned char *rhs, size_t count) {
+	int CDECL _mbsncmp(const unsigned char *lhs, const unsigned char *rhs, SIZE_T count) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbsncmp(%s, %s, %zu)\n", lhs, rhs, count);
 		if (!lhs || !rhs) {
@@ -1049,7 +1016,7 @@ namespace msvcrt {
 		return std::strncmp(reinterpret_cast<const char *>(lhs), reinterpret_cast<const char *>(rhs), count);
 	}
 
-	size_t WIN_ENTRY _mbsspn(const unsigned char *str, const unsigned char *set) {
+	SIZE_T CDECL _mbsspn(const unsigned char *str, const unsigned char *set) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mbsspn(%s, %s)\n", str, set);
 		if (!str || !set) {
@@ -1058,7 +1025,7 @@ namespace msvcrt {
 		return std::strspn(reinterpret_cast<const char *>(str), reinterpret_cast<const char *>(set));
 	}
 
-	int WIN_ENTRY _ismbcdigit(unsigned int ch) {
+	int CDECL _ismbcdigit(unsigned int ch) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_ismbcdigit(%d)\n", ch);
 		if (ch <= 0xFF) {
@@ -1067,7 +1034,7 @@ namespace msvcrt {
 		return 0;
 	}
 
-	int WIN_ENTRY _stricmp(const char *lhs, const char *rhs) {
+	int CDECL _stricmp(const char *lhs, const char *rhs) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_stricmp(%s, %s)\n", lhs, rhs);
 		if (!lhs || !rhs) {
@@ -1076,7 +1043,7 @@ namespace msvcrt {
 		return strcasecmp(lhs, rhs);
 	}
 
-	int WIN_ENTRY _strnicmp(const char *lhs, const char *rhs, size_t count) {
+	int CDECL _strnicmp(const char *lhs, const char *rhs, SIZE_T count) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_strnicmp(%s, %s, %zu)\n", lhs, rhs, count);
 		if (!lhs || !rhs) {
@@ -1085,7 +1052,7 @@ namespace msvcrt {
 		return strncasecmp(lhs, rhs, count);
 	}
 
-	int WIN_ENTRY _memicmp(const void *lhs, const void *rhs, size_t count) {
+	int CDECL _memicmp(const void *lhs, const void *rhs, SIZE_T count) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_memicmp(%p, %p, %zu)\n", lhs, rhs, count);
 		if (!lhs || !rhs) {
@@ -1093,7 +1060,7 @@ namespace msvcrt {
 		}
 		const auto *a = static_cast<const unsigned char *>(lhs);
 		const auto *b = static_cast<const unsigned char *>(rhs);
-		for (size_t i = 0; i < count; ++i) {
+		for (SIZE_T i = 0; i < count; ++i) {
 			const auto ca = static_cast<unsigned char>(std::tolower(a[i]));
 			const auto cb = static_cast<unsigned char>(std::tolower(b[i]));
 			if (ca != cb) {
@@ -1103,7 +1070,7 @@ namespace msvcrt {
 		return 0;
 	}
 
-	int WIN_ENTRY _vsnprintf(char *buffer, size_t count, const char *format, va_list args) {
+	int CDECL _vsnprintf(char *buffer, SIZE_T count, const char *format, va_list args) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_vsnprintf(%p, %zu, %s, %p)\n", buffer, count, format, args);
 		if (!buffer || !format) {
@@ -1114,14 +1081,14 @@ namespace msvcrt {
 		if (result < 0) {
 			return -1;
 		}
-		if (static_cast<size_t>(result) >= count) {
+		if (static_cast<SIZE_T>(result) >= count) {
 			buffer[count ? count - 1 : 0] = '\0';
 			return -1;
 		}
 		return result;
 	}
 
-	int WIN_ENTRY _snprintf(char *buffer, size_t count, const char *format, ...) {
+	int CDECL_NO_CONV _snprintf(char *buffer, SIZE_T count, const char *format, ...) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_snprintf(%p, %zu, %s, ...)\n", buffer, count, format);
 		va_list args;
@@ -1131,7 +1098,7 @@ namespace msvcrt {
 		return result;
 	}
 
-	int WIN_ENTRY sprintf(char *buffer, const char *format, ...) {
+	int CDECL_NO_CONV sprintf(char *buffer, const char *format, ...) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("sprintf(%p, %s, ...)\n", buffer, format);
 		va_list args;
@@ -1141,7 +1108,7 @@ namespace msvcrt {
 		return result;
 	}
 
-	int WIN_ENTRY printf(const char *format, ...) {
+	int CDECL_NO_CONV printf(const char *format, ...) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("printf(%s, ...)\n", format);
 		va_list args;
@@ -1151,7 +1118,7 @@ namespace msvcrt {
 		return result;
 	}
 
-	int WIN_ENTRY sscanf(const char *buffer, const char *format, ...) {
+	int CDECL_NO_CONV sscanf(const char *buffer, const char *format, ...) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("sscanf(%p, %p, ...)\n", buffer, format);
 		va_list args;
@@ -1161,7 +1128,7 @@ namespace msvcrt {
 		return result;
 	}
 
-	char *WIN_ENTRY fgets(char *str, int count, FILE *stream) {
+	char *CDECL fgets(char *str, int count, FILE *stream) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fgets(%p, %d, %p)\n", str, count, stream);
 		if (!str || count <= 0) {
@@ -1171,14 +1138,14 @@ namespace msvcrt {
 		return ::fgets(str, count, host);
 	}
 
-	size_t WIN_ENTRY fread(void *buffer, size_t size, size_t count, FILE *stream) {
+	SIZE_T CDECL fread(void *buffer, SIZE_T size, SIZE_T count, FILE *stream) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fread(%p, %zu, %zu, %p)\n", buffer, size, count, stream);
 		FILE *host = mapToHostFile(stream);
 		return ::fread(buffer, size, count, host);
 	}
 
-	FILE *WIN_ENTRY _fsopen(const char *filename, const char *mode, int shflag) {
+	FILE *CDECL _fsopen(const char *filename, const char *mode, int shflag) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_fsopen(%s, %s, %d)\n", filename ? filename : "(null)", mode ? mode : "(null)", shflag);
 		(void)shflag;
@@ -1190,7 +1157,7 @@ namespace msvcrt {
 		return ::fopen(hostPath.c_str(), mode);
 	}
 
-	int WIN_ENTRY _sopen(const char *path, int oflag, int shflag, int pmode) {
+	int CDECL _sopen(const char *path, int oflag, int shflag, int pmode) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_sopen(%s, %d, %d, %d)\n", path ? path : "(null)", oflag, shflag, pmode);
 		(void)shflag;
@@ -1204,26 +1171,26 @@ namespace msvcrt {
 		return ::open(hostPath.c_str(), flags, pmode);
 	}
 
-	int WIN_ENTRY _read(int fd, void *buffer, unsigned int count) {
+	int CDECL _read(int fd, void *buffer, unsigned int count) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_read(%d, %p, %u)\n", fd, buffer, count);
 		return static_cast<int>(::read(fd, buffer, count));
 	}
 
-	int WIN_ENTRY _close(int fd) {
+	int CDECL _close(int fd) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_close(%d)\n", fd);
 		return ::close(fd);
 	}
 
-	long WIN_ENTRY _lseek(int fd, long offset, int origin) {
+	long CDECL _lseek(int fd, long offset, int origin) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_lseek(%d, %ld, %d)\n", fd, offset, origin);
 		off_t result = ::lseek(fd, static_cast<off_t>(offset), origin);
 		return static_cast<long>(result);
 	}
 
-	int WIN_ENTRY _unlink(const char *path) {
+	int CDECL _unlink(const char *path) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_unlink(%s)\n", path ? path : "(null)");
 		if (!path) {
@@ -1234,7 +1201,7 @@ namespace msvcrt {
 		return ::unlink(hostPath.c_str());
 	}
 
-	int WIN_ENTRY _utime(const char *path, const _utimbuf *times) {
+	int CDECL _utime(const char *path, const _utimbuf *times) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_utime(%s, %p)\n", path ? path : "(null)", times);
 		if (!path) {
@@ -1249,58 +1216,58 @@ namespace msvcrt {
 		return ::utime(hostPath.c_str(), &native);
 	}
 
-	int WIN_ENTRY _chsize(int fd, long size) {
+	int CDECL _chsize(int fd, long size) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_chsize(%d, %ld)\n", fd, size);
 		return ::ftruncate(fd, static_cast<off_t>(size));
 	}
 
-	char* WIN_ENTRY strncpy(char *dest, const char *src, size_t count) {
+	char* CDECL strncpy(char *dest, const char *src, SIZE_T count) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("strncpy(%p, %s, %zu)\n", dest, src ? src : "(null)", count);
 		return std::strncpy(dest, src, count);
 	}
 
-	char* WIN_ENTRY strpbrk(const char *str, const char *accept) {
+	char* CDECL strpbrk(const char *str, const char *accept) {
 		HOST_CONTEXT_GUARD();
 		const char *result = std::strpbrk(str, accept);
 		DEBUG_LOG("strpbrk(%s, %s) -> %p\n", str ? str : "(null)", accept ? accept : "(null)", result);
 		return result ? const_cast<char *>(result) : nullptr;
 	}
 
-	char* WIN_ENTRY strstr(const char *haystack, const char *needle) {
+	char* CDECL strstr(const char *haystack, const char *needle) {
 		HOST_CONTEXT_GUARD();
 		const char *result = std::strstr(haystack, needle);
 		DEBUG_LOG("strstr(%s, %s) -> %p\n", haystack ? haystack : "(null)", needle ? needle : "(null)", result);
 		return result ? const_cast<char *>(result) : nullptr;
 	}
 
-	char* WIN_ENTRY strrchr(const char *str, int ch) {
+	char* CDECL strrchr(const char *str, int ch) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("strrchr(%s, %c)\n", str ? str : "(null)", ch);
 		const char *result = std::strrchr(str, ch);
 		return result ? const_cast<char *>(result) : nullptr;
 	}
 
-	char* WIN_ENTRY strtok(char *str, const char *delim) {
+	char* CDECL strtok(char *str, const char *delim) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("strtok(%p, %s)\n", str, delim ? delim : "(null)");
 		return std::strtok(str, delim);
 	}
 
-	long WIN_ENTRY _adj_fdiv_r(long value) {
+	long CDECL _adj_fdiv_r(long value) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("STUB: _adj_fdiv_r(%ld)\n", value);
 		return value;
 	}
 
-	void WIN_ENTRY _adjust_fdiv(long n) {
+	void CDECL _adjust_fdiv(long n) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("STUB: _adjust_fdiv(%ld)\n", n);
 		(void)n;
 	}
 
-	int WIN_ENTRY _ftime(struct _timeb *timeptr) {
+	int CDECL _ftime(struct _timeb *timeptr) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_ftime(%p)\n", timeptr);
 		if (!timeptr) {
@@ -1318,7 +1285,7 @@ namespace msvcrt {
 		return 0;
 	}
 
-	unsigned long WIN_ENTRY _ultoa(unsigned long value, char *str, int radix) {
+	unsigned long CDECL _ultoa(unsigned long value, char *str, int radix) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_ultoa(%lu, %p, %d)\n", value, str, radix);
 		if (!str || radix < 2 || radix > 36) {
@@ -1340,7 +1307,7 @@ namespace msvcrt {
 		return static_cast<unsigned long>(std::strlen(str));
 	}
 
-	char* WIN_ENTRY _ltoa(long value, char *str, int radix) {
+	char* CDECL _ltoa(long value, char *str, int radix) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_ltoa(%ld, %p, %d)\n", value, str, radix);
 		if (!str || radix < 2 || radix > 36) {
@@ -1360,7 +1327,7 @@ namespace msvcrt {
 		return str;
 	}
 
-	char* WIN_ENTRY _makepath(char *path, const char *drive, const char *dir, const char *fname, const char *ext) {
+	char* CDECL _makepath(char *path, const char *drive, const char *dir, const char *fname, const char *ext) {
 		HOST_CONTEXT_GUARD();
 		if (!path) {
 			return nullptr;
@@ -1394,7 +1361,7 @@ namespace msvcrt {
 		return path;
 	}
 
-	char* WIN_ENTRY _fullpath(char *absPath, const char *relPath, size_t maxLength) {
+	char* CDECL _fullpath(char *absPath, const char *relPath, SIZE_T maxLength) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_fullpath(%p, %s, %zu)\n", absPath, relPath ? relPath : "(null)", maxLength);
 		if (!relPath) {
@@ -1425,7 +1392,7 @@ namespace msvcrt {
 		return result;
 	}
 
-	int WIN_ENTRY _putenv(const char *envString) {
+	int CDECL _putenv(const char *envString) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_putenv(%s)\n", envString ? envString : "(null)");
 		if (!envString) {
@@ -1443,14 +1410,14 @@ namespace msvcrt {
 		return ::putenv(stored);
 	}
 
-	char *WIN_ENTRY _mktemp(char *templateName) {
+	char *CDECL _mktemp(char *templateName) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_mktemp(%s)\n", templateName);
 		if (!templateName) {
 			errno = EINVAL;
 			return nullptr;
 		}
-		size_t originalLen = std::strlen(templateName);
+		SIZE_T originalLen = std::strlen(templateName);
 		std::string hostTemplate = files::pathFromWindows(templateName).string();
 		if (hostTemplate.empty()) {
 			hostTemplate = templateName;
@@ -1472,30 +1439,30 @@ namespace msvcrt {
 		return templateName;
 	}
 
-	int WIN_ENTRY _except_handler3(void *record, void *frame, void *context, void *dispatch) {
+	int CDECL _except_handler3(void *record, void *frame, void *context, void *dispatch) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_except_handler3(%p, %p, %p, %p)\n", record, frame, context, dispatch);
 		return _except_handler4_common(record, frame, context, dispatch);
 	}
 
-	int WIN_ENTRY getchar() {
+	int CDECL getchar() {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("getchar()\n");
 		return std::getchar();
 	}
 
-	time_t WIN_ENTRY time(time_t *t) {
+	TIME_T CDECL time(TIME_T *t) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("time(%p)\n", t);
-		time_t result = std::time(nullptr);
+		TIME_T result = std::time(nullptr);
 		if (t) {
 			*t = result;
 		}
 		return result;
 	}
 
-	char *WIN_ENTRY __unDName(char *outputString, const char *mangledName, int maxStringLength,
-							  void *(*allocFunc)(size_t), void (*freeFunc)(void *), unsigned short) {
+	char *CDECL __unDName(char *outputString, const char *mangledName, int maxStringLength,
+							  void *(*allocFunc)(SIZE_T), void (*freeFunc)(void *), unsigned short) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("STUB: __unDName(%p, %s, %d, %p, %p)\n", outputString, mangledName ? mangledName : "(null)",
 				  maxStringLength, allocFunc, freeFunc);
@@ -1508,7 +1475,7 @@ namespace msvcrt {
 		return nullptr;
 	}
 
-	char* WIN_ENTRY setlocale(int category, const char *locale){
+	char* CDECL setlocale(int category, const char *locale){
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("setlocale(%d, %s)\n", category, locale ? locale : "(null)");
 		char *result = std::setlocale(category, locale);
@@ -1518,7 +1485,7 @@ namespace msvcrt {
 		return result;
 	}
 
-	int WIN_ENTRY _wdupenv_s(uint16_t **buffer, size_t *numberOfElements, const uint16_t *varname){
+	int CDECL _wdupenv_s(uint16_t **buffer, SIZE_T *numberOfElements, const uint16_t *varname){
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_wdupenv_s(%p, %p, %s)\n", buffer, numberOfElements, wideStringToString(varname).c_str());
 		if (buffer) {
@@ -1544,7 +1511,7 @@ namespace msvcrt {
 			return 0;
 		}
 
-		size_t value_len = match->length;
+		SIZE_T value_len = match->length;
 		auto *copy = static_cast<uint16_t *>(malloc((value_len + 1) * sizeof(uint16_t)));
 		if (!copy) {
 			DEBUG_LOG("_wdupenv_s: allocation failed\n");
@@ -1561,7 +1528,7 @@ namespace msvcrt {
 		return 0;
 	}
 
-	int WIN_ENTRY _wgetenv_s(size_t* pReturnValue, uint16_t* buffer, size_t numberOfElements, const uint16_t* varname){
+	int CDECL _wgetenv_s(SIZE_T* pReturnValue, uint16_t* buffer, SIZE_T numberOfElements, const uint16_t* varname){
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_wgetenv_s(%p, %p, %zu, %s)\n", pReturnValue, buffer, numberOfElements,
 				  wideStringToString(varname).c_str());
@@ -1588,7 +1555,7 @@ namespace msvcrt {
 			return 0;
 		}
 
-		size_t required = match->length + 1;
+		SIZE_T required = match->length + 1;
 		*pReturnValue = required;
 		if (!bufferRequired || !buffer) {
 			return 0;
@@ -1604,38 +1571,38 @@ namespace msvcrt {
 		return 0;
 	}
 
-	size_t WIN_ENTRY strlen(const char *str) {
+	SIZE_T CDECL strlen(const char *str) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("strlen(%s)\n", str);
 		return ::strlen(str);
 	}
 
-	int WIN_ENTRY strcmp(const char *lhs, const char *rhs) {
+	int CDECL strcmp(const char *lhs, const char *rhs) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("strcmp(%s, %s)\n", lhs, rhs);
 		return ::strcmp(lhs, rhs);
 	}
 
-	int WIN_ENTRY strncmp(const char *lhs, const char *rhs, size_t count) {
+	int CDECL strncmp(const char *lhs, const char *rhs, SIZE_T count) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("strncmp(%s, %s, %zu)\n", lhs, rhs, count);
 		return ::strncmp(lhs, rhs, count);
 	}
 
-	void WIN_ENTRY _exit(int status) {
+	void CDECL _exit(int status) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_exit(%d)\n", status);
 		kernel32::exitInternal(status);
 	}
 
-	int WIN_ENTRY strcpy_s(char *dest, size_t dest_size, const char *src) {
+	int CDECL strcpy_s(char *dest, SIZE_T dest_size, const char *src) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("strcpy_s(%p, %zu, %s)\n", dest, dest_size, src);
 		if (!dest || !src || dest_size == 0) {
 			return 22;
 		}
 
-		size_t src_len = ::strlen(src);
+		SIZE_T src_len = ::strlen(src);
 		if (src_len + 1 > dest_size) {
 			dest[0] = 0;
 			return 34;
@@ -1645,15 +1612,15 @@ namespace msvcrt {
 		return 0;
 	}
 
-	int WIN_ENTRY strcat_s(char *dest, size_t numberOfElements, const char *src) {
+	int CDECL strcat_s(char *dest, SIZE_T numberOfElements, const char *src) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("strcat_s(%p, %zu, %s)\n", dest, numberOfElements, src);
 		if (!dest || !src || numberOfElements == 0) {
 			return 22;
 		}
 
-		size_t dest_len = ::strlen(dest);
-		size_t src_len = ::strlen(src);
+		SIZE_T dest_len = ::strlen(dest);
+		SIZE_T src_len = ::strlen(src);
 		if (dest_len + src_len + 1 > numberOfElements) {
 			dest[0] = 0;
 			return 34;
@@ -1663,10 +1630,10 @@ namespace msvcrt {
 		return 0;
 	}
 
-	int WIN_ENTRY strncpy_s(char *dest, size_t dest_size, const char *src, size_t count) {
+	int CDECL strncpy_s(char *dest, SIZE_T dest_size, const char *src, SIZE_T count) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("strncpy_s(%p, %zu, %s, %zu)\n", dest, dest_size, src, count);
-		constexpr size_t TRUNCATE = static_cast<size_t>(-1);
+		constexpr SIZE_T TRUNCATE = static_cast<SIZE_T>(-1);
 		constexpr int STRUNCATE = 80;
 
 		if (!dest || dest_size == 0) {
@@ -1684,9 +1651,9 @@ namespace msvcrt {
 		}
 
 		if (count == TRUNCATE) {
-			size_t src_len = ::strlen(src);
+			SIZE_T src_len = ::strlen(src);
 			if (src_len + 1 > dest_size) {
-				size_t copy_len = dest_size > 0 ? dest_size - 1 : 0;
+				SIZE_T copy_len = dest_size > 0 ? dest_size - 1 : 0;
 				if (copy_len > 0) {
 					std::memcpy(dest, src, copy_len);
 				}
@@ -1697,8 +1664,8 @@ namespace msvcrt {
 			return 0;
 		}
 
-		size_t src_len = ::strlen(src);
-		size_t copy_len = count < src_len ? count : src_len;
+		SIZE_T src_len = ::strlen(src);
+		SIZE_T copy_len = count < src_len ? count : src_len;
 		if (copy_len >= dest_size) {
 			dest[0] = 0;
 			return 34;
@@ -1711,14 +1678,14 @@ namespace msvcrt {
 		return 0;
 	}
 
-	char *WIN_ENTRY _strdup(const char *strSource) {
+	char *CDECL _strdup(const char *strSource) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_strdup(%s)\n", strSource);
 		if (!strSource) {
 			return nullptr;
 		}
 
-		size_t length = ::strlen(strSource);
+		SIZE_T length = ::strlen(strSource);
 		auto *copy = static_cast<char *>(std::malloc(length + 1));
 		if (!copy) {
 			return nullptr;
@@ -1728,57 +1695,57 @@ namespace msvcrt {
 		return copy;
 	}
 
-	unsigned long WIN_ENTRY strtoul(const char *str, char **endptr, int base) {
+	unsigned long CDECL strtoul(const char *str, char **endptr, int base) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("strtoul(%s, %p, %d)\n", str, endptr, base);
 		return ::strtoul(str, endptr, base);
 	}
 
-	void* WIN_ENTRY malloc(size_t size){
+	void* CDECL malloc(SIZE_T size){
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("malloc(%zu)\n", size);
 		return std::malloc(size);
 	}
 
-	void* WIN_ENTRY calloc(size_t count, size_t size){
+	void* CDECL calloc(SIZE_T count, SIZE_T size){
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("calloc(%zu, %zu)\n", count, size);
 		return std::calloc(count, size);
 	}
 
-	void* WIN_ENTRY realloc(void *ptr, size_t size) {
+	void* CDECL realloc(void *ptr, SIZE_T size) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("realloc(%p, %zu)\n", ptr, size);
 		return std::realloc(ptr, size);
 	}
 
-	void* WIN_ENTRY _malloc_crt(size_t size) {
+	void* CDECL _malloc_crt(SIZE_T size) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_malloc_crt(%zu)\n", size);
 		return std::malloc(size);
 	}
 
-	void WIN_ENTRY _lock(int locknum) {
+	void CDECL _lock(int locknum) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_lock(%d)\n", locknum);
-		if (locknum < 0 || static_cast<size_t>(locknum) >= LOCK_TABLE_SIZE) {
+		if (locknum < 0 || static_cast<SIZE_T>(locknum) >= LOCK_TABLE_SIZE) {
 			DEBUG_LOG("_lock: unsupported lock %d\n", locknum);
 			return;
 		}
-		lockTable()[static_cast<size_t>(locknum)].lock();
+		lockTable()[static_cast<SIZE_T>(locknum)].lock();
 	}
 
-	void WIN_ENTRY _unlock(int locknum) {
+	void CDECL _unlock(int locknum) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_unlock(%d)\n", locknum);
-		if (locknum < 0 || static_cast<size_t>(locknum) >= LOCK_TABLE_SIZE) {
+		if (locknum < 0 || static_cast<SIZE_T>(locknum) >= LOCK_TABLE_SIZE) {
 			DEBUG_LOG("_unlock: unsupported lock %d\n", locknum);
 			return;
 		}
-		lockTable()[static_cast<size_t>(locknum)].unlock();
+		lockTable()[static_cast<SIZE_T>(locknum)].unlock();
 	}
 
-	_onexit_t WIN_ENTRY __dllonexit(_onexit_t func, _PVFV **pbegin, _PVFV **pend) {
+	_onexit_t CDECL __dllonexit(_onexit_t func, _PVFV **pbegin, _PVFV **pend) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("__dllonexit(%p, %p, %p)\n", func, pbegin, pend);
 		if (!pbegin || !pend) {
@@ -1810,37 +1777,37 @@ namespace msvcrt {
 		return reinterpret_cast<_onexit_t>(func);
 	}
 
-	void WIN_ENTRY free(void* ptr){
+	void CDECL free(void* ptr){
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("free(%p)\n", ptr);
 		std::free(ptr);
 	}
 
-	void* WIN_ENTRY memcpy(void *dest, const void *src, size_t count) {
+	void* CDECL memcpy(void *dest, const void *src, SIZE_T count) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("memcpy(%p, %p, %zu)\n", dest, src, count);
 		return std::memcpy(dest, src, count);
 	}
 
-	void* WIN_ENTRY memmove(void *dest, const void *src, size_t count) {
+	void* CDECL memmove(void *dest, const void *src, SIZE_T count) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("memmove(%p, %p, %zu)\n", dest, src, count);
 		return std::memmove(dest, src, count);
 	}
 
-	int WIN_ENTRY memcmp(const void *lhs, const void *rhs, size_t count) {
+	int CDECL memcmp(const void *lhs, const void *rhs, SIZE_T count) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("memcmp(%p, %p, %zu)\n", lhs, rhs, count);
 		return std::memcmp(lhs, rhs, count);
 	}
 
-	void WIN_ENTRY qsort(void *base, size_t num, size_t size, int (*compar)(const void *, const void *)) {
+	void CDECL qsort(void *base, SIZE_T num, SIZE_T size, int (*compar)(const void *, const void *)) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("qsort(%p, %zu, %zu, %p)\n", base, num, size, compar);
 		std::qsort(base, num, size, compar);
 	}
 
-	int WIN_ENTRY fflush(FILE *stream) {
+	int CDECL fflush(FILE *stream) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fflush(%p)\n", stream);
 		if (!stream) {
@@ -1850,7 +1817,7 @@ namespace msvcrt {
 		return std::fflush(host);
 	}
 
-	int WIN_ENTRY vfwprintf(FILE *stream, const uint16_t *format, va_list args) {
+	int CDECL vfwprintf(FILE *stream, const uint16_t *format, va_list args) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("vfwprintf(%p, %s, ...)\n", stream, wideStringToString(format).c_str());
 		FILE *host = mapToHostFile(stream ? stream : stdout);
@@ -1864,43 +1831,43 @@ namespace msvcrt {
 		return std::vfwprintf(host, fmt.c_str(), args);
 	}
 
-	FILE *WIN_ENTRY fopen(const char *filename, const char *mode) {
+	FILE *CDECL fopen(const char *filename, const char *mode) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fopen(%s, %s)\n", filename ? filename : "(null)", mode ? mode : "(null)");
 		return std::fopen(filename, mode);
 	}
 
-	int WIN_ENTRY _dup2(int fd1, int fd2) {
+	int CDECL _dup2(int fd1, int fd2) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_dup2(%d, %d)\n", fd1, fd2);
 		return dup2(fd1, fd2);
 	}
 
-	int WIN_ENTRY _isatty(int fd) {
+	int CDECL _isatty(int fd) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_isatty(%d)\n", fd);
 		return isatty(fd);
 	}
 
-	int WIN_ENTRY fseek(FILE *stream, long offset, int origin) {
+	int CDECL fseek(FILE *stream, long offset, int origin) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("fseek(%p, %ld, %d)\n", stream, offset, origin);
 		return std::fseek(stream, offset, origin);
 	}
 
-	long WIN_ENTRY ftell(FILE *stream) {
+	long CDECL ftell(FILE *stream) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("ftell(%p)\n", stream);
 		return std::ftell(stream);
 	}
 
-	int WIN_ENTRY feof(FILE *stream) {
+	int CDECL feof(FILE *stream) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("feof(%p)\n", stream);
 		return std::feof(stream);
 	}
 
-	int WIN_ENTRY fputws(const uint16_t *str, FILE *stream) {
+	int CDECL fputws(const uint16_t *str, FILE *stream) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fputws(%s, %p)\n", wideStringToString(str).c_str(), stream);
 		std::wstring temp;
@@ -1912,19 +1879,19 @@ namespace msvcrt {
 		return std::fputws(temp.c_str(), stream);
 	}
 
-	int WIN_ENTRY _cputws(const uint16_t *string) {
+	int CDECL _cputws(const uint16_t *string) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_cputws(%s)\n", wideStringToString(string).c_str());
 		return fputws(string, stdout);
 	}
 
-	uint16_t* WIN_ENTRY fgetws(uint16_t *buffer, int size, FILE *stream) {
+	uint16_t* CDECL fgetws(uint16_t *buffer, int size, FILE *stream) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fgetws(%p, %d, %p)\n", buffer, size, stream);
 		if (!buffer || size <= 0) {
 			return nullptr;
 		}
-		std::vector<wchar_t> temp(static_cast<size_t>(size));
+		std::vector<wchar_t> temp(static_cast<SIZE_T>(size));
 		wchar_t *res = std::fgetws(temp.data(), size, stream);
 		if (!res) {
 			return nullptr;
@@ -1938,13 +1905,13 @@ namespace msvcrt {
 		return buffer;
 	}
 
-	wint_t WIN_ENTRY fgetwc(FILE *stream) {
+	WINT_T CDECL fgetwc(FILE *stream) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("fgetwc(%p)\n", stream);
 		return std::fgetwc(stream);
 	}
 
-	int WIN_ENTRY _wfopen_s(FILE **stream, const uint16_t *filename, const uint16_t *mode) {
+	int CDECL _wfopen_s(FILE **stream, const uint16_t *filename, const uint16_t *mode) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_wfopen_s(%p, %s, %s)\n", stream, wideStringToString(filename).c_str(),
 				  wideStringToString(mode).c_str());
@@ -1963,7 +1930,7 @@ namespace msvcrt {
 		return 0;
 	}
 
-	int WIN_ENTRY _wcsicmp(const uint16_t *lhs, const uint16_t *rhs) {
+	int CDECL _wcsicmp(const uint16_t *lhs, const uint16_t *rhs) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_wcsicmp(%s, %s)\n", wideStringToString(lhs).c_str(), wideStringToString(rhs).c_str());
 		if (lhs == rhs) {
@@ -1989,7 +1956,7 @@ namespace msvcrt {
 		return static_cast<int>(a) - static_cast<int>(b);
 	}
 
-	int WIN_ENTRY _wmakepath_s(uint16_t *path, size_t sizeInWords, const uint16_t *drive, const uint16_t *dir,
+	int CDECL _wmakepath_s(uint16_t *path, SIZE_T sizeInWords, const uint16_t *drive, const uint16_t *dir,
 				 const uint16_t *fname, const uint16_t *ext) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_wmakepath_s(%p, %zu, %s, %s, %s, %s)\n", path, sizeInWords, wideStringToString(drive).c_str(),
@@ -2049,20 +2016,20 @@ namespace msvcrt {
 
 		DEBUG_LOG("-> %s\n", wideStringToString(reinterpret_cast<const uint16_t*>(result.c_str())).c_str());
 
-		size_t required = result.size() + 1;
+		SIZE_T required = result.size() + 1;
 		if (required > sizeInWords) {
 			path[0] = 0;
 			return ERANGE;
 		}
 
-		for (size_t i = 0; i < result.size(); ++i) {
+		for (SIZE_T i = 0; i < result.size(); ++i) {
 			path[i] = static_cast<uint16_t>(result[i]);
 		}
 		path[result.size()] = 0;
 		return 0;
 	}
 
-	int WIN_ENTRY _wputenv_s(const uint16_t *varname, const uint16_t *value) {
+	int CDECL _wputenv_s(const uint16_t *varname, const uint16_t *value) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_wputenv_s(%p, %p)\n", varname, value);
 		if (!varname || !value) {
@@ -2110,7 +2077,7 @@ namespace msvcrt {
 		return 0;
 	}
 
-	unsigned long WIN_ENTRY wcsspn(const uint16_t *str1, const uint16_t *str2) {
+	unsigned long CDECL wcsspn(const uint16_t *str1, const uint16_t *str2) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("wcsspn(%p, %p)\n", str1, str2);
 		if (!str1 || !str2) {
@@ -2133,51 +2100,51 @@ namespace msvcrt {
 		return count;
 	}
 
-	long WIN_ENTRY _wtol(const uint16_t *str) {
+	long CDECL _wtol(const uint16_t *str) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_wtol(%p)\n", str);
 		return wstrtol(str, nullptr, 10);
 	}
 
-	int WIN_ENTRY _wcsupr_s(uint16_t *str, size_t size) {
+	int CDECL _wcsupr_s(uint16_t *str, SIZE_T size) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_wcsupr_s(%p, %zu)\n", str, size);
 		if (!str || size == 0) {
 			return EINVAL;
 		}
-		size_t len = wstrnlen(str, size);
+		SIZE_T len = wstrnlen(str, size);
 		if (len >= size) {
 			return ERANGE;
 		}
-		for (size_t i = 0; i < len; ++i) {
+		for (SIZE_T i = 0; i < len; ++i) {
 			str[i] = wcharToUpper(str[i]);
 		}
 		return 0;
 	}
 
-	int WIN_ENTRY _wcslwr_s(uint16_t *str, size_t size) {
+	int CDECL _wcslwr_s(uint16_t *str, SIZE_T size) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_wcslwr_s(%p, %zu)\n", str, size);
 		if (!str || size == 0) {
 			return EINVAL;
 		}
-		size_t len = wstrnlen(str, size);
+		SIZE_T len = wstrnlen(str, size);
 		if (len >= size) {
 			return ERANGE;
 		}
-		for (size_t i = 0; i < len; ++i) {
+		for (SIZE_T i = 0; i < len; ++i) {
 			str[i] = wcharToLower(str[i]);
 		}
 		return 0;
 	}
 
-	wint_t WIN_ENTRY towlower(wint_t ch) {
+	WINT_T CDECL towlower(WINT_T ch) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("towlower(%d)\n", ch);
 		return wcharToLower(ch);
 	}
 
-	unsigned int WIN_ENTRY _mbctolower(unsigned int ch) {
+	unsigned int CDECL _mbctolower(unsigned int ch) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_mbctolower(%u)\n", ch);
 		if (ch <= 0xFF) {
@@ -2188,33 +2155,33 @@ namespace msvcrt {
 		return ch;
 	}
 
-	int WIN_ENTRY toupper(int ch) {
+	int CDECL toupper(int ch) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("toupper(%d)\n", ch);
 		return std::toupper(ch);
 	}
 
-	int WIN_ENTRY tolower(int ch) {
+	int CDECL tolower(int ch) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("tolower(%d)\n", ch);
 		return std::tolower(ch);
 	}
 
-	int WIN_ENTRY _ftime64_s(void *timeb) {
+	int CDECL _ftime64_s(void *timeb) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("STUB: _ftime64_s(%p)\n", timeb);
 		(void)timeb;
 		return 0;
 	}
 
-	int WIN_ENTRY _crt_debugger_hook(int value) {
+	int CDECL _crt_debugger_hook(int value) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("STUB: _crt_debugger_hook(%d)\n", value);
 		(void)value;
 		return 0;
 	}
 
-	int WIN_ENTRY _configthreadlocale(int mode) {
+	int CDECL _configthreadlocale(int mode) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_configthreadlocale(mode=%d)\n", mode);
 		static int currentMode = 0;
@@ -2230,13 +2197,13 @@ namespace msvcrt {
 		return -1;
 	}
 
-	void WIN_ENTRY __setusermatherr(void* handler) {
+	void CDECL __setusermatherr(void* handler) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("STUB: __setusermatherr(handler=%p)\n", handler);
 		(void)handler;
 	}
 
-	void WIN_ENTRY _cexit() {
+	void CDECL _cexit() {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_cexit()\n");
 		std::fflush(nullptr);
@@ -2249,7 +2216,7 @@ namespace msvcrt {
 		return mapToHostFile(stream);
 	}
 
-	int WIN_ENTRY vfprintf(FILE *stream, const char *format, va_list args) {
+	int CDECL vfprintf(FILE *stream, const char *format, va_list args) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("vfprintf(stream=%p, format=%s, args=%p)\n", stream, format, args);
 		if (!format || !stream) {
@@ -2268,7 +2235,7 @@ namespace msvcrt {
 		return result;
 	}
 
-	int WIN_ENTRY fprintf(FILE *stream, const char *format, ...) {
+	int CDECL_NO_CONV fprintf(FILE *stream, const char *format, ...) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fprintf(%p, %s, ...)\n", stream, format);
 		va_list args;
@@ -2278,7 +2245,7 @@ namespace msvcrt {
 		return result;
 	}
 
-	int WIN_ENTRY fputc(int ch, FILE *stream) {
+	int CDECL fputc(int ch, FILE *stream) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fputc(%d, %p)\n", ch, stream);
 		if (!stream) {
@@ -2293,7 +2260,7 @@ namespace msvcrt {
 		return std::fputc(ch, native);
 	}
 
-	size_t WIN_ENTRY fwrite(const void *buffer, size_t size, size_t count, FILE *stream) {
+	SIZE_T CDECL fwrite(const void *buffer, SIZE_T size, SIZE_T count, FILE *stream) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fwrite(%p, %zu, %zu, %p)\n", buffer, size, count, stream);
 		if (!buffer || !stream) {
@@ -2308,27 +2275,25 @@ namespace msvcrt {
 		return std::fwrite(buffer, size, count, native);
 	}
 
-	char *WIN_ENTRY strerror(int errnum) {
+	char *CDECL strerror(int errnum) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("strerror(%d)\n", errnum);
 		return std::strerror(errnum);
 	}
 
-	char *WIN_ENTRY strchr(const char *str, int character) {
+	char *CDECL strchr(const char *str, int character) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("strchr(%s, %d)\n", str, character);
 		return const_cast<char *>(std::strchr(str, character));
 	}
 
-	struct lconv *WIN_ENTRY localeconv() {
+	struct lconv *CDECL localeconv() {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("localeconv()\n");
 		return std::localeconv();
 	}
 
-	using SignalHandler = void (*)(int);
-
-	SignalHandler WIN_ENTRY signal(int sig, SignalHandler handler) {
+	signal_handler CDECL signal(int sig, signal_handler handler) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("signal(%d, %p)\n", sig, handler);
 		if (sig != SIGABRT && sig != SIGFPE && sig != SIGILL && sig != SIGINT &&
@@ -2340,7 +2305,7 @@ namespace msvcrt {
 		return std::signal(sig, handler);
 	}
 
-	size_t WIN_ENTRY wcslen(const uint16_t *str) {
+	SIZE_T CDECL wcslen(const uint16_t *str) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("wcslen(%p)\n", str);
 		return wstrlen(str);
@@ -2351,12 +2316,12 @@ namespace msvcrt {
 		std::abort();
 	}
 
-	void WIN_ENTRY abort() {
+	void CDECL abort() {
 		HOST_CONTEXT_GUARD();
 		abort_and_log("abort");
 	}
 
-	int WIN_ENTRY atoi(const char *str) {
+	int CDECL atoi(const char *str) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("atoi(%s)\n", str);
 		if (!str) {
@@ -2366,43 +2331,43 @@ namespace msvcrt {
 		return std::atoi(str);
 	}
 
-	int WIN_ENTRY _amsg_exit(int reason) {
+	int CDECL _amsg_exit(int reason) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_amsg_exit(%d)\n", reason);
 		abort_and_log("_amsg_exit");
 		return reason;
 	}
 
-	void WIN_ENTRY _invoke_watson(const uint16_t *, const uint16_t *, const uint16_t *, unsigned int, uintptr_t) {
+	void CDECL _invoke_watson(const uint16_t *, const uint16_t *, const uint16_t *, unsigned int, uintptr_t) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_invoke_watson(...)\n");
 		abort_and_log("_invoke_watson");
 	}
 
-	void WIN_ENTRY terminateShim() {
+	void CDECL terminateShim() {
 		HOST_CONTEXT_GUARD();
 		abort_and_log("terminate");
 	}
 
-	int WIN_ENTRY _purecall() {
+	int CDECL _purecall() {
 		HOST_CONTEXT_GUARD();
 		abort_and_log("_purecall");
 		return 0;
 	}
 
-	int WIN_ENTRY _except_handler4_common(void *, void *, void *, void *) {
+	int CDECL _except_handler4_common(void *, void *, void *, void *) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("STUB: _except_handler4_common\n");
 		return 0;
 	}
 
-	long WIN_ENTRY _XcptFilter(unsigned long code, void *) {
+	long CDECL _XcptFilter(unsigned long code, void *) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("STUB: _XcptFilter(%lu)\n", code);
 		return 0;
 	}
 
-	int WIN_ENTRY _get_wpgmptr(uint16_t **pValue) {
+	int CDECL _get_wpgmptr(uint16_t **pValue) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_get_wpgmptr(%p)\n", pValue);
 		if (!pValue) {
@@ -2424,15 +2389,15 @@ namespace msvcrt {
 		return 0;
 	}
 
-	char** WIN_ENTRY __p__pgmptr() {
+	char** CDECL __p__pgmptr() {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("__p__pgmptr()\n");
 		_pgmptr = const_cast<char *>(wibo::guestExecutablePath.c_str());
 		return &_pgmptr;
 	}
 
-	int WIN_ENTRY _wsplitpath_s(const uint16_t * path, uint16_t * drive, size_t driveNumberOfElements, uint16_t *dir, size_t dirNumberOfElements,
-		uint16_t * fname, size_t nameNumberOfElements, uint16_t * ext, size_t extNumberOfElements){
+	int CDECL _wsplitpath_s(const uint16_t * path, uint16_t * drive, SIZE_T driveNumberOfElements, uint16_t *dir, SIZE_T dirNumberOfElements,
+		uint16_t * fname, SIZE_T nameNumberOfElements, uint16_t * ext, SIZE_T extNumberOfElements){
 		HOST_CONTEXT_GUARD();
 		if(!path){
 			return 22;
@@ -2455,21 +2420,21 @@ namespace msvcrt {
 		if (dot && dot < filename_start) dot = nullptr;
 
 		if (dir && dirNumberOfElements && slash) {
-			size_t dir_len = slash - path + 1;
+			SIZE_T dir_len = slash - path + 1;
 			if (dir_len >= dirNumberOfElements) return 34;
 			wstrncpy(dir, path, dir_len);
 			dir[dir_len] = L'\0';
 		}
 
 		if (fname && nameNumberOfElements) {
-			size_t fname_len = dot ? (size_t)(dot - filename_start) : wstrlen(filename_start);
+			SIZE_T fname_len = dot ? (SIZE_T)(dot - filename_start) : wstrlen(filename_start);
 			if (fname_len >= nameNumberOfElements) return 34;
 			wstrncpy(fname, filename_start, fname_len);
 			fname[fname_len] = L'\0';
 		}
 
 		if (ext && extNumberOfElements && dot) {
-			size_t ext_len = wstrlen(dot);
+			SIZE_T ext_len = wstrlen(dot);
 			if (ext_len >= extNumberOfElements) return 34;
 			wstrncpy(ext, dot, ext_len);
 			ext[ext_len] = L'\0';
@@ -2485,15 +2450,15 @@ namespace msvcrt {
 		return 0;
 	}
 
-	int WIN_ENTRY wcscat_s(uint16_t *strDestination, size_t numberOfElements, const uint16_t *strSource){
+	int CDECL wcscat_s(uint16_t *strDestination, SIZE_T numberOfElements, const uint16_t *strSource){
 		HOST_CONTEXT_GUARD();
 		std::string dst_str = wideStringToString(strDestination);
 		std::string src_str = wideStringToString(strSource);
 		DEBUG_LOG("wcscat_s %s %d %s", dst_str.c_str(), numberOfElements, src_str.c_str());
 		if(!strDestination || !strSource || numberOfElements == 0) return 22;
 
-		size_t dest_len = wstrlen(strDestination);
-		size_t src_len = wstrlen(strSource);
+		SIZE_T dest_len = wstrlen(strDestination);
+		SIZE_T src_len = wstrlen(strSource);
 
 		if(dest_len + src_len + 1 > numberOfElements){
 			if(strDestination && numberOfElements > 0) strDestination[0] = L'\0';
@@ -2507,17 +2472,17 @@ namespace msvcrt {
 		return 0;
 	}
 
-	uint16_t* WIN_ENTRY _wcsdup(const uint16_t *strSource){
+	uint16_t* CDECL _wcsdup(const uint16_t *strSource){
 		HOST_CONTEXT_GUARD();
 		// std::string src_str = wideStringToString(strSource);
 		// DEBUG_LOG("_wcsdup: %s", src_str.c_str());
 		if(!strSource) return nullptr;
-		size_t strLen = wstrlen(strSource);
+		SIZE_T strLen = wstrlen(strSource);
 
 		auto *dup = static_cast<uint16_t *>(malloc((strLen + 1) * sizeof(uint16_t)));
 		if(!dup) return nullptr;
 
-		for(size_t i = 0; i <= strLen; i++){
+		for(SIZE_T i = 0; i <= strLen; i++){
 			dup[i] = strSource[i];
 		}
 
@@ -2526,7 +2491,7 @@ namespace msvcrt {
 		return dup;
 	}
 
-	int WIN_ENTRY _waccess_s(const uint16_t* path, int mode){
+	int CDECL _waccess_s(const uint16_t* path, int mode){
 		HOST_CONTEXT_GUARD();
 		std::string original = wideStringToString(path);
 		DEBUG_LOG("_waccess_s %s\n", original.c_str());
@@ -2541,12 +2506,12 @@ namespace msvcrt {
 		return access(candidate.c_str(), mode);
 	}
 
-	void* WIN_ENTRY memset(void *s, int c, size_t n){
+	void* CDECL memset(void *s, int c, SIZE_T n){
 		HOST_CONTEXT_GUARD();
 		return std::memset(s, c, n);
 	}
 
-	int WIN_ENTRY wcsncpy_s(uint16_t *strDest, size_t numberOfElements, const uint16_t *strSource, size_t count){
+	int CDECL wcsncpy_s(uint16_t *strDest, SIZE_T numberOfElements, const uint16_t *strSource, SIZE_T count){
 		HOST_CONTEXT_GUARD();
 		std::string src_str = wideStringToString(strSource);
 		DEBUG_LOG("wcsncpy_s(%p, %zu, %p, %zu)\n", strDest, numberOfElements, strSource, count);
@@ -2556,7 +2521,7 @@ namespace msvcrt {
 			return 1;
 		}
 
-		if(count == (size_t)-1) count = wstrlen(strSource);
+		if(count == (SIZE_T)-1) count = wstrlen(strSource);
 
 		if(count >= numberOfElements){
 			strDest[0] = L'\0';
@@ -2569,7 +2534,7 @@ namespace msvcrt {
 		return 0;
 	}
 
-	int WIN_ENTRY wcsncat_s(uint16_t *strDest, size_t numberOfElements, const uint16_t *strSource, size_t count){
+	int CDECL wcsncat_s(uint16_t *strDest, SIZE_T numberOfElements, const uint16_t *strSource, SIZE_T count){
 		HOST_CONTEXT_GUARD();
 		std::string dst_str = wideStringToString(strDest);
 		std::string src_str = wideStringToString(strSource);
@@ -2580,8 +2545,8 @@ namespace msvcrt {
 			return 1;
 		}
 
-		size_t dest_len = wstrlen(strDest);
-		size_t src_len = (count == (size_t)-1) ? wstrlen(strSource) : wstrnlen(strSource, count);
+		SIZE_T dest_len = wstrlen(strDest);
+		SIZE_T src_len = (count == (SIZE_T)-1) ? wstrlen(strSource) : wstrnlen(strSource, count);
 
 		if(dest_len + src_len + 1 > numberOfElements){
 			strDest[0] = L'\0';
@@ -2593,7 +2558,7 @@ namespace msvcrt {
 		return 0;
 	}
 
-	int WIN_ENTRY _itow_s(int value, uint16_t *buffer, size_t size, int radix){
+	int CDECL _itow_s(int value, uint16_t *buffer, SIZE_T size, int radix){
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_itow_s(%d, %p, %zu, %d)\n", value, buffer, size, radix);
 		if (!buffer || size == 0) return 22;
@@ -2613,13 +2578,13 @@ namespace msvcrt {
 		return 0;
 	}
 
-	int WIN_ENTRY _wtoi(const uint16_t* str) {
+	int CDECL _wtoi(const uint16_t* str) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_wtoi(%p)\n", str);
 		return wstrtol(str, nullptr, 10);
 	}
 
-	int WIN_ENTRY _ltoa_s(long value, char *buffer, size_t sizeInChars, int radix) {
+	int CDECL _ltoa_s(long value, char *buffer, SIZE_T sizeInChars, int radix) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_ltoa_s(%ld, %p, %zu, %d)\n", value, buffer, sizeInChars, radix);
 		if (!buffer || sizeInChars == 0) {
@@ -2633,7 +2598,7 @@ namespace msvcrt {
 		bool isNegative = (value < 0) && (radix == 10);
 		uint64_t magnitude = isNegative ? static_cast<uint64_t>(-(int64_t)value) : static_cast<uint64_t>(static_cast<int64_t>(value));
 		char temp[65];
-		size_t index = 0;
+		SIZE_T index = 0;
 		do {
 			uint64_t digit = magnitude % static_cast<uint64_t>(radix);
 			temp[index++] = static_cast<char>((digit < 10) ? ('0' + digit) : ('a' + (digit - 10)));
@@ -2644,20 +2609,20 @@ namespace msvcrt {
 			temp[index++] = '-';
 		}
 
-		size_t required = index + 1; // include null terminator
+		SIZE_T required = index + 1; // include null terminator
 		if (required > sizeInChars) {
 			buffer[0] = 0;
 			return 34;
 		}
 
-		for (size_t i = 0; i < index; ++i) {
+		for (SIZE_T i = 0; i < index; ++i) {
 			buffer[i] = temp[index - i - 1];
 		}
 		buffer[index] = '\0';
 		return 0;
 	}
 
-	int WIN_ENTRY wcscpy_s(uint16_t *dest, size_t dest_size, const uint16_t *src) {
+	int CDECL wcscpy_s(uint16_t *dest, SIZE_T dest_size, const uint16_t *src) {
 		HOST_CONTEXT_GUARD();
 		std::string src_str = wideStringToString(src);
 		VERBOSE_LOG("wcscpy_s(%p, %zu, %p)\n", dest, dest_size, src);
@@ -2674,7 +2639,7 @@ namespace msvcrt {
 		return 0;
 	}
 
-	int WIN_ENTRY swprintf_s(uint16_t *buffer, size_t sizeOfBuffer, const uint16_t *format, ...) {
+	int CDECL_NO_CONV swprintf_s(uint16_t *buffer, SIZE_T sizeOfBuffer, const uint16_t *format, ...) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("swprintf_s(%p, %zu, %p, ...)\n", buffer, sizeOfBuffer, format);
 		if (!buffer || sizeOfBuffer == 0 || !format) {
@@ -2691,18 +2656,18 @@ namespace msvcrt {
 		va_start(args, format);
 		int written = std::vswprintf(temp.data(), temp.size(), fmt.c_str(), args);
 		va_end(args);
-		if (written < 0 || static_cast<size_t>(written) >= sizeOfBuffer) {
+		if (written < 0 || static_cast<SIZE_T>(written) >= sizeOfBuffer) {
 			buffer[0] = 0;
 			errno = ERANGE;
 			return ERANGE;
 		}
 		for (int i = 0; i <= written; ++i) {
-			buffer[i] = static_cast<uint16_t>(temp[static_cast<size_t>(i)]);
+			buffer[i] = static_cast<uint16_t>(temp[static_cast<SIZE_T>(i)]);
 		}
 		return written;
 	}
 
-	int WIN_ENTRY swscanf_s(const uint16_t *buffer, const uint16_t *format, ...) {
+	int CDECL_NO_CONV swscanf_s(const uint16_t *buffer, const uint16_t *format, ...) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("swscanf_s(%p, %p, ...)\n", buffer, format);
 		if (!buffer || !format) {
@@ -2726,31 +2691,31 @@ namespace msvcrt {
 		return result;
 	}
 
-	int* WIN_ENTRY _get_osfhandle(int fd){
+	int* CDECL _get_osfhandle(int fd){
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("STUB: _get_osfhandle(%d)\n", fd);
 		return (int*)fd;
 	}
 
-	int WIN_ENTRY _write(int fd, const void* buffer, unsigned int count) {
+	int CDECL _write(int fd, const void* buffer, unsigned int count) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_write(fd=%d, buffer=%p, count=%u)\n", fd, buffer, count);
 		return (int)write(fd, buffer, count);
 	}
 
-	void WIN_ENTRY exit(int status) {
+	void CDECL exit(int status) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("exit(%d)\n", status);
 		kernel32::exitInternal(status);
 	}
 
-	int WIN_ENTRY wcsncmp(const uint16_t *string1, const uint16_t *string2, size_t count) {
+	int CDECL wcsncmp(const uint16_t *string1, const uint16_t *string2, SIZE_T count) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("wcsncmp(%p, %p, %zu)\n", string1, string2, count);
 		return wstrncmp(string1, string2, count);
 	}
 
-	int WIN_ENTRY _vswprintf_c_l(uint16_t *buffer, size_t size, const uint16_t *format, ...) {
+	int CDECL_NO_CONV _vswprintf_c_l(uint16_t *buffer, SIZE_T size, const uint16_t *format, ...) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_vswprintf_c_l(%p, %zu, %p, ...)\n", buffer, size, format);
 		if (!buffer || !format || size == 0) {
@@ -2776,7 +2741,7 @@ namespace msvcrt {
 			return -1;
 		}
 
-		std::vector<char> narrowBuffer(static_cast<size_t>(required) + 1);
+		std::vector<char> narrowBuffer(static_cast<SIZE_T>(required) + 1);
 		int written = vsnprintf(narrowBuffer.data(), narrowBuffer.size(), narrow_fmt.c_str(), args);
 		va_end(args);
 
@@ -2787,13 +2752,13 @@ namespace msvcrt {
 		DEBUG_LOG("\tBuffer: %s\n", narrowBuffer.data());
 
 		std::vector<uint16_t> wide = stringToWideString(narrowBuffer.data());
-		size_t wideLen = wide.size();
+		SIZE_T wideLen = wide.size();
 
 		if (wideLen + 1 > size) {
 			buffer[0] = 0;
 			return -1;
 		}
-		if (wideLen > static_cast<size_t>(std::numeric_limits<int>::max())) {
+		if (wideLen > static_cast<SIZE_T>(std::numeric_limits<int>::max())) {
 			buffer[0] = 0;
 			return -1;
 		}
@@ -2806,43 +2771,43 @@ namespace msvcrt {
 		return static_cast<int>(wideLen);
 	}
 
-	const uint16_t* WIN_ENTRY wcsstr( const uint16_t *dest, const uint16_t *src ){
+	const uint16_t* CDECL wcsstr( const uint16_t *dest, const uint16_t *src ){
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("wcsstr(%p, %p)\n", dest, src);
 		return wstrstr(dest, src);
 	}
 
-	int WIN_ENTRY iswspace(uint32_t w){
+	int CDECL iswspace(uint32_t w){
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("iswspace(%u)\n", w);
 		return std::iswspace(w);
 	}
 
-	int WIN_ENTRY iswdigit(uint32_t w){
+	int CDECL iswdigit(uint32_t w){
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("iswdigit(%u)\n", w);
 		return std::iswdigit(w);
 	}
 
-	const uint16_t* WIN_ENTRY wcschr(const uint16_t* str, uint16_t c){
+	const uint16_t* CDECL wcschr(const uint16_t* str, uint16_t c){
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("wcschr(%p, %u)\n", str, c);
 		return wstrchr(str, c);
 	}
 
-	const uint16_t* WIN_ENTRY wcsrchr(const uint16_t *str, uint16_t c){
+	const uint16_t* CDECL wcsrchr(const uint16_t *str, uint16_t c){
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("wcsrchr(%p, %u)\n", str, c);
 		return wstrrchr(str, c);
 	}
 
-	unsigned long WIN_ENTRY wcstoul(const uint16_t *strSource, uint16_t **endptr, int base){
+	unsigned long CDECL wcstoul(const uint16_t *strSource, uint16_t **endptr, int base){
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("wcstoul(%p, %p, %d)\n", strSource, endptr, base);
 		return wstrtoul(strSource, endptr, base);
 	}
 
-	FILE* WIN_ENTRY _wfsopen(const uint16_t* filename, const uint16_t* mode, int shflag){
+	FILE* CDECL _wfsopen(const uint16_t* filename, const uint16_t* mode, int shflag){
 		HOST_CONTEXT_GUARD();
 		if (!filename || !mode) return nullptr;
 		std::string fname_str = wideStringToString(filename);
@@ -2853,7 +2818,7 @@ namespace msvcrt {
 		return fopen(fname_str.c_str(), mode_str.c_str());
 	}
 
-	int WIN_ENTRY puts(const char *str) {
+	int CDECL puts(const char *str) {
 		HOST_CONTEXT_GUARD();
 		if (!str) {
 			str = "(null)";
@@ -2866,13 +2831,13 @@ namespace msvcrt {
 		return 0;
 	}
 
-	int WIN_ENTRY fclose(FILE* stream){
+	int CDECL fclose(FILE* stream){
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("fclose(%p)\n", stream);
 		return ::fclose(stream);
 	}
 
-	int WIN_ENTRY _flushall(){
+	int CDECL _flushall(){
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_flushall()\n");
 		int count = 0;
@@ -2884,13 +2849,13 @@ namespace msvcrt {
 		return count;
 	}
 
-	int* WIN_ENTRY _errno() {
+	int* CDECL _errno() {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_errno()\n");
 		return &errno;
 	}
 
-	intptr_t WIN_ENTRY _wspawnvp(int mode, const uint16_t* cmdname, const uint16_t* const * argv) {
+	intptr_t CDECL _wspawnvp(int mode, const uint16_t* cmdname, const uint16_t* const * argv) {
 		HOST_CONTEXT_GUARD();
 		if (!cmdname || !argv) {
 			errno = EINVAL;
@@ -2939,7 +2904,7 @@ namespace msvcrt {
 		return static_cast<intptr_t>(po->pid);
 	}
 
-	intptr_t WIN_ENTRY _spawnvp(int mode, const char *cmdname, const char * const *argv) {
+	intptr_t CDECL _spawnvp(int mode, const char *cmdname, const char * const *argv) {
 		HOST_CONTEXT_GUARD();
 		if (!cmdname || !argv) {
 			errno = EINVAL;
@@ -2987,14 +2952,14 @@ namespace msvcrt {
 		return static_cast<intptr_t>(po->pid);
 	}
 
-	int WIN_ENTRY _wunlink(const uint16_t *filename){
+	int CDECL _wunlink(const uint16_t *filename){
 		HOST_CONTEXT_GUARD();
 		std::string str = wideStringToString(filename);
 		DEBUG_LOG("_wunlink(%s)\n", str.c_str());
 		return unlink(str.c_str());
 	}
 
-	uint16_t* WIN_ENTRY _wfullpath(uint16_t* absPath, const uint16_t* relPath, size_t maxLength){
+	uint16_t* CDECL _wfullpath(uint16_t* absPath, const uint16_t* relPath, SIZE_T maxLength){
 		HOST_CONTEXT_GUARD();
 		std::string relPathStr = wideStringToString(relPath);
 		DEBUG_LOG("_wfullpath(%s, %zu)\n", relPathStr.c_str(), maxLength);
@@ -3047,201 +3012,7 @@ namespace msvcrt {
 	}
 }
 
-
-static void *resolveByName(const char *name) {
-	if (strcmp(name, "__set_app_type") == 0) return (void *) msvcrt::__set_app_type;
-	if (strcmp(name, "_fmode") == 0) return (void *)&msvcrt::_fmode;
-    if (strcmp(name, "_commode") == 0) return (void *)&msvcrt::_commode;
-	if (strcmp(name, "__initenv") == 0) return (void *)&msvcrt::__initenv;
-	if (strcmp(name, "__winitenv") == 0) return (void *)&msvcrt::__winitenv;
-	if (strcmp(name, "__iob_func") == 0) return (void *) msvcrt::__iob_func;
-	if (strcmp(name, "_exit") == 0) return (void *) msvcrt::_exit;
-	if (strcmp(name, "__p__fmode") == 0) return (void *) msvcrt::__p__fmode;
-	if (strcmp(name, "__p__commode") == 0) return (void *) msvcrt::__p__commode;
-	if (strcmp(name, "_initterm") == 0) return (void *)msvcrt::_initterm;
-	if (strcmp(name, "_initterm_e") == 0) return (void *)msvcrt::_initterm_e;
-	if (strcmp(name, "_controlfp") == 0) return (void *)msvcrt::_controlfp;
-	if (strcmp(name, "_controlfp_s") == 0) return (void *)msvcrt::_controlfp_s;
-	if (strcmp(name, "__p___initenv") == 0) return (void *)msvcrt::__p___initenv;
-	if (strcmp(name, "_onexit") == 0) return (void*)msvcrt::_onexit;
-	if (strcmp(name, "__getmainargs") == 0) return (void*)msvcrt::__getmainargs;
-	if (strcmp(name, "__wgetmainargs") == 0) return (void*)msvcrt::__wgetmainargs;
-	if (strcmp(name, "setlocale") == 0) return (void*)msvcrt::setlocale;
-	if (strcmp(name, "__mb_cur_max") == 0) return (void *)&msvcrt::mbCurMaxValue;
-	if (strcmp(name, "__p__mbctype") == 0) return (void *)msvcrt::__p__mbctype;
-	if (strcmp(name, "__p__pctype") == 0) return (void *)msvcrt::__p__pctype;
-	if (strcmp(name, "__p___mb_cur_max") == 0) return (void *)msvcrt::__p___mb_cur_max;
-	if (strcmp(name, "_isctype") == 0) return (void *)msvcrt::_isctype;
-	if (strcmp(name, "__unDName") == 0) return (void *)msvcrt::__unDName;
-	if (strcmp(name, "__setusermatherr") == 0) return (void *)msvcrt::__setusermatherr;
-	if (strcmp(name, "_wdupenv_s") == 0) return (void*)msvcrt::_wdupenv_s;
-	if (strcmp(name, "strlen") == 0) return (void *)msvcrt::strlen;
-	if (strcmp(name, "strcmp") == 0) return (void *)msvcrt::strcmp;
-	if (strcmp(name, "strncmp") == 0) return (void *)msvcrt::strncmp;
-	if (strcmp(name, "strcat") == 0) return (void *)msvcrt::strcat;
-	if (strcmp(name, "strcpy") == 0) return (void *)msvcrt::strcpy;
-	if (strcmp(name, "strcpy_s") == 0) return (void *)msvcrt::strcpy_s;
-	if (strcmp(name, "strcat_s") == 0) return (void *)msvcrt::strcat_s;
-	if (strcmp(name, "strncpy_s") == 0) return (void *)msvcrt::strncpy_s;
-	if (strcmp(name, "_strdup") == 0) return (void *)msvcrt::_strdup;
-	if (strcmp(name, "strncpy") == 0) return (void *)msvcrt::strncpy;
-	if (strcmp(name, "strpbrk") == 0) return (void *)msvcrt::strpbrk;
-	if (strcmp(name, "strstr") == 0) return (void *)msvcrt::strstr;
-	if (strcmp(name, "strrchr") == 0) return (void *)msvcrt::strrchr;
-	if (strcmp(name, "strtok") == 0) return (void *)msvcrt::strtok;
-	if (strcmp(name, "sprintf") == 0) return (void *)msvcrt::sprintf;
-	if (strcmp(name, "printf") == 0) return (void *)msvcrt::printf;
-	if (strcmp(name, "sscanf") == 0) return (void *)msvcrt::sscanf;
-	if (strcmp(name, "strtoul") == 0) return (void *)msvcrt::strtoul;
-	if (strcmp(name, "malloc") == 0) return (void*)msvcrt::malloc;
-	if (strcmp(name, "calloc") == 0) return (void*)msvcrt::calloc;
-	if (strcmp(name, "_malloc_crt") == 0) return (void*)msvcrt::_malloc_crt;
-	if (strcmp(name, "_lock") == 0) return (void*)msvcrt::_lock;
-	if (strcmp(name, "_unlock") == 0) return (void*)msvcrt::_unlock;
-	if (strcmp(name, "__dllonexit") == 0) return (void*)msvcrt::__dllonexit;
-	if (strcmp(name, "free") == 0) return (void*)msvcrt::free;
-	if (strcmp(name, "_wcsicmp") == 0) return (void*)msvcrt::_wcsicmp;
-	if (strcmp(name, "_wmakepath_s") == 0) return (void*)msvcrt::_wmakepath_s;
-	if (strcmp(name, "_wputenv_s") == 0) return (void*)msvcrt::_wputenv_s;
-	if (strcmp(name, "_get_wpgmptr") == 0) return (void*)msvcrt::_get_wpgmptr;
-	if (strcmp(name, "_wsplitpath_s") == 0) return (void*)msvcrt::_wsplitpath_s;
-	if (strcmp(name, "wcscat_s") == 0) return (void*)msvcrt::wcscat_s;
-	if (strcmp(name, "_wcsdup") == 0) return (void*)msvcrt::_wcsdup;
-	if (strcmp(name, "__p__pgmptr") == 0) return (void*)msvcrt::__p__pgmptr;
-	if (strcmp(name, "_splitpath") == 0) return (void*)msvcrt::_splitpath;
-	if (strcmp(name, "memset") == 0) return (void*)msvcrt::memset;
-	if (strcmp(name, "memcpy") == 0) return (void*)msvcrt::memcpy;
-	if (strcmp(name, "memmove") == 0) return (void*)msvcrt::memmove;
-	if (strcmp(name, "memcmp") == 0) return (void*)msvcrt::memcmp;
-	if (strcmp(name, "qsort") == 0) return (void*)msvcrt::qsort;
-	if (strcmp(name, "fflush") == 0) return (void*)msvcrt::fflush;
-	if (strcmp(name, "fopen") == 0) return (void*)msvcrt::fopen;
-	if (strcmp(name, "fseek") == 0) return (void*)msvcrt::fseek;
-	if (strcmp(name, "ftell") == 0) return (void*)msvcrt::ftell;
-	if (strcmp(name, "feof") == 0) return (void*)msvcrt::feof;
-	if (strcmp(name, "fgetws") == 0) return (void*)msvcrt::fgetws;
-	if (strcmp(name, "fgetwc") == 0) return (void*)msvcrt::fgetwc;
-	if (strcmp(name, "fgets") == 0) return (void*)msvcrt::fgets;
-	if (strcmp(name, "fputws") == 0) return (void*)msvcrt::fputws;
-	if (strcmp(name, "_cputws") == 0) return (void*)msvcrt::_cputws;
-	if (strcmp(name, "vfwprintf") == 0) return (void*)msvcrt::vfwprintf;
-	if (strcmp(name, "_wfopen_s") == 0) return (void*)msvcrt::_wfopen_s;
-	if (strcmp(name, "wcsspn") == 0) return (void*)msvcrt::wcsspn;
-	if (strcmp(name, "_fileno") == 0) return (void*)msvcrt::_fileno;
-	if (strcmp(name, "_wtol") == 0) return (void*)msvcrt::_wtol;
-	if (strcmp(name, "_wcsupr_s") == 0) return (void*)msvcrt::_wcsupr_s;
-	if (strcmp(name, "_wcslwr_s") == 0) return (void*)msvcrt::_wcslwr_s;
-	if (strcmp(name, "_dup2") == 0) return (void*)msvcrt::_dup2;
-	if (strcmp(name, "_isatty") == 0) return (void*)msvcrt::_isatty;
-	if (strcmp(name, "swprintf_s") == 0) return (void*)msvcrt::swprintf_s;
-	if (strcmp(name, "swscanf_s") == 0) return (void*)msvcrt::swscanf_s;
-	if (strcmp(name, "towlower") == 0) return (void*)msvcrt::towlower;
-	if (strcmp(name, "toupper") == 0) return (void*)msvcrt::toupper;
-	if (strcmp(name, "tolower") == 0) return (void*)msvcrt::tolower;
-	if (strcmp(name, "setbuf") == 0) return (void*)msvcrt::setbuf;
-	if (strcmp(name, "_mbctolower") == 0) return (void*)msvcrt::_mbctolower;
-	if (strcmp(name, "_ismbcspace") == 0) return (void*)msvcrt::_ismbcspace;
-	if (strcmp(name, "_ismbcdigit") == 0) return (void*)msvcrt::_ismbcdigit;
-	if (strcmp(name, "_ismbblead") == 0) return (void*)msvcrt::_ismbblead;
-	if (strcmp(name, "_ismbbtrail") == 0) return (void*)msvcrt::_ismbbtrail;
-	if (strcmp(name, "_mbccpy") == 0) return (void*)msvcrt::_mbccpy;
-	if (strcmp(name, "_mbsinc") == 0) return (void*)msvcrt::_mbsinc;
-	if (strcmp(name, "_mbsdec") == 0) return (void*)msvcrt::_mbsdec;
-	if (strcmp(name, "_mbclen") == 0) return (void*)msvcrt::_mbclen;
-	if (strcmp(name, "_mbscmp") == 0) return (void*)msvcrt::_mbscmp;
-	if (strcmp(name, "_mbsicmp") == 0) return (void*)msvcrt::_mbsicmp;
-	if (strcmp(name, "_mbsstr") == 0) return (void*)msvcrt::_mbsstr;
-	if (strcmp(name, "_mbschr") == 0) return (void*)msvcrt::_mbschr;
-	if (strcmp(name, "_mbsrchr") == 0) return (void*)msvcrt::_mbsrchr;
-	if (strcmp(name, "_mbslwr") == 0) return (void*)msvcrt::_mbslwr;
-	if (strcmp(name, "_mbsupr") == 0) return (void*)msvcrt::_mbsupr;
-	if (strcmp(name, "_mbsspn") == 0) return (void*)msvcrt::_mbsspn;
-	if (strcmp(name, "_mbsncmp") == 0) return (void*)msvcrt::_mbsncmp;
-	if (strcmp(name, "_ftime64_s") == 0) return (void*)msvcrt::_ftime64_s;
-	if (strcmp(name, "_crt_debugger_hook") == 0) return (void*)msvcrt::_crt_debugger_hook;
-	if (strcmp(name, "_configthreadlocale") == 0) return (void*)msvcrt::_configthreadlocale;
-	if (strcmp(name, "_amsg_exit") == 0) return (void*)msvcrt::_amsg_exit;
-	if (strcmp(name, "_invoke_watson") == 0) return (void*)msvcrt::_invoke_watson;
-	if (strcmp(name, "_except_handler4_common") == 0) return (void*)msvcrt::_except_handler4_common;
-	if (strcmp(name, "_except_handler3") == 0) return (void*)msvcrt::_except_handler3;
-	if (strcmp(name, "_XcptFilter") == 0) return (void*)msvcrt::_XcptFilter;
-	if (strcmp(name, "?terminate@@YAXXZ") == 0) return (void*)msvcrt::terminateShim;
-	if (strcmp(name, "_purecall") == 0) return (void*)msvcrt::_purecall;
-	if (strcmp(name, "wcsncpy_s") == 0) return (void*)msvcrt::wcsncpy_s;
-	if (strcmp(name, "wcsncat_s") == 0) return (void*)msvcrt::wcsncat_s;
-	if (strcmp(name, "_itow_s") == 0) return (void*)msvcrt::_itow_s;
-	if (strcmp(name, "_wtoi") == 0) return (void*)msvcrt::_wtoi;
-	if (strcmp(name, "_ltoa_s") == 0) return (void*)msvcrt::_ltoa_s;
-	if (strcmp(name, "wcscpy_s") == 0) return (void*)msvcrt::wcscpy_s;
-	if (strcmp(name, "_get_osfhandle") == 0) return (void*)msvcrt::_get_osfhandle;
-	if (strcmp(name, "_write") == 0) return (void*)msvcrt::_write;
-	if (strcmp(name, "_read") == 0) return (void*)msvcrt::_read;
-	if (strcmp(name, "_close") == 0) return (void*)msvcrt::_close;
-	if (strcmp(name, "_lseek") == 0) return (void*)msvcrt::_lseek;
-	if (strcmp(name, "_chsize") == 0) return (void*)msvcrt::_chsize;
-	if (strcmp(name, "exit") == 0) return (void*)msvcrt::exit;
-	if (strcmp(name, "wcsncmp") == 0) return (void*)msvcrt::wcsncmp;
-	if (strcmp(name, "_vswprintf_c_l") == 0) return (void*)msvcrt::_vswprintf_c_l;
-	if (strcmp(name, "wcsstr") == 0) return (void*)msvcrt::wcsstr;
-	if (strcmp(name, "iswspace") == 0) return (void*)msvcrt::iswspace;
-	if (strcmp(name, "wcsrchr") == 0) return (void*)msvcrt::wcsrchr;
-	if (strcmp(name, "wcstoul") == 0) return (void*)msvcrt::wcstoul;
-	if (strcmp(name, "iswdigit") == 0) return (void*)msvcrt::iswdigit;
-	if (strcmp(name, "wcschr") == 0) return (void*)msvcrt::wcschr;
-	if (strcmp(name, "getenv") == 0) return (void*)msvcrt::getenv;
-	if (strcmp(name, "_wgetenv_s") == 0) return (void*)msvcrt::_wgetenv_s;
-	if (strcmp(name, "_waccess_s") == 0) return (void*)msvcrt::_waccess_s;
-	if (strcmp(name, "_access") == 0) return (void*)msvcrt::_access;
-	if (strcmp(name, "_dup2") == 0) return (void*)msvcrt::_dup2;
-	if (strcmp(name, "_wfsopen") == 0) return (void*)msvcrt::_wfsopen;
-	if (strcmp(name, "_fsopen") == 0) return (void*)msvcrt::_fsopen;
-	if (strcmp(name, "_sopen") == 0) return (void*)msvcrt::_sopen;
-	if (strcmp(name, "fputws") == 0) return (void*)msvcrt::fputws;
-	if (strcmp(name, "puts") == 0) return (void*)msvcrt::puts;
-	if (strcmp(name, "fclose") == 0) return (void*)msvcrt::fclose;
-	if (strcmp(name, "_flushall") == 0) return (void*)msvcrt::_flushall;
-	if (strcmp(name, "_errno") == 0) return (void*)msvcrt::_errno;
-	if (strcmp(name, "_getmbcp") == 0) return (void*)msvcrt::_getmbcp;
-	if (strcmp(name, "_setmbcp") == 0) return (void*)msvcrt::_setmbcp;
-	if (strcmp(name, "_wspawnvp") == 0) return (void*)msvcrt::_wspawnvp;
-	if (strcmp(name, "_wunlink") == 0) return (void*)msvcrt::_wunlink;
-	if (strcmp(name, "_wfullpath") == 0) return (void*)msvcrt::_wfullpath;
-	if (strcmp(name, "_cexit") == 0) return (void*)msvcrt::_cexit;
-	if (strcmp(name, "_iob") == 0) return (void*)msvcrt::standardIobEntries();
-	if (strcmp(name, "__p__iob") == 0) return (void*)msvcrt::__p__iob;
-	if (strcmp(name, "abort") == 0) return (void*)msvcrt::abort;
-	if (strcmp(name, "atoi") == 0) return (void*)msvcrt::atoi;
-	if (strcmp(name, "fprintf") == 0) return (void*)msvcrt::fprintf;
-	if (strcmp(name, "vfprintf") == 0) return (void*)msvcrt::vfprintf;
-	if (strcmp(name, "fputc") == 0) return (void*)msvcrt::fputc;
-	if (strcmp(name, "fwrite") == 0) return (void*)msvcrt::fwrite;
-	if (strcmp(name, "localeconv") == 0) return (void*)msvcrt::localeconv;
-	if (strcmp(name, "signal") == 0) return (void*)msvcrt::signal;
-	if (strcmp(name, "strchr") == 0) return (void*)msvcrt::strchr;
-	if (strcmp(name, "strerror") == 0) return (void*)msvcrt::strerror;
-	if (strcmp(name, "wcslen") == 0) return (void*)msvcrt::wcslen;
-	if (strcmp(name, "fread") == 0) return (void*)msvcrt::fread;
-	if (strcmp(name, "_unlink") == 0) return (void*)msvcrt::_unlink;
-	if (strcmp(name, "_utime") == 0) return (void*)msvcrt::_utime;
-	if (strcmp(name, "_ultoa") == 0) return (void*)msvcrt::_ultoa;
-	if (strcmp(name, "_ltoa") == 0) return (void*)msvcrt::_ltoa;
-	if (strcmp(name, "_makepath") == 0) return (void*)msvcrt::_makepath;
-	if (strcmp(name, "_fullpath") == 0) return (void*)msvcrt::_fullpath;
-	if (strcmp(name, "_vsnprintf") == 0) return (void*)msvcrt::_vsnprintf;
-	if (strcmp(name, "_snprintf") == 0) return (void*)msvcrt::_snprintf;
-	if (strcmp(name, "_adj_fdiv_r") == 0) return (void*)msvcrt::_adj_fdiv_r;
-	if (strcmp(name, "_adjust_fdiv") == 0) return (void*)msvcrt::_adjust_fdiv;
-	if (strcmp(name, "_memicmp") == 0) return (void*)msvcrt::_memicmp;
-	if (strcmp(name, "_stricmp") == 0) return (void*)msvcrt::_stricmp;
-	if (strcmp(name, "_strnicmp") == 0) return (void*)msvcrt::_strnicmp;
-	if (strcmp(name, "_putenv") == 0) return (void*)msvcrt::_putenv;
-	if (strcmp(name, "_mktemp") == 0) return (void*)msvcrt::_mktemp;
-	if (strcmp(name, "_spawnvp") == 0) return (void*)msvcrt::_spawnvp;
-	if (strcmp(name, "_ftime") == 0) return (void*)msvcrt::_ftime;
-	if (strcmp(name, "getchar") == 0) return (void*)msvcrt::getchar;
-	if (strcmp(name, "time") == 0) return (void*)msvcrt::time;
-	return nullptr;
-}
+#include "msvcrt_trampolines.h"
 
 extern const wibo::ModuleStub lib_msvcrt = {
 	(const char *[]){
@@ -3254,6 +3025,6 @@ extern const wibo::ModuleStub lib_msvcrt = {
 		"msvcr100",
 		nullptr,
 	},
-	resolveByName,
+	msvcrtThunkByName,
 	nullptr,
 };

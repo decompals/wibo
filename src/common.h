@@ -22,6 +22,8 @@
 #define VERBOSE_LOG(...) ((void)0)
 #endif
 
+extern "C" thread_local TEB *currentThreadTeb;
+
 namespace wibo {
 
 extern char **argv;
@@ -32,7 +34,6 @@ extern std::string commandLine;
 extern std::vector<uint16_t> commandLineW;
 extern bool debugEnabled;
 extern unsigned int debugIndent;
-extern uint16_t tibSelector;
 extern int tibEntryNumber;
 extern PEB *processPeb;
 
@@ -40,8 +41,6 @@ TEB *allocateTib();
 void destroyTib(TEB *tib);
 void initializeTibStackInfo(TEB *tib);
 bool installTibForCurrentThread(TEB *tib);
-void setThreadTibForHost(TEB *tib);
-TEB *getThreadTibForHost();
 
 void debug_log(const char *fmt, ...);
 

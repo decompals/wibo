@@ -1,11 +1,10 @@
 #pragma once
 
 #include "types.h"
-#include <cstdint>
 
 typedef void (_CC_CDECL *_PVFV)();
 typedef int (_CC_CDECL *_PIFV)();
-typedef void (_CC_CDECL *_invalid_parameter_handler)(const WCHAR *, const WCHAR *, const WCHAR *, unsigned int, uintptr_t);
+typedef void (_CC_CDECL *_invalid_parameter_handler)(const WCHAR *, const WCHAR *, const WCHAR *, UINT, UINT_PTR);
 
 typedef enum _crt_app_type {
 	_crt_unknown_app,

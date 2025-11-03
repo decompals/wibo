@@ -2339,7 +2339,7 @@ namespace msvcrt {
 		return reason;
 	}
 
-	void CDECL _invoke_watson(const uint16_t *, const uint16_t *, const uint16_t *, unsigned int, uintptr_t) {
+	void CDECL _invoke_watson(const WCHAR *, const WCHAR *, const WCHAR *, UINT, UINT_PTR) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_invoke_watson(...)\n");
 		abort_and_log("_invoke_watson");
@@ -2778,13 +2778,13 @@ namespace msvcrt {
 		return wstrstr(dest, src);
 	}
 
-	int CDECL iswspace(uint32_t w){
+	int CDECL iswspace(WINT_T w){
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("iswspace(%u)\n", w);
 		return std::iswspace(w);
 	}
 
-	int CDECL iswdigit(uint32_t w){
+	int CDECL iswdigit(WINT_T w){
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("iswdigit(%u)\n", w);
 		return std::iswdigit(w);
@@ -2856,7 +2856,7 @@ namespace msvcrt {
 		return &errno;
 	}
 
-	intptr_t CDECL _wspawnvp(int mode, const uint16_t* cmdname, const uint16_t* const * argv) {
+	LONG_PTR CDECL _wspawnvp(int mode, const uint16_t* cmdname, const uint16_t* const * argv) {
 		HOST_CONTEXT_GUARD();
 		if (!cmdname || !argv) {
 			errno = EINVAL;
@@ -2905,7 +2905,7 @@ namespace msvcrt {
 		return static_cast<intptr_t>(po->pid);
 	}
 
-	intptr_t CDECL _spawnvp(int mode, const char *cmdname, const char * const *argv) {
+	LONG_PTR CDECL _spawnvp(int mode, const char *cmdname, const char * const *argv) {
 		HOST_CONTEXT_GUARD();
 		if (!cmdname || !argv) {
 			errno = EINVAL;

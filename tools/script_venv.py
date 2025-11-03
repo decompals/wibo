@@ -8,17 +8,75 @@ This module provides utilities to:
 3. Track dependencies and reinstall when they change
 """
 
+import contextlib
 import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
+import time
 import venv
 from pathlib import Path
 
-
 SCRIPT_BLOCK_RE = re.compile(r"(?m)^# /// script$\s(?P<content>(^#(| .*)$\s)+)^# ///$")
+
+
+@contextlib.contextmanager
+def _venv_lock(venv_dir: Path, timeout: float = 300.0):
+    """
+    Context manager for file-based locking of venv operations.
+
+    Uses the .script-managed file within the venv directory for locking,
+    synchronizing venv creation and pip operations across multiple processes.
+
+    Args:
+        venv_dir: Path to the virtual environment directory
+        timeout: Maximum seconds to wait for lock (default: 5 minutes)
+    """
+    venv_dir.mkdir(parents=True, exist_ok=True)
+    lock_file = venv_dir / ".script-managed"
+    fd = os.open(str(lock_file), os.O_CREAT | os.O_RDWR, 0o644)
+
+    try:
+        start_time = time.time()
+        locked = False
+
+        while not locked:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+
+                    # msvcrt.locking locks from current file position
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                    locked = True
+                else:
+                    import fcntl
+
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    locked = True
+            except (IOError, OSError):
+                elapsed = time.time() - start_time
+                if elapsed >= timeout:
+                    raise TimeoutError(f"Failed to acquire venv lock after {timeout}s")
+                time.sleep(0.1)
+
+        yield
+
+    finally:
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
 
 def _load_toml(text: str) -> dict:
@@ -174,7 +232,11 @@ def set_venv_digest(venv_dir: Path, digest: str) -> None:
 
 
 def create_venv(venv_dir: Path) -> Path:
-    """Create a new virtual environment and return the path to its Python binary."""
+    """
+    Create a new virtual environment and return the path to its Python binary.
+
+    Note: This function should be called within a _venv_lock() context.
+    """
     python_bin = venv_dir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     if not python_bin.exists():
         venv.create(venv_dir, with_pip=True)
@@ -182,7 +244,11 @@ def create_venv(venv_dir: Path) -> Path:
 
 
 def install_deps(python_bin: Path, deps: list[str]) -> None:
-    """Install dependencies into a virtual environment."""
+    """
+    Install dependencies into a virtual environment.
+
+    Note: This function should be called within a _venv_lock() context.
+    """
     if not deps:
         return
     subprocess.check_call([str(python_bin), "-m", "pip", "install", *deps])
@@ -203,7 +269,6 @@ def bootstrap_venv(script_file: str) -> None:
 
     # Read PEP 723 metadata
     meta = read_pep723_metadata(script_path)
-    # Enforce requires-python if declared
     requires = meta.get("requires-python")
     if isinstance(requires, str) and not _satisfies_requires_python(requires):
         msg = (
@@ -222,14 +287,19 @@ def bootstrap_venv(script_file: str) -> None:
     else:
         # Create a new managed venv
         venv_dir = script_path.parent / ".venv"
-        python_bin = create_venv(venv_dir)
+        with _venv_lock(venv_dir):
+            python_bin = create_venv(venv_dir)
         managed = True
 
     stored_digest = get_venv_digest(venv_dir)
     if managed and stored_digest != current_digest:
         # Managed venv and deps changed, reinstall
-        install_deps(python_bin, deps)
-        set_venv_digest(venv_dir, current_digest)
+        with _venv_lock(venv_dir):
+            # Double-check pattern: another process may have just finished installing
+            stored_digest = get_venv_digest(venv_dir)
+            if stored_digest != current_digest:
+                install_deps(python_bin, deps)
+                set_venv_digest(venv_dir, current_digest)
 
     if venv_dir != Path(sys.prefix):
         # Re-exec with venv Python

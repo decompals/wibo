@@ -1071,7 +1071,7 @@ namespace msvcrt {
 		return 0;
 	}
 
-	int CDECL _vsnprintf(char *buffer, SIZE_T count, const char *format, va_list args) {
+	int CDECL_NO_CONV _vsnprintf(char *buffer, SIZE_T count, const char *format, va_list args) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_vsnprintf(%p, %zu, %s, %p)\n", buffer, count, format, args);
 		if (!buffer || !format) {
@@ -1818,7 +1818,7 @@ namespace msvcrt {
 		return std::fflush(host);
 	}
 
-	int CDECL vfwprintf(FILE *stream, const uint16_t *format, va_list args) {
+	int CDECL_NO_CONV vfwprintf(FILE *stream, const uint16_t *format, va_list args) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("vfwprintf(%p, %s, ...)\n", stream, wideStringToString(format).c_str());
 		FILE *host = mapToHostFile(stream ? stream : stdout);
@@ -2217,7 +2217,7 @@ namespace msvcrt {
 		return mapToHostFile(stream);
 	}
 
-	int CDECL vfprintf(FILE *stream, const char *format, va_list args) {
+	int CDECL_NO_CONV vfprintf(FILE *stream, const char *format, va_list args) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("vfprintf(stream=%p, format=%s, args=%p)\n", stream, format, args);
 		if (!format || !stream) {

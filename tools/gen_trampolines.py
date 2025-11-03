@@ -535,7 +535,6 @@ def emit_host_to_guest_thunks(
             lines.append(
                 f"\t# Arg {i} (slot_size={arg.slot_size}, primitive={arg.primitive}, sign_extended={arg.sign_extended})"
             )
-        lines.append(f".globl {thunk}")
         lines.append(f".weak {thunk}")
         lines.append(f".type {thunk}, @function")
         lines.append(f"{thunk}:")

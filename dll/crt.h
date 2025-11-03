@@ -66,9 +66,9 @@ void CDECL _exit(int status);
 void CDECL abort();
 signal_handler CDECL signal(int signum, signal_handler handler);
 void *CDECL __acrt_iob_func(unsigned int index);
-int CDECL __stdio_common_vfprintf(unsigned long long options, FILE *stream, const char *format, void *locale,
+int CDECL_NO_CONV __stdio_common_vfprintf(unsigned long long options, FILE *stream, const char *format, void *locale,
 								  va_list args);
-int CDECL __stdio_common_vsprintf(unsigned long long options, char *buffer, SIZE_T len, const char *format,
+int CDECL_NO_CONV __stdio_common_vsprintf(unsigned long long options, char *buffer, SIZE_T len, const char *format,
 								  void *locale, va_list args);
 void CDECL qsort(void *base, SIZE_T num, SIZE_T size, sort_compare compare);
 int CDECL puts(const char *str);

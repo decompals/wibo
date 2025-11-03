@@ -302,14 +302,14 @@ void *CDECL __acrt_iob_func(unsigned int index) {
 	return nullptr;
 }
 
-int CDECL __stdio_common_vfprintf(unsigned long long options, FILE *stream, const char *format, void *locale,
+int CDECL_NO_CONV __stdio_common_vfprintf(unsigned long long options, FILE *stream, const char *format, void *locale,
 								  va_list args) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("__stdio_common_vfprintf(%llu, %p, %s, %p, %p)\n", options, stream, format, locale, args);
 	return vfprintf(stream, format, args);
 }
 
-int CDECL __stdio_common_vsprintf(unsigned long long options, char *buffer, SIZE_T len, const char *format,
+int CDECL_NO_CONV __stdio_common_vsprintf(unsigned long long options, char *buffer, SIZE_T len, const char *format,
 								  void *locale, va_list args) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("__stdio_common_vsprintf(%llu, %p, %zu, %s, %p, ...)\n", options, buffer, len, format, locale);

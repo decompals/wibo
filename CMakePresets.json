@@ -11,6 +11,14 @@
       }
     },
     {
+      "name": "clang-base",
+      "hidden": true,
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++"
+      }
+    },
+    {
       "name": "debug",
       "displayName": "Debug",
       "inherits": ["ninja-base"],
@@ -24,6 +32,24 @@
       "displayName": "Release",
       "inherits": ["ninja-base"],
       "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "debug-clang",
+      "displayName": "Debug (Clang)",
+      "inherits": ["ninja-base", "clang-base"],
+      "binaryDir": "${sourceDir}/build/debug-clang",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "release-clang",
+      "displayName": "Release (Clang)",
+      "inherits": ["ninja-base", "clang-base"],
+      "binaryDir": "${sourceDir}/build/release-clang",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
@@ -43,6 +69,20 @@
       "configurePreset": "release",
       "targets": ["wibo", "wibo_test_fixtures"],
       "configuration": "Release"
+    },
+    {
+      "name": "debug-clang",
+      "displayName": "Build (Debug, Clang)",
+      "configurePreset": "debug-clang",
+      "targets": ["wibo", "wibo_test_fixtures"],
+      "configuration": "Debug"
+    },
+    {
+      "name": "release-clang",
+      "displayName": "Build (Release, Clang)",
+      "configurePreset": "release-clang",
+      "targets": ["wibo", "wibo_test_fixtures"],
+      "configuration": "Release"
     }
   ],
   "testPresets": [
@@ -60,6 +100,26 @@
       "name": "fixtures-release",
       "displayName": "Run fixture tests (Release)",
       "configurePreset": "release",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      }
+    },
+    {
+      "name": "fixtures-debug-clang",
+      "displayName": "Run fixture tests (Debug, Clang)",
+      "configurePreset": "debug-clang",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      }
+    },
+    {
+      "name": "fixtures-release-clang",
+      "displayName": "Run fixture tests (Release, Clang)",
+      "configurePreset": "release-clang",
       "configuration": "Release",
       "output": {
         "outputOnFailure": true,

@@ -3,18 +3,6 @@
 #include "types.h"
 #include "minwinbase.h"
 
-struct MEMORY_BASIC_INFORMATION {
-	PVOID BaseAddress;
-	PVOID AllocationBase;
-	DWORD AllocationProtect;
-	SIZE_T RegionSize;
-	DWORD State;
-	DWORD Protect;
-	DWORD Type;
-};
-
-using PMEMORY_BASIC_INFORMATION = MEMORY_BASIC_INFORMATION *;
-
 namespace kernel32 {
 
 HANDLE WINAPI CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMappingAttributes, DWORD flProtect,

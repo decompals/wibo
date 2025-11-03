@@ -62,6 +62,7 @@ class Executable {
 	bool execMapped = false;
 	bool importsResolved = false;
 	bool importsResolving = false;
+	bool sectionsProtected = false;
 	std::vector<SectionInfo> sections;
 };
 

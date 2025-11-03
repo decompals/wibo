@@ -19,3 +19,4 @@ venv/
 *.pyc
 *.pyo
 *.pyd
+.ruff_cache/

@@ -148,7 +148,6 @@ void *threadTrampoline(void *param) {
 	DEBUG_LOG("Calling thread entry %p with userData %p\n", data.entry, data.userData);
 	DWORD result = 0;
 	if (data.entry) {
-		GUEST_CONTEXT_GUARD(threadTib);
 		result = call_LPTHREAD_START_ROUTINE(data.entry, data.userData);
 	}
 	DEBUG_LOG("Thread exiting with code %u\n", result);

@@ -1,11 +1,11 @@
 #include "modules.h"
 
 #include "common.h"
-#include "context.h"
 #include "entry.h"
 #include "entry_trampolines.h"
 #include "errors.h"
 #include "files.h"
+#include "heap.h"
 #include "kernel32/internal.h"
 #include "msvcrt.h"
 #include "msvcrt_trampolines.h"
@@ -87,15 +87,10 @@ std::string makeStubKey(const char *dllName, const char *funcName) {
 	return key;
 }
 
-void stubBase(size_t index) {
-	const char *func = stubFuncNames[index].empty() ? "<unknown>" : stubFuncNames[index].c_str();
-	const char *dll = stubDlls[index].empty() ? "<unknown>" : stubDlls[index].c_str();
-	fprintf(stderr, "wibo: call reached missing import %s from %s\n", func, dll);
-	fflush(stderr);
-	abort();
+template <size_t Index> void stubThunk() {
+	// Call the appropriate entry trampoline
+	thunk_entry_stubBase(Index);
 }
-
-template <size_t Index> void stubThunk() { stubBase(Index); }
 
 template <size_t... Indices>
 constexpr std::array<void (*)(void), sizeof...(Indices)> makeStubTable(std::index_sequence<Indices...>) {
@@ -293,7 +288,7 @@ bool allocateModuleTlsForThread(wibo::ModuleInfo &module, TEB *tib) {
 	void *block = nullptr;
 	const size_t allocationSize = info.allocationSize;
 	if (allocationSize > 0) {
-		block = std::malloc(allocationSize);
+		block = wibo::heap::guestMalloc(allocationSize);
 		if (!block) {
 			DEBUG_LOG("  allocateModuleTlsForThread: failed to allocate %zu bytes for %s\n", allocationSize,
 					  module.originalName.c_str());
@@ -715,6 +710,19 @@ void ensureExportsInitialized(wibo::ModuleInfo &info) {
 }
 
 } // namespace
+
+namespace entry {
+
+// Trampoline target for missing imports
+void stubBase(SIZE_T index) {
+	const char *func = stubFuncNames[index].empty() ? "<unknown>" : stubFuncNames[index].c_str();
+	const char *dll = stubDlls[index].empty() ? "<unknown>" : stubDlls[index].c_str();
+	fprintf(stderr, "wibo: call reached missing import %s from %s\n", func, dll);
+	fflush(stderr);
+	abort();
+}
+
+} // namespace entry
 
 namespace wibo {
 

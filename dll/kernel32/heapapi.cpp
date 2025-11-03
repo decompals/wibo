@@ -1,4 +1,5 @@
 #include "heapapi.h"
+#include "heap.h"
 
 #include "common.h"
 #include "context.h"
@@ -22,8 +23,7 @@ HeapObject *g_processHeapRecord = nullptr;
 
 void ensureProcessHeapInitialized() {
 	std::call_once(g_processHeapInitFlag, []() {
-		mi_heap_t *heap = mi_heap_get_default();
-		auto record = make_pin<HeapObject>(heap);
+		auto record = make_pin<HeapObject>(nullptr);
 		if (!record) {
 			return;
 		}
@@ -38,8 +38,12 @@ bool isExecutableHeap(const HeapObject *record) {
 }
 
 LPVOID heapAllocFromRecord(HeapObject *record, DWORD dwFlags, SIZE_T dwBytes) {
-	if (!record || !record->heap) {
+	if (!record) {
 		return nullptr;
+	}
+	auto *heap = record->heap;
+	if (!heap && record->isProcessHeap) {
+		heap = wibo::heap::getGuestHeap();
 	}
 	if ((record->createFlags | dwFlags) & HEAP_GENERATE_EXCEPTIONS) {
 		DEBUG_LOG("HeapAlloc: HEAP_GENERATE_EXCEPTIONS not supported\n");
@@ -48,7 +52,7 @@ LPVOID heapAllocFromRecord(HeapObject *record, DWORD dwFlags, SIZE_T dwBytes) {
 	}
 	const bool zeroMemory = (dwFlags & HEAP_ZERO_MEMORY) != 0;
 	const SIZE_T requestSize = std::max<SIZE_T>(1, dwBytes);
-	void *mem = zeroMemory ? mi_heap_zalloc(record->heap, requestSize) : mi_heap_malloc(record->heap, requestSize);
+	void *mem = zeroMemory ? mi_heap_zalloc(heap, requestSize) : mi_heap_malloc(heap, requestSize);
 	if (!mem) {
 		kernel32::setLastError(ERROR_NOT_ENOUGH_MEMORY);
 		return nullptr;
@@ -63,9 +67,7 @@ LPVOID heapAllocFromRecord(HeapObject *record, DWORD dwFlags, SIZE_T dwBytes) {
 
 HeapObject::~HeapObject() {
 	if (heap) {
-		if (!isProcessHeap) {
-			mi_heap_destroy(heap);
-		}
+		mi_heap_destroy(heap);
 		heap = nullptr;
 	}
 	if (isProcessHeap) {
@@ -84,7 +86,7 @@ HANDLE WINAPI HeapCreate(DWORD flOptions, SIZE_T dwInitialSize, SIZE_T dwMaximum
 		return nullptr;
 	}
 
-	mi_heap_t *heap = mi_heap_new();
+	mi_heap_t *heap = wibo::heap::createGuestHeap();
 	if (!heap) {
 		setLastError(ERROR_NOT_ENOUGH_MEMORY);
 		return nullptr;
@@ -211,7 +213,11 @@ LPVOID WINAPI HeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dwBy
 		return lpMem;
 	}
 
-	void *ret = mi_heap_realloc(record->heap, lpMem, requestSize);
+	auto *heap = record->heap;
+	if (!heap && record->isProcessHeap) {
+		heap = wibo::heap::getGuestHeap();
+	}
+	void *ret = mi_heap_realloc(heap, lpMem, requestSize);
 	if (!ret) {
 		setLastError(ERROR_NOT_ENOUGH_MEMORY);
 		return nullptr;

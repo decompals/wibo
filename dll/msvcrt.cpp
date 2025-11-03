@@ -3,6 +3,7 @@
 #include "common.h"
 #include "context.h"
 #include "files.h"
+#include "heap.h"
 #include "kernel32/internal.h"
 #include "modules.h"
 #include "msvcrt_trampolines.h"
@@ -1382,7 +1383,7 @@ namespace msvcrt {
 			std::strcpy(absPath, winPath.c_str());
 			return absPath;
 		}
-		char *result = static_cast<char *>(std::malloc(winPath.size() + 1));
+		char *result = static_cast<char *>(wibo::heap::guestMalloc(winPath.size() + 1));
 		if (!result) {
 			errno = ENOMEM;
 			return nullptr;
@@ -1512,7 +1513,7 @@ namespace msvcrt {
 		}
 
 		SIZE_T value_len = match->length;
-		auto *copy = static_cast<uint16_t *>(malloc((value_len + 1) * sizeof(uint16_t)));
+		auto *copy = static_cast<uint16_t *>(wibo::heap::guestMalloc((value_len + 1) * sizeof(uint16_t)));
 		if (!copy) {
 			DEBUG_LOG("_wdupenv_s: allocation failed\n");
 			errno = ENOMEM;
@@ -1686,7 +1687,7 @@ namespace msvcrt {
 		}
 
 		SIZE_T length = ::strlen(strSource);
-		auto *copy = static_cast<char *>(std::malloc(length + 1));
+		auto *copy = static_cast<char *>(wibo::heap::guestMalloc(length + 1));
 		if (!copy) {
 			return nullptr;
 		}
@@ -1704,25 +1705,25 @@ namespace msvcrt {
 	void* CDECL malloc(SIZE_T size){
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("malloc(%zu)\n", size);
-		return std::malloc(size);
+		return wibo::heap::guestMalloc(size);
 	}
 
 	void* CDECL calloc(SIZE_T count, SIZE_T size){
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("calloc(%zu, %zu)\n", count, size);
-		return std::calloc(count, size);
+		return wibo::heap::guestCalloc(count, size);
 	}
 
 	void* CDECL realloc(void *ptr, SIZE_T size) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("realloc(%p, %zu)\n", ptr, size);
-		return std::realloc(ptr, size);
+		return wibo::heap::guestRealloc(ptr, size);
 	}
 
 	void* CDECL _malloc_crt(SIZE_T size) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("_malloc_crt(%zu)\n", size);
-		return std::malloc(size);
+		return wibo::heap::guestMalloc(size);
 	}
 
 	void CDECL _lock(int locknum) {
@@ -2479,7 +2480,7 @@ namespace msvcrt {
 		if(!strSource) return nullptr;
 		SIZE_T strLen = wstrlen(strSource);
 
-		auto *dup = static_cast<uint16_t *>(malloc((strLen + 1) * sizeof(uint16_t)));
+		auto *dup = static_cast<uint16_t *>(wibo::heap::guestMalloc((strLen + 1) * sizeof(uint16_t)));
 		if(!dup) return nullptr;
 
 		for(SIZE_T i = 0; i <= strLen; i++){
@@ -3000,7 +3001,7 @@ namespace msvcrt {
 	        return absPath;
 	    } else {
 	        // Windows behavior: if absPath == NULL, allocate new
-	        auto *newBuf = new uint16_t[wResolved.size() + 1];
+	        auto *newBuf = static_cast<uint16_t*>(wibo::heap::guestMalloc((wResolved.size() + 1) * sizeof(uint16_t)));
 	        std::copy(wResolved.begin(), wResolved.end(), newBuf);
 	        newBuf[wResolved.size()] = 0;
 

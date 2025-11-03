@@ -3,6 +3,7 @@
 #include "common.h"
 #include "context.h"
 #include "crt_trampolines.h"
+#include "heap.h"
 #include "kernel32/internal.h"
 #include "modules.h"
 
@@ -180,25 +181,25 @@ const char *CDECL strrchr(const char *str, int ch) {
 void *CDECL malloc(SIZE_T size) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("malloc(%zu)\n", size);
-	return ::malloc(size);
+	return wibo::heap::guestMalloc(size);
 }
 
 void *CDECL calloc(SIZE_T count, SIZE_T size) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("calloc(%zu, %zu)\n", count, size);
-	return ::calloc(count, size);
+	return wibo::heap::guestCalloc(count, size);
 }
 
 void *CDECL realloc(void *ptr, SIZE_T newSize) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("realloc(%p, %zu)\n", ptr, newSize);
-	return ::realloc(ptr, newSize);
+	return wibo::heap::guestRealloc(ptr, newSize);
 }
 
 void CDECL free(void *ptr) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("free(%p)\n", ptr);
-	::free(ptr);
+	wibo::heap::guestFree(ptr);
 }
 
 void *CDECL memcpy(void *dest, const void *src, SIZE_T count) {

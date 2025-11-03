@@ -174,6 +174,7 @@ add_executable(wibo
     src/files.cpp
     src/handles.cpp
     src/loader.cpp
+    src/heap.cpp
     src/main.cpp
     src/modules.cpp
     src/processes.cpp
@@ -184,9 +185,10 @@ add_executable(wibo
 target_compile_definitions(wibo PRIVATE _GNU_SOURCE _FILE_OFFSET_BITS=64 _TIME_BITS=64)
 target_compile_features(wibo PRIVATE cxx_std_20)
 target_compile_options(wibo PRIVATE -Wall -Wextra)
+target_link_options(wibo PRIVATE -no-pie -Wl,--image-base=0x90000000)
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(wibo PRIVATE -fno-pie -maccumulate-outgoing-args)
-    target_link_options(wibo PRIVATE -no-pie -maccumulate-outgoing-args)
+    target_link_options(wibo PRIVATE -maccumulate-outgoing-args)
 endif()
 target_include_directories(wibo PRIVATE dll src ${WIBO_GENERATED_HEADER_DIR})
 target_link_libraries(wibo PRIVATE mimalloc-obj atomic)

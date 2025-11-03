@@ -3,6 +3,7 @@
 #include "context.h"
 #include "errors.h"
 #include "files.h"
+#include "heap.h"
 #include "internal.h"
 #include "strutil.h"
 
@@ -78,7 +79,7 @@ LPCH WINAPI GetEnvironmentStrings() {
 	}
 	bufSize++;
 
-	char *buffer = static_cast<char *>(mi_malloc(bufSize));
+	char *buffer = static_cast<char *>(wibo::heap::guestMalloc(bufSize));
 	if (!buffer) {
 		setLastError(ERROR_NOT_ENOUGH_MEMORY);
 		return nullptr;
@@ -111,7 +112,7 @@ LPWCH WINAPI GetEnvironmentStringsW() {
 	}
 	bufSizeW++;
 
-	uint16_t *buffer = static_cast<uint16_t *>(mi_malloc(bufSizeW * sizeof(uint16_t)));
+	uint16_t *buffer = static_cast<uint16_t *>(wibo::heap::guestMalloc(bufSizeW * sizeof(uint16_t)));
 	if (!buffer) {
 		setLastError(ERROR_NOT_ENOUGH_MEMORY);
 		return nullptr;

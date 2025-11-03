@@ -30,6 +30,7 @@ from clang.cindex import (
     CursorKind,
     Index,
     TranslationUnit,
+    Type,
     TypeKind,
     conf,
 )
@@ -97,7 +98,7 @@ class ArgInfo:
     slot_size: int
     primitive: bool
     sign_extended: bool
-    type_str: str
+    type: Type
 
 
 @dataclass
@@ -108,6 +109,7 @@ class FuncInfo:
     source_cc: CallingConv
     target_cc: CallingConv
     variadic: bool
+    return_type: Type
     args: List[ArgInfo] = field(default_factory=list)
 
 
@@ -117,7 +119,7 @@ class TypedefInfo:
     source_cc: CallingConv
     target_cc: CallingConv
     variadic: bool
-    return_type: str
+    return_type: Type
     args: List[ArgInfo] = field(default_factory=list)
 
 
@@ -233,7 +235,7 @@ def _collect_args(func_type: CXType) -> List[ArgInfo]:
                 slot_size=slot_size,
                 primitive=is_primitive,
                 sign_extended=is_sign_extended,
-                type_str=_type_to_string(t),
+                type=t,
             )
         )
     return args
@@ -258,10 +260,11 @@ def collect_functions(tu: TranslationUnit, ns_filter: Optional[str]) -> List[Fun
                 qualified_ns="::".join(ns_parts),
                 name=name,
                 mangled=node.mangled_name or name,
-                args=_collect_args(node.type),
                 source_cc=source_cc,
                 target_cc=_get_function_calling_conv(node.type),
                 variadic=node.type.is_function_variadic(),
+                return_type=node.type.get_result(),
+                args=_collect_args(node.type),
             )
 
         # Recurse into children
@@ -519,8 +522,42 @@ def emit_header_mapping(
 
     # Guest-to-host thunk functions
     for f in funcs:
+        # Generate best-effort function prototype so that simple thunks can be called directly
+        # in special cases (e.g. thunk_entry_stubBase)
+        def _is_opaque(t: Type) -> bool:
+            if (
+                t.kind == TypeKind.RECORD
+                or t.kind == TypeKind.ENUM
+                or t.kind == TypeKind.FUNCTIONPROTO
+                or t.kind == TypeKind.FUNCTIONNOPROTO
+            ):
+                return True
+            return t.kind == TypeKind.POINTER and _is_opaque(
+                t.get_pointee().get_canonical()
+            )
+
+        def _canonical_type_str(t: Type) -> str:
+            c = t.get_canonical()
+            if _is_opaque(c):
+                return "void *"
+            return c.spelling
+
         thunk = f"thunk_{dll}_{f.name}"
-        lines.append(f"void {thunk}(void);")
+        args = []
+        for i, arg in enumerate(f.args):
+            type_str = _canonical_type_str(arg.type)
+            args.append(f"{type_str} arg{i}")
+        param_list = ", ".join(args)
+        return_type = _canonical_type_str(f.return_type)
+        if f.source_cc == CallingConv.X86_STDCALL:
+            cc_attr = "__attribute__((stdcall))"
+        elif f.source_cc == CallingConv.C:
+            cc_attr = "__attribute__((cdecl))"
+        else:
+            raise NotImplementedError(
+                f"Unsupported calling convention {f.source_cc} for function {f.name}"
+            )
+        lines.append(f"{cc_attr} {return_type} {thunk}({param_list});")
 
     # Host-to-guest thunk functions
     for td in typedefs:
@@ -530,7 +567,8 @@ def emit_header_mapping(
 
         params = [f"{td.name} fn"]
         for i, arg in enumerate(td.args):
-            params.append(f"{arg.type_str} arg{i}")
+            type_str = _type_to_string(arg.type)
+            params.append(f"{type_str} arg{i}")
 
         param_list = ", ".join(params)
         lines.append(f"{td.return_type} {thunk}({param_list});")

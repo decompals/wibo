@@ -3,6 +3,7 @@
 #include "entry.h"
 #include "entry_trampolines.h"
 #include "files.h"
+#include "heap.h"
 #include "modules.h"
 #include "processes.h"
 #include "strutil.h"
@@ -501,10 +502,7 @@ int main(int argc, char **argv) {
 	kernel32::setLastError(0);
 
 	// Invoke the damn thing
-	{
-		GUEST_CONTEXT_GUARD(&tib);
-		call_EntryProc(entryPoint);
-	}
+	call_EntryProc(entryPoint);
 	DEBUG_LOG("We came back\n");
 	wibo::shutdownModuleRegistry();
 	wibo::tls::cleanupTib(&tib);

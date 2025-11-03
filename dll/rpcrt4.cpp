@@ -2,6 +2,7 @@
 
 #include "common.h"
 #include "context.h"
+#include "heap.h"
 #include "modules.h"
 
 #include <cstdarg>
@@ -125,7 +126,7 @@ RPC_STATUS WINAPI RpcStringBindingComposeW(RPC_WSTR objUuid, RPC_WSTR protSeq, R
 
 	if (stringBinding) {
 		size_t length = encoded.size();
-		auto *buffer = static_cast<char16_t *>(std::malloc((length + 1) * sizeof(char16_t)));
+		auto *buffer = static_cast<char16_t *>(wibo::heap::guestMalloc((length + 1) * sizeof(char16_t)));
 		if (!buffer) {
 			return RPC_S_OUT_OF_MEMORY;
 		}

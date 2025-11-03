@@ -157,7 +157,7 @@ struct HeapObject : public ObjectBase {
 	~HeapObject() override;
 
 	[[nodiscard]] inline bool isOwner() const { return pthread_equal(owner, pthread_self()); }
-	[[nodiscard]] inline bool canAccess() const { return (isProcessHeap || isOwner()) && heap != nullptr; }
+	[[nodiscard]] inline bool canAccess() const { return isProcessHeap || (isOwner() && heap != nullptr); }
 };
 
 inline constexpr uintptr_t kPseudoCurrentProcessHandleValue = static_cast<uintptr_t>(-1);

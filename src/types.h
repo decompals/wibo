@@ -436,3 +436,13 @@ static_assert(offsetof(TEB, LastErrorValue) == 0x34, "LastErrorValue offset mism
 static_assert(offsetof(TEB, GdiTebBatch) == 0x1FC, "GdiTebBatch offset mismatch");
 static_assert(offsetof(TEB, DeallocationStack) == 0xE0C, "DeallocationStack offset mismatch");
 static_assert(offsetof(TEB, TlsSlots) == 0xE10, "TLS slots offset mismatch");
+
+typedef struct _MEMORY_BASIC_INFORMATION {
+	PVOID BaseAddress;
+	PVOID AllocationBase;
+	DWORD AllocationProtect;
+	SIZE_T RegionSize;
+	DWORD State;
+	DWORD Protect;
+	DWORD Type;
+} MEMORY_BASIC_INFORMATION, *PMEMORY_BASIC_INFORMATION;

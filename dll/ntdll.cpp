@@ -5,6 +5,7 @@
 #include "errors.h"
 #include "files.h"
 #include "handles.h"
+#include "heap.h"
 #include "kernel32/internal.h"
 #include "kernel32/processthreadsapi.h"
 #include "modules.h"
@@ -14,7 +15,6 @@
 
 #include <cerrno>
 #include <cstring>
-#include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -267,35 +267,23 @@ NTSTATUS WINAPI NtAllocateVirtualMemory(HANDLE ProcessHandle, PVOID *BaseAddress
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("NtAllocateVirtualMemory(%p, %p, %lu, %p, %lu, %lu) ", ProcessHandle, BaseAddress, ZeroBits, RegionSize,
 			  AllocationType, Protect);
-	assert(ProcessHandle == (HANDLE)-1);
-	assert(ZeroBits == 0);
-
-	int prot = 0;
-	if (Protect & PAGE_NOACCESS)
-		prot |= PROT_NONE;
-	if (Protect & PAGE_READONLY)
-		prot |= PROT_READ;
-	if (Protect & PAGE_READWRITE)
-		prot |= PROT_READ | PROT_WRITE;
-	if (Protect & PAGE_WRITECOPY)
-		prot |= PROT_READ | PROT_WRITE;
-	if (Protect & PAGE_EXECUTE)
-		prot |= PROT_EXEC;
-	if (Protect & PAGE_EXECUTE_READ)
-		prot |= PROT_EXEC | PROT_READ;
-	if (Protect & PAGE_EXECUTE_READWRITE)
-		prot |= PROT_EXEC | PROT_READ | PROT_WRITE;
-	assert(!(Protect & PAGE_EXECUTE_WRITECOPY));
-	assert(!(Protect & PAGE_GUARD));
-	assert(!(Protect & PAGE_NOCACHE));
-	assert(!(Protect & PAGE_WRITECOMBINE));
-
-	void *addr = mmap(*BaseAddress, *RegionSize, prot, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-	if (addr == MAP_FAILED) {
-		perror("mmap");
-		return STATUS_NOT_SUPPORTED;
+	if (ProcessHandle != (HANDLE)-1) {
+		DEBUG_LOG("-> 0x%x\n", STATUS_INVALID_HANDLE);
+		return STATUS_INVALID_HANDLE;
 	}
-	*BaseAddress = addr;
+	if (ZeroBits != 0 || BaseAddress == nullptr || RegionSize == nullptr) {
+		DEBUG_LOG("-> 0x%x\n", STATUS_INVALID_PARAMETER);
+		return STATUS_INVALID_PARAMETER;
+	}
+
+	wibo::heap::VmStatus vmStatus =
+		wibo::heap::virtualAlloc(reinterpret_cast<void **>(BaseAddress), reinterpret_cast<std::size_t *>(RegionSize),
+								 static_cast<DWORD>(AllocationType), static_cast<DWORD>(Protect));
+	if (vmStatus != wibo::heap::VmStatus::Success) {
+		NTSTATUS status = wibo::heap::ntStatusFromVmStatus(vmStatus);
+		DEBUG_LOG("-> 0x%x\n", status);
+		return status;
+	}
 
 	DEBUG_LOG("-> 0x%x\n", STATUS_SUCCESS);
 	return STATUS_SUCCESS;
@@ -306,38 +294,25 @@ NTSTATUS WINAPI NtProtectVirtualMemory(HANDLE ProcessHandle, PVOID *BaseAddress,
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("NtProtectVirtualMemory(%p, %p, %p, %lu, %p) ", ProcessHandle, BaseAddress, NumberOfBytesToProtect,
 			  NewAccessProtection, OldAccessProtection);
-	assert(ProcessHandle == (HANDLE)-1);
-	assert(NumberOfBytesToProtect != nullptr);
-
-	int prot = 0;
-	if (NewAccessProtection & PAGE_NOACCESS)
-		prot |= PROT_NONE;
-	if (NewAccessProtection & PAGE_READONLY)
-		prot |= PROT_READ;
-	if (NewAccessProtection & PAGE_READWRITE)
-		prot |= PROT_READ | PROT_WRITE;
-	if (NewAccessProtection & PAGE_WRITECOPY)
-		prot |= PROT_READ | PROT_WRITE;
-	if (NewAccessProtection & PAGE_EXECUTE)
-		prot |= PROT_EXEC;
-	if (NewAccessProtection & PAGE_EXECUTE_READ)
-		prot |= PROT_EXEC | PROT_READ;
-	if (NewAccessProtection & PAGE_EXECUTE_READWRITE)
-		prot |= PROT_EXEC | PROT_READ | PROT_WRITE;
-	assert(!(NewAccessProtection & PAGE_EXECUTE_WRITECOPY));
-	assert(!(NewAccessProtection & PAGE_GUARD));
-	assert(!(NewAccessProtection & PAGE_NOCACHE));
-	assert(!(NewAccessProtection & PAGE_WRITECOMBINE));
-
-	int ret = mprotect(*BaseAddress, *NumberOfBytesToProtect, prot);
-	if (ret != 0) {
-		perror("mprotect");
-		return STATUS_NOT_SUPPORTED;
+	if (ProcessHandle != (HANDLE)-1) {
+		DEBUG_LOG("-> 0x%x\n", STATUS_INVALID_HANDLE);
+		return STATUS_INVALID_HANDLE;
+	}
+	if (BaseAddress == nullptr || NumberOfBytesToProtect == nullptr) {
+		DEBUG_LOG("-> 0x%x\n", STATUS_INVALID_PARAMETER);
+		return STATUS_INVALID_PARAMETER;
 	}
 
-	if (OldAccessProtection) {
-		*OldAccessProtection = 0; // stub
+	void *base = *BaseAddress;
+	std::size_t length = static_cast<std::size_t>(*NumberOfBytesToProtect);
+	wibo::heap::VmStatus vmStatus =
+		wibo::heap::virtualProtect(base, length, static_cast<DWORD>(NewAccessProtection), OldAccessProtection);
+	if (vmStatus != wibo::heap::VmStatus::Success) {
+		NTSTATUS status = wibo::heap::ntStatusFromVmStatus(vmStatus);
+		DEBUG_LOG("-> 0x%x\n", status);
+		return status;
 	}
+
 	DEBUG_LOG("-> 0x%x\n", STATUS_SUCCESS);
 	return STATUS_SUCCESS;
 }

@@ -4,6 +4,7 @@
 #include "context.h"
 #include "errors.h"
 #include "files.h"
+#include "heap.h"
 #include "internal.h"
 #include "modules.h"
 #include "strutil.h"
@@ -169,7 +170,7 @@ void *doAlloc(UINT dwBytes, bool zero) {
 	if (dwBytes == 0) {
 		dwBytes = 1;
 	}
-	void *ret = mi_malloc_aligned(dwBytes, 8);
+	void *ret = mi_heap_malloc_aligned(wibo::heap::getGuestHeap(), dwBytes, 8);
 	if (ret && zero) {
 		std::memset(ret, 0, mi_usable_size(ret));
 	}
@@ -181,7 +182,7 @@ void *doRealloc(void *mem, UINT dwBytes, bool zero) {
 		dwBytes = 1;
 	}
 	size_t oldSize = mi_usable_size(mem);
-	void *ret = mi_realloc_aligned(mem, dwBytes, 8);
+	void *ret = mi_heap_realloc_aligned(wibo::heap::getGuestHeap(), mem, dwBytes, 8);
 	size_t newSize = mi_usable_size(ret);
 	if (ret && zero && newSize > oldSize) {
 		std::memset(static_cast<char *>(ret) + oldSize, 0, newSize - oldSize);

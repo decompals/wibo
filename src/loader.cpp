@@ -1,12 +1,13 @@
 #include "common.h"
 #include "errors.h"
+#include "heap.h"
 #include "kernel32/internal.h"
 #include "modules.h"
+#include "types.h"
 
 #include <algorithm>
 #include <cstring>
 #include <strings.h>
-#include <sys/mman.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
@@ -183,7 +184,7 @@ uint32_t read32(FILE *file) {
 
 wibo::Executable::~Executable() {
 	if (imageBase) {
-		munmap(imageBase, imageSize);
+		wibo::heap::virtualFree(imageBase, 0, MEM_RELEASE);
 		imageBase = nullptr;
 	}
 }
@@ -239,20 +240,28 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 
 	// Build buffer
 	imageSize = header32.sizeOfImage;
-	int prot = PROT_READ | PROT_WRITE;
-	if (exec)
-		prot |= PROT_EXEC;
-	void *preferredBase = (void *)(uintptr_t)header32.imageBase;
-	imageBase = mmap(preferredBase, header32.sizeOfImage, prot, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-	if (imageBase == MAP_FAILED) {
-		imageBase = mmap(nullptr, header32.sizeOfImage, prot, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+	DWORD initialProtect = exec ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE;
+	void *preferredBase = reinterpret_cast<void *>(static_cast<uintptr_t>(header32.imageBase));
+	void *allocatedBase = preferredBase;
+	std::size_t allocationSize = static_cast<std::size_t>(header32.sizeOfImage);
+	wibo::heap::VmStatus allocStatus = wibo::heap::virtualAlloc(
+		&allocatedBase, &allocationSize, MEM_RESERVE | MEM_COMMIT, initialProtect, MEM_IMAGE);
+	if (allocStatus != wibo::heap::VmStatus::Success) {
+		DEBUG_LOG("loadPE: preferred base allocation failed (status=%u), retrying anywhere\n",
+			  static_cast<unsigned>(allocStatus));
+		allocatedBase = nullptr;
+		allocationSize = static_cast<std::size_t>(header32.sizeOfImage);
+		allocStatus = wibo::heap::virtualAlloc(
+			&allocatedBase, &allocationSize, MEM_RESERVE | MEM_COMMIT, initialProtect, MEM_IMAGE);
 	}
-	if (imageBase == MAP_FAILED) {
-		perror("Image mapping failed!");
+	if (allocStatus != wibo::heap::VmStatus::Success) {
+		DEBUG_LOG("Image mapping failed (status=%u)\n", static_cast<unsigned>(allocStatus));
 		imageBase = nullptr;
 		return false;
 	}
-	relocationDelta = (intptr_t)((uintptr_t)imageBase - (uintptr_t)header32.imageBase);
+	imageBase = allocatedBase;
+	relocationDelta =
+		static_cast<intptr_t>(reinterpret_cast<uintptr_t>(imageBase) - static_cast<uintptr_t>(header32.imageBase));
 	memset(imageBase, 0, header32.sizeOfImage);
 	sections.clear();
 	uintptr_t imageBaseAddr = reinterpret_cast<uintptr_t>(imageBase);
@@ -315,7 +324,7 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 	if (exec && relocationDelta != 0) {
 		if (relocationDirectoryRVA == 0 || relocationDirectorySize == 0) {
 			DEBUG_LOG("Relocation required but no relocation directory present\n");
-			munmap(imageBase, imageSize);
+			wibo::heap::virtualFree(imageBase, 0, MEM_RELEASE);
 			imageBase = nullptr;
 			return false;
 		}
@@ -361,9 +370,34 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 }
 
 bool wibo::Executable::resolveImports() {
+	auto finalizeSections = [this]() -> bool {
+		if (!execMapped || sectionsProtected) {
+			return true;
+		}
+		for (const auto &section : sections) {
+			if (section.size == 0) {
+				continue;
+			}
+			void *sectionAddress = reinterpret_cast<void *>(section.base);
+			wibo::heap::VmStatus status =
+				wibo::heap::virtualProtect(sectionAddress, section.size, section.protect, nullptr);
+			if (status != wibo::heap::VmStatus::Success) {
+				DEBUG_LOG("resolveImports: failed to set section protection at %p (size=%zu, protect=0x%x) status=%u\n",
+					  sectionAddress, section.size, section.protect, static_cast<unsigned>(status));
+				kernel32::setLastError(wibo::heap::win32ErrorFromVmStatus(status));
+				return false;
+			}
+		}
+		sectionsProtected = true;
+		return true;
+	};
+
 	if (importsResolved || !execMapped) {
 		importsResolved = true;
 		importsResolving = false;
+		if (!finalizeSections()) {
+			return false;
+		}
 		return true;
 	}
 	if (importsResolving) {
@@ -374,6 +408,9 @@ bool wibo::Executable::resolveImports() {
 	if (!importDirectoryRVA) {
 		importsResolved = true;
 		importsResolving = false;
+		if (!finalizeSections()) {
+			return false;
+		}
 		return true;
 	}
 
@@ -381,6 +418,9 @@ bool wibo::Executable::resolveImports() {
 	if (!dir) {
 		importsResolved = true;
 		importsResolving = false;
+		if (!finalizeSections()) {
+			return false;
+		}
 		return true;
 	}
 
@@ -464,5 +504,9 @@ bool wibo::Executable::resolveImports() {
 
 	importsResolved = true;
 	importsResolving = false;
+	if (!finalizeSections()) {
+		importsResolved = false;
+		return false;
+	}
 	return true;
 }

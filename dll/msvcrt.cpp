@@ -34,6 +34,7 @@
 #include <mutex>
 #include <optional>
 #include <spawn.h>
+#include <stdio.h>
 #include <string>
 #include <strings.h>
 #include <sys/stat.h>
@@ -50,7 +51,48 @@
 #define O_BINARY 0
 #endif
 
-using _onexit_t = _PIFV;
+namespace {
+
+std::mutex g_fileMutex;
+std::unordered_map<int, FILE *> g_files;
+
+FILE *mapToHostFile(_FILE *file) {
+	if (!file)
+		return nullptr;
+	switch (file->_file) {
+	case -1:
+		return nullptr;
+	case STDIN_FILENO:
+		return stdin;
+	case STDOUT_FILENO:
+		return stdout;
+	case STDERR_FILENO:
+		return stderr;
+	default:
+	    return g_files[file->_file];
+	}
+}
+
+_FILE *mapToGuestFile(FILE *file) {
+	if (!file)
+		return nullptr;
+	int fd = file->_fileno;
+	_FILE *out = new (wibo::heap::guestMalloc(sizeof(_FILE))) _FILE(fd);
+	std::lock_guard lock(g_fileMutex);
+	g_files[fd] = file;
+	return out;
+}
+
+int closeGuestFile(_FILE *file) {
+	if (!file)
+		return -1;
+	int fd = file->_file;
+	std::lock_guard lock(g_fileMutex);
+	g_files.erase(fd);
+	return close(fd);
+}
+
+} // namespace
 
 namespace msvcrt {
 	int _commode;
@@ -59,13 +101,15 @@ namespace msvcrt {
 	uint16_t** __winitenv;
 	uint16_t* _wpgmptr = nullptr;
 	char* _pgmptr = nullptr;
+	int __mb_cur_max = 1;
+	_FILE _iob[_IOB_ENTRIES] = {_FILE{STDOUT_FILENO}, _FILE{STDERR_FILENO}, _FILE{STDIN_FILENO}};
+
 	constexpr int MB_CP_ANSI = -3;
 	constexpr int MB_CP_OEM = -2;
 	constexpr int MB_CP_LOCALE = -4;
 	constexpr int MB_CP_SBCS = 0;
 	constexpr int MB_CP_UTF8 = -5;
 
-	static unsigned int mbCurMaxValue = 1;
 	static int mbCodePageSetting = MB_CP_ANSI;
 	static unsigned int floatingPointControlWord = 0x0009001F; // _CW_DEFAULT for x87
 
@@ -103,7 +147,7 @@ namespace msvcrt {
 		}
 	}
 
-	unsigned int mbCurMaxForCodePage(int codepage);
+	int mbCurMaxForCodePage(int codepage);
 
 	void updateMbctypeForCodePage(int codepage) {
 		auto &table = mbctypeTable();
@@ -158,7 +202,7 @@ namespace msvcrt {
 	void ensureMbctypeInitialized() {
 		std::call_once(mbctypeInitFlag(), []() {
 			updateMbctypeForCodePage(mbCodePageSetting);
-			mbCurMaxValue = mbCurMaxForCodePage(mbCodePageSetting);
+			__mb_cur_max = mbCurMaxForCodePage(mbCodePageSetting);
 		});
 	}
 
@@ -205,52 +249,21 @@ namespace msvcrt {
 		return storage;
 	}
 
-	IOBProxy *standardIobEntries() {
-		static IOBProxy entries[3] = {};
-		return entries;
+	_FILE *standardIobEntries() {
+		return _iob;
 	}
 
-	IOBProxy *CDECL __iob_func() {
+	_FILE *CDECL __iob_func() {
 		HOST_CONTEXT_GUARD();
-		return standardIobEntries();
+		return _iob;
 	}
 
-	IOBProxy *CDECL __p__iob() {
+	_FILE *CDECL __p__iob() {
 		HOST_CONTEXT_GUARD();
-		return standardIobEntries();
+		return _iob;
 	}
 
-	std::unordered_map<void *, FILE *> &iobMapping() {
-		static std::unordered_map<void *, FILE *> mapping;
-		return mapping;
-	}
-
-	std::once_flag &iobInitFlag() {
-		static std::once_flag flag;
-		return flag;
-	}
-
-	void initializeIobMapping() {
-		std::call_once(iobInitFlag(), []() {
-			auto &mapping = iobMapping();
-			IOBProxy *entries = standardIobEntries();
-			mapping.emplace(static_cast<void *>(&entries[0]), stdin);
-			mapping.emplace(static_cast<void *>(&entries[1]), stdout);
-			mapping.emplace(static_cast<void *>(&entries[2]), stderr);
-		});
-	}
-
-	FILE *mapToHostFile(FILE *stream) {
-		initializeIobMapping();
-		auto &mapping = iobMapping();
-		auto it = mapping.find(stream);
-		if (it != mapping.end()) {
-			return it->second;
-		}
-		return stream;
-	}
-
-	void CDECL setbuf(FILE *stream, char *buffer) {
+	void CDECL setbuf(_FILE *stream, char *buffer) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("setbuf(%p, %p)\n", stream, buffer);
 		if (!stream) {
@@ -329,7 +342,7 @@ namespace msvcrt {
 				  ext ? ext : "");
 	}
 
-	int CDECL _fileno(FILE *stream) {
+	int CDECL _fileno(_FILE *stream) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_fileno(%p)\n", stream);
 		if (!stream) {
@@ -340,7 +353,7 @@ namespace msvcrt {
 		return ::fileno(host);
 	}
 
-	unsigned int mbCurMaxForCodePage(int codepage) {
+	int mbCurMaxForCodePage(int codepage) {
 		switch (codepage) {
 		case MB_CP_SBCS:
 		case MB_CP_ANSI:
@@ -363,7 +376,7 @@ namespace msvcrt {
 
 	void refreshMbCurMax() {
 		ensureMbctypeInitialized();
-		mbCurMaxValue = mbCurMaxForCodePage(mbCodePageSetting);
+		__mb_cur_max = mbCurMaxForCodePage(mbCodePageSetting);
 	}
 
 	int CDECL _getmbcp() {
@@ -373,11 +386,11 @@ namespace msvcrt {
 		return mbCodePageSetting;
 	}
 
-	unsigned int* CDECL __p___mb_cur_max() {
+	int* CDECL __p___mb_cur_max() {
 		HOST_CONTEXT_GUARD();
 		ensureMbctypeInitialized();
-		DEBUG_LOG("__p___mb_cur_max() -> %u\n", mbCurMaxValue);
-		return &mbCurMaxValue;
+		DEBUG_LOG("__p___mb_cur_max() -> %u\n", __mb_cur_max);
+		return &__mb_cur_max;
 	}
 
 	int CDECL _setmbcp(int codepage) {
@@ -402,7 +415,7 @@ namespace msvcrt {
 
 		mbCodePageSetting = codepage;
 		updateMbctypeForCodePage(codepage);
-		mbCurMaxValue = mbCurMaxForCodePage(codepage);
+		__mb_cur_max = mbCurMaxForCodePage(codepage);
 		return 0;
 	}
 
@@ -729,11 +742,20 @@ namespace msvcrt {
 		return 0;
 	}
 
-	_PIFV CDECL _onexit(_PIFV func) {
+	static void runExitFunc(int status, void *arg) {
+		(void)status;
+		(void)call__onexit_t(reinterpret_cast<_onexit_t>(arg));
+	}
+
+	_onexit_t CDECL _onexit(_onexit_t func) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_onexit(%p)\n", func);
-		if(!func) return nullptr;
-		if (atexit(reinterpret_cast<void (*)()>(func)) != 0) return nullptr;
+		if (!func) {
+			return nullptr;
+		}
+		if (on_exit(runExitFunc, reinterpret_cast<void *>(func)) != 0) {
+			return nullptr;
+		}
 		return func;
 	}
 
@@ -1129,7 +1151,7 @@ namespace msvcrt {
 		return result;
 	}
 
-	char *CDECL fgets(char *str, int count, FILE *stream) {
+	char *CDECL fgets(char *str, int count, _FILE *stream) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fgets(%p, %d, %p)\n", str, count, stream);
 		if (!str || count <= 0) {
@@ -1139,14 +1161,14 @@ namespace msvcrt {
 		return ::fgets(str, count, host);
 	}
 
-	SIZE_T CDECL fread(void *buffer, SIZE_T size, SIZE_T count, FILE *stream) {
+	SIZE_T CDECL fread(void *buffer, SIZE_T size, SIZE_T count, _FILE *stream) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fread(%p, %zu, %zu, %p)\n", buffer, size, count, stream);
 		FILE *host = mapToHostFile(stream);
 		return ::fread(buffer, size, count, host);
 	}
 
-	FILE *CDECL _fsopen(const char *filename, const char *mode, int shflag) {
+	_FILE *CDECL _fsopen(const char *filename, const char *mode, int shflag) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_fsopen(%s, %s, %d)\n", filename ? filename : "(null)", mode ? mode : "(null)", shflag);
 		(void)shflag;
@@ -1155,7 +1177,7 @@ namespace msvcrt {
 			return nullptr;
 		}
 		auto hostPath = files::pathFromWindows(filename);
-		return ::fopen(hostPath.c_str(), mode);
+		return mapToGuestFile(::fopen(hostPath.c_str(), mode));
 	}
 
 	int CDECL _sopen(const char *path, int oflag, int shflag, int pmode) {
@@ -1802,13 +1824,18 @@ namespace msvcrt {
 		return std::memcmp(lhs, rhs, count);
 	}
 
-	void CDECL qsort(void *base, SIZE_T num, SIZE_T size, int (*compar)(const void *, const void *)) {
+	static thread_local sort_compare currentCompare = nullptr;
+
+	static int doCompare(const void *a, const void *b) { return call_sort_compare(currentCompare, a, b); }
+
+	void CDECL qsort(void *base, SIZE_T num, SIZE_T size, sort_compare compare) {
 		HOST_CONTEXT_GUARD();
-		DEBUG_LOG("qsort(%p, %zu, %zu, %p)\n", base, num, size, compar);
-		std::qsort(base, num, size, compar);
+		DEBUG_LOG("qsort(%p, %zu, %zu, %p)\n", base, num, size, compare);
+		currentCompare = compare;
+		::qsort(base, num, size, doCompare);
 	}
 
-	int CDECL fflush(FILE *stream) {
+	int CDECL fflush(_FILE *stream) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fflush(%p)\n", stream);
 		if (!stream) {
@@ -1818,10 +1845,10 @@ namespace msvcrt {
 		return std::fflush(host);
 	}
 
-	int CDECL_NO_CONV vfwprintf(FILE *stream, const uint16_t *format, va_list args) {
+	int CDECL_NO_CONV vfwprintf(_FILE *stream, const uint16_t *format, va_list args) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("vfwprintf(%p, %s, ...)\n", stream, wideStringToString(format).c_str());
-		FILE *host = mapToHostFile(stream ? stream : stdout);
+		FILE *host = mapToHostFile(stream ? stream : &_iob[0]);
 		std::wstring fmt;
 		if (format) {
 			for (const uint16_t *ptr = format; *ptr; ++ptr) {
@@ -1832,10 +1859,10 @@ namespace msvcrt {
 		return std::vfwprintf(host, fmt.c_str(), args);
 	}
 
-	FILE *CDECL fopen(const char *filename, const char *mode) {
+	_FILE *CDECL fopen(const char *filename, const char *mode) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fopen(%s, %s)\n", filename ? filename : "(null)", mode ? mode : "(null)");
-		return std::fopen(filename, mode);
+		return mapToGuestFile(std::fopen(filename, mode));
 	}
 
 	int CDECL _dup2(int fd1, int fd2) {
@@ -1850,25 +1877,28 @@ namespace msvcrt {
 		return isatty(fd);
 	}
 
-	int CDECL fseek(FILE *stream, long offset, int origin) {
+	int CDECL fseek(_FILE *stream, long offset, int origin) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("fseek(%p, %ld, %d)\n", stream, offset, origin);
-		return std::fseek(stream, offset, origin);
+		FILE* host = mapToHostFile(stream);
+		return std::fseek(host, offset, origin);
 	}
 
-	long CDECL ftell(FILE *stream) {
+	long CDECL ftell(_FILE *stream) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("ftell(%p)\n", stream);
-		return std::ftell(stream);
+		FILE* host = mapToHostFile(stream);
+		return std::ftell(host);
 	}
 
-	int CDECL feof(FILE *stream) {
+	int CDECL feof(_FILE *stream) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("feof(%p)\n", stream);
-		return std::feof(stream);
+		FILE* host = mapToHostFile(stream);
+		return std::feof(host);
 	}
 
-	int CDECL fputws(const uint16_t *str, FILE *stream) {
+	int CDECL fputws(const uint16_t *str, _FILE *stream) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fputws(%s, %p)\n", wideStringToString(str).c_str(), stream);
 		std::wstring temp;
@@ -1877,23 +1907,25 @@ namespace msvcrt {
 				temp.push_back(static_cast<wchar_t>(*cursor));
 			}
 		}
-		return std::fputws(temp.c_str(), stream);
+		FILE* host = mapToHostFile(stream);
+		return std::fputws(temp.c_str(), host);
 	}
 
 	int CDECL _cputws(const uint16_t *string) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_cputws(%s)\n", wideStringToString(string).c_str());
-		return fputws(string, stdout);
+		return fputws(string, &_iob[0]);
 	}
 
-	uint16_t* CDECL fgetws(uint16_t *buffer, int size, FILE *stream) {
+	uint16_t* CDECL fgetws(uint16_t *buffer, int size, _FILE *stream) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fgetws(%p, %d, %p)\n", buffer, size, stream);
 		if (!buffer || size <= 0) {
 			return nullptr;
 		}
 		std::vector<wchar_t> temp(static_cast<SIZE_T>(size));
-		wchar_t *res = std::fgetws(temp.data(), size, stream);
+		FILE* host = mapToHostFile(stream);
+		wchar_t *res = std::fgetws(temp.data(), size, host);
 		if (!res) {
 			return nullptr;
 		}
@@ -1906,13 +1938,14 @@ namespace msvcrt {
 		return buffer;
 	}
 
-	WINT_T CDECL fgetwc(FILE *stream) {
+	WINT_T CDECL fgetwc(_FILE *stream) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("fgetwc(%p)\n", stream);
-		return std::fgetwc(stream);
+		FILE* host = mapToHostFile(stream);
+		return std::fgetwc(host);
 	}
 
-	int CDECL _wfopen_s(FILE **stream, const uint16_t *filename, const uint16_t *mode) {
+	int CDECL _wfopen_s(_FILE **stream, const uint16_t *filename, const uint16_t *mode) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_wfopen_s(%p, %s, %s)\n", stream, wideStringToString(filename).c_str(),
 				  wideStringToString(mode).c_str());
@@ -1927,7 +1960,7 @@ namespace msvcrt {
 			*stream = nullptr;
 			return errno ? errno : EINVAL;
 		}
-		*stream = handle;
+		*stream = mapToGuestFile(handle);
 		return 0;
 	}
 
@@ -2210,21 +2243,14 @@ namespace msvcrt {
 		std::fflush(nullptr);
 	}
 
-	static FILE *resolveFileStream(FILE *stream) {
-		if (!stream) {
-			return nullptr;
-		}
-		return mapToHostFile(stream);
-	}
-
-	int CDECL_NO_CONV vfprintf(FILE *stream, const char *format, va_list args) {
+	int CDECL_NO_CONV vfprintf(_FILE *stream, const char *format, va_list args) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("vfprintf(stream=%p, format=%s, args=%p)\n", stream, format, args);
 		if (!format || !stream) {
 			errno = EINVAL;
 			return -1;
 		}
-		FILE *native = resolveFileStream(stream);
+		FILE *native = mapToHostFile(stream);
 		if (!native) {
 			errno = EINVAL;
 			return -1;
@@ -2236,7 +2262,7 @@ namespace msvcrt {
 		return result;
 	}
 
-	int CDECL_NO_CONV fprintf(FILE *stream, const char *format, ...) {
+	int CDECL_NO_CONV fprintf(_FILE *stream, const char *format, ...) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fprintf(%p, %s, ...)\n", stream, format);
 		va_list args;
@@ -2246,14 +2272,14 @@ namespace msvcrt {
 		return result;
 	}
 
-	int CDECL fputc(int ch, FILE *stream) {
+	int CDECL fputc(int ch, _FILE *stream) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fputc(%d, %p)\n", ch, stream);
 		if (!stream) {
 			errno = EINVAL;
 			return EOF;
 		}
-		FILE *native = resolveFileStream(stream);
+		FILE *native = mapToHostFile(stream);
 		if (!native) {
 			errno = EINVAL;
 			return EOF;
@@ -2261,14 +2287,14 @@ namespace msvcrt {
 		return std::fputc(ch, native);
 	}
 
-	SIZE_T CDECL fwrite(const void *buffer, SIZE_T size, SIZE_T count, FILE *stream) {
+	SIZE_T CDECL fwrite(const void *buffer, SIZE_T size, SIZE_T count, _FILE *stream) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("fwrite(%p, %zu, %zu, %p)\n", buffer, size, count, stream);
 		if (!buffer || !stream) {
 			errno = EINVAL;
 			return 0;
 		}
-		FILE *native = resolveFileStream(stream);
+		FILE *native = mapToHostFile(stream);
 		if (!native) {
 			errno = EINVAL;
 			return 0;
@@ -2808,7 +2834,7 @@ namespace msvcrt {
 		return wstrtoul(strSource, endptr, base);
 	}
 
-	FILE* CDECL _wfsopen(const uint16_t* filename, const uint16_t* mode, int shflag){
+	_FILE* CDECL _wfsopen(const uint16_t* filename, const uint16_t* mode, int shflag){
 		HOST_CONTEXT_GUARD();
 		if (!filename || !mode) return nullptr;
 		std::string fname_str = wideStringToString(filename);
@@ -2832,10 +2858,10 @@ namespace msvcrt {
 		return 0;
 	}
 
-	int CDECL fclose(FILE* stream){
+	int CDECL fclose(_FILE* stream){
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("fclose(%p)\n", stream);
-		return ::fclose(stream);
+		return closeGuestFile(stream);
 	}
 
 	int CDECL _flushall(){
@@ -2843,9 +2869,15 @@ namespace msvcrt {
 		DEBUG_LOG("_flushall()\n");
 		int count = 0;
 
-		if (msvcrt::fflush(stdin) == 0) count++;
-		if (msvcrt::fflush(stdout) == 0) count++;
-		if (msvcrt::fflush(stderr) == 0) count++;
+		if (::fflush(stdin) == 0) count++;
+		if (::fflush(stdout) == 0) count++;
+		if (::fflush(stderr) == 0) count++;
+
+		std::lock_guard lock(g_fileMutex);
+		for (auto &file : g_files) {
+			if (::fflush(file.second) == 0)
+				count++;
+		}
 
 		return count;
 	}

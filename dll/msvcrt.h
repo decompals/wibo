@@ -7,7 +7,9 @@ using WINT_T = unsigned short;
 
 typedef void(_CC_CDECL *_PVFV)();
 typedef int(_CC_CDECL *_PIFV)();
-using _onexit_t = _PIFV;
+typedef int(_CC_CDECL *_onexit_t)();
+typedef void(_CC_CDECL *signal_handler)(int);
+typedef int(_CC_CDECL *sort_compare)(const void *, const void *);
 
 struct _utimbuf {
 	long actime;
@@ -21,31 +23,26 @@ struct _timeb {
 	short dstflag;
 };
 
-typedef void(_CC_CDECL *signal_handler)(int);
-using FILE = struct _IO_FILE;
-
-struct IOBProxy {
-	char *_ptr;
-	int _cnt;
-	char *_base;
-	int _flag;
-	int _file;
-	int _charbuf;
-	int _bufsiz;
-	char *_tmpfname;
-};
-
 struct lconv;
 
 namespace msvcrt {
 
-IOBProxy *CDECL __iob_func();
-IOBProxy *CDECL __p__iob();
-void CDECL setbuf(FILE *stream, char *buffer);
+extern int _commode;
+extern int _fmode;
+extern char **__initenv;
+extern WCHAR **__winitenv;
+extern WCHAR *_wpgmptr;
+extern char *_pgmptr;
+extern int __mb_cur_max;
+extern _FILE _iob[_IOB_ENTRIES];
+
+_FILE *CDECL __iob_func();
+_FILE *CDECL __p__iob();
+void CDECL setbuf(_FILE *stream, char *buffer);
 void CDECL _splitpath(const char *path, char *drive, char *dir, char *fname, char *ext);
-int CDECL _fileno(FILE *stream);
+int CDECL _fileno(_FILE *stream);
 int CDECL _getmbcp();
-unsigned int *CDECL __p___mb_cur_max();
+int *CDECL __p___mb_cur_max();
 int CDECL _setmbcp(int codepage);
 unsigned char *CDECL __p__mbctype();
 unsigned short **CDECL __p__pctype();
@@ -57,7 +54,7 @@ void CDECL _initterm(const _PVFV *ppfn, const _PVFV *end);
 int CDECL _initterm_e(const _PIFV *ppfn, const _PIFV *end);
 unsigned int CDECL _controlfp(unsigned int newControl, unsigned int mask);
 int CDECL _controlfp_s(unsigned int *currentControl, unsigned int newControl, unsigned int mask);
-_PIFV CDECL _onexit(_PIFV func);
+_onexit_t CDECL _onexit(_onexit_t func);
 int CDECL __wgetmainargs(int *wargc, WCHAR ***wargv, WCHAR ***wenv, int doWildcard, int *startInfo);
 int CDECL __getmainargs(int *argc, char ***argv, char ***env, int doWildcard, int *startInfo);
 char *CDECL getenv(const char *varname);
@@ -92,9 +89,9 @@ int CDECL_NO_CONV _snprintf(char *buffer, SIZE_T count, const char *format, ...)
 int CDECL_NO_CONV sprintf(char *buffer, const char *format, ...);
 int CDECL_NO_CONV printf(const char *format, ...);
 int CDECL_NO_CONV sscanf(const char *buffer, const char *format, ...);
-char *CDECL fgets(char *str, int count, FILE *stream);
-SIZE_T CDECL fread(void *buffer, SIZE_T size, SIZE_T count, FILE *stream);
-FILE *CDECL _fsopen(const char *filename, const char *mode, int shflag);
+char *CDECL fgets(char *str, int count, _FILE *stream);
+SIZE_T CDECL fread(void *buffer, SIZE_T size, SIZE_T count, _FILE *stream);
+_FILE *CDECL _fsopen(const char *filename, const char *mode, int shflag);
 int CDECL _sopen(const char *path, int oflag, int shflag, int pmode);
 int CDECL _read(int fd, void *buffer, unsigned int count);
 int CDECL _close(int fd);
@@ -144,20 +141,20 @@ void CDECL free(void *ptr);
 void *CDECL memcpy(void *dest, const void *src, SIZE_T count);
 void *CDECL memmove(void *dest, const void *src, SIZE_T count);
 int CDECL memcmp(const void *lhs, const void *rhs, SIZE_T count);
-void CDECL qsort(void *base, SIZE_T num, SIZE_T size, int (*compar)(const void *, const void *));
-int CDECL fflush(FILE *stream);
-int CDECL_NO_CONV vfwprintf(FILE *stream, const WCHAR *format, va_list args);
-FILE *CDECL fopen(const char *filename, const char *mode);
+void CDECL qsort(void *base, SIZE_T num, SIZE_T size, sort_compare compare);
+int CDECL fflush(_FILE *stream);
+int CDECL_NO_CONV vfwprintf(_FILE *stream, const WCHAR *format, va_list args);
+_FILE *CDECL fopen(const char *filename, const char *mode);
 int CDECL _dup2(int fd1, int fd2);
 int CDECL _isatty(int fd);
-int CDECL fseek(FILE *stream, long offset, int origin);
-long CDECL ftell(FILE *stream);
-int CDECL feof(FILE *stream);
-int CDECL fputws(const WCHAR *str, FILE *stream);
+int CDECL fseek(_FILE *stream, long offset, int origin);
+long CDECL ftell(_FILE *stream);
+int CDECL feof(_FILE *stream);
+int CDECL fputws(const WCHAR *str, _FILE *stream);
 int CDECL _cputws(const WCHAR *string);
-WCHAR *CDECL fgetws(WCHAR *buffer, int size, FILE *stream);
-WINT_T CDECL fgetwc(FILE *stream);
-int CDECL _wfopen_s(FILE **stream, const WCHAR *filename, const WCHAR *mode);
+WCHAR *CDECL fgetws(WCHAR *buffer, int size, _FILE *stream);
+WINT_T CDECL fgetwc(_FILE *stream);
+int CDECL _wfopen_s(_FILE **stream, const WCHAR *filename, const WCHAR *mode);
 int CDECL _wcsicmp(const WCHAR *lhs, const WCHAR *rhs);
 int CDECL _wmakepath_s(WCHAR *path, SIZE_T sizeInWords, const WCHAR *drive, const WCHAR *dir, const WCHAR *fname,
 					   const WCHAR *ext);
@@ -175,10 +172,10 @@ int CDECL _crt_debugger_hook(int value);
 int CDECL _configthreadlocale(int mode);
 void CDECL __setusermatherr(void *handler);
 void CDECL _cexit();
-int CDECL_NO_CONV vfprintf(FILE *stream, const char *format, va_list args);
-int CDECL_NO_CONV fprintf(FILE *stream, const char *format, ...);
-int CDECL fputc(int ch, FILE *stream);
-SIZE_T CDECL fwrite(const void *buffer, SIZE_T size, SIZE_T count, FILE *stream);
+int CDECL_NO_CONV vfprintf(_FILE *stream, const char *format, va_list args);
+int CDECL_NO_CONV fprintf(_FILE *stream, const char *format, ...);
+int CDECL fputc(int ch, _FILE *stream);
+SIZE_T CDECL fwrite(const void *buffer, SIZE_T size, SIZE_T count, _FILE *stream);
 char *CDECL strerror(int errnum);
 char *CDECL strchr(const char *str, int character);
 struct lconv *CDECL localeconv();
@@ -220,9 +217,9 @@ int CDECL iswdigit(WINT_T w);
 const WCHAR *CDECL wcschr(const WCHAR *str, WCHAR c);
 const WCHAR *CDECL wcsrchr(const WCHAR *str, WCHAR c);
 unsigned long CDECL wcstoul(const WCHAR *strSource, WCHAR **endptr, int base);
-FILE *CDECL _wfsopen(const WCHAR *filename, const WCHAR *mode, int shflag);
+_FILE *CDECL _wfsopen(const WCHAR *filename, const WCHAR *mode, int shflag);
 int CDECL puts(const char *str);
-int CDECL fclose(FILE *stream);
+int CDECL fclose(_FILE *stream);
 int CDECL _flushall();
 int *CDECL _errno();
 LONG_PTR CDECL _wspawnvp(int mode, const WCHAR *cmdname, const WCHAR *const *argv);

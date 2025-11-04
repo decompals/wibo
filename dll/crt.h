@@ -2,9 +2,9 @@
 
 #include "types.h"
 
-typedef void (_CC_CDECL *_PVFV)();
-typedef int (_CC_CDECL *_PIFV)();
-typedef void (_CC_CDECL *_invalid_parameter_handler)(const WCHAR *, const WCHAR *, const WCHAR *, UINT, UINT_PTR);
+typedef void(_CC_CDECL *_PVFV)();
+typedef int(_CC_CDECL *_PIFV)();
+typedef void(_CC_CDECL *_invalid_parameter_handler)(const WCHAR *, const WCHAR *, const WCHAR *, UINT, UINT_PTR);
 
 typedef enum _crt_app_type {
 	_crt_unknown_app,
@@ -18,11 +18,13 @@ typedef enum _crt_argv_mode {
 	_crt_argv_expanded_arguments,
 } _crt_argv_mode;
 
-typedef void (_CC_CDECL *signal_handler)(int);
-typedef int (_CC_CDECL *sort_compare)(const void *, const void *);
-using FILE = struct _IO_FILE;
+typedef void(_CC_CDECL *signal_handler)(int);
+typedef int(_CC_CDECL *sort_compare)(const void *, const void *);
 
 namespace crt {
+
+extern int _commode;
+extern int _fmode;
 
 void CDECL _initterm(const _PVFV *ppfn, const _PVFV *end);
 int CDECL _initterm_e(const _PIFV *ppfn, const _PIFV *end);
@@ -65,10 +67,10 @@ void CDECL _exit(int status);
 void CDECL abort();
 signal_handler CDECL signal(int signum, signal_handler handler);
 void *CDECL __acrt_iob_func(unsigned int index);
-int CDECL_NO_CONV __stdio_common_vfprintf(unsigned long long options, FILE *stream, const char *format, void *locale,
-								  va_list args);
+int CDECL_NO_CONV __stdio_common_vfprintf(unsigned long long options, _FILE *stream, const char *format, void *locale,
+										  va_list args);
 int CDECL_NO_CONV __stdio_common_vsprintf(unsigned long long options, char *buffer, SIZE_T len, const char *format,
-								  void *locale, va_list args);
+										  void *locale, va_list args);
 void CDECL qsort(void *base, SIZE_T num, SIZE_T size, sort_compare compare);
 int CDECL puts(const char *str);
 

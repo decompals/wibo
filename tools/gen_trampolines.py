@@ -29,14 +29,13 @@ from clang.cindex import (
     Cursor,
     CursorKind,
     Index,
+    StorageClass,
     TranslationUnit,
     Type,
     TypeKind,
     conf,
 )
-from clang.cindex import (
-    Type as CXType,
-)
+from clang.cindex import Type as CXType
 
 # Allow libclang path to be specified via environment variable
 if "LIBCLANG_PATH" in os.environ:
@@ -121,6 +120,12 @@ class TypedefInfo:
     variadic: bool
     return_type: Type
     args: List[ArgInfo] = field(default_factory=list)
+
+
+@dataclass
+class VarInfo:
+    qualified_ns: str
+    name: str
 
 
 def parse_tu(
@@ -338,6 +343,35 @@ def collect_typedefs(tu: TranslationUnit) -> List[TypedefInfo]:
     return sorted(out.values(), key=lambda t: t.name)
 
 
+def collect_variables(tu: TranslationUnit, ns_filter: Optional[str]) -> List[VarInfo]:
+    """Collect extern variable declarations from the translation unit."""
+    want_ns = ns_filter.split("::") if ns_filter else None
+    out: dict[str, VarInfo] = {}
+
+    def visit(node: Cursor) -> None:
+        if node.kind == CursorKind.VAR_DECL:
+            if node.storage_class != StorageClass.EXTERN or node.is_definition():
+                return
+            ns_parts = _cursor_namespace(node)
+            if want_ns is not None and ns_parts != want_ns:
+                return
+            name = node.spelling
+            if not name:
+                return
+            out[name] = VarInfo(
+                qualified_ns="::".join(ns_parts),
+                name=name,
+            )
+
+        if node.kind in (CursorKind.TRANSLATION_UNIT, CursorKind.NAMESPACE):
+            for c in node.get_children():
+                visit(c)
+
+    if tu.cursor is not None:
+        visit(tu.cursor)
+    return sorted(out.values(), key=lambda v: v.name)
+
+
 def emit_cc_thunk(f: FuncInfo | TypedefInfo, lines: List[str]):
     if isinstance(f, TypedefInfo):
         # Host-to-guest
@@ -543,7 +577,10 @@ def emit_host_to_guest_thunks(
 
 
 def emit_header_mapping(
-    dll: str, funcs: Iterable[FuncInfo], typedefs: Iterable[TypedefInfo]
+    dll: str,
+    funcs: Iterable[FuncInfo],
+    typedefs: Iterable[TypedefInfo],
+    variables: Iterable[VarInfo],
 ) -> str:
     guard = f"WIBO_GEN_{dll.upper()}_THUNKS_H"
     lines: List[str] = []
@@ -616,6 +653,11 @@ def emit_header_mapping(
         lines.append(
             f'\tif (strcmp(name, "{f.name}") == 0) return (void*)&thunk_{dll}_{f.name};'
         )
+    for v in variables:
+        qualified = f"{v.qualified_ns}::{v.name}" if v.qualified_ns else v.name
+        lines.append(
+            f'\tif (strcmp(name, "{v.name}") == 0) return (void*)&{qualified};'
+        )
     lines.append("\treturn NULL;")
     lines.append("}")
 
@@ -644,9 +686,10 @@ def main() -> int:
     tu = parse_tu(args.headers, args.incs, target)
     funcs = collect_functions(tu, args.ns)
     typedefs = collect_typedefs(tu)
+    variables = collect_variables(tu, args.ns)
 
-    if not funcs and not typedefs:
-        sys.stderr.write("No functions or typedefs found for generation.\n")
+    if not funcs and not typedefs and not variables:
+        sys.stderr.write("No functions, typedefs, or variables found for generation.\n")
         return 1
 
     lines: List[str] = []
@@ -659,7 +702,7 @@ def main() -> int:
     emit_host_to_guest_thunks(lines, typedefs)
 
     asm = "\n".join(lines) + "\n"
-    hdr = emit_header_mapping(args.dll, funcs, typedefs)
+    hdr = emit_header_mapping(args.dll, funcs, typedefs, variables)
 
     args.out_asm.parent.mkdir(parents=True, exist_ok=True)
     args.out_hdr.parent.mkdir(parents=True, exist_ok=True)

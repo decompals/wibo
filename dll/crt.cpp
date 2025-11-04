@@ -15,6 +15,25 @@
 #include <unistd.h>
 #include <vector>
 
+namespace {
+
+FILE *mapToHostFile(_FILE *file) {
+	if (!file)
+		return nullptr;
+	switch (file->_file) {
+	case STDIN_FILENO:
+		return stdin;
+	case STDOUT_FILENO:
+		return stdout;
+	case STDERR_FILENO:
+		return stderr;
+	default:
+		return nullptr;
+	}
+}
+
+} // namespace
+
 namespace crt {
 
 int _commode = 0;
@@ -302,15 +321,18 @@ void *CDECL __acrt_iob_func(unsigned int index) {
 	return nullptr;
 }
 
-int CDECL_NO_CONV __stdio_common_vfprintf(unsigned long long options, FILE *stream, const char *format, void *locale,
-								  va_list args) {
+int CDECL_NO_CONV __stdio_common_vfprintf(unsigned long long options, _FILE *stream, const char *format, void *locale,
+										  va_list args) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("__stdio_common_vfprintf(%llu, %p, %s, %p, %p)\n", options, stream, format, locale, args);
-	return vfprintf(stream, format, args);
+	FILE *hostFile = mapToHostFile(stream);
+	if (!hostFile)
+		return -1;
+	return vfprintf(hostFile, format, args);
 }
 
 int CDECL_NO_CONV __stdio_common_vsprintf(unsigned long long options, char *buffer, SIZE_T len, const char *format,
-								  void *locale, va_list args) {
+										  void *locale, va_list args) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("__stdio_common_vsprintf(%llu, %p, %zu, %s, %p, ...)\n", options, buffer, len, format, locale);
 	if (!buffer || !format)

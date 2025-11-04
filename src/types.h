@@ -444,3 +444,19 @@ typedef struct _MEMORY_BASIC_INFORMATION {
 	DWORD Protect;
 	DWORD Type;
 } MEMORY_BASIC_INFORMATION, *PMEMORY_BASIC_INFORMATION;
+
+#define _IOB_ENTRIES 20
+
+typedef struct _iobuf {
+	_iobuf() : _file(-1) {}
+	explicit _iobuf(int file) : _file(file) {}
+
+	char *_ptr = nullptr;
+	int _cnt = 0;
+	char *_base = nullptr;
+	int _flag = 0;
+	int _file;
+	int _charbuf = 0;
+	int _bufsiz = 0;
+	char *_tmpfname = nullptr;
+} _FILE;

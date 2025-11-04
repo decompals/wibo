@@ -251,34 +251,57 @@ int CDECL __setusermatherr(void *handler) {
 	return 0;
 }
 
-int CDECL _initialize_onexit_table(void *table) {
+int CDECL _initialize_onexit_table(_onexit_table_t *table) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("STUB: _initialize_onexit_table(%p)\n", table);
-	wibo::registerOnExitTable(table);
+	DEBUG_LOG("_initialize_onexit_table(%p)\n", table);
+	if (!table)
+		return -1;
+	if (table->first != table->last)
+		return 0;
+	table->first = nullptr;
+	table->last = nullptr;
+	table->end = nullptr;
 	return 0;
 }
 
-int CDECL _register_onexit_function(void *table, void (*func)()) {
+int CDECL _register_onexit_function(_onexit_table_t *table, _onexit_t func) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("STUB: _register_onexit_function(%p, %p)\n", table, func);
-	wibo::addOnExitFunction(table, func);
+	DEBUG_LOG("_register_onexit_function(%p, %p)\n", table, func);
+	if (!table || !func)
+		return -1;
+	if (table->last == table->end) {
+		size_t count = table->end - table->first;
+		size_t newCount = count + 1;
+		if (newCount <= 0)
+			return -1;
+		_onexit_t *newTable =
+			static_cast<_onexit_t *>(wibo::heap::guestRealloc(table->first, newCount * sizeof(_onexit_t)));
+		if (!newTable)
+			return -1;
+		table->first = newTable;
+		table->last = newTable + count;
+		table->end = newTable + newCount;
+	}
+	*table->last++ = func;
 	return 0;
 }
 
-int CDECL _execute_onexit_table(void *table) {
+int CDECL _execute_onexit_table(_onexit_table_t *table) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("STUB: _execute_onexit_table(%p)\n", table);
-	wibo::executeOnExitTable(table);
+	DEBUG_LOG("_execute_onexit_table(%p)\n", table);
+	if (!table)
+		return -1;
+	for (auto it = table->first; it != table->last; ++it) {
+		DEBUG_LOG("Calling onexit_table function %p\n", *it);
+		call__onexit_t(*it);
+	}
 	return 0;
 }
 
 void CDECL exit(int status) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("exit(%i)\n", status);
-	for (auto it = atexitFuncs.rbegin(); it != atexitFuncs.rend(); ++it) {
-		DEBUG_LOG("Calling atexit function %p\n", *it);
-		call__PVFV(*it);
-	}
+	_cexit();
 	kernel32::exitInternal(status);
 }
 
@@ -289,6 +312,7 @@ void CDECL _cexit() {
 		DEBUG_LOG("Calling atexit function %p\n", *it);
 		call__PVFV(*it);
 	}
+	std::fflush(nullptr);
 }
 
 void CDECL _exit(int status) {

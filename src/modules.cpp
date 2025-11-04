@@ -132,7 +132,6 @@ struct ModuleRegistry {
 	std::unordered_map<std::string, wibo::ModuleInfo *> modulesByAlias;
 	std::optional<std::filesystem::path> dllDirectory;
 	bool initialized = false;
-	std::unordered_map<void *, wibo::ModuleInfo *> onExitTables;
 	std::unordered_map<const wibo::ModuleStub *, std::vector<std::string>> builtinAliasLists;
 	std::unordered_map<std::string, wibo::ModuleInfo *> builtinAliasMap;
 	std::unordered_set<std::string> pinnedAliases;
@@ -797,7 +796,7 @@ void shutdownModuleRegistry() {
 		if (!info || info->moduleStub) {
 			continue;
 		}
-		runPendingOnExit(*info);
+		// runPendingOnExit(*info);
 		if (info->tlsInfo.hasTls) {
 			runModuleTlsCallbacks(*info, TLS_PROCESS_DETACH);
 		}
@@ -810,7 +809,6 @@ void shutdownModuleRegistry() {
 	reg->modulesByAlias.clear();
 	reg->dllDirectory.reset();
 	reg->initialized = false;
-	reg->onExitTables.clear();
 }
 
 ModuleInfo *moduleInfoFromHandle(HMODULE module) {
@@ -858,45 +856,6 @@ ModuleInfo *moduleInfoFromAddress(void *addr) {
 	}
 	auto reg = registry();
 	return moduleFromAddress(*reg, addr);
-}
-
-void registerOnExitTable(void *table) {
-	if (!table)
-		return;
-	auto reg = registry();
-	if (reg->onExitTables.find(table) == reg->onExitTables.end()) {
-		if (auto *info = moduleFromAddress(*reg, table)) {
-			reg->onExitTables[table] = info;
-		}
-	}
-}
-
-void addOnExitFunction(void *table, _PVFV func) {
-	if (!func)
-		return;
-	auto reg = registry();
-	ModuleInfo *info = nullptr;
-	auto it = reg->onExitTables.find(table);
-	if (it != reg->onExitTables.end()) {
-		info = it->second;
-	} else if (table) {
-		info = moduleFromAddress(*reg, table);
-		if (info)
-			reg->onExitTables[table] = info;
-	}
-	if (info) {
-		info->onExitFunctions.push_back(func);
-	}
-}
-
-void runPendingOnExit(ModuleInfo &info) {
-	for (auto it = info.onExitFunctions.rbegin(); it != info.onExitFunctions.rend(); ++it) {
-		auto *fn = *it;
-		if (fn) {
-			call__PVFV(fn);
-		}
-	}
-	info.onExitFunctions.clear();
 }
 
 bool initializeModuleTls(ModuleInfo &module) {
@@ -1035,23 +994,6 @@ void releaseModuleTls(ModuleInfo &module) {
 		}
 	}
 	info = wibo::ModuleTlsInfo{};
-}
-
-void executeOnExitTable(void *table) {
-	auto reg = registry();
-	ModuleInfo *info = nullptr;
-	if (table) {
-		auto it = reg->onExitTables.find(table);
-		if (it != reg->onExitTables.end()) {
-			info = it->second;
-			reg->onExitTables.erase(it);
-		} else {
-			info = moduleFromAddress(*reg, table);
-		}
-	}
-	if (info) {
-		runPendingOnExit(*info);
-	}
 }
 
 void notifyDllThreadAttach() {
@@ -1207,14 +1149,7 @@ ModuleInfo *loadModule(const char *dllName) {
 		if (!callDllMain(*raw, DLL_PROCESS_ATTACH, nullptr)) {
 			DEBUG_LOG("  DllMain failed for %s\n", raw->originalName.c_str());
 			releaseModuleTls(*raw);
-			runPendingOnExit(*raw);
-			for (auto it = reg->onExitTables.begin(); it != reg->onExitTables.end();) {
-				if (it->second == raw) {
-					it = reg->onExitTables.erase(it);
-				} else {
-					++it;
-				}
-			}
+			// runPendingOnExit(*raw);
 			for (auto it = reg->modulesByAlias.begin(); it != reg->modulesByAlias.end();) {
 				if (it->second == raw) {
 					it = reg->modulesByAlias.erase(it);
@@ -1308,14 +1243,7 @@ void freeModule(ModuleInfo *info) {
 	}
 	info->refCount--;
 	if (info->refCount == 0) {
-		for (auto it = reg->onExitTables.begin(); it != reg->onExitTables.end();) {
-			if (it->second == info) {
-				it = reg->onExitTables.erase(it);
-			} else {
-				++it;
-			}
-		}
-		runPendingOnExit(*info);
+		// runPendingOnExit(*info);
 		if (info->tlsInfo.hasTls) {
 			runModuleTlsCallbacks(*info, TLS_PROCESS_DETACH);
 		}

@@ -20,6 +20,13 @@ typedef enum _crt_argv_mode {
 
 typedef void(_CC_CDECL *signal_handler)(int);
 typedef int(_CC_CDECL *sort_compare)(const void *, const void *);
+typedef int(_CC_CDECL *_onexit_t)();
+
+struct _onexit_table_t {
+	_onexit_t *first;
+	_onexit_t *last;
+	_onexit_t *end;
+};
 
 namespace crt {
 
@@ -58,9 +65,9 @@ void *CDECL memmove(void *dest, const void *src, SIZE_T count);
 void *CDECL memset(void *dest, int ch, SIZE_T count);
 int CDECL memcmp(const void *lhs, const void *rhs, SIZE_T count);
 int CDECL __setusermatherr(void *handler);
-int CDECL _initialize_onexit_table(void *table);
-int CDECL _register_onexit_function(void *table, void (*func)());
-int CDECL _execute_onexit_table(void *table);
+int CDECL _initialize_onexit_table(_onexit_table_t *table);
+int CDECL _register_onexit_function(_onexit_table_t *table, _onexit_t func);
+int CDECL _execute_onexit_table(_onexit_table_t *table);
 void CDECL exit(int status);
 void CDECL _cexit();
 void CDECL _exit(int status);

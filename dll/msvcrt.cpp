@@ -14,9 +14,7 @@
 #include <array>
 #include <cctype>
 #include <cerrno>
-#include <climits>
 #include <clocale>
-#include <cmath>
 #include <csignal>
 #include <cstdarg>
 #include <cstdint>
@@ -28,13 +26,11 @@
 #include <cwctype>
 #include <fcntl.h>
 #include <filesystem>
-#include <float.h>
-#include <math.h>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <spawn.h>
-#include <stdio.h>
+#include <cstdio>
 #include <string>
 #include <strings.h>
 #include <sys/stat.h>
@@ -76,7 +72,7 @@ FILE *mapToHostFile(_FILE *file) {
 _FILE *mapToGuestFile(FILE *file) {
 	if (!file)
 		return nullptr;
-	int fd = file->_fileno;
+	int fd = fileno(file);
 	_FILE *out = new (wibo::heap::guestMalloc(sizeof(_FILE))) _FILE(fd);
 	std::lock_guard lock(g_fileMutex);
 	g_files[fd] = file;
@@ -87,9 +83,13 @@ int closeGuestFile(_FILE *file) {
 	if (!file)
 		return -1;
 	int fd = file->_file;
-	std::lock_guard lock(g_fileMutex);
-	g_files.erase(fd);
-	return close(fd);
+	{
+		std::lock_guard lock(g_fileMutex);
+		g_files.erase(fd);
+	}
+	int ret = close(fd);
+	wibo::heap::guestFree(file);
+	return ret;
 }
 
 } // namespace
@@ -112,6 +112,8 @@ namespace msvcrt {
 
 	static int mbCodePageSetting = MB_CP_ANSI;
 	static unsigned int floatingPointControlWord = 0x0009001F; // _CW_DEFAULT for x87
+	static std::array<unsigned char, 257> mbctypeTable;
+	static std::vector<_onexit_t> onExitFuncs;
 
 	constexpr unsigned short PCTYPE_UPPER = 0x0001;
 	constexpr unsigned short PCTYPE_LOWER = 0x0002;
@@ -132,17 +134,11 @@ namespace msvcrt {
 
 	using ByteRange = std::pair<uint8_t, uint8_t>;
 
-	std::array<unsigned char, 257> &mbctypeTable() {
-		static std::array<unsigned char, 257> table = {};
-		return table;
-	}
-
 	template <size_t N>
 	void setMbctypeFlag(unsigned char flag, const std::array<ByteRange, N> &ranges) {
-		auto &table = mbctypeTable();
 		for (const auto &range : ranges) {
 			for (int value = range.first; value <= range.second; ++value) {
-				table[static_cast<size_t>(value)] |= flag;
+				mbctypeTable[static_cast<size_t>(value)] |= flag;
 			}
 		}
 	}
@@ -150,8 +146,7 @@ namespace msvcrt {
 	int mbCurMaxForCodePage(int codepage);
 
 	void updateMbctypeForCodePage(int codepage) {
-		auto &table = mbctypeTable();
-		table.fill(0);
+		mbctypeTable.fill(0);
 
 		switch (codepage) {
 		case 932: {
@@ -208,12 +203,12 @@ namespace msvcrt {
 
 	bool isLeadByte(unsigned char byte) {
 		ensureMbctypeInitialized();
-		return (mbctypeTable()[byte] & _M1) != 0;
+		return (mbctypeTable[byte] & _M1) != 0;
 	}
 
 	bool isTrailByte(unsigned char byte) {
 		ensureMbctypeInitialized();
-		return (mbctypeTable()[byte] & _M2) != 0;
+		return (mbctypeTable[byte] & _M2) != 0;
 	}
 
 	std::once_flag &pctypeInitFlag() {
@@ -422,8 +417,8 @@ namespace msvcrt {
 	unsigned char *CDECL __p__mbctype() {
 		HOST_CONTEXT_GUARD();
 		ensureMbctypeInitialized();
-		DEBUG_LOG("__p__mbctype() -> %p\n", mbctypeTable().data());
-		return mbctypeTable().data();
+		DEBUG_LOG("__p__mbctype() -> %p\n", mbctypeTable.data());
+		return mbctypeTable.data();
 	}
 
 	unsigned short **CDECL __p__pctype() {
@@ -447,38 +442,10 @@ namespace msvcrt {
 	}
 
 	namespace {
-		struct DllOnExitTable {
-			_PVFV **pbegin;
-			_PVFV **pend;
-			std::vector<_PVFV> callbacks;
-			bool registered;
-		};
-
 		constexpr SIZE_T LOCK_TABLE_SIZE = 64;
 		std::array<std::recursive_mutex, LOCK_TABLE_SIZE> &lockTable() {
 			static std::array<std::recursive_mutex, LOCK_TABLE_SIZE> table;
 			return table;
-		}
-
-		std::vector<DllOnExitTable> &dllOnExitTables() {
-			static std::vector<DllOnExitTable> tables;
-			return tables;
-		}
-
-		std::mutex &dllOnExitMutex() {
-			static std::mutex mutex;
-			return mutex;
-		}
-
-		DllOnExitTable &ensureDllOnExitTable(_PVFV **pbegin, _PVFV **pend) {
-			auto &tables = dllOnExitTables();
-			for (auto &table : tables) {
-				if (table.pbegin == pbegin && table.pend == pend) {
-					return table;
-				}
-			}
-			tables.push_back(DllOnExitTable{pbegin, pend, {}, false});
-			return tables.back();
 		}
 
 		std::string normalizeEnvStringForWindows(const char *src) {
@@ -742,20 +709,13 @@ namespace msvcrt {
 		return 0;
 	}
 
-	static void runExitFunc(int status, void *arg) {
-		(void)status;
-		(void)call__onexit_t(reinterpret_cast<_onexit_t>(arg));
-	}
-
 	_onexit_t CDECL _onexit(_onexit_t func) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_onexit(%p)\n", func);
 		if (!func) {
 			return nullptr;
 		}
-		if (on_exit(runExitFunc, reinterpret_cast<void *>(func)) != 0) {
-			return nullptr;
-		}
+		onExitFuncs.push_back(func);
 		return func;
 	}
 
@@ -1768,36 +1728,26 @@ namespace msvcrt {
 		lockTable()[static_cast<SIZE_T>(locknum)].unlock();
 	}
 
-	_onexit_t CDECL __dllonexit(_onexit_t func, _PVFV **pbegin, _PVFV **pend) {
+	_onexit_t CDECL __dllonexit(_onexit_t func, _onexit_t **pbegin, _onexit_t **pend) {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("__dllonexit(%p, %p, %p)\n", func, pbegin, pend);
 		if (!pbegin || !pend) {
 			return nullptr;
 		}
 
-		std::lock_guard<std::mutex> guard(dllOnExitMutex());
-		auto &table = ensureDllOnExitTable(pbegin, pend);
-		if (!table.registered) {
-			wibo::registerOnExitTable(reinterpret_cast<void *>(pbegin));
-			table.registered = true;
+		size_t len = pend - pbegin;
+		if (++len <= 0) {
+			return nullptr;
 		}
 
-		if (func) {
-			auto callback = reinterpret_cast<_PVFV>(func);
-			table.callbacks.push_back(callback);
-			wibo::addOnExitFunction(reinterpret_cast<void *>(pbegin), reinterpret_cast<void (*)()>(callback));
+		_onexit_t *table = static_cast<_onexit_t *>(wibo::heap::guestRealloc(pbegin, len * sizeof(_onexit_t)));
+		if (!table) {
+			return nullptr;
 		}
-
-		if (table.callbacks.empty()) {
-			*pbegin = nullptr;
-			*pend = nullptr;
-		} else {
-			_PVFV *dataPtr = table.callbacks.data();
-			*pbegin = dataPtr;
-			*pend = dataPtr + table.callbacks.size();
-		}
-
-		return reinterpret_cast<_onexit_t>(func);
+		*pbegin = table;
+		*pend = table + len;
+		table[len - 1] = func;
+		return func;
 	}
 
 	void CDECL free(void* ptr){
@@ -2240,6 +2190,9 @@ namespace msvcrt {
 	void CDECL _cexit() {
 		HOST_CONTEXT_GUARD();
 		DEBUG_LOG("_cexit()\n");
+		for (_onexit_t func : onExitFuncs) {
+			call__onexit_t(func);
+		}
 		std::fflush(nullptr);
 	}
 
@@ -2733,6 +2686,7 @@ namespace msvcrt {
 	void CDECL exit(int status) {
 		HOST_CONTEXT_GUARD();
 		VERBOSE_LOG("exit(%d)\n", status);
+		_cexit();
 		kernel32::exitInternal(status);
 	}
 

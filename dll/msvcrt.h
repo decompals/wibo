@@ -136,7 +136,7 @@ void *CDECL realloc(void *ptr, SIZE_T size);
 void *CDECL _malloc_crt(SIZE_T size);
 void CDECL _lock(int locknum);
 void CDECL _unlock(int locknum);
-_onexit_t CDECL __dllonexit(_onexit_t func, _PVFV **pbegin, _PVFV **pend);
+_onexit_t CDECL __dllonexit(_onexit_t func, _onexit_t **pbegin, _onexit_t **pend);
 void CDECL free(void *ptr);
 void *CDECL memcpy(void *dest, const void *src, SIZE_T count);
 void *CDECL memmove(void *dest, const void *src, SIZE_T count);

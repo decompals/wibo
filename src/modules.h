@@ -103,7 +103,6 @@ struct ModuleInfo {
 	std::vector<void *> exportsByOrdinal;
 	std::unordered_map<std::string, uint16_t> exportNameToOrdinal;
 	bool exportsInitialized = false;
-	std::vector<_PVFV> onExitFunctions;
 	ModuleTlsInfo tlsInfo;
 };
 extern ModuleInfo *mainModule;
@@ -117,10 +116,6 @@ void setDllDirectoryOverride(const std::filesystem::path &path);
 void clearDllDirectoryOverride();
 std::optional<std::filesystem::path> dllDirectoryOverride();
 ModuleInfo *findLoadedModule(const char *name);
-void registerOnExitTable(void *table);
-void addOnExitFunction(void *table, _PVFV func);
-void executeOnExitTable(void *table);
-void runPendingOnExit(ModuleInfo &info);
 void notifyDllThreadAttach();
 void notifyDllThreadDetach();
 BOOL disableThreadNotifications(ModuleInfo *info);

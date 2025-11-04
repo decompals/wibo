@@ -536,6 +536,7 @@ LPVOID WINAPI VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationTy
 		setLastError(err);
 		return nullptr;
 	}
+	DEBUG_LOG("-> success (base=%p, size=%zu)\n", base, size);
 	return base;
 }
 

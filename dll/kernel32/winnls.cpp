@@ -3,11 +3,12 @@
 #include "context.h"
 #include "errors.h"
 #include "internal.h"
+#include "kernel32.h"
+#include "kernel32_trampolines.h"
 #include "strutil.h"
 
 #include <algorithm>
 #include <cstring>
-#include <cwctype>
 #include <initializer_list>
 #include <string>
 #include <vector>
@@ -236,7 +237,7 @@ BOOL WINAPI EnumSystemLocalesA(LOCALE_ENUMPROCA lpLocaleEnumProc, DWORD dwFlags)
 	}
 	// Return to guest context before callback
 	char localeId[] = "00000409"; // en-US
-	return lpLocaleEnumProc(localeId);
+	return call_LOCALE_ENUMPROCA(lpLocaleEnumProc, localeId);
 }
 
 LCID WINAPI GetUserDefaultLCID() {

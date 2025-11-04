@@ -7,8 +7,6 @@
 #include "files.h"
 #include "heap.h"
 #include "kernel32/internal.h"
-#include "msvcrt.h"
-#include "msvcrt_trampolines.h"
 #include "strutil.h"
 #include "tls.h"
 
@@ -1278,6 +1276,7 @@ void *resolveFuncByName(ModuleInfo *info, const char *funcName) {
 		if (it != info->exportNameToOrdinal.end()) {
 			return resolveFuncByOrdinal(info, it->second);
 		}
+		return nullptr;
 	}
 	return reinterpret_cast<void *>(resolveMissingFuncName(info->originalName.c_str(), funcName));
 }
@@ -1303,6 +1302,7 @@ void *resolveFuncByOrdinal(ModuleInfo *info, uint16_t ordinal) {
 				}
 			}
 		}
+		return nullptr;
 	}
 	return reinterpret_cast<void *>(resolveMissingFuncOrdinal(info->originalName.c_str(), ordinal));
 }

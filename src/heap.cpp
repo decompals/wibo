@@ -435,7 +435,7 @@ void initializeImpl() {
 
 	// Map and register guest arena (below 2GB, exclusive)
 	ArenaRange guest;
-	if (mapArena(kGuestArenaSize, kLowMemoryStart, kTopDownStart, false, "wibo guest arena", guest)) {
+	if (mapArena(kGuestArenaSize, kLowMemoryStart, kTopDownStart, true, "wibo guest arena", guest)) {
 		bool ok = mi_manage_os_memory_ex(guest.start, guest.size,
 										 /*is_committed*/ false,
 										 /*is_pinned*/ false,

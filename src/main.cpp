@@ -84,6 +84,7 @@ void wibo::initializeTibStackInfo(TEB *tibPtr) {
 	}
 	tibPtr->Tib.StackLimit = guestLimit;
 	tibPtr->Tib.StackBase = guestBase;
+	tibPtr->CurrentStackPointer = guestBase;
 	DEBUG_LOG("initializeTibStackInfo: using guest stack base=%p limit=%p\n", tibPtr->Tib.StackBase,
 			  tibPtr->Tib.StackLimit);
 }
@@ -115,8 +116,8 @@ bool wibo::installTibForCurrentThread(TEB *tibPtr) {
 		DEBUG_LOG("set_thread_area: reused entry=%d base=%p\n", tibEntryNumber, tibPtr);
 	}
 
-	tibPtr->HostFsSelector = static_cast<uint16_t>((desc.entry_number << 3) | 3);
-	tibPtr->HostGsSelector = 0;
+	tibPtr->CurrentFsSelector = static_cast<uint16_t>((desc.entry_number << 3) | 3);
+	tibPtr->CurrentGsSelector = 0;
 	currentThreadTeb = tibPtr;
 	return true;
 }

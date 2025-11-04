@@ -6,7 +6,7 @@
 """
 Generate Windows ABI trampolines by scanning C++ prototypes using libclang.
 
-This emits x86 trampolines for guest-to-host calls.
+This emits x86 trampolines for guest<->host calls.
 """
 
 if __name__ == "__main__":
@@ -306,7 +306,7 @@ def collect_typedefs(tu: TranslationUnit) -> List[TypedefInfo]:
 
         variadic = func_type.is_function_variadic()
         args = _collect_args(func_type)
-        return_type = _type_to_string(func_type.get_result())
+        return_type = func_type.get_result()
 
         out[name] = TypedefInfo(
             name=name,
@@ -341,14 +341,14 @@ def collect_typedefs(tu: TranslationUnit) -> List[TypedefInfo]:
 def emit_cc_thunk(f: FuncInfo | TypedefInfo, lines: List[str]):
     if isinstance(f, TypedefInfo):
         # Host-to-guest
-        target = "[ebp+8]"
-        arg_off = 12
+        target = "[eax+4]"
+        arg_off = 8
         align = 0
         host_to_guest = True
     elif isinstance(f, FuncInfo):
         # Guest-to-host
         target = f.mangled
-        arg_off = 8
+        arg_off = 4
         align = 16
         host_to_guest = False
 
@@ -378,7 +378,7 @@ def emit_cc_thunk(f: FuncInfo | TypedefInfo, lines: List[str]):
         pass
     else:
         raise NotImplementedError(
-            f"Unsupported target calling convention {f.target_cc} for function {f.name}"
+            f"Unsupported target calling convention {f.target_cc.name} for function {f.name}"
         )
 
     # Bytes we will push for the call (exclude args passed in registers)
@@ -386,24 +386,31 @@ def emit_cc_thunk(f: FuncInfo | TypedefInfo, lines: List[str]):
         arg.slot_size for i, arg in enumerate(f.args) if i not in reg_indices
     )
 
-    # Save frame pointer and use EBP for argument access
-    lines.append("\tpush ebp")
-    lines.append("\tmov ebp, esp")
-
     # Get current TIB
     if host_to_guest:
-        lines.append("\tmov edx, [gs:currentThreadTeb@ntpoff]")
+        lines.append("\tmov ecx, gs:[currentThreadTeb@ntpoff]")
     else:
-        lines.append("\tmov edx, [fs:0x18]")
-    # Save previous fs and gs
-    lines.append("\tmov cx, fs")
-    lines.append("\txchg cx, word ptr [edx+0xf98]")
-    lines.append("\tmov fs, cx")
-    lines.append("\tmov cx, gs")
-    lines.append("\txchg cx, word ptr [edx+0xf9a]")
-    lines.append("\tmov gs, cx")
+        lines.append("\tmov ecx, fs:[0x18]")
 
-    # TODO: switch stacks here
+    # Swap fs and gs
+    lines.append("\tmov ax, fs")
+    lines.append("\tmov dx, word ptr [ecx+0xf98]")
+    lines.append("\tmov word ptr [ecx+0xf98], ax")
+    lines.append("\tmov fs, dx")
+    lines.append("\tmov ax, gs")
+    lines.append("\tmov dx, word ptr [ecx+0xf9a]")
+    lines.append("\tmov word ptr [ecx+0xf9a], ax")
+    lines.append("\tmov gs, dx")
+
+    # Store guest stack pointer in eax for arg access
+    if len(f.args) > 0 or host_to_guest:
+        lines.append("\tmov eax, esp")
+
+    # Swap stack pointer
+    lines.append("\tpush ebp")
+    lines.append("\tmov ebp, dword ptr [ecx+0xf9c]")
+    lines.append("\tmov dword ptr [ecx+0xf9c], esp")
+    lines.append("\tmov esp, ebp")
 
     # Allocate stack space for arguments
     if stack_bytes > 0:
@@ -413,41 +420,69 @@ def emit_cc_thunk(f: FuncInfo | TypedefInfo, lines: List[str]):
     if align > 0:
         lines.append(f"\tand esp, ~{align - 1}")
 
-    # Load args into registers as needed
-    if len(reg_indices) > 0:
-        i = reg_indices[0]
-        offset = offsets[i]
-        lines.append(f"\tmov ecx, [ebp+{offset}]")
-    if len(reg_indices) > 1:
-        i = reg_indices[1]
-        offset = offsets[i]
-        lines.append(f"\tmov edx, [ebp+{offset}]")
-
-    # Copy remaining args onto stack
+    # Copy args onto stack
     cur_off = 0
     for i, arg in enumerate(f.args):
         if i in reg_indices:
             continue
         base = offsets[i]
         for part_off in range(0, arg.slot_size, 4):
-            lines.append(f"\tmov eax, [ebp+{base + part_off}]")
-            lines.append(f"\tmov [esp+{cur_off + part_off}], eax")
+            lines.append(f"\tmov ecx, [eax+{base + part_off}]")
+            lines.append(f"\tmov [esp+{cur_off + part_off}], ecx")
         cur_off += arg.slot_size
+
+    # Load args into registers as needed
+    if len(reg_indices) > 0:
+        i = reg_indices[0]
+        offset = offsets[i]
+        lines.append(f"\tmov ecx, [eax+{offset}]")
+    if len(reg_indices) > 1:
+        i = reg_indices[1]
+        offset = offsets[i]
+        lines.append(f"\tmov edx, [eax+{offset}]")
 
     # Call into target
     lines.append(f"\tcall {target}")
 
+    # Determine if we can clobber eax/edx
+    if f.return_type.kind == TypeKind.RECORD:
+        raise NotImplementedError(
+            f"Struct return type not supported for function {f.name}"
+        )
+    return_size = f.return_type.get_size()
+    save_eax = return_size > 0
+    save_edx = return_size > 4
+    if return_size > 8:
+        raise NotImplementedError(
+            f"Return size {return_size} not supported for function {f.name}"
+        )
+
     # Restore segment registers
+    if save_eax:
+        lines.append("\tpush eax")
+    if save_edx:
+        lines.append("\tpush edx")
     if host_to_guest:
-        lines.append("\tmov edx, [fs:0x18]")
+        lines.append("\tmov ecx, fs:[0x18]")
     else:
-        lines.append("\tmov edx, [gs:currentThreadTeb@ntpoff]")
-    lines.append("\tmov cx, fs")
-    lines.append("\txchg cx, word ptr [edx+0xf98]")
-    lines.append("\tmov fs, cx")
-    lines.append("\tmov cx, gs")
-    lines.append("\txchg cx, word ptr [edx+0xf9a]")
-    lines.append("\tmov gs, cx")
+        lines.append("\tmov ecx, gs:[currentThreadTeb@ntpoff]")
+    lines.append("\tmov ax, fs")
+    lines.append("\tmov dx, word ptr [ecx+0xf98]")
+    lines.append("\tmov word ptr [ecx+0xf98], ax")
+    lines.append("\tmov fs, dx")
+    lines.append("\tmov ax, gs")
+    lines.append("\tmov dx, word ptr [ecx+0xf9a]")
+    lines.append("\tmov word ptr [ecx+0xf9a], ax")
+    lines.append("\tmov gs, dx")
+    if save_edx:
+        lines.append("\tpop edx")
+    if save_eax:
+        lines.append("\tpop eax")
+
+    # Swap stack pointer
+    lines.append("\tmov esp, ebp")  # Clean up arg space
+    lines.append("\tmov ebp, dword ptr [ecx+0xf9c]")
+    lines.append("\tmov dword ptr [ecx+0xf9c], esp")
 
     # Restore stack and frame pointer
     lines.append("\tleave")
@@ -455,16 +490,16 @@ def emit_cc_thunk(f: FuncInfo | TypedefInfo, lines: List[str]):
     # Return to guest
     if f.source_cc == CallingConv.X86_STDCALL:
         ret_bytes = sum(arg.slot_size for arg in f.args)
-        if ret_bytes > 0:
-            lines.append(f"\tret {ret_bytes}")
-        else:
-            lines.append("\tret")
     elif f.source_cc == CallingConv.C:
-        lines.append("\tret")
+        ret_bytes = 0
     else:
         raise NotImplementedError(
-            f"Unsupported source calling convention {f.source_cc} for function {f.name}"
+            f"Unsupported source calling convention {f.source_cc.name} for function {f.name}"
         )
+    if ret_bytes > 0:
+        lines.append(f"\tret {ret_bytes}")
+    else:
+        lines.append("\tret")
 
 
 def emit_guest_to_host_thunks(
@@ -555,7 +590,7 @@ def emit_header_mapping(
             cc_attr = "__attribute__((cdecl))"
         else:
             raise NotImplementedError(
-                f"Unsupported calling convention {f.source_cc} for function {f.name}"
+                f"Unsupported calling convention {f.source_cc.name} for function {f.name}"
             )
         lines.append(f"{cc_attr} {return_type} {thunk}({param_list});")
 
@@ -571,7 +606,8 @@ def emit_header_mapping(
             params.append(f"{type_str} arg{i}")
 
         param_list = ", ".join(params)
-        lines.append(f"{td.return_type} {thunk}({param_list});")
+        return_type = _type_to_string(td.return_type)
+        lines.append(f"{return_type} {thunk}({param_list});")
 
     lines.append("#ifdef __cplusplus\n}\n#endif")
     lines.append("")

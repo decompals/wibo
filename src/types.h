@@ -418,11 +418,9 @@ typedef struct _TEB {
 	PVOID Reserved5[3];
 	PVOID *TlsExpansionSlots;
 	// wibo
-	WORD HostFsSelector;
-	WORD HostGsSelector;
-	PVOID HostStackBase;
-	PVOID HostStackLimit;
-	PVOID HostStackPointer;
+	WORD CurrentFsSelector;
+	WORD CurrentGsSelector;
+	PVOID CurrentStackPointer;
 } TEB, *PTEB;
 
 #ifndef offsetof

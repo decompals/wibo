@@ -80,8 +80,8 @@ set(MI_BUILD_TESTS OFF CACHE BOOL "Build test executables" FORCE)
 include(FetchContent)
 FetchContent_Declare(
     mimalloc
-    GIT_REPOSITORY https://github.com/microsoft/mimalloc.git
-    GIT_TAG        dfa50c37d951128b1e77167dd9291081aa88eea4  # v3.1.5
+    GIT_REPOSITORY https://github.com/encounter/mimalloc.git
+    GIT_TAG        18d8537659d36ddeb320dfacc3b88fcd22a2607f  # v3.1.5 + patch
 )
 FetchContent_MakeAvailable(mimalloc)
 

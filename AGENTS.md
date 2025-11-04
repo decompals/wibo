@@ -9,7 +9,7 @@
 - `cmake --preset debug` configures a 32-bit toolchain; ensure multilib packages are present. (`--preset release` for optimized builds.)
 - `cmake --build --preset debug` compiles the program and tests.
 - `./build/debug/wibo /path/to/program.exe` runs a Windows binary. Use `-D` (or `WIBO_DEBUG=1`) for verbose logging. Use `-C` to set the working directory.
-- `ctest --preset fixtures` runs the self-checking WinAPI fixtures (requires `i686-w64-mingw32-gcc` and `i686-w64-mingw32-windres`).
+- `ctest --preset debug` runs the self-checking WinAPI fixtures (requires `i686-w64-mingw32-gcc` and `i686-w64-mingw32-windres`).
 - `clang-format -i path/to/file.cpp` and `clang-tidy -p build/debug path/to/file.cpp` keep contributions aligned with the repo's tooling.
 
 ## Coding Style & Naming Conventions
@@ -31,7 +31,7 @@
 - All fixtures must self-assert; use `test_assert.h` helpers so `ctest` fails on mismatched WinAPI behaviour.
 - Update `CMakeLists.txt` to add new fixture sources, then rebuild. (`cmake --build --preset debug`)
 - ALWAYS run tests against `wine` FIRST to establish expected behaviour. (`WINEDEBUG=-all wine build/debug/test/test_<feature>.exe`)
-- Run tests against wibo with `ctest --preset fixtures`. (Or `fixtures-release` for optimized builds.)
+- Run tests against wibo with `ctest --preset debug`. (Or `release` for optimized builds.)
 
 ## Debugging Workflow
 - Reproduce crashes under `gdb` (or `lldb`) with `-q -batch` to capture backtraces, register state, and the faulting instruction without interactive prompts.

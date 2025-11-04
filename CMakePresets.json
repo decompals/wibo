@@ -87,8 +87,8 @@
   ],
   "testPresets": [
     {
-      "name": "fixtures",
-      "displayName": "Run fixture tests (Debug)",
+      "name": "debug",
+      "displayName": "Run tests (Debug)",
       "configurePreset": "debug",
       "configuration": "Debug",
       "output": {
@@ -97,8 +97,8 @@
       }
     },
     {
-      "name": "fixtures-release",
-      "displayName": "Run fixture tests (Release)",
+      "name": "release",
+      "displayName": "Run tests (Release)",
       "configurePreset": "release",
       "configuration": "Release",
       "output": {
@@ -107,8 +107,8 @@
       }
     },
     {
-      "name": "fixtures-debug-clang",
-      "displayName": "Run fixture tests (Debug, Clang)",
+      "name": "debug-clang",
+      "displayName": "Run tests (Debug, Clang)",
       "configurePreset": "debug-clang",
       "configuration": "Debug",
       "output": {
@@ -117,8 +117,8 @@
       }
     },
     {
-      "name": "fixtures-release-clang",
-      "displayName": "Run fixture tests (Release, Clang)",
+      "name": "release-clang",
+      "displayName": "Run tests (Release, Clang)",
       "configurePreset": "release-clang",
       "configuration": "Release",
       "output": {

@@ -66,7 +66,7 @@ wibo -- test.exe a b c
 Self-checking Windows fixtures run through CTest. They require a 32-bit MinGW cross toolchain (`i686-w64-mingw32-gcc` and `i686-w64-mingw32-windres`).
 
 ```sh
-ctest --preset fixtures
+ctest --preset debug
 ```
 
 This will cross-compile the fixture executables, run them through `wibo`, and fail if any WinAPI expectations are not met.

@@ -19,6 +19,7 @@ RUN apt-get update \
         libc6-dev-i386 \
         libclang-dev \
         linux-libc-dev-i386-cross \
+        lld \
         llvm \
         make \
         ninja-build \
@@ -46,6 +47,7 @@ RUN cmake -S /wibo -B /wibo/build -G Ninja \
         -DCMAKE_AR:PATH=/usr/bin/llvm-ar \
         -DCMAKE_RANLIB:PATH=/usr/bin/llvm-ranlib \
         -DCMAKE_BUILD_TYPE:STRING="$BUILD_TYPE" \
+        -DCMAKE_EXE_LINKER_FLAGS:STRING="-m32 -fuse-ld=lld" \
         -DWIBO_ENABLE_LIBURING:BOOL=ON \
         -DWIBO_ENABLE_LTO:STRING="$ENABLE_LTO" \
         -DWIBO_VERSION:STRING="$WIBO_VERSION" \

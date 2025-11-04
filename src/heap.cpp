@@ -12,11 +12,15 @@
 #include <cstring>
 #include <fcntl.h>
 #include <limits>
-#include <linux/prctl.h>
 #include <map>
 #include <mutex>
 #include <utility>
 #include <vector>
+
+// Alpine hack: rename duplicate prctl_mm_map (sys/prctl.h also includes it)
+#define prctl_mm_map _prctl_mm_map
+#include <linux/prctl.h>
+#undef prctl_mm_map
 
 #include <mimalloc.h>
 #include <mimalloc/internal.h>

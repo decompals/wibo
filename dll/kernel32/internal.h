@@ -160,17 +160,15 @@ struct HeapObject : public ObjectBase {
 	[[nodiscard]] inline bool canAccess() const { return isProcessHeap || (isOwner() && heap != nullptr); }
 };
 
-inline constexpr uintptr_t kPseudoCurrentProcessHandleValue = static_cast<uintptr_t>(-1);
-inline constexpr uintptr_t kPseudoCurrentThreadHandleValue = static_cast<uintptr_t>(-2);
+inline constexpr HANDLE kPseudoCurrentProcessHandleValue = static_cast<HANDLE>(-1);
+inline constexpr HANDLE kPseudoCurrentThreadHandleValue = static_cast<HANDLE>(-2);
 
 inline bool isPseudoCurrentProcessHandle(HANDLE h) {
-	uintptr_t rawHandle = reinterpret_cast<uintptr_t>(h);
-	return rawHandle == kPseudoCurrentProcessHandleValue;
+	return h == kPseudoCurrentProcessHandleValue;
 }
 
 inline bool isPseudoCurrentThreadHandle(HANDLE h) {
-	uintptr_t rawHandle = reinterpret_cast<uintptr_t>(h);
-	return rawHandle == kPseudoCurrentThreadHandleValue;
+	return h == kPseudoCurrentThreadHandleValue;
 }
 
 void tryMarkExecutable(void *mem);

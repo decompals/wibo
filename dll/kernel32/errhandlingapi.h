@@ -7,14 +7,14 @@ constexpr DWORD EXCEPTION_MAXIMUM_PARAMETERS = 15;
 struct EXCEPTION_RECORD {
 	DWORD ExceptionCode;
 	DWORD ExceptionFlags;
-	EXCEPTION_RECORD *ExceptionRecord;
-	PVOID ExceptionAddress;
+	GUEST_PTR ExceptionRecord;
+	GUEST_PTR ExceptionAddress;
 	DWORD NumberParameters;
 	ULONG_PTR ExceptionInformation[EXCEPTION_MAXIMUM_PARAMETERS];
 };
 
-using PEXCEPTION_RECORD = EXCEPTION_RECORD *;
-using PCONTEXT = void *;
+using PEXCEPTION_RECORD = GUEST_PTR;
+using PCONTEXT = GUEST_PTR;
 
 struct EXCEPTION_POINTERS {
 	PEXCEPTION_RECORD ExceptionRecord;

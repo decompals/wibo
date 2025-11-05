@@ -6,12 +6,15 @@
 #include "handles.h"
 #include "internal.h"
 #include "kernel32/internal.h"
+#include "types.h"
 
 #include <algorithm>
 #include <cstring>
 #include <limits>
 
 namespace {
+
+constexpr BYTE kNtAuthority[6] = {0, 0, 0, 0, 0, 5};
 
 constexpr size_t kAceAlignment = 4;
 constexpr DWORD ERROR_REVISION_MISMATCH = 1306;
@@ -202,14 +205,14 @@ BOOL WINAPI AddAccessAllowedAce(PACL pAcl, DWORD dwAceRevision, DWORD AccessMask
 	return TRUE;
 }
 
-BOOL WINAPI FindFirstFreeAce(PACL pAcl, LPVOID *pAce) {
+BOOL WINAPI FindFirstFreeAce(PACL pAcl, GUEST_PTR *pAce) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FindFirstFreeAce(%p, %p)\n", pAcl, pAce);
 	if (!pAce) {
 		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
-	*pAce = nullptr;
+	*pAce = GUEST_NULL;
 	if (!pAcl) {
 		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
@@ -220,13 +223,13 @@ BOOL WINAPI FindFirstFreeAce(PACL pAcl, LPVOID *pAce) {
 		kernel32::setLastError(ERROR_INVALID_ACL);
 		return FALSE;
 	}
-	*pAce = reinterpret_cast<BYTE *>(pAcl) + used;
+	*pAce = toGuestPtr(reinterpret_cast<BYTE *>(pAcl) + used);
 	pAcl->AclSize = static_cast<WORD>(std::max<size_t>(pAcl->AclSize, used));
 	return TRUE;
 }
 
-BOOL WINAPI GetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR pSecurityDescriptor, LPBOOL lpbDaclPresent, PACL *pDacl,
-										LPBOOL lpbDaclDefaulted) {
+BOOL WINAPI GetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR pSecurityDescriptor, LPBOOL lpbDaclPresent, GUEST_PTR *pDacl,
+									  LPBOOL lpbDaclDefaulted) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetSecurityDescriptorDacl(%p, %p, %p, %p)\n", pSecurityDescriptor, lpbDaclPresent, pDacl,
 			  lpbDaclDefaulted);
@@ -246,7 +249,7 @@ BOOL WINAPI GetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR pSecurityDescriptor, 
 	*lpbDaclPresent = hasDacl;
 	if (!hasDacl) {
 		if (pDacl) {
-			*pDacl = nullptr;
+			*pDacl = GUEST_NULL;
 		}
 		if (lpbDaclDefaulted) {
 			*lpbDaclDefaulted = FALSE;
@@ -315,7 +318,7 @@ BOOL WINAPI ImpersonateLoggedOnUser(HANDLE hToken) {
 }
 
 BOOL WINAPI DuplicateTokenEx(HANDLE hExistingToken, DWORD dwDesiredAccess, void *lpTokenAttributes,
-							   DWORD ImpersonationLevel, DWORD TokenType, PHANDLE phNewToken) {
+							 DWORD ImpersonationLevel, DWORD TokenType, PHANDLE phNewToken) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("DuplicateTokenEx(%p, 0x%x, %p, %u, %u, %p)\n", hExistingToken, dwDesiredAccess, lpTokenAttributes,
 			  ImpersonationLevel, TokenType, phNewToken);
@@ -399,7 +402,7 @@ BOOL WINAPI EqualSid(PSID pSid1, PSID pSid2) {
 }
 
 BOOL WINAPI SetKernelObjectSecurity(HANDLE Handle, SECURITY_INFORMATION SecurityInformation,
-									  PSECURITY_DESCRIPTOR SecurityDescriptor) {
+									PSECURITY_DESCRIPTOR SecurityDescriptor) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: SetKernelObjectSecurity(%p, 0x%x, %p)\n", Handle, SecurityInformation, SecurityDescriptor);
 	(void)SecurityInformation;
@@ -425,15 +428,15 @@ BOOL WINAPI InitializeSecurityDescriptor(PSECURITY_DESCRIPTOR pSecurityDescripto
 	pSecurityDescriptor->Revision = static_cast<BYTE>(dwRevision);
 	pSecurityDescriptor->Sbz1 = 0;
 	pSecurityDescriptor->Control = 0;
-	pSecurityDescriptor->Owner = nullptr;
-	pSecurityDescriptor->Group = nullptr;
-	pSecurityDescriptor->Sacl = nullptr;
-	pSecurityDescriptor->Dacl = nullptr;
+	pSecurityDescriptor->Owner = GUEST_NULL;
+	pSecurityDescriptor->Group = GUEST_NULL;
+	pSecurityDescriptor->Sacl = GUEST_NULL;
+	pSecurityDescriptor->Dacl = GUEST_NULL;
 	return TRUE;
 }
 
 BOOL WINAPI SetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR pSecurityDescriptor, BOOL bDaclPresent, PACL pDacl,
-										BOOL bDaclDefaulted) {
+									  BOOL bDaclDefaulted) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetSecurityDescriptorDacl(%p, %u, %p, %u)\n", pSecurityDescriptor, bDaclPresent, pDacl, bDaclDefaulted);
 	if (!pSecurityDescriptor || pSecurityDescriptor->Revision != SECURITY_DESCRIPTOR_REVISION) {
@@ -446,16 +449,16 @@ BOOL WINAPI SetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR pSecurityDescriptor, 
 		if (bDaclDefaulted) {
 			control = static_cast<WORD>(control | SE_DACL_DEFAULTED);
 		}
-		pSecurityDescriptor->Dacl = pDacl;
+		pSecurityDescriptor->Dacl = toGuestPtr(pDacl);
 	} else {
-		pSecurityDescriptor->Dacl = nullptr;
+		pSecurityDescriptor->Dacl = GUEST_NULL;
 	}
 	pSecurityDescriptor->Control = control;
 	return TRUE;
 }
 
 BOOL WINAPI GetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS TokenInformationClass,
-								  LPVOID TokenInformation, DWORD TokenInformationLength, LPDWORD ReturnLength) {
+								LPVOID TokenInformation, DWORD TokenInformationLength, LPDWORD ReturnLength) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: GetTokenInformation(%p, %u, %p, %u, %p)\n", TokenHandle, TokenInformationClass, TokenInformation,
 			  TokenInformationLength, ReturnLength);
@@ -535,7 +538,7 @@ BOOL WINAPI GetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS Toke
 }
 
 BOOL WINAPI AdjustTokenPrivileges(HANDLE TokenHandle, BOOL DisableAllPrivileges, PTOKEN_PRIVILEGES NewState,
-									DWORD BufferLength, PTOKEN_PRIVILEGES PreviousState, LPDWORD ReturnLength) {
+								  DWORD BufferLength, PTOKEN_PRIVILEGES PreviousState, LPDWORD ReturnLength) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("AdjustTokenPrivileges(%p, %u, %p, %u, %p, %p)\n", TokenHandle, DisableAllPrivileges, NewState,
 			  BufferLength, PreviousState, ReturnLength);
@@ -549,7 +552,7 @@ BOOL WINAPI AdjustTokenPrivileges(HANDLE TokenHandle, BOOL DisableAllPrivileges,
 }
 
 BOOL WINAPI SetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS TokenInformationClass,
-								  LPVOID TokenInformation, DWORD TokenInformationLength) {
+								LPVOID TokenInformation, DWORD TokenInformationLength) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: SetTokenInformation(%p, %u, %p, %u)\n", TokenHandle, TokenInformationClass, TokenInformation,
 			  TokenInformationLength);

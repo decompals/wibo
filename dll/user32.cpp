@@ -12,7 +12,7 @@
 namespace user32 {
 
 constexpr uint32_t RT_STRING_ID = 6;
-constexpr uintptr_t kDefaultKeyboardLayout = 0x04090409;
+constexpr HKL kDefaultKeyboardLayout = 0x04090409;
 constexpr int UOI_FLAGS = 1;
 constexpr DWORD WSF_VISIBLE = 0x0001;
 
@@ -135,15 +135,14 @@ int WINAPI MessageBoxA(HWND hwnd, LPCSTR lpText, LPCSTR lpCaption, UINT uType) {
 
 HKL WINAPI GetKeyboardLayout(DWORD idThread) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("GetKeyboardLayout(%u)\n", idThread);
+	DEBUG_LOG("STUB: GetKeyboardLayout(%u)\n", idThread);
 	(void)idThread;
-	return reinterpret_cast<HKL>(kDefaultKeyboardLayout);
+	return kDefaultKeyboardLayout;
 }
 
 HWINSTA WINAPI GetProcessWindowStation() {
-	DEBUG_LOG("GetProcessWindowStation()\n");
-	static int kWindowStationStub;
-	return reinterpret_cast<HWINSTA>(&kWindowStationStub);
+	DEBUG_LOG("STUB: GetProcessWindowStation()\n");
+	return NO_HANDLE;
 }
 
 BOOL WINAPI GetUserObjectInformationA(HANDLE hObj, int nIndex, PVOID pvInfo, DWORD nLength, LPDWORD lpnLengthNeeded) {
@@ -173,7 +172,7 @@ BOOL WINAPI GetUserObjectInformationA(HANDLE hObj, int nIndex, PVOID pvInfo, DWO
 
 HWND WINAPI GetActiveWindow() {
 	DEBUG_LOG("GetActiveWindow()\n");
-	return nullptr;
+	return NO_HANDLE;
 }
 
 } // namespace user32

@@ -15,6 +15,7 @@ namespace {
 
 constexpr WCHAR kAccountSystem[] = {u'S', u'Y', u'S', u'T', u'E', u'M', u'\0'};
 constexpr WCHAR kDomainNtAuthority[] = {u'N', u'T', u' ', u'A', u'U', u'T', u'H', u'O', u'R', u'I', u'T', u'Y', u'\0'};
+constexpr BYTE kNtAuthority[6] = {0, 0, 0, 0, 0, 5};
 
 std::mutex g_privilegeMapMutex;
 std::unordered_map<std::string, LUID> g_privilegeLuidCache;

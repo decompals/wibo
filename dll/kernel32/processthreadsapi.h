@@ -15,9 +15,9 @@ using LPPROCESS_INFORMATION = PROCESS_INFORMATION *;
 
 struct STARTUPINFOA {
 	DWORD cb;
-	LPSTR lpReserved;
-	LPSTR lpDesktop;
-	LPSTR lpTitle;
+	GUEST_PTR lpReserved;
+	GUEST_PTR lpDesktop;
+	GUEST_PTR lpTitle;
 	DWORD dwX;
 	DWORD dwY;
 	DWORD dwXSize;
@@ -28,7 +28,7 @@ struct STARTUPINFOA {
 	DWORD dwFlags;
 	WORD wShowWindow;
 	WORD cbReserved2;
-	LPBYTE lpReserved2;
+	GUEST_PTR lpReserved2;
 	HANDLE hStdInput;
 	HANDLE hStdOutput;
 	HANDLE hStdError;
@@ -38,9 +38,9 @@ using LPSTARTUPINFOA = STARTUPINFOA *;
 
 struct STARTUPINFOW {
 	DWORD cb;
-	LPWSTR lpReserved;
-	LPWSTR lpDesktop;
-	LPWSTR lpTitle;
+	GUEST_PTR lpReserved;
+	GUEST_PTR lpDesktop;
+	GUEST_PTR lpTitle;
 	DWORD dwX;
 	DWORD dwY;
 	DWORD dwXSize;
@@ -51,7 +51,7 @@ struct STARTUPINFOW {
 	DWORD dwFlags;
 	WORD wShowWindow;
 	WORD cbReserved2;
-	LPBYTE lpReserved2;
+	GUEST_PTR lpReserved2;
 	HANDLE hStdInput;
 	HANDLE hStdOutput;
 	HANDLE hStdError;

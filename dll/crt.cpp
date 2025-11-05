@@ -6,6 +6,7 @@
 #include "heap.h"
 #include "kernel32/internal.h"
 #include "modules.h"
+#include "types.h"
 
 #include <csignal>
 #include <cstdarg>
@@ -42,24 +43,29 @@ int _fmode = 0;
 std::vector<_PVFV> atexitFuncs;
 _invalid_parameter_handler invalidParameterHandler = nullptr;
 
-void CDECL _initterm(const _PVFV *ppfn, const _PVFV *end) {
+GUEST_PTR guestArgv = GUEST_NULL;
+GUEST_PTR guestEnviron = GUEST_NULL;
+
+void CDECL _initterm(GUEST_PTR *ppfn, GUEST_PTR *end) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("_initterm(%p, %p)\n", ppfn, end);
 	do {
-		if (_PVFV pfn = *++ppfn) {
+		if (GUEST_PTR pfn = *++ppfn) {
 			DEBUG_LOG("-> calling %p\n", pfn);
-			call__PVFV(pfn);
+			auto fn = reinterpret_cast<_PVFV>(fromGuestPtr(pfn));
+			call__PVFV(fn);
 		}
 	} while (ppfn < end);
 }
 
-int CDECL _initterm_e(const _PIFV *ppfn, const _PIFV *end) {
+int CDECL _initterm_e(GUEST_PTR *ppfn, GUEST_PTR *end) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("_initterm_e(%p, %p)\n", ppfn, end);
 	do {
-		if (_PIFV pfn = *++ppfn) {
+		if (GUEST_PTR pfn = *++ppfn) {
 			DEBUG_LOG("-> calling %p\n", pfn);
-			int err = call__PIFV(pfn);
+			auto fn = reinterpret_cast<_PIFV>(fromGuestPtr(pfn));
+			int err = call__PIFV(fn);
 			if (err)
 				return err;
 		}
@@ -80,16 +86,16 @@ int CDECL _set_fmode(int mode) {
 	return 0;
 }
 
-int *CDECL __p__commode() {
+GUEST_PTR CDECL __p__commode() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("__p__commode()\n");
-	return &_commode;
+	return toGuestPtr(&_commode);
 }
 
-int *CDECL __p__fmode() {
+GUEST_PTR CDECL __p__fmode() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("__p__fmode()\n");
-	return &_fmode;
+	return toGuestPtr(&_fmode);
 }
 
 int CDECL _crt_atexit(void (*func)()) {
@@ -137,28 +143,79 @@ int CDECL _set_new_mode(int newhandlermode) {
 	return 0;
 }
 
-char **CDECL _get_initial_narrow_environment() {
+GUEST_PTR CDECL _get_initial_narrow_environment() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("_get_initial_narrow_environment()\n");
-	return environ;
+	if (guestEnviron == GUEST_NULL) {
+		int count = 0;
+		while (environ[count]) {
+			count++;
+		}
+		GUEST_PTR *buf = reinterpret_cast<GUEST_PTR *>(wibo::heap::guestMalloc(count * sizeof(GUEST_PTR)));
+		if (!buf) {
+			return GUEST_NULL;
+		}
+		for (int i = 0; i < count; i++) {
+			size_t len = ::strlen(environ[i]);
+			char *str = reinterpret_cast<char *>(wibo::heap::guestMalloc(len + 1));
+			::memcpy(str, environ[i], len + 1);
+			buf[i] = toGuestPtr(str);
+		}
+		guestEnviron = toGuestPtr(buf);
+	}
+	return guestEnviron;
 }
 
-char ***CDECL __p__environ() {
+GUEST_PTR CDECL __p__environ() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("__p__environ()\n");
-	return &environ;
+	if (guestEnviron == GUEST_NULL) {
+		int count = 0;
+		while (environ[count]) {
+			count++;
+		}
+		GUEST_PTR *buf = reinterpret_cast<GUEST_PTR *>(wibo::heap::guestMalloc(count * sizeof(GUEST_PTR)));
+		if (!buf) {
+			return GUEST_NULL;
+		}
+		for (int i = 0; i < count; i++) {
+			size_t len = ::strlen(environ[i]);
+			char *str = reinterpret_cast<char *>(wibo::heap::guestMalloc(len + 1));
+			::memcpy(str, environ[i], len + 1);
+			buf[i] = toGuestPtr(str);
+		}
+		guestEnviron = toGuestPtr(buf);
+	}
+	return toGuestPtr(&environ);
 }
 
-char ***CDECL __p___argv() {
+GUEST_PTR CDECL __p___argv() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("__p___argv()\n");
-	return &wibo::argv;
+	if (guestArgv == GUEST_NULL) {
+		int count = 0;
+		while (wibo::argv[count]) {
+			count++;
+		}
+		GUEST_PTR *buf = reinterpret_cast<GUEST_PTR *>(wibo::heap::guestMalloc(count * sizeof(GUEST_PTR)));
+		if (!buf) {
+			return GUEST_NULL;
+		}
+		for (int i = 0; i < count; i++) {
+			size_t len = ::strlen(wibo::argv[i]);
+			char *str = reinterpret_cast<char *>(wibo::heap::guestMalloc(len + 1));
+			::memcpy(str, wibo::argv[i], len + 1);
+			buf[i] = toGuestPtr(str);
+		}
+		guestArgv = toGuestPtr(buf);
+	}
+	return toGuestPtr(&guestArgv);
 }
 
-int *CDECL __p___argc() {
+GUEST_PTR CDECL __p___argc() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("__p___argc()\n");
-	return &wibo::argc;
+	return toGuestPtr(&wibo::argc);
 }
 
 SIZE_T CDECL strlen(const char *str) {
@@ -258,9 +315,9 @@ int CDECL _initialize_onexit_table(_onexit_table_t *table) {
 		return -1;
 	if (table->first != table->last)
 		return 0;
-	table->first = nullptr;
-	table->last = nullptr;
-	table->end = nullptr;
+	table->first = GUEST_NULL;
+	table->last = GUEST_NULL;
+	table->end = GUEST_NULL;
 	return 0;
 }
 
@@ -269,20 +326,23 @@ int CDECL _register_onexit_function(_onexit_table_t *table, _onexit_t func) {
 	DEBUG_LOG("_register_onexit_function(%p, %p)\n", table, func);
 	if (!table || !func)
 		return -1;
-	if (table->last == table->end) {
-		size_t count = table->end - table->first;
+	GUEST_PTR *first = reinterpret_cast<GUEST_PTR *>(fromGuestPtr(table->first));
+	GUEST_PTR *last = reinterpret_cast<GUEST_PTR *>(fromGuestPtr(table->last));
+	GUEST_PTR *end = reinterpret_cast<GUEST_PTR *>(fromGuestPtr(table->end));
+	if (last == end) {
+		size_t count = end - first;
 		size_t newCount = count + 1;
 		if (newCount <= 0)
 			return -1;
-		_onexit_t *newTable =
-			static_cast<_onexit_t *>(wibo::heap::guestRealloc(table->first, newCount * sizeof(_onexit_t)));
+		GUEST_PTR *newTable = static_cast<GUEST_PTR *>(wibo::heap::guestRealloc(first, newCount * sizeof(GUEST_PTR)));
 		if (!newTable)
 			return -1;
-		table->first = newTable;
-		table->last = newTable + count;
-		table->end = newTable + newCount;
+		table->first = toGuestPtr(newTable);
+		last = newTable + count;
+		table->end = toGuestPtr(newTable + newCount);
 	}
-	*table->last++ = func;
+	*last = toGuestPtr(reinterpret_cast<void *>(func));
+	table->last = toGuestPtr(last + 1);
 	return 0;
 }
 
@@ -291,9 +351,12 @@ int CDECL _execute_onexit_table(_onexit_table_t *table) {
 	DEBUG_LOG("_execute_onexit_table(%p)\n", table);
 	if (!table)
 		return -1;
-	for (auto it = table->first; it != table->last; ++it) {
-		DEBUG_LOG("Calling onexit_table function %p\n", *it);
-		call__onexit_t(*it);
+	GUEST_PTR *first = reinterpret_cast<GUEST_PTR *>(fromGuestPtr(table->first));
+	GUEST_PTR *last = reinterpret_cast<GUEST_PTR *>(fromGuestPtr(table->last));
+	for (auto it = first; it != last; ++it) {
+		_onexit_t fn = reinterpret_cast<_onexit_t>(fromGuestPtr(*it));
+		DEBUG_LOG("Calling onexit_table function %p\n", fn);
+		call__onexit_t(fn);
 	}
 	return 0;
 }
@@ -345,7 +408,7 @@ void *CDECL __acrt_iob_func(unsigned int index) {
 	return nullptr;
 }
 
-int CDECL_NO_CONV __stdio_common_vfprintf(unsigned long long options, _FILE *stream, const char *format, void *locale,
+int CDECL_NO_CONV __stdio_common_vfprintf(ULONGLONG options, _FILE *stream, const char *format, void *locale,
 										  va_list args) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("__stdio_common_vfprintf(%llu, %p, %s, %p, %p)\n", options, stream, format, locale, args);
@@ -355,8 +418,8 @@ int CDECL_NO_CONV __stdio_common_vfprintf(unsigned long long options, _FILE *str
 	return vfprintf(hostFile, format, args);
 }
 
-int CDECL_NO_CONV __stdio_common_vsprintf(unsigned long long options, char *buffer, SIZE_T len, const char *format,
-										  void *locale, va_list args) {
+int CDECL_NO_CONV __stdio_common_vsprintf(ULONGLONG options, char *buffer, SIZE_T len, const char *format, void *locale,
+										  va_list args) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("__stdio_common_vsprintf(%llu, %p, %zu, %s, %p, ...)\n", options, buffer, len, format, locale);
 	if (!buffer || !format)

@@ -29,17 +29,17 @@ struct RegistryKeyObject : ObjectBase {
 };
 
 struct PredefinedKeyInfo {
-	uintptr_t value;
+	HKEY value;
 	const char16_t *name;
 };
 
 constexpr PredefinedKeyInfo kPredefinedKeyInfos[] = {
-	{static_cast<uintptr_t>(0x80000000u), u"HKEY_CLASSES_ROOT"},
-	{static_cast<uintptr_t>(0x80000001u), u"HKEY_CURRENT_USER"},
-	{static_cast<uintptr_t>(0x80000002u), u"HKEY_LOCAL_MACHINE"},
-	{static_cast<uintptr_t>(0x80000003u), u"HKEY_USERS"},
-	{static_cast<uintptr_t>(0x80000004u), u"HKEY_PERFORMANCE_DATA"},
-	{static_cast<uintptr_t>(0x80000005u), u"HKEY_CURRENT_CONFIG"},
+	{static_cast<HKEY>(0x80000000u), u"HKEY_CLASSES_ROOT"},
+	{static_cast<HKEY>(0x80000001u), u"HKEY_CURRENT_USER"},
+	{static_cast<HKEY>(0x80000002u), u"HKEY_LOCAL_MACHINE"},
+	{static_cast<HKEY>(0x80000003u), u"HKEY_USERS"},
+	{static_cast<HKEY>(0x80000004u), u"HKEY_PERFORMANCE_DATA"},
+	{static_cast<HKEY>(0x80000005u), u"HKEY_CURRENT_CONFIG"},
 };
 
 constexpr size_t kPredefinedKeyCount = std::size(kPredefinedKeyInfos);
@@ -82,7 +82,7 @@ std::u16string canonicalizeKeySegment(LPCWSTR input) {
 	return canonicalizeKeySegment(wide);
 }
 
-Pin<RegistryKeyObject> predefinedHandleForValue(uintptr_t value) {
+Pin<RegistryKeyObject> predefinedHandleForValue(HKEY value) {
 	static std::array<Pin<RegistryKeyObject>, kPredefinedKeyCount> g_predefinedHandles = [] {
 		std::array<Pin<RegistryKeyObject>, kPredefinedKeyCount> arr;
 		for (size_t i = 0; i < kPredefinedKeyCount; ++i) {
@@ -101,11 +101,10 @@ Pin<RegistryKeyObject> predefinedHandleForValue(uintptr_t value) {
 }
 
 Pin<RegistryKeyObject> handleDataFromHKeyLocked(HKEY hKey) {
-	uintptr_t raw = reinterpret_cast<uintptr_t>(hKey);
-	if (raw == 0) {
+	if (hKey == NO_HANDLE) {
 		return {};
 	}
-	if (auto predefined = predefinedHandleForValue(raw)) {
+	if (auto predefined = predefinedHandleForValue(hKey)) {
 		return predefined;
 	}
 	auto obj = wibo::handles().getAs<RegistryKeyObject>(hKey);
@@ -116,9 +115,8 @@ Pin<RegistryKeyObject> handleDataFromHKeyLocked(HKEY hKey) {
 }
 
 bool isPredefinedKeyHandle(HKEY hKey) {
-	uintptr_t raw = reinterpret_cast<uintptr_t>(hKey);
 	return std::any_of(std::begin(kPredefinedKeyInfos), std::end(kPredefinedKeyInfos),
-					   [raw](const PredefinedKeyInfo &info) { return info.value == raw; });
+					   [hKey](const PredefinedKeyInfo &info) { return info.value == hKey; });
 }
 
 } // namespace
@@ -139,7 +137,7 @@ LSTATUS WINAPI RegCreateKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD Reserved, LPWS
 		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return ERROR_INVALID_PARAMETER;
 	}
-	*phkResult = nullptr;
+	*phkResult = NO_HANDLE;
 	if (Reserved != 0) {
 		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return ERROR_INVALID_PARAMETER;
@@ -220,7 +218,7 @@ LSTATUS WINAPI RegOpenKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD ulOptions, REGSA
 		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return ERROR_INVALID_PARAMETER;
 	}
-	*phkResult = nullptr;
+	*phkResult = NO_HANDLE;
 	if ((ulOptions & ~REG_OPTION_OPEN_LINK) != 0) {
 		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return ERROR_INVALID_PARAMETER;

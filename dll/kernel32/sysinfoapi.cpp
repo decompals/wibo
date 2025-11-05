@@ -4,6 +4,7 @@
 #include "context.h"
 #include "errors.h"
 #include "internal.h"
+#include "ntdll.h"
 #include "timeutil.h"
 
 #include <cstring>
@@ -52,12 +53,12 @@ void WINAPI GetSystemInfo(LPSYSTEM_INFO lpSystemInfo) {
 	}
 	lpSystemInfo->dwPageSize = static_cast<DWORD>(pageSize);
 
-	lpSystemInfo->lpMinimumApplicationAddress = reinterpret_cast<LPVOID>(0x00010000);
-	if (sizeof(void *) == 4) {
-		lpSystemInfo->lpMaximumApplicationAddress = reinterpret_cast<LPVOID>(0x7FFEFFFF);
-	} else {
-		lpSystemInfo->lpMaximumApplicationAddress = reinterpret_cast<LPVOID>(0x00007FFFFFFEFFFFull);
-	}
+	lpSystemInfo->lpMinimumApplicationAddress = toGuestPtr(reinterpret_cast<void *>(0x00010000));
+#ifdef _WIN64
+	lpSystemInfo->lpMaximumApplicationAddress = toGuestPtr(reinterpret_cast<void *>(0x00007FFFFFFEFFFFull));
+#else
+	lpSystemInfo->lpMaximumApplicationAddress = toGuestPtr(reinterpret_cast<void *>(0x7FFEFFFF));
+#endif
 
 	unsigned int cpuCount = 1;
 	long reported = sysconf(_SC_NPROCESSORS_ONLN);
@@ -198,11 +199,62 @@ BOOL WINAPI GetVersionExA(LPOSVERSIONINFOA lpVersionInformation) {
 		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
-	std::memset(lpVersionInformation, 0, lpVersionInformation->dwOSVersionInfoSize);
-	lpVersionInformation->dwMajorVersion = kMajorVersion;
-	lpVersionInformation->dwMinorVersion = kMinorVersion;
-	lpVersionInformation->dwBuildNumber = kBuildNumber;
-	lpVersionInformation->dwPlatformId = 2;
+
+	DWORD size = lpVersionInformation->dwOSVersionInfoSize;
+	if (size < sizeof(OSVERSIONINFOA)) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+
+	DWORD requestSize = (size >= sizeof(OSVERSIONINFOEXA)) ? sizeof(OSVERSIONINFOEXW) : sizeof(OSVERSIONINFOW);
+	OSVERSIONINFOEXW wideInfo{};
+	wideInfo.dwOSVersionInfoSize = requestSize;
+	NTSTATUS status = ntdll::RtlGetVersion(reinterpret_cast<PRTL_OSVERSIONINFOW>(&wideInfo));
+	if (status != STATUS_SUCCESS) {
+		setLastError(wibo::winErrorFromNtStatus(status));
+		return FALSE;
+	}
+
+	std::memset(lpVersionInformation, 0, size);
+	lpVersionInformation->dwOSVersionInfoSize = size;
+	lpVersionInformation->dwMajorVersion = wideInfo.dwMajorVersion;
+	lpVersionInformation->dwMinorVersion = wideInfo.dwMinorVersion;
+	lpVersionInformation->dwBuildNumber = wideInfo.dwBuildNumber;
+	lpVersionInformation->dwPlatformId = wideInfo.dwPlatformId;
+
+	if (size >= sizeof(OSVERSIONINFOEXA)) {
+		auto extended = reinterpret_cast<OSVERSIONINFOEXA *>(lpVersionInformation);
+		extended->wServicePackMajor = wideInfo.wServicePackMajor;
+		extended->wServicePackMinor = wideInfo.wServicePackMinor;
+		extended->wSuiteMask = wideInfo.wSuiteMask;
+		extended->wProductType = wideInfo.wProductType;
+		extended->wReserved = wideInfo.wReserved;
+	}
+
+	return TRUE;
+}
+
+BOOL WINAPI GetVersionExW(LPOSVERSIONINFOW lpVersionInformation) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("GetVersionExW(%p)\n", lpVersionInformation);
+	if (!lpVersionInformation) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+
+	DWORD size = lpVersionInformation->dwOSVersionInfoSize;
+	if (size < sizeof(OSVERSIONINFOW)) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+
+	NTSTATUS status = ntdll::RtlGetVersion(reinterpret_cast<PRTL_OSVERSIONINFOW>(lpVersionInformation));
+	if (status != STATUS_SUCCESS) {
+		setLastError(wibo::winErrorFromNtStatus(status));
+		return FALSE;
+	}
+
+	lpVersionInformation->dwOSVersionInfoSize = size;
 	return TRUE;
 }
 

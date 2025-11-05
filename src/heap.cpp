@@ -35,6 +35,7 @@
 namespace {
 
 constexpr uintptr_t kLowMemoryStart = 0x00110000UL; // 1 MiB + 64 KiB
+constexpr uintptr_t kHeapMax = 0x60000000UL;		// 1 GiB
 constexpr uintptr_t kTopDownStart = 0x7F000000UL;	// Just below 2GB
 constexpr uintptr_t kTwoGB = 0x80000000UL;
 constexpr std::size_t kGuestArenaSize = 512ULL * 1024ULL * 1024ULL; // 512 MiB
@@ -195,7 +196,7 @@ bool overlapsExistingMapping(uintptr_t base, std::size_t length) {
 		if (info.RegionSize == 0) {
 			continue;
 		}
-		uintptr_t mapStart = reinterpret_cast<uintptr_t>(info.BaseAddress);
+		uintptr_t mapStart = reinterpret_cast<uintptr_t>(fromGuestPtr(info.BaseAddress));
 		uintptr_t mapEnd = mapStart + static_cast<uintptr_t>(info.RegionSize);
 		if (mapEnd <= base) {
 			continue;
@@ -214,8 +215,8 @@ void recordGuestMapping(uintptr_t base, std::size_t size, DWORD allocationProtec
 		return;
 	}
 	MEMORY_BASIC_INFORMATION info{};
-	info.BaseAddress = reinterpret_cast<void *>(base);
-	info.AllocationBase = reinterpret_cast<void *>(base);
+	info.BaseAddress = toGuestPtr(reinterpret_cast<void *>(base));
+	info.AllocationBase = toGuestPtr(reinterpret_cast<void *>(base));
 	info.AllocationProtect = allocationProtect;
 	info.RegionSize = size;
 	info.State = state;
@@ -435,7 +436,7 @@ void initializeImpl() {
 
 	// Map and register guest arena (below 2GB, exclusive)
 	ArenaRange guest;
-	if (mapArena(kGuestArenaSize, kLowMemoryStart, kTopDownStart, true, "wibo guest arena", guest)) {
+	if (mapArena(kGuestArenaSize, kLowMemoryStart, kHeapMax, true, "wibo guest arena", guest)) {
 		bool ok = mi_manage_os_memory_ex(guest.start, guest.size,
 										 /*is_committed*/ false,
 										 /*is_pinned*/ false,
@@ -910,8 +911,8 @@ VmStatus virtualQuery(const void *address, MEMORY_BASIC_INFORMATION *outInfo) {
 			regionEnd = regionStart + pageSize;
 		}
 		allocLock.unlock();
-		outInfo->BaseAddress = reinterpret_cast<void *>(regionStart);
-		outInfo->AllocationBase = nullptr;
+		outInfo->BaseAddress = toGuestPtr(reinterpret_cast<void *>(regionStart));
+		outInfo->AllocationBase = GUEST_NULL;
 		outInfo->AllocationProtect = 0;
 		outInfo->RegionSize = regionEnd - regionStart;
 		outInfo->State = MEM_FREE;
@@ -961,8 +962,8 @@ VmStatus virtualQuery(const void *address, MEMORY_BASIC_INFORMATION *outInfo) {
 	DWORD finalProtect = committed ? pageProtect : PAGE_NOACCESS;
 	allocLock.unlock();
 
-	outInfo->BaseAddress = reinterpret_cast<void *>(blockStart);
-	outInfo->AllocationBase = reinterpret_cast<void *>(region->base);
+	outInfo->BaseAddress = toGuestPtr(reinterpret_cast<void *>(blockStart));
+	outInfo->AllocationBase = toGuestPtr(reinterpret_cast<void *>(region->base));
 	outInfo->AllocationProtect = allocationProtect;
 	outInfo->RegionSize = blockEnd - blockStart;
 	outInfo->State = committed ? MEM_COMMIT : MEM_RESERVE;
@@ -1153,7 +1154,7 @@ static size_t blockLower2GB(MEMORY_BASIC_INFORMATION mappings[MAX_NUM_MAPPINGS])
 		if (numMappings < MAX_NUM_MAPPINGS) {
 			if (numMappings > 0) {
 				auto &prevMapping = mappings[numMappings - 1];
-				uintptr_t prevMapStart = reinterpret_cast<uintptr_t>(prevMapping.BaseAddress);
+				uintptr_t prevMapStart = reinterpret_cast<uintptr_t>(fromGuestPtr(prevMapping.BaseAddress));
 				uintptr_t prevMapEnd = prevMapStart + prevMapping.RegionSize;
 				if (mapStart <= prevMapEnd) {
 					// Extend the previous mapping
@@ -1164,10 +1165,10 @@ static size_t blockLower2GB(MEMORY_BASIC_INFORMATION mappings[MAX_NUM_MAPPINGS])
 				}
 			}
 			mappings[numMappings++] = (MEMORY_BASIC_INFORMATION){
-				.BaseAddress = reinterpret_cast<void *>(mapStart),
-				.AllocationBase = reinterpret_cast<void *>(mapStart),
+				.BaseAddress = toGuestPtr(reinterpret_cast<void *>(mapStart)),
+				.AllocationBase = toGuestPtr(reinterpret_cast<void *>(mapStart)),
 				.AllocationProtect = PAGE_NOACCESS,
-				.RegionSize = mapEnd - mapStart,
+				.RegionSize = static_cast<SIZE_T>(mapEnd - mapStart),
 				.State = MEM_RESERVE,
 				.Protect = PAGE_NOACCESS,
 				.Type = 0, // external
@@ -1225,9 +1226,9 @@ __attribute__((used)) static void wibo_heap_constructor() {
 	g_mappings = new std::map<uintptr_t, MEMORY_BASIC_INFORMATION>;
 	for (size_t i = 0; i < numMappings; ++i) {
 		if (debug) {
-			fprintf(stderr, "Existing %zu: BaseAddress=%p, RegionSize=%lu\n", i, mappings[i].BaseAddress,
+			fprintf(stderr, "Existing %zu: BaseAddress=%x, RegionSize=%u\n", i, mappings[i].BaseAddress,
 					mappings[i].RegionSize);
 		}
-		g_mappings->emplace(reinterpret_cast<uintptr_t>(mappings[i].BaseAddress), mappings[i]);
+		g_mappings->emplace(reinterpret_cast<uintptr_t>(fromGuestPtr(mappings[i].BaseAddress)), mappings[i]);
 	}
 }

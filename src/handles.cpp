@@ -1,4 +1,5 @@
 #include "handles.h"
+#include "types.h"
 #include <atomic>
 #include <cassert>
 #include <cstdint>
@@ -12,7 +13,7 @@ constexpr uint32_t kCompatMaxIndex = (0xFFFFu >> kHandleAlignShift) - 1;
 constexpr uint32_t kQuarantineLen = 64;
 
 inline uint32_t indexOf(HANDLE h) noexcept {
-	uint32_t v = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(h));
+	uint32_t v = static_cast<uint32_t>(h);
 	if (v == 0 || (v & ((1U << kHandleAlignShift) - 1)) != 0) {
 		return UINT32_MAX;
 	}
@@ -21,7 +22,7 @@ inline uint32_t indexOf(HANDLE h) noexcept {
 
 inline HANDLE makeHandle(uint32_t index) noexcept {
 	uint32_t v = (index + 1) << kHandleAlignShift;
-	return reinterpret_cast<HANDLE>(static_cast<uintptr_t>(v));
+	return static_cast<HANDLE>(v);
 }
 
 inline bool isPseudo(HANDLE h) noexcept { return reinterpret_cast<int32_t>(h) < 0; }
@@ -83,7 +84,7 @@ HANDLE Handles::alloc(Pin<> obj, uint32_t grantedAccess, uint32_t flags) {
 }
 
 Pin<> Handles::get(HANDLE h, HandleMeta *metaOut) {
-	if (h == nullptr || isPseudo(h)) {
+	if (h == NO_HANDLE || isPseudo(h)) {
 		return {}; // pseudo-handles have no entries
 	}
 

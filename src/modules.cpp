@@ -6,9 +6,11 @@
 #include "errors.h"
 #include "files.h"
 #include "heap.h"
+#include "kernel32/errhandlingapi.h"
 #include "kernel32/internal.h"
 #include "strutil.h"
 #include "tls.h"
+#include "types.h"
 
 #include <algorithm>
 #include <array>
@@ -38,7 +40,64 @@ extern const wibo::ModuleStub lib_user32;
 extern const wibo::ModuleStub lib_vcruntime;
 extern const wibo::ModuleStub lib_version;
 
+// setup.S
+template <size_t Index> void stubThunk();
+
+/*
+ apiset api-ms-win-core-crt-l1-1-0 = msvcrt.dll
+ apiset api-ms-win-core-crt-l2-1-0 = msvcrt.dll
+ apiset api-ms-win-crt-conio-l1-1-0 = msvcrt.dll
+ apiset api-ms-win-crt-convert-l1-1-0 = msvcrt.dll
+ apiset api-ms-win-crt-environment-l1-1-0 = ucrtbase.dll
+ apiset api-ms-win-crt-filesystem-l1-1-0 = ucrtbase.dll
+ apiset api-ms-win-crt-heap-l1-1-0 = ucrtbase.dll
+ apiset api-ms-win-crt-locale-l1-1-0 = ucrtbase.dll
+ apiset api-ms-win-crt-math-l1-1-0 = ucrtbase.dll
+ apiset api-ms-win-crt-multibyte-l1-1-0 = ucrtbase.dll
+ apiset api-ms-win-crt-private-l1-1-0 = ucrtbase.dll
+ apiset api-ms-win-crt-process-l1-1-0 = ucrtbase.dll
+ apiset api-ms-win-crt-runtime-l1-1-0 = ucrtbase.dll
+ apiset api-ms-win-crt-stdio-l1-1-0 = ucrtbase.dll
+ apiset api-ms-win-crt-string-l1-1-0 = ucrtbase.dll
+ apiset api-ms-win-crt-time-l1-1-0 = ucrtbase.dll
+ apiset api-ms-win-crt-utility-l1-1-0 = ucrtbase.dll
+*/
+
 namespace {
+
+const std::array<std::pair<std::string_view, std::string_view>, 17> kApiSet = {
+	std::pair{"api-ms-win-core-crt-l1-1-0.dll", "msvcrt.dll"},
+	std::pair{"api-ms-win-core-crt-l2-1-0.dll", "msvcrt.dll"},
+	std::pair{"api-ms-win-crt-conio-l1-1-0.dll", "msvcrt.dll"},
+	std::pair{"api-ms-win-crt-convert-l1-1-0.dll", "msvcrt.dll"},
+	std::pair{"api-ms-win-crt-environment-l1-1-0.dll", "ucrtbase.dll"},
+	std::pair{"api-ms-win-crt-filesystem-l1-1-0.dll", "ucrtbase.dll"},
+	std::pair{"api-ms-win-crt-heap-l1-1-0.dll", "ucrtbase.dll"},
+	std::pair{"api-ms-win-crt-locale-l1-1-0.dll", "ucrtbase.dll"},
+	std::pair{"api-ms-win-crt-math-l1-1-0.dll", "ucrtbase.dll"},
+	std::pair{"api-ms-win-crt-multibyte-l1-1-0.dll", "ucrtbase.dll"},
+	std::pair{"api-ms-win-crt-private-l1-1-0.dll", "ucrtbase.dll"},
+	std::pair{"api-ms-win-crt-process-l1-1-0.dll", "ucrtbase.dll"},
+	std::pair{"api-ms-win-crt-runtime-l1-1-0.dll", "ucrtbase.dll"},
+	std::pair{"api-ms-win-crt-stdio-l1-1-0.dll", "ucrtbase.dll"},
+	std::pair{"api-ms-win-crt-string-l1-1-0.dll", "ucrtbase.dll"},
+	std::pair{"api-ms-win-crt-time-l1-1-0.dll", "ucrtbase.dll"},
+	std::pair{"api-ms-win-crt-utility-l1-1-0.dll", "ucrtbase.dll"},
+};
+
+const std::array<std::pair<std::string_view, std::string_view>, 11> kFallbacks = {
+	std::pair{"ucrtbase.dll", "msvcrt.dll"},
+	std::pair{"msvcrt40.dll", "msvcrt.dll"},
+	std::pair{"msvcr70.dll", "msvcrt.dll"},
+	std::pair{"msvcr71.dll", "msvcrt.dll"},
+	std::pair{"msvcr80.dll", "msvcrt.dll"},
+	std::pair{"msvcr90.dll", "msvcrt.dll"},
+	std::pair{"msvcr100.dll", "msvcrt.dll"},
+	std::pair{"msvcr110.dll", "msvcrt.dll"},
+	std::pair{"msvcr120.dll", "msvcrt.dll"},
+	std::pair{"msvcr130.dll", "msvcrt.dll"},
+	std::pair{"msvcr140.dll", "msvcrt.dll"},
+};
 
 constexpr DWORD DLL_PROCESS_DETACH = 0;
 constexpr DWORD DLL_PROCESS_ATTACH = 1;
@@ -69,6 +128,8 @@ size_t stubIndex = 0;
 std::array<std::string, MAX_STUBS> stubDlls;
 std::array<std::string, MAX_STUBS> stubFuncNames;
 std::unordered_map<std::string, StubFuncType> stubCache;
+std::unordered_map<HANDLE, std::shared_ptr<wibo::ModuleInfo>> g_modules;
+HANDLE g_nextStubHandle = 1;
 
 std::string makeStubKey(const char *dllName, const char *funcName) {
 	std::string key;
@@ -83,11 +144,6 @@ std::string makeStubKey(const char *dllName, const char *funcName) {
 		key += func;
 	}
 	return key;
-}
-
-template <size_t Index> void stubThunk() {
-	// Call the appropriate entry trampoline
-	thunk_entry_stubBase(Index);
 }
 
 template <size_t... Indices>
@@ -162,8 +218,11 @@ LockedRegistry registry() {
 	if (!reg.initialized) {
 		reg.initialized = true;
 		const wibo::ModuleStub *builtins[] = {
-			&lib_advapi32, &lib_bcrypt, &lib_crt,	 &lib_kernel32, &lib_lmgr,		&lib_mscoree, &lib_msvcrt,
-			&lib_ntdll,	   &lib_ole32,	&lib_rpcrt4, &lib_user32,	&lib_vcruntime, &lib_version, nullptr,
+			&lib_advapi32, &lib_bcrypt,	   /*&lib_crt,*/ &lib_kernel32,
+			&lib_lmgr,	   &lib_mscoree, /*&lib_msvcrt,*/
+			&lib_ntdll,	   &lib_ole32,	   &lib_rpcrt4,
+			&lib_user32,   &lib_vcruntime, &lib_version,
+			nullptr,
 		};
 		for (const wibo::ModuleStub **module = builtins; *module; ++module) {
 			registerBuiltinModule(reg, *module);
@@ -204,11 +263,11 @@ struct ParsedModuleName {
 	bool endsWithDot = false;
 };
 
-ParsedModuleName parseModuleName(const std::string &name) {
+ParsedModuleName parseModuleName(std::string_view name) {
 	ParsedModuleName parsed;
 	parsed.original = name;
 	parsed.base = name;
-	std::string sanitized = name;
+	std::string sanitized{name};
 	std::replace(sanitized.begin(), sanitized.end(), '/', '\\');
 	auto sep = sanitized.find_last_of('\\');
 	if (sep != std::string::npos) {
@@ -282,19 +341,20 @@ bool allocateModuleTlsForThread(wibo::ModuleInfo &module, TEB *tib) {
 	if (info.threadAllocations.find(tib) != info.threadAllocations.end()) {
 		return true;
 	}
-	void *block = nullptr;
+	GUEST_PTR block = GUEST_NULL;
 	const size_t allocationSize = info.allocationSize;
 	if (allocationSize > 0) {
-		block = wibo::heap::guestMalloc(allocationSize);
-		if (!block) {
+		void *ptr = wibo::heap::guestMalloc(allocationSize);
+		if (!ptr) {
 			DEBUG_LOG("  allocateModuleTlsForThread: failed to allocate %zu bytes for %s\n", allocationSize,
 					  module.originalName.c_str());
 			return false;
 		}
-		std::memset(block, 0, allocationSize);
+		std::memset(ptr, 0, allocationSize);
 		if (info.templateData && info.templateSize > 0) {
-			std::memcpy(block, info.templateData, info.templateSize);
+			std::memcpy(ptr, info.templateData, info.templateSize);
 		}
+		block = toGuestPtr(ptr);
 	}
 	info.threadAllocations.emplace(tib, block);
 	if (!wibo::tls::setValue(tib, info.index, block)) {
@@ -322,10 +382,10 @@ void freeModuleTlsForThread(wibo::ModuleInfo &module, TEB *tib) {
 	if (it == info.threadAllocations.end()) {
 		return;
 	}
-	void *block = it->second;
+	GUEST_PTR block = it->second;
 	info.threadAllocations.erase(it);
 	if (wibo::tls::getValue(tib, info.index) == block) {
-		if (!wibo::tls::setValue(tib, info.index, nullptr)) {
+		if (!wibo::tls::setValue(tib, info.index, GUEST_NULL)) {
 			DEBUG_LOG("  freeModuleTlsForThread: failed to clear TLS pointer for %s (index %u)\n",
 					  module.originalName.c_str(), info.index);
 		}
@@ -334,7 +394,7 @@ void freeModuleTlsForThread(wibo::ModuleInfo &module, TEB *tib) {
 		wibo::tls::clearModulePointer(tib, info.loaderIndex);
 	}
 	if (block) {
-		std::free(block);
+		wibo::heap::guestFree(fromGuestPtr(block));
 	}
 }
 
@@ -346,7 +406,7 @@ void runModuleTlsCallbacks(wibo::ModuleInfo &module, DWORD reason) {
 		if (!callback) {
 			continue;
 		}
-		call_PIMAGE_TLS_CALLBACK(callback, module.handle, reason, nullptr);
+		call_PIMAGE_TLS_CALLBACK(callback, reinterpret_cast<PVOID>(module.handle), reason, nullptr);
 	}
 }
 
@@ -502,7 +562,9 @@ void registerBuiltinModule(ModuleRegistry &reg, const wibo::ModuleStub *module) 
 		return;
 	}
 	wibo::ModulePtr entry = std::make_shared<wibo::ModuleInfo>();
-	entry->handle = entry.get();
+	HANDLE handle = g_nextStubHandle++;
+	g_modules[handle] = entry;
+	entry->handle = handle;
 	entry->moduleStub = module;
 	entry->refCount = UINT_MAX;
 	entry->originalName = module->names[0] ? module->names[0] : "";
@@ -570,12 +632,10 @@ BOOL callDllMain(wibo::ModuleInfo &info, DWORD reason, LPVOID reserved) {
 			}
 		}
 
-		DEBUG_LOG("  callDllMain: invoking DllMain(%p, %u, %p) for %s\n",
-				  reinterpret_cast<HMODULE>(info.executable->imageBase), callReason, callReserved,
-				  info.normalizedName.c_str());
+		DEBUG_LOG("  callDllMain: invoking DllMain(%p, %u, %p) for %s\n", toGuestPtr(info.executable->imageBase),
+				  callReason, callReserved, info.normalizedName.c_str());
 
-		BOOL result =
-			call_DllEntryProc(dllMain, reinterpret_cast<HMODULE>(info.executable->imageBase), callReason, callReserved);
+		BOOL result = call_DllEntryProc(dllMain, toGuestPtr(info.executable->imageBase), callReason, callReserved);
 		DEBUG_LOG("  callDllMain: %s DllMain returned %d\n", info.normalizedName.c_str(), result);
 		return result;
 	};
@@ -739,7 +799,7 @@ ModuleInfo *registerProcessModule(std::unique_ptr<Executable> executable, std::f
 	std::string normalizedName = normalizedBaseKey(parsed);
 
 	ModulePtr info = std::make_unique<ModuleInfo>();
-	info->handle = executable->imageBase; // Use image base as handle for main module
+	info->handle = toGuestPtr(executable->imageBase); // Use image base as handle for main module
 	info->moduleStub = nullptr;
 	info->originalName = std::move(originalName);
 	info->normalizedName = std::move(normalizedName);
@@ -825,7 +885,7 @@ ModuleInfo *moduleInfoFromHandle(HMODULE module) {
 		if (info->handle == module) {
 			return info;
 		}
-		if (info->executable && info->executable->imageBase == module) {
+		if (info->executable && info->executable->imageBase == reinterpret_cast<void *>(module)) {
 			return info;
 		}
 	}
@@ -883,7 +943,7 @@ bool initializeModuleTls(ModuleInfo &module) {
 	info.callbacks.clear();
 	uintptr_t callbacksArray = resolveModuleAddress(exec, tlsDirectory->AddressOfCallBacks);
 	if (callbacksArray) {
-		auto callbackPtr = reinterpret_cast<uintptr_t *>(callbacksArray);
+		auto callbackPtr = reinterpret_cast<GUEST_PTR *>(callbacksArray);
 		while (callbackPtr && *callbackPtr) {
 			info.callbacks.push_back(reinterpret_cast<PIMAGE_TLS_CALLBACK>(resolveModuleAddress(exec, *callbackPtr)));
 			++callbackPtr;
@@ -937,13 +997,13 @@ bool initializeModuleTls(ModuleInfo &module) {
 	if (!ctx.success) {
 		for (auto &[thread, block] : info.threadAllocations) {
 			if (block) {
-				std::free(block);
+				wibo::heap::guestFree(fromGuestPtr(block));
 			}
 			if (info.loaderIndex != tls::kInvalidTlsIndex) {
 				wibo::tls::clearModulePointer(thread, info.loaderIndex);
 			}
 			if (wibo::tls::getValue(thread, info.index) == block) {
-				wibo::tls::setValue(thread, info.index, nullptr);
+				wibo::tls::setValue(thread, info.index, GUEST_NULL);
 			}
 		}
 		info.threadAllocations.clear();
@@ -971,14 +1031,14 @@ void releaseModuleTls(ModuleInfo &module) {
 	for (auto &[tib, block] : info.threadAllocations) {
 		if (tib) {
 			if (wibo::tls::getValue(tib, info.index) == block) {
-				wibo::tls::setValue(tib, info.index, nullptr);
+				wibo::tls::setValue(tib, info.index, GUEST_NULL);
 			}
 			if (info.loaderIndex != tls::kInvalidTlsIndex) {
 				wibo::tls::clearModulePointer(tib, info.loaderIndex);
 			}
 		}
 		if (block) {
-			std::free(block);
+			wibo::heap::guestFree(fromGuestPtr(block));
 		}
 	}
 	info.threadAllocations.clear();
@@ -1068,18 +1128,9 @@ ModuleInfo *findLoadedModule(const char *name) {
 	return info;
 }
 
-ModuleInfo *loadModule(const char *dllName) {
-	if (!dllName || *dllName == '\0') {
-		kernel32::setLastError(ERROR_INVALID_PARAMETER);
-		return nullptr;
-	}
-	std::string requested(dllName);
-	DEBUG_LOG("loadModule(%s)\n", requested.c_str());
-
+static ModuleInfo *loadModuleInternal(const std::string &dllName) {
 	auto reg = registry();
-
-	ParsedModuleName parsed = parseModuleName(requested);
-
+	ParsedModuleName parsed = parseModuleName(dllName);
 	DWORD diskError = ERROR_SUCCESS;
 
 	auto tryLoadExternal = [&](const std::filesystem::path &path) -> ModuleInfo * {
@@ -1090,7 +1141,7 @@ ModuleInfo *loadModule(const char *dllName) {
 			if (info->refCount != UINT_MAX) {
 				info->refCount++;
 			}
-			registerExternalModuleAliases(*reg, requested, files::canonicalPath(path), info);
+			registerExternalModuleAliases(*reg, dllName, files::canonicalPath(path), info);
 			return info;
 		}
 		reg.lock.unlock();
@@ -1115,9 +1166,11 @@ ModuleInfo *loadModule(const char *dllName) {
 		fclose(file);
 
 		ModulePtr info = std::make_unique<ModuleInfo>();
-		info->handle = info.get();
+		HANDLE handle = g_nextStubHandle++;
+		g_modules[handle] = info;
+		info->handle = handle;
 		info->moduleStub = nullptr;
-		info->originalName = requested;
+		info->originalName = dllName;
 		info->normalizedName = normalizedBaseKey(parsed);
 		info->resolvedPath = files::canonicalPath(path);
 		info->executable = std::move(executable);
@@ -1126,7 +1179,7 @@ ModuleInfo *loadModule(const char *dllName) {
 		reg.lock.lock();
 		ModuleInfo *raw = info.get();
 		reg->modulesByKey[key] = std::move(info);
-		registerExternalModuleAliases(*reg, requested, raw->resolvedPath, raw);
+		registerExternalModuleAliases(*reg, dllName, raw->resolvedPath, raw);
 		reg.lock.unlock();
 		ensureExportsInitialized(*raw);
 		if (!raw->executable->resolveImports()) {
@@ -1165,7 +1218,7 @@ ModuleInfo *loadModule(const char *dllName) {
 	};
 
 	auto resolveAndLoadExternal = [&]() -> ModuleInfo * {
-		auto resolvedPath = resolveModuleOnDisk(*reg, requested, false);
+		auto resolvedPath = resolveModuleOnDisk(*reg, dllName, false);
 		if (!resolvedPath) {
 			DEBUG_LOG("  module not found on disk\n");
 			diskError = ERROR_MOD_NOT_FOUND;
@@ -1177,7 +1230,7 @@ ModuleInfo *loadModule(const char *dllName) {
 	std::string alias = normalizedBaseKey(parsed);
 	ModuleInfo *existing = findByAlias(*reg, alias);
 	if (!existing) {
-		existing = findByAlias(*reg, normalizeAlias(requested));
+		existing = findByAlias(*reg, normalizeAlias(dllName));
 	}
 	if (existing) {
 		DEBUG_LOG("  found existing module alias %s (builtin=%d)\n", alias.c_str(), existing->moduleStub != nullptr);
@@ -1188,10 +1241,10 @@ ModuleInfo *loadModule(const char *dllName) {
 			DEBUG_LOG("  returning existing external module %s\n", existing->originalName.c_str());
 			return existing;
 		}
-		bool pinned = reg->pinnedModules.count(existing) != 0;
+		bool pinned = reg->pinnedModules.contains(existing);
 		if (!pinned) {
 			if (ModuleInfo *external = resolveAndLoadExternal()) {
-				DEBUG_LOG("  replaced builtin module %s with external copy\n", requested.c_str());
+				DEBUG_LOG("  replaced builtin module %s with external copy\n", dllName.c_str());
 				return external;
 			} else if (diskError != ERROR_MOD_NOT_FOUND) {
 				kernel32::setLastError(diskError);
@@ -1203,7 +1256,7 @@ ModuleInfo *loadModule(const char *dllName) {
 	}
 
 	if (ModuleInfo *external = resolveAndLoadExternal()) {
-		DEBUG_LOG("  loaded external module %s\n", requested.c_str());
+		DEBUG_LOG("  loaded external module %s\n", dllName.c_str());
 		return external;
 	} else if (diskError != ERROR_MOD_NOT_FOUND) {
 		kernel32::setLastError(diskError);
@@ -1217,7 +1270,7 @@ ModuleInfo *loadModule(const char *dllName) {
 		builtin = builtinIt->second;
 	}
 	if (!builtin) {
-		builtinIt = reg->builtinAliasMap.find(normalizeAlias(requested));
+		builtinIt = reg->builtinAliasMap.find(normalizeAlias(dllName));
 		if (builtinIt != reg->builtinAliasMap.end()) {
 			builtin = builtinIt->second;
 		}
@@ -1228,6 +1281,46 @@ ModuleInfo *loadModule(const char *dllName) {
 	}
 
 	kernel32::setLastError((diskError != ERROR_SUCCESS) ? diskError : ERROR_MOD_NOT_FOUND);
+	return nullptr;
+}
+
+ModuleInfo *loadModule(const char* dllName) {
+	if (!dllName || *dllName == '\0') {
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
+		return nullptr;
+	}
+	DEBUG_LOG("loadModule(%s)\n", dllName);
+	std::string_view requested{dllName};
+
+	const auto parsed = parseModuleName(requested);
+	std::string normalized = normalizedBaseKey(parsed);
+
+	for (auto& [alias, module] : kApiSet) {
+		if (alias == normalized) {
+			DEBUG_LOG("  resolved api set %s -> %s\n", alias.data(), module.data());
+			requested = module;
+			normalized = module;
+			break;
+		}
+	}
+
+	DWORD lastError = kernel32::getLastError();
+	if (auto* info = loadModuleInternal(std::string{requested})) {
+		return info;
+	}
+	if (kernel32::getLastError() != ERROR_MOD_NOT_FOUND) {
+		return nullptr;
+	}
+
+	kernel32::setLastError(lastError);
+	for (auto& [module, fallback] : kFallbacks) {
+		if (module == normalized) {
+			DEBUG_LOG("  trying fallback %s -> %s\n", module.data(), fallback.data());
+			return loadModuleInternal(std::string{fallback});
+		}
+	}
+
+	kernel32::setLastError(ERROR_MOD_NOT_FOUND);
 	return nullptr;
 }
 

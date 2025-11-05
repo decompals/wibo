@@ -34,21 +34,19 @@ constexpr REGSAM KEY_WOW64_32KEY = 0x00000200;
 namespace advapi32 {
 
 LSTATUS WINAPI RegCreateKeyExA(HKEY hKey, LPCSTR lpSubKey, DWORD Reserved, LPSTR lpClass, DWORD dwOptions,
-								 REGSAM samDesired, void *lpSecurityAttributes, PHKEY phkResult,
-								 LPDWORD lpdwDisposition);
+							   REGSAM samDesired, void *lpSecurityAttributes, PHKEY phkResult, LPDWORD lpdwDisposition);
 LSTATUS WINAPI RegCreateKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD Reserved, LPWSTR lpClass, DWORD dwOptions,
-								 REGSAM samDesired, void *lpSecurityAttributes, PHKEY phkResult,
-								 LPDWORD lpdwDisposition);
+							   REGSAM samDesired, void *lpSecurityAttributes, PHKEY phkResult, LPDWORD lpdwDisposition);
 LSTATUS WINAPI RegOpenKeyExA(HKEY hKey, LPCSTR lpSubKey, DWORD ulOptions, REGSAM samDesired, PHKEY phkResult);
 LSTATUS WINAPI RegOpenKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD ulOptions, REGSAM samDesired, PHKEY phkResult);
 LSTATUS WINAPI RegQueryValueExA(HKEY hKey, LPCSTR lpValueName, LPDWORD lpReserved, LPDWORD lpType, BYTE *lpData,
-								  LPDWORD lpcbData);
+								LPDWORD lpcbData);
 LSTATUS WINAPI RegQueryValueExW(HKEY hKey, LPCWSTR lpValueName, LPDWORD lpReserved, LPDWORD lpType, BYTE *lpData,
-								  LPDWORD lpcbData);
+								LPDWORD lpcbData);
 LSTATUS WINAPI RegEnumKeyExA(HKEY hKey, DWORD dwIndex, LPSTR lpName, LPDWORD lpcchName, LPDWORD lpReserved,
-							   LPSTR lpClass, LPDWORD lpcchClass, FILETIME *lpftLastWriteTime);
+							 LPSTR lpClass, LPDWORD lpcchClass, FILETIME *lpftLastWriteTime);
 LSTATUS WINAPI RegEnumKeyExW(HKEY hKey, DWORD dwIndex, LPWSTR lpName, LPDWORD lpcchName, LPDWORD lpReserved,
-							   LPWSTR lpClass, LPDWORD lpcchClass, FILETIME *lpftLastWriteTime);
+							 LPWSTR lpClass, LPDWORD lpcchClass, FILETIME *lpftLastWriteTime);
 LSTATUS WINAPI RegCloseKey(HKEY hKey);
 
 } // namespace advapi32

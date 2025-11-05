@@ -23,9 +23,9 @@ typedef int(_CC_CDECL *sort_compare)(const void *, const void *);
 typedef int(_CC_CDECL *_onexit_t)();
 
 struct _onexit_table_t {
-	_onexit_t *first;
-	_onexit_t *last;
-	_onexit_t *end;
+	GUEST_PTR first;
+	GUEST_PTR last;
+	GUEST_PTR end;
 };
 
 namespace crt {
@@ -33,23 +33,23 @@ namespace crt {
 extern int _commode;
 extern int _fmode;
 
-void CDECL _initterm(const _PVFV *ppfn, const _PVFV *end);
-int CDECL _initterm_e(const _PIFV *ppfn, const _PIFV *end);
+void CDECL _initterm(GUEST_PTR *ppfn, GUEST_PTR *end);
+int CDECL _initterm_e(GUEST_PTR *ppfn, GUEST_PTR *end);
 void CDECL _set_app_type(_crt_app_type type);
 int CDECL _set_fmode(int mode);
-int *CDECL __p__commode();
-int *CDECL __p__fmode();
-int CDECL _crt_atexit(void (*func)());
+GUEST_PTR CDECL __p__commode();
+GUEST_PTR CDECL __p__fmode();
+int CDECL _crt_atexit(_PVFV func);
 int CDECL _configure_narrow_argv(_crt_argv_mode mode);
 _invalid_parameter_handler CDECL _set_invalid_parameter_handler(_invalid_parameter_handler newHandler);
 int CDECL _controlfp_s(unsigned int *currentControl, unsigned int newControl, unsigned int mask);
 int CDECL _configthreadlocale(int per_thread_locale_type);
 int CDECL _initialize_narrow_environment();
 int CDECL _set_new_mode(int newhandlermode);
-char **CDECL _get_initial_narrow_environment();
-char ***CDECL __p__environ();
-char ***CDECL __p___argv();
-int *CDECL __p___argc();
+GUEST_PTR CDECL _get_initial_narrow_environment();
+GUEST_PTR CDECL __p__environ();
+GUEST_PTR CDECL __p___argv();
+GUEST_PTR CDECL __p___argc();
 SIZE_T CDECL strlen(const char *str);
 int CDECL strcmp(const char *lhs, const char *rhs);
 int CDECL strncmp(const char *lhs, const char *rhs, SIZE_T count);
@@ -74,10 +74,12 @@ void CDECL _exit(int status);
 void CDECL abort();
 signal_handler CDECL signal(int signum, signal_handler handler);
 void *CDECL __acrt_iob_func(unsigned int index);
-int CDECL_NO_CONV __stdio_common_vfprintf(unsigned long long options, _FILE *stream, const char *format, void *locale,
+#ifndef __x86_64__ // TODO
+int CDECL_NO_CONV __stdio_common_vfprintf(ULONGLONG options, _FILE *stream, const char *format, void *locale,
 										  va_list args);
-int CDECL_NO_CONV __stdio_common_vsprintf(unsigned long long options, char *buffer, SIZE_T len, const char *format,
+int CDECL_NO_CONV __stdio_common_vsprintf(ULONGLONG options, char *buffer, SIZE_T len, const char *format,
 										  void *locale, va_list args);
+#endif
 void CDECL qsort(void *base, SIZE_T num, SIZE_T size, sort_compare compare);
 int CDECL puts(const char *str);
 

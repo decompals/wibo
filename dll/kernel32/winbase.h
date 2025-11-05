@@ -5,21 +5,21 @@
 struct GUID;
 
 struct ACTCTX_SECTION_KEYED_DATA_ASSEMBLY_METADATA {
-	PVOID lpInformation;
-	PVOID lpSectionBase;
+	GUEST_PTR lpInformation;
+	GUEST_PTR lpSectionBase;
 	ULONG ulSectionLength;
-	PVOID lpSectionGlobalData;
+	GUEST_PTR lpSectionGlobalData;
 	ULONG ulSectionGlobalDataLength;
 };
 
 struct ACTCTX_SECTION_KEYED_DATA {
 	ULONG cbSize;
 	ULONG ulDataFormatVersion;
-	PVOID lpData;
+	GUEST_PTR lpData;
 	ULONG ulLength;
-	PVOID lpSectionGlobalData;
+	GUEST_PTR lpSectionGlobalData;
 	ULONG ulSectionGlobalDataLength;
-	PVOID lpSectionBase;
+	GUEST_PTR lpSectionBase;
 	ULONG ulSectionTotalLength;
 	HANDLE hActCtx;
 	ULONG ulAssemblyRosterIndex;
@@ -68,8 +68,8 @@ ATOM WINAPI AddAtomW(LPCWSTR lpString);
 UINT WINAPI GetAtomNameA(ATOM nAtom, LPSTR lpBuffer, int nSize);
 UINT WINAPI GetAtomNameW(ATOM nAtom, LPWSTR lpBuffer, int nSize);
 UINT WINAPI SetHandleCount(UINT uNumber);
-DWORD WINAPI FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId, DWORD dwLanguageId, LPSTR lpBuffer,
-							DWORD nSize, va_list *Arguments);
+// DWORD WINAPI FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId, DWORD dwLanguageId, LPSTR lpBuffer,
+// 							DWORD nSize, va_list *Arguments);
 PVOID WINAPI EncodePointer(PVOID Ptr);
 PVOID WINAPI DecodePointer(PVOID Ptr);
 BOOL WINAPI SetDllDirectoryA(LPCSTR lpPathName);

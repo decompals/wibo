@@ -119,7 +119,7 @@ HRESULT WINAPI CoInitialize(LPVOID pvReserved) {
 }
 
 HRESULT WINAPI CoCreateInstance(const GUID *rclsid, LPVOID pUnkOuter, DWORD dwClsContext, const GUID *riid,
-								LPVOID *ppv) {
+								GUEST_PTR *ppv) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: CoCreateInstance(0x%x, %p, %d, 0x%x, %p)\n", rclsid->Data1, pUnkOuter, dwClsContext, riid->Data1,
 			  *ppv);

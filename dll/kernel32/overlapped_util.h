@@ -1,17 +1,14 @@
 #pragma once
 
-#include "errors.h"
 #include "handles.h"
 #include "internal.h"
 #include "minwinbase.h"
 
-#include <cstdint>
-
 namespace kernel32::detail {
 
 inline HANDLE normalizedOverlappedEventHandle(const OVERLAPPED *ov) {
-	if (!ov || (reinterpret_cast<uintptr_t>(ov->hEvent) & 1U) != 0) {
-		return nullptr;
+	if (!ov || (ov->hEvent & 1U) != 0) {
+		return NO_HANDLE;
 	}
 	return ov->hEvent;
 }

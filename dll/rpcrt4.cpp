@@ -4,8 +4,8 @@
 #include "context.h"
 #include "heap.h"
 #include "modules.h"
+#include "types.h"
 
-#include <cstdarg>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -44,7 +44,7 @@ struct BindingHandleData {
 };
 
 std::unordered_map<RPC_WSTR, BindingComponents> g_stringBindings;
-std::unordered_map<RPC_BINDING_HANDLE, std::unique_ptr<BindingHandleData>> g_bindingHandles;
+std::unordered_map<RPC_BINDING_HANDLE, wibo::heap::guest_ptr<BindingHandleData>> g_bindingHandles;
 
 std::u16string toU16(RPC_WSTR str) {
 	if (!str) {
@@ -112,7 +112,7 @@ BindingHandleData *getBinding(RPC_BINDING_HANDLE handle) {
 namespace rpcrt4 {
 
 RPC_STATUS WINAPI RpcStringBindingComposeW(RPC_WSTR objUuid, RPC_WSTR protSeq, RPC_WSTR networkAddr, RPC_WSTR endpoint,
-										   RPC_WSTR options, RPC_WSTR *stringBinding) {
+										   RPC_WSTR options, GUEST_PTR *stringBinding) {
 	HOST_CONTEXT_GUARD();
 	BindingComponents components;
 	components.objectUuid = toU16(objUuid);
@@ -136,18 +136,18 @@ RPC_STATUS WINAPI RpcStringBindingComposeW(RPC_WSTR objUuid, RPC_WSTR protSeq, R
 		buffer[length] = 0;
 		RPC_WSTR result = reinterpret_cast<RPC_WSTR>(buffer);
 		g_stringBindings[result] = components;
-		*stringBinding = result;
+		*stringBinding = toGuestPtr(result);
 	}
 
 	return RPC_S_OK;
 }
 
-RPC_STATUS WINAPI RpcBindingFromStringBindingW(RPC_WSTR stringBinding, RPC_BINDING_HANDLE *binding) {
+RPC_STATUS WINAPI RpcBindingFromStringBindingW(RPC_WSTR stringBinding, GUEST_PTR *binding) {
 	HOST_CONTEXT_GUARD();
 	if (!binding) {
 		return RPC_S_INVALID_ARG;
 	}
-	*binding = nullptr;
+	*binding = GUEST_NULL;
 	if (!stringBinding) {
 		return RPC_S_INVALID_STRING_BINDING;
 	}
@@ -155,13 +155,13 @@ RPC_STATUS WINAPI RpcBindingFromStringBindingW(RPC_WSTR stringBinding, RPC_BINDI
 	if (it == g_stringBindings.end()) {
 		return RPC_S_INVALID_STRING_BINDING;
 	}
-	auto handleData = std::make_unique<BindingHandleData>();
+	auto handleData = wibo::heap::make_guest_unique<BindingHandleData>();
 	handleData->components = it->second;
 	handleData->bindingString = composeString(handleData->components);
 	handleData->serverReachable = false;
 	RPC_BINDING_HANDLE handle = reinterpret_cast<RPC_BINDING_HANDLE>(handleData.get());
 	g_bindingHandles.emplace(handle, std::move(handleData));
-	*binding = handle;
+	*binding = toGuestPtr(handle);
 	DEBUG_LOG("RpcBindingFromStringBindingW(handle=%p)\n", handle);
 	return RPC_S_OK;
 }
@@ -190,12 +190,12 @@ RPC_STATUS WINAPI RpcBindingSetAuthInfoExW(RPC_BINDING_HANDLE binding, RPC_WSTR 
 	return RPC_S_OK;
 }
 
-RPC_STATUS WINAPI RpcBindingFree(RPC_BINDING_HANDLE *binding) {
+RPC_STATUS WINAPI RpcBindingFree(GUEST_PTR *binding) {
 	HOST_CONTEXT_GUARD();
 	if (!binding) {
 		return RPC_S_INVALID_ARG;
 	}
-	RPC_BINDING_HANDLE handle = *binding;
+	RPC_BINDING_HANDLE handle = reinterpret_cast<RPC_BINDING_HANDLE>(fromGuestPtr(*binding));
 	if (!handle) {
 		return RPC_S_INVALID_BINDING;
 	}
@@ -204,17 +204,17 @@ RPC_STATUS WINAPI RpcBindingFree(RPC_BINDING_HANDLE *binding) {
 		return RPC_S_INVALID_BINDING;
 	}
 	g_bindingHandles.erase(it);
-	*binding = nullptr;
+	*binding = GUEST_NULL;
 	DEBUG_LOG("RpcBindingFree\n");
 	return RPC_S_OK;
 }
 
-RPC_STATUS WINAPI RpcStringFreeW(RPC_WSTR *string) {
+RPC_STATUS WINAPI RpcStringFreeW(GUEST_PTR *string) {
 	HOST_CONTEXT_GUARD();
 	if (!string) {
 		return RPC_S_INVALID_ARG;
 	}
-	RPC_WSTR value = *string;
+	RPC_WSTR value = reinterpret_cast<RPC_WSTR>(fromGuestPtr(*string));
 	if (!value) {
 		return RPC_S_OK;
 	}
@@ -223,7 +223,7 @@ RPC_STATUS WINAPI RpcStringFreeW(RPC_WSTR *string) {
 		g_stringBindings.erase(it);
 	}
 	std::free(reinterpret_cast<void *>(value));
-	*string = nullptr;
+	*string = GUEST_NULL;
 	return RPC_S_OK;
 }
 

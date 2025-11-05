@@ -13,6 +13,7 @@
 #include "strutil.h"
 #include "timeutil.h"
 #include "tls.h"
+#include "types.h"
 
 #include <cerrno>
 #include <csignal>
@@ -83,7 +84,7 @@ template <typename StartupInfo> void populateStartupInfo(StartupInfo *info) {
 	info->dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
 	info->wShowWindow = SW_SHOWNORMAL;
 	info->cbReserved2 = 0;
-	info->lpReserved2 = nullptr;
+	info->lpReserved2 = GUEST_NULL;
 	info->hStdInput = files::getStdHandle(STD_INPUT_HANDLE);
 	info->hStdOutput = files::getStdHandle(STD_OUTPUT_HANDLE);
 	info->hStdError = files::getStdHandle(STD_ERROR_HANDLE);
@@ -182,7 +183,7 @@ BOOL WINAPI IsProcessorFeaturePresent(DWORD ProcessorFeature) {
 HANDLE WINAPI GetCurrentProcess() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetCurrentProcess() -> %p\n", reinterpret_cast<void *>(static_cast<uintptr_t>(-1)));
-	return reinterpret_cast<HANDLE>(static_cast<uintptr_t>(-1));
+	return kPseudoCurrentProcessHandleValue;
 }
 
 DWORD WINAPI GetCurrentProcessId() {
@@ -395,9 +396,9 @@ LPVOID WINAPI TlsGetValue(DWORD dwTlsIndex) {
 		setLastError(ERROR_INVALID_PARAMETER);
 		return nullptr;
 	}
-	void *result = wibo::tls::getValue(dwTlsIndex);
+	GUEST_PTR result = wibo::tls::getValue(dwTlsIndex);
 	setLastError(ERROR_SUCCESS);
-	return result;
+	return reinterpret_cast<LPVOID>(result);
 }
 
 BOOL WINAPI TlsSetValue(DWORD dwTlsIndex, LPVOID lpTlsValue) {
@@ -407,7 +408,7 @@ BOOL WINAPI TlsSetValue(DWORD dwTlsIndex, LPVOID lpTlsValue) {
 		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
-	if (!wibo::tls::setValue(dwTlsIndex, lpTlsValue)) {
+	if (!wibo::tls::setValue(dwTlsIndex, toGuestPtr(lpTlsValue))) {
 		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
@@ -463,7 +464,7 @@ HANDLE WINAPI CreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dwSt
 	if ((dwCreationFlags & ~SUPPORTED_FLAGS) != 0) {
 		DEBUG_LOG("CreateThread: unsupported creation flags 0x%x\n", dwCreationFlags);
 		setLastError(ERROR_NOT_SUPPORTED);
-		return nullptr;
+		return NO_HANDLE;
 	}
 
 	Pin<ThreadObject> obj = make_pin<ThreadObject>(0); // tid set during pthread_create
@@ -554,7 +555,7 @@ int WINAPI GetThreadPriority(HANDLE hThread) {
 
 DWORD WINAPI GetPriorityClass(HANDLE hProcess) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("GetPriorityClass(%p)\n", hProcess);
+	DEBUG_LOG("STUB: GetPriorityClass(%p)\n", hProcess);
 	(void)hProcess;
 	return NORMAL_PRIORITY_CLASS;
 }

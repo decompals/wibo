@@ -8,6 +8,7 @@
 #include "modules.h"
 #include "resources.h"
 #include "strutil.h"
+#include "types.h"
 
 #include <cstdio>
 #include <cstring>
@@ -239,7 +240,7 @@ UINT WINAPI GetFileVersionInfoA(LPCSTR lptstrFilename, DWORD dwHandle, DWORD dwL
 	return 1;
 }
 
-static unsigned int VerQueryValueImpl(const void *pBlock, const std::string &subBlock, void **lplpBuffer,
+static unsigned int VerQueryValueImpl(const void *pBlock, const std::string &subBlock, GUEST_PTR *lplpBuffer,
 									  unsigned int *puLen) {
 	if (!pBlock)
 		return 0;
@@ -264,20 +265,20 @@ static unsigned int VerQueryValueImpl(const void *pBlock, const std::string &sub
 		std::string narrow = wideStringToString(reinterpret_cast<const uint16_t *>(outPtr), static_cast<int>(outLen));
 		std::memcpy(dest, narrow.c_str(), narrow.size() + 1);
 		if (lplpBuffer)
-			*lplpBuffer = dest;
+			*lplpBuffer = toGuestPtr(dest);
 		if (puLen)
 			*puLen = static_cast<unsigned int>(narrow.size());
 		return 1;
 	}
 
 	if (lplpBuffer)
-		*lplpBuffer = const_cast<uint8_t *>(outPtr);
+		*lplpBuffer = toGuestPtr(outPtr);
 	if (puLen)
 		*puLen = outLen;
 	return 1;
 }
 
-UINT WINAPI VerQueryValueA(LPCVOID pBlock, LPCSTR lpSubBlock, LPVOID *lplpBuffer, PUINT puLen) {
+UINT WINAPI VerQueryValueA(LPCVOID pBlock, LPCSTR lpSubBlock, GUEST_PTR *lplpBuffer, PUINT puLen) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("VerQueryValueA(%p, %s, %p, %p)\n", pBlock, lpSubBlock ? lpSubBlock : "(null)", lplpBuffer, puLen);
 	if (!lpSubBlock)
@@ -299,7 +300,7 @@ UINT WINAPI GetFileVersionInfoW(LPCWSTR lptstrFilename, DWORD dwHandle, DWORD dw
 	return GetFileVersionInfoA(narrow.c_str(), dwHandle, dwLen, lpData);
 }
 
-UINT WINAPI VerQueryValueW(LPCVOID pBlock, LPCWSTR lpSubBlock, LPVOID *lplpBuffer, PUINT puLen) {
+UINT WINAPI VerQueryValueW(LPCVOID pBlock, LPCWSTR lpSubBlock, GUEST_PTR *lplpBuffer, PUINT puLen) {
 	HOST_CONTEXT_GUARD();
 	if (!lpSubBlock)
 		return 0;

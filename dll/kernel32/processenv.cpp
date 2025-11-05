@@ -6,6 +6,7 @@
 #include "heap.h"
 #include "internal.h"
 #include "strutil.h"
+#include "types.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -15,6 +16,9 @@
 #include <unistd.h>
 
 namespace {
+
+GUEST_PTR g_commandLineA = GUEST_NULL;
+GUEST_PTR g_commandLineW = GUEST_NULL;
 
 std::string convertEnvValueForWindows(const std::string &name, const char *rawValue) {
 	if (!rawValue) {
@@ -42,16 +46,26 @@ std::string convertEnvValueToHost(const std::string &name, const char *rawValue)
 
 namespace kernel32 {
 
-LPSTR WINAPI GetCommandLineA() {
+GUEST_PTR WINAPI GetCommandLineA() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetCommandLineA() -> %s\n", wibo::commandLine.c_str());
-	return const_cast<LPSTR>(wibo::commandLine.c_str());
+	if (g_commandLineA == GUEST_NULL) {
+		void *tmp = wibo::heap::guestCalloc(1, wibo::commandLine.size() + 1);
+		memcpy(tmp, wibo::commandLine.c_str(), wibo::commandLine.size());
+		g_commandLineA = toGuestPtr(tmp);
+	}
+	return g_commandLineA;
 }
 
-LPWSTR WINAPI GetCommandLineW() {
+GUEST_PTR WINAPI GetCommandLineW() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetCommandLineW() -> %s\n", wideStringToString(wibo::commandLineW.data()).c_str());
-	return wibo::commandLineW.data();
+	if (g_commandLineW == GUEST_NULL) {
+		void *tmp = wibo::heap::guestCalloc(1, wibo::commandLineW.size() * sizeof(WCHAR) + sizeof(WCHAR));
+		memcpy(tmp, wibo::commandLineW.data(), wibo::commandLineW.size() * sizeof(WCHAR));
+		g_commandLineW = toGuestPtr(tmp);
+	}
+	return g_commandLineW;
 }
 
 HANDLE WINAPI GetStdHandle(DWORD nStdHandle) {
@@ -66,7 +80,11 @@ BOOL WINAPI SetStdHandle(DWORD nStdHandle, HANDLE hHandle) {
 	return files::setStdHandle(nStdHandle, hHandle);
 }
 
-LPCH WINAPI GetEnvironmentStrings() {
+GUEST_PTR WINAPI GetEnvironmentStrings() {
+	return GetEnvironmentStringsA();
+}
+
+GUEST_PTR WINAPI GetEnvironmentStringsA() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetEnvironmentStrings()\n");
 
@@ -82,7 +100,7 @@ LPCH WINAPI GetEnvironmentStrings() {
 	char *buffer = static_cast<char *>(wibo::heap::guestMalloc(bufSize));
 	if (!buffer) {
 		setLastError(ERROR_NOT_ENOUGH_MEMORY);
-		return nullptr;
+		return GUEST_NULL;
 	}
 	char *ptr = buffer;
 	work = environ;
@@ -96,10 +114,10 @@ LPCH WINAPI GetEnvironmentStrings() {
 	}
 	*ptr = 0;
 
-	return buffer;
+	return toGuestPtr(buffer);
 }
 
-LPWCH WINAPI GetEnvironmentStringsW() {
+GUEST_PTR WINAPI GetEnvironmentStringsW() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetEnvironmentStringsW()\n");
 
@@ -115,7 +133,7 @@ LPWCH WINAPI GetEnvironmentStringsW() {
 	uint16_t *buffer = static_cast<uint16_t *>(wibo::heap::guestMalloc(bufSizeW * sizeof(uint16_t)));
 	if (!buffer) {
 		setLastError(ERROR_NOT_ENOUGH_MEMORY);
-		return nullptr;
+		return GUEST_NULL;
 	}
 	uint16_t *ptr = buffer;
 	work = environ;
@@ -131,7 +149,7 @@ LPWCH WINAPI GetEnvironmentStringsW() {
 	}
 	*ptr = 0;
 
-	return buffer;
+	return toGuestPtr(buffer);
 }
 
 BOOL WINAPI FreeEnvironmentStringsA(LPCH penv) {

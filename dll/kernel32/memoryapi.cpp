@@ -7,6 +7,7 @@
 #include "heap.h"
 #include "internal.h"
 #include "strutil.h"
+#include "types.h"
 
 #include <cerrno>
 #include <cstring>
@@ -161,8 +162,8 @@ bool mappedViewRegionForAddress(uintptr_t request, uintptr_t pageBase, MEMORY_BA
 		}
 		uintptr_t blockStart = viewStart;
 		uintptr_t blockEnd = alignUp(viewEnd, pageSize);
-		info.BaseAddress = reinterpret_cast<void *>(blockStart);
-		info.AllocationBase = reinterpret_cast<void *>(view.viewBase);
+		info.BaseAddress = toGuestPtr(reinterpret_cast<void *>(blockStart));
+		info.AllocationBase = toGuestPtr(reinterpret_cast<void *>(view.viewBase));
 		info.AllocationProtect = view.allocationProtect;
 		info.RegionSize = blockEnd > blockStart ? blockEnd - blockStart : 0;
 		info.State = MEM_COMMIT;
@@ -189,7 +190,7 @@ HANDLE WINAPI CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMappi
 	if (flProtect != PAGE_READONLY && flProtect != PAGE_READWRITE && flProtect != PAGE_WRITECOPY) {
 		DEBUG_LOG("CreateFileMappingA: unsupported protection 0x%x\n", flProtect);
 		setLastError(ERROR_INVALID_PARAMETER);
-		return nullptr;
+		return NO_HANDLE;
 	}
 
 	auto mapping = make_pin<MappingObject>();
@@ -200,25 +201,25 @@ HANDLE WINAPI CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMappi
 		mapping->fd = -1;
 		if (size == 0) {
 			setLastError(ERROR_INVALID_PARAMETER);
-			return nullptr;
+			return NO_HANDLE;
 		}
 		mapping->maxSize = size;
 	} else {
 		auto file = wibo::handles().getAs<FileObject>(hFile);
 		if (!file || !file->valid()) {
 			setLastError(ERROR_INVALID_HANDLE);
-			return nullptr;
+			return NO_HANDLE;
 		}
 		int dupFd = fcntl(file->fd, F_DUPFD_CLOEXEC, 0);
 		if (dupFd == -1) {
 			setLastErrorFromErrno();
-			return nullptr;
+			return NO_HANDLE;
 		}
 		mapping->fd = dupFd;
 		if (size == 0) {
 			off_t fileSize = lseek(dupFd, 0, SEEK_END);
 			if (fileSize < 0) {
-				return nullptr;
+				return NO_HANDLE;
 			}
 			size = static_cast<uint64_t>(fileSize);
 		}

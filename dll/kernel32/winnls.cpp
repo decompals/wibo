@@ -19,6 +19,9 @@ constexpr DWORD kNormIgnoreCase = 0x00000001;
 constexpr DWORD LCID_INSTALLED = 0x00000001;
 constexpr DWORD LCID_SUPPORTED = 0x00000002;
 constexpr DWORD LCID_ALTERNATE_SORTS = 0x00000004;
+constexpr LCID kEnUsLcid = 0x0409;
+constexpr LCID kInvariantLcid = 0x007f;
+constexpr DWORD LOCALE_ALLOW_NEUTRAL_NAMES = 0x08000000;
 
 int compareStrings(const std::string &a, const std::string &b, DWORD dwCmpFlags) {
 	for (size_t i = 0;; ++i) {
@@ -102,6 +105,50 @@ LANGID WINAPI GetUserDefaultUILanguage() {
 	return 0;
 }
 
+int WINAPI GetUserDefaultLocaleName(LPWSTR lpLocaleName, int cchLocaleName) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("GetUserDefaultLocaleName(%p, %d)\n", lpLocaleName, cchLocaleName);
+	if (!lpLocaleName || cchLocaleName < 0) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return 0;
+	}
+
+	constexpr char16_t localeName[] = u"en-US";
+	constexpr int requiredChars = static_cast<int>(sizeof(localeName) / sizeof(char16_t));
+	if (cchLocaleName < requiredChars) {
+		setLastError(ERROR_INSUFFICIENT_BUFFER);
+		return 0;
+	}
+
+	std::memcpy(lpLocaleName, localeName, sizeof(localeName));
+	return requiredChars;
+}
+
+LCID WINAPI LocaleNameToLCID(LPCWSTR lpName, DWORD dwFlags) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("LocaleNameToLCID(%p, 0x%x)\n", lpName, dwFlags);
+	if (dwFlags & ~LOCALE_ALLOW_NEUTRAL_NAMES) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return 0;
+	}
+	if (!lpName) {
+		return kEnUsLcid;
+	}
+
+	std::string localeName = wideStringToString(lpName);
+	if (localeName.empty()) {
+		return kInvariantLcid;
+	}
+
+	std::string normalized = stringToLower(localeName);
+	if (normalized == "en-us" || normalized == "en_us" || normalized == "!x-sys-default-locale") {
+		return kEnUsLcid;
+	}
+
+	setLastError(ERROR_INVALID_PARAMETER);
+	return 0;
+}
+
 BOOL WINAPI GetCPInfo(UINT CodePage, LPCPINFO lpCPInfo) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetCPInfo(%u, %p)\n", CodePage, lpCPInfo);
@@ -120,7 +167,7 @@ BOOL WINAPI GetCPInfo(UINT CodePage, LPCPINFO lpCPInfo) {
 }
 
 int WINAPI CompareStringA(LCID Locale, DWORD dwCmpFlags, LPCSTR lpString1, int cchCount1, LPCSTR lpString2,
-							int cchCount2) {
+						  int cchCount2) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CompareStringA(%u, %u, %s, %d, %s, %d)\n", Locale, dwCmpFlags, lpString1 ? lpString1 : "(null)",
 			  cchCount1, lpString2 ? lpString2 : "(null)", cchCount2);
@@ -143,7 +190,7 @@ int WINAPI CompareStringA(LCID Locale, DWORD dwCmpFlags, LPCSTR lpString1, int c
 }
 
 int WINAPI CompareStringW(LCID Locale, DWORD dwCmpFlags, LPCWCH lpString1, int cchCount1, LPCWCH lpString2,
-							int cchCount2) {
+						  int cchCount2) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CompareStringW(%u, %u, %p, %d, %p, %d)\n", Locale, dwCmpFlags, lpString1, cchCount1, lpString2,
 			  cchCount2);

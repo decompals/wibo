@@ -1,11 +1,11 @@
 #include "files.h"
 #include "common.h"
+#include "errors.h"
 #include "handles.h"
 #include "strutil.h"
 
 #include <algorithm>
 #include <cerrno>
-#include <climits>
 #include <cstddef>
 #include <cstdio>
 #include <mutex>
@@ -312,7 +312,7 @@ HANDLE getStdHandle(DWORD nStdHandle) {
 	case STD_ERROR_HANDLE:
 		return stderrHandle;
 	default:
-		return (void *)0xFFFFFFFF;
+		return INVALID_HANDLE_VALUE;
 	}
 }
 

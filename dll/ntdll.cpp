@@ -24,7 +24,7 @@ namespace {
 
 struct PROCESS_BASIC_INFORMATION {
 	NTSTATUS ExitStatus;
-	PEB *PebBaseAddress;
+	GUEST_PTR PebBaseAddress;
 	ULONG_PTR AffinityMask;
 	LONG BasePriority;
 	ULONG_PTR UniqueProcessId;
@@ -94,8 +94,8 @@ std::string windowsImagePathFor(const ProcessHandleDetails &details) {
 } // namespace
 
 namespace kernel32 {
-BOOL WIN_FUNC SetEvent(HANDLE hEvent);
-BOOL WIN_FUNC ResetEvent(HANDLE hEvent);
+BOOL WINAPI SetEvent(HANDLE hEvent);
+BOOL WINAPI ResetEvent(HANDLE hEvent);
 } // namespace kernel32
 
 namespace ntdll {
@@ -262,7 +262,7 @@ NTSTATUS WINAPI NtWriteFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE Apc
 	return status;
 }
 
-NTSTATUS WINAPI NtAllocateVirtualMemory(HANDLE ProcessHandle, PVOID *BaseAddress, ULONG_PTR ZeroBits,
+NTSTATUS WINAPI NtAllocateVirtualMemory(HANDLE ProcessHandle, GUEST_PTR *BaseAddress, ULONG_PTR ZeroBits,
 										PSIZE_T RegionSize, ULONG AllocationType, ULONG Protect) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("NtAllocateVirtualMemory(%p, %p, %lu, %p, %lu, %lu) ", ProcessHandle, BaseAddress, ZeroBits, RegionSize,
@@ -276,20 +276,24 @@ NTSTATUS WINAPI NtAllocateVirtualMemory(HANDLE ProcessHandle, PVOID *BaseAddress
 		return STATUS_INVALID_PARAMETER;
 	}
 
-	wibo::heap::VmStatus vmStatus =
-		wibo::heap::virtualAlloc(reinterpret_cast<void **>(BaseAddress), reinterpret_cast<std::size_t *>(RegionSize),
-								 static_cast<DWORD>(AllocationType), static_cast<DWORD>(Protect));
+	void *baseAddress = fromGuestPtr(*BaseAddress);
+	size_t regionSize = static_cast<size_t>(*RegionSize);
+	wibo::heap::VmStatus vmStatus = wibo::heap::virtualAlloc(
+		&baseAddress, &regionSize, static_cast<DWORD>(AllocationType), static_cast<DWORD>(Protect));
 	if (vmStatus != wibo::heap::VmStatus::Success) {
 		NTSTATUS status = wibo::heap::ntStatusFromVmStatus(vmStatus);
 		DEBUG_LOG("-> 0x%x\n", status);
 		return status;
 	}
 
+	*BaseAddress = toGuestPtr(baseAddress);
+	*RegionSize = static_cast<SIZE_T>(regionSize);
+
 	DEBUG_LOG("-> 0x%x\n", STATUS_SUCCESS);
 	return STATUS_SUCCESS;
 }
 
-NTSTATUS WINAPI NtProtectVirtualMemory(HANDLE ProcessHandle, PVOID *BaseAddress, PSIZE_T NumberOfBytesToProtect,
+NTSTATUS WINAPI NtProtectVirtualMemory(HANDLE ProcessHandle, GUEST_PTR *BaseAddress, PSIZE_T NumberOfBytesToProtect,
 									   ULONG NewAccessProtection, PULONG OldAccessProtection) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("NtProtectVirtualMemory(%p, %p, %p, %lu, %p) ", ProcessHandle, BaseAddress, NumberOfBytesToProtect,
@@ -303,8 +307,8 @@ NTSTATUS WINAPI NtProtectVirtualMemory(HANDLE ProcessHandle, PVOID *BaseAddress,
 		return STATUS_INVALID_PARAMETER;
 	}
 
-	void *base = *BaseAddress;
-	std::size_t length = static_cast<std::size_t>(*NumberOfBytesToProtect);
+	void *base = fromGuestPtr(*BaseAddress);
+	size_t length = static_cast<size_t>(*NumberOfBytesToProtect);
 	wibo::heap::VmStatus vmStatus =
 		wibo::heap::virtualProtect(base, length, static_cast<DWORD>(NewAccessProtection), OldAccessProtection);
 	if (vmStatus != wibo::heap::VmStatus::Success) {
@@ -351,7 +355,7 @@ NTSTATUS WINAPI NtQueryInformationProcess(HANDLE ProcessHandle, PROCESSINFOCLASS
 										  PVOID ProcessInformation, ULONG ProcessInformationLength,
 										  PULONG ReturnLength) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("NtQueryInformationProcess(%p, %u, %p, %u, %p) ", ProcessHandle, ProcessInformationClass,
+	DEBUG_LOG("NtQueryInformationProcess(%d, %u, %p, %u, %p) ", ProcessHandle, ProcessInformationClass,
 			  ProcessInformation, ProcessInformationLength, ReturnLength);
 	if (!ProcessInformation) {
 		DEBUG_LOG("-> 0x%x\n", STATUS_INVALID_PARAMETER);
@@ -378,7 +382,7 @@ NTSTATUS WINAPI NtQueryInformationProcess(HANDLE ProcessHandle, PROCESSINFOCLASS
 		auto *info = reinterpret_cast<PROCESS_BASIC_INFORMATION *>(ProcessInformation);
 		std::memset(info, 0, sizeof(*info));
 		info->ExitStatus = static_cast<NTSTATUS>(details.exitCode);
-		info->PebBaseAddress = details.peb;
+		info->PebBaseAddress = toGuestPtr(details.peb);
 		DWORD_PTR processMask = 0;
 		DWORD_PTR systemMask = 0;
 		if (kernel32::GetProcessAffinityMask(ProcessHandle, &processMask, &systemMask)) {
@@ -440,7 +444,7 @@ NTSTATUS WINAPI NtQueryInformationProcess(HANDLE ProcessHandle, PROCESSINFOCLASS
 		size_t characterCount = widePath.empty() ? 0 : widePath.size() - 1;
 		unicode->Length = static_cast<unsigned short>(characterCount * sizeof(uint16_t));
 		unicode->MaximumLength = static_cast<unsigned short>(widePath.size() * sizeof(uint16_t));
-		unicode->Buffer = buffer;
+		unicode->Buffer = toGuestPtr(buffer);
 		DEBUG_LOG("-> 0x%x\n", STATUS_SUCCESS);
 		return STATUS_SUCCESS;
 	}

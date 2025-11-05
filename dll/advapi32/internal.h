@@ -6,8 +6,6 @@
 
 constexpr DWORD SECURITY_LOCAL_SYSTEM_RID = 18;
 
-constexpr BYTE kNtAuthority[6] = {0, 0, 0, 0, 0, 5};
-
 struct TokenObject : ObjectBase {
 	static constexpr ObjectType kType = ObjectType::Token;
 

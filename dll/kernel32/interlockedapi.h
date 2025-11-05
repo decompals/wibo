@@ -5,13 +5,13 @@
 namespace kernel32 {
 
 struct SLIST_ENTRY {
-	SLIST_ENTRY *Next;
+	GUEST_PTR Next;
 };
 
 using PSLIST_ENTRY = SLIST_ENTRY *;
 
 struct SLIST_HEADER {
-	SLIST_ENTRY *Head;
+	GUEST_PTR Head;
 	unsigned short Depth;
 	unsigned short Sequence;
 };

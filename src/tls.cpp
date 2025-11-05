@@ -1,5 +1,7 @@
 #include "tls.h"
 #include "common.h"
+#include "heap.h"
+#include "types.h"
 
 #include <algorithm>
 #include <array>
@@ -20,7 +22,7 @@ size_t g_expansionCapacity = 0;
 
 struct TlsArray {
 	size_t capacity;
-	void *slots[];
+	GUEST_PTR slots[];
 };
 
 std::unordered_map<TEB *, TlsArray *> g_moduleArrays;
@@ -31,8 +33,8 @@ TlsArray *allocateTlsArray(size_t capacity) {
 	if (capacity == 0 || capacity > kMaxExpansionSlots) {
 		return nullptr;
 	}
-	const size_t bytes = sizeof(TlsArray) + capacity * sizeof(void *);
-	auto *arr = static_cast<TlsArray *>(std::calloc(1, bytes));
+	const size_t bytes = sizeof(TlsArray) + capacity * sizeof(GUEST_PTR);
+	auto *arr = static_cast<TlsArray *>(wibo::heap::guestCalloc(1, bytes));
 	if (!arr) {
 		return nullptr;
 	}
@@ -40,7 +42,7 @@ TlsArray *allocateTlsArray(size_t capacity) {
 	return arr;
 }
 
-inline TlsArray *arrayFromSlots(void *slots) {
+inline TlsArray *arrayFromSlots(GUEST_PTR slots) {
 	return slots ? reinterpret_cast<TlsArray *>(reinterpret_cast<uint8_t *>(slots) - offsetof(TlsArray, slots))
 				 : nullptr;
 }
@@ -56,7 +58,7 @@ void setExpansionArray(TEB *tib, TlsArray *arr) {
 	if (!tib) {
 		return;
 	}
-	tib->TlsExpansionSlots = arr ? arr->slots : nullptr;
+	tib->TlsExpansionSlots = arr ? toGuestPtr(arr->slots) : GUEST_NULL;
 }
 
 size_t chooseCapacity(size_t current, size_t required) {
@@ -202,7 +204,7 @@ bool ensureModuleArrayCapacityLocked(size_t required) {
 	}
 	for (auto &entry : pending) {
 		g_moduleArrays[entry.tib] = entry.newArray;
-		entry.tib->ThreadLocalStoragePointer = entry.newArray->slots;
+		entry.tib->ThreadLocalStoragePointer = toGuestPtr(entry.newArray->slots);
 		if (entry.oldArray) {
 			queueOldModuleArray(entry.tib, entry.oldArray);
 		}
@@ -214,7 +216,7 @@ bool ensureModuleArrayCapacityLocked(size_t required) {
 void zeroSlotForAllTibs(size_t index) {
 	if (index < kTlsSlotCount) {
 		for (TEB *tib : g_activeTibs) {
-			tib->TlsSlots[index] = nullptr;
+			tib->TlsSlots[index] = GUEST_NULL;
 		}
 		return;
 	}
@@ -224,7 +226,7 @@ void zeroSlotForAllTibs(size_t index) {
 		if (!arr || expansionIndex >= arr->capacity) {
 			continue;
 		}
-		arr->slots[expansionIndex] = nullptr;
+		arr->slots[expansionIndex] = GUEST_NULL;
 	}
 }
 
@@ -272,7 +274,7 @@ void cleanupTib(TEB *tib) {
 		}
 		g_moduleGarbage.erase(garbageIt);
 	}
-	tib->ThreadLocalStoragePointer = nullptr;
+	tib->ThreadLocalStoragePointer = GUEST_NULL;
 	auto it = std::find(g_activeTibs.begin(), g_activeTibs.end(), tib);
 	if (it != g_activeTibs.end()) {
 		g_activeTibs.erase(it);
@@ -316,9 +318,9 @@ bool isSlotAllocated(DWORD index) {
 	return index < wibo::tls::kTlsMaxSlotCount && g_slotUsed[index];
 }
 
-void *getValue(TEB *tib, DWORD index) {
+GUEST_PTR getValue(TEB *tib, DWORD index) {
 	if (!tib || index >= static_cast<DWORD>(wibo::tls::kTlsMaxSlotCount)) {
-		return nullptr;
+		return GUEST_NULL;
 	}
 	if (index < static_cast<DWORD>(kTlsSlotCount)) {
 		return tib->TlsSlots[index];
@@ -326,16 +328,16 @@ void *getValue(TEB *tib, DWORD index) {
 	std::lock_guard lock(g_tlsMutex);
 	auto *arr = getExpansionArray(tib);
 	if (!arr) {
-		return nullptr;
+		return GUEST_NULL;
 	}
 	size_t expansionIndex = static_cast<size_t>(index) - kTlsSlotCount;
 	if (expansionIndex >= arr->capacity) {
-		return nullptr;
+		return GUEST_NULL;
 	}
 	return arr->slots[expansionIndex];
 }
 
-bool setValue(TEB *tib, DWORD index, void *value) {
+bool setValue(TEB *tib, DWORD index, GUEST_PTR value) {
 	if (!tib || index >= static_cast<DWORD>(wibo::tls::kTlsMaxSlotCount)) {
 		return false;
 	}
@@ -357,9 +359,9 @@ bool setValue(TEB *tib, DWORD index, void *value) {
 	return true;
 }
 
-void *getValue(DWORD index) { return getValue(currentThreadTeb, index); }
+GUEST_PTR getValue(DWORD index) { return getValue(currentThreadTeb, index); }
 
-bool setValue(DWORD index, void *value) { return setValue(currentThreadTeb, index, value); }
+bool setValue(DWORD index, GUEST_PTR value) { return setValue(currentThreadTeb, index, value); }
 
 void forEachTib(void (*callback)(TEB *, void *), void *context) {
 	if (!callback) {
@@ -380,7 +382,7 @@ bool ensureModulePointerCapacity(size_t capacity) {
 	return ensureModuleArrayCapacityLocked(capacity);
 }
 
-bool setModulePointer(TEB *tib, size_t index, void *value) {
+bool setModulePointer(TEB *tib, size_t index, GUEST_PTR value) {
 	if (!tib) {
 		return false;
 	}
@@ -393,7 +395,7 @@ bool setModulePointer(TEB *tib, size_t index, void *value) {
 		return false;
 	}
 	array->slots[index] = value;
-	tib->ThreadLocalStoragePointer = array->slots;
+	tib->ThreadLocalStoragePointer = toGuestPtr(array->slots);
 	return true;
 }
 
@@ -406,7 +408,7 @@ void clearModulePointer(TEB *tib, size_t index) {
 	if (!array || index >= array->capacity) {
 		return;
 	}
-	array->slots[index] = nullptr;
+	array->slots[index] = GUEST_NULL;
 }
 
 } // namespace wibo::tls

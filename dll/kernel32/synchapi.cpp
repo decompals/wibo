@@ -4,8 +4,10 @@
 #include "context.h"
 #include "errors.h"
 #include "handles.h"
+#include "heap.h"
 #include "internal.h"
 #include "strutil.h"
+#include "types.h"
 
 #include <algorithm>
 #include <chrono>
@@ -158,7 +160,7 @@ HANDLE WINAPI CreateMutexW(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInitia
 	if (!mu) {
 		// Name exists but isn't a mutex
 		setLastError(ERROR_INVALID_HANDLE);
-		return nullptr;
+		return NO_HANDLE;
 	}
 	HANDLE h = wibo::handles().alloc(std::move(mu), grantedAccess, handleFlags);
 	setLastError(created ? ERROR_SUCCESS : ERROR_ALREADY_EXISTS);
@@ -204,7 +206,7 @@ BOOL WINAPI ReleaseMutex(HANDLE hMutex) {
 }
 
 HANDLE WINAPI CreateEventW(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManualReset, BOOL bInitialState,
-							 LPCWSTR lpName) {
+						   LPCWSTR lpName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CreateEventW(%p, %d, %d, %s)\n", lpEventAttributes, static_cast<int>(bManualReset),
 			  static_cast<int>(bInitialState), wideStringToString(lpName).c_str());
@@ -222,7 +224,7 @@ HANDLE WINAPI CreateEventW(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManual
 	if (!ev) {
 		// Name exists but isn't an event
 		setLastError(ERROR_INVALID_HANDLE);
-		return nullptr;
+		return NO_HANDLE;
 	}
 	HANDLE h = wibo::handles().alloc(std::move(ev), grantedAccess, handleFlags);
 	DEBUG_LOG("-> %p (created=%d)\n", h, created ? 1 : 0);
@@ -231,7 +233,7 @@ HANDLE WINAPI CreateEventW(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManual
 }
 
 HANDLE WINAPI CreateEventA(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManualReset, BOOL bInitialState,
-							 LPCSTR lpName) {
+						   LPCSTR lpName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CreateEventA -> ");
 	std::vector<uint16_t> wideName;
@@ -241,7 +243,7 @@ HANDLE WINAPI CreateEventA(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManual
 }
 
 HANDLE WINAPI CreateSemaphoreW(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LONG lInitialCount, LONG lMaximumCount,
-								 LPCWSTR lpName) {
+							   LPCWSTR lpName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CreateSemaphoreW(%p, %ld, %ld, %s)\n", lpSemaphoreAttributes, lInitialCount, lMaximumCount,
 			  wideStringToString(lpName).c_str());
@@ -260,7 +262,7 @@ HANDLE WINAPI CreateSemaphoreW(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LONG
 	if (!sem) {
 		// Name exists but isn't an event
 		setLastError(ERROR_INVALID_HANDLE);
-		return nullptr;
+		return NO_HANDLE;
 	}
 	HANDLE h = wibo::handles().alloc(std::move(sem), granted, hflags);
 	setLastError(created ? ERROR_SUCCESS : ERROR_ALREADY_EXISTS);
@@ -268,7 +270,7 @@ HANDLE WINAPI CreateSemaphoreW(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LONG
 }
 
 HANDLE WINAPI CreateSemaphoreA(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LONG lInitialCount, LONG lMaximumCount,
-								 LPCSTR lpName) {
+							   LPCSTR lpName) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CreateSemaphoreA -> ");
 	std::vector<uint16_t> wideName;
@@ -545,38 +547,37 @@ DWORD WINAPI WaitForMultipleObjects(DWORD nCount, const HANDLE *lpHandles, BOOL 
 
 void WINAPI InitializeCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
 	HOST_CONTEXT_GUARD();
-	VERBOSE_LOG("STUB: InitializeCriticalSection(%p)\n", lpCriticalSection);
-	if (!lpCriticalSection) {
-		return;
-	}
-	std::memset(lpCriticalSection, 0, sizeof(*lpCriticalSection));
+	VERBOSE_LOG("InitializeCriticalSection(%p)\n", lpCriticalSection);
+	InitializeCriticalSectionEx(lpCriticalSection, 0, 0);
 }
 
 BOOL WINAPI InitializeCriticalSectionEx(LPCRITICAL_SECTION lpCriticalSection, DWORD dwSpinCount, DWORD Flags) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("STUB: InitializeCriticalSectionEx(%p, %u, 0x%x)\n", lpCriticalSection, dwSpinCount, Flags);
+	DEBUG_LOG("InitializeCriticalSectionEx(%p, %u, 0x%x)\n", lpCriticalSection, dwSpinCount, Flags);
 	if (!lpCriticalSection) {
 		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
-	if (Flags & ~CRITICAL_SECTION_NO_DEBUG_INFO) {
-		setLastError(ERROR_INVALID_PARAMETER);
-		return FALSE;
-	}
 	std::memset(lpCriticalSection, 0, sizeof(*lpCriticalSection));
+	if (Flags & RTL_CRITICAL_SECTION_FLAG_NO_DEBUG_INFO) {
+		lpCriticalSection->DebugInfo = static_cast<GUEST_PTR>(-1);
+	} else {
+		auto *debugInfo = reinterpret_cast<RTL_CRITICAL_SECTION_DEBUG *>(
+			wibo::heap::guestCalloc(1, sizeof(RTL_CRITICAL_SECTION_DEBUG)));
+		debugInfo->CriticalSection = toGuestPtr(lpCriticalSection);
+		debugInfo->ProcessLocksList.Blink = toGuestPtr(&debugInfo->ProcessLocksList);
+		debugInfo->ProcessLocksList.Flink = toGuestPtr(&debugInfo->ProcessLocksList);
+		lpCriticalSection->DebugInfo = toGuestPtr(debugInfo);
+	}
+	lpCriticalSection->LockCount = -1;
 	lpCriticalSection->SpinCount = dwSpinCount;
 	return TRUE;
 }
 
 BOOL WINAPI InitializeCriticalSectionAndSpinCount(LPCRITICAL_SECTION lpCriticalSection, DWORD dwSpinCount) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("STUB: InitializeCriticalSectionAndSpinCount(%p, %u)\n", lpCriticalSection, dwSpinCount);
-	if (!lpCriticalSection) {
-		setLastError(ERROR_INVALID_PARAMETER);
-		return FALSE;
-	}
-	std::memset(lpCriticalSection, 0, sizeof(*lpCriticalSection));
-	lpCriticalSection->SpinCount = dwSpinCount;
+	DEBUG_LOG("InitializeCriticalSectionAndSpinCount(%p, %u)\n", lpCriticalSection, dwSpinCount);
+	InitializeCriticalSectionEx(lpCriticalSection, dwSpinCount, 0);
 	return TRUE;
 }
 
@@ -598,7 +599,7 @@ void WINAPI LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
 	(void)lpCriticalSection;
 }
 
-BOOL WINAPI InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBOOL fPending, LPVOID *lpContext) {
+BOOL WINAPI InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBOOL fPending, GUEST_PTR *lpContext) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: InitOnceBeginInitialize(%p, %u, %p, %p)\n", lpInitOnce, dwFlags, fPending, lpContext);
 	if (!lpInitOnce) {
@@ -613,7 +614,7 @@ BOOL WINAPI InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBOOL
 		*fPending = TRUE;
 	}
 	if (lpContext) {
-		*lpContext = nullptr;
+		*lpContext = GUEST_NULL;
 	}
 	return TRUE;
 }

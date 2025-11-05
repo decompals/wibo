@@ -5,14 +5,15 @@
 #include "errors.h"
 #include "handles.h"
 #include "internal.h"
+#include "types.h"
 
 namespace kernel32 {
 
-BOOL WINAPI Wow64DisableWow64FsRedirection(PVOID *OldValue) {
+BOOL WINAPI Wow64DisableWow64FsRedirection(GUEST_PTR *OldValue) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: Wow64DisableWow64FsRedirection(%p)\n", OldValue);
 	if (OldValue) {
-		*OldValue = nullptr;
+		*OldValue = GUEST_NULL;
 	}
 	return TRUE;
 }

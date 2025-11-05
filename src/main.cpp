@@ -1,5 +1,4 @@
 #include "common.h"
-#include "context.h"
 #include "entry.h"
 #include "entry_trampolines.h"
 #include "files.h"
@@ -8,9 +7,15 @@
 #include "processes.h"
 #include "strutil.h"
 #include "tls.h"
+#include "types.h"
 #include "version_info.h"
 
+#ifdef __x86_64__
+#include "setup.h"
+#endif
+
 #include <asm/ldt.h>
+#include <asm/prctl.h>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -53,13 +58,13 @@ void wibo::debug_log(const char *fmt, ...) {
 }
 
 TEB *wibo::allocateTib() {
-	auto *newTib = static_cast<TEB *>(std::calloc(1, sizeof(TEB)));
+	auto *newTib = static_cast<TEB *>(wibo::heap::guestCalloc(1, sizeof(TEB)));
 	if (!newTib) {
 		return nullptr;
 	}
 	tls::initializeTib(newTib);
-	newTib->Tib.Self = &newTib->Tib;
-	newTib->Peb = processPeb;
+	newTib->Tib.Self = toGuestPtr(newTib);
+	newTib->Peb = toGuestPtr(processPeb);
 	return newTib;
 }
 
@@ -82,8 +87,8 @@ void wibo::initializeTibStackInfo(TEB *tibPtr) {
 		fprintf(stderr, "Failed to reserve guest stack\n");
 		std::abort();
 	}
-	tibPtr->Tib.StackLimit = guestLimit;
-	tibPtr->Tib.StackBase = guestBase;
+	tibPtr->Tib.StackLimit = toGuestPtr(guestLimit);
+	tibPtr->Tib.StackBase = toGuestPtr(guestBase);
 	tibPtr->CurrentStackPointer = guestBase;
 	DEBUG_LOG("initializeTibStackInfo: using guest stack base=%p limit=%p\n", tibPtr->Tib.StackBase,
 			  tibPtr->Tib.StackLimit);
@@ -94,10 +99,18 @@ bool wibo::installTibForCurrentThread(TEB *tibPtr) {
 		return false;
 	}
 
+	currentThreadTeb = tibPtr;
+#ifdef __x86_64__
+	tibEntryNumber = x86_64_thread_setup(tibEntryNumber, tibPtr);
+	if (tibEntryNumber == -1 || tibPtr->CurrentFsSelector == 0) {
+		perror("x86_64_thread_setup failed");
+		return false;
+	}
+#else
 	struct user_desc desc;
 	std::memset(&desc, 0, sizeof(desc));
 	desc.entry_number = tibEntryNumber;
-	desc.base_addr = reinterpret_cast<unsigned int>(tibPtr);
+	desc.base_addr = reinterpret_cast<uintptr_t>(tibPtr);
 	desc.limit = static_cast<unsigned int>(sizeof(TEB) - 1);
 	desc.seg_32bit = 1;
 	desc.contents = 0;
@@ -118,12 +131,9 @@ bool wibo::installTibForCurrentThread(TEB *tibPtr) {
 
 	tibPtr->CurrentFsSelector = static_cast<uint16_t>((desc.entry_number << 3) | 3);
 	tibPtr->CurrentGsSelector = 0;
-	currentThreadTeb = tibPtr;
+#endif
 	return true;
 }
-
-// Make this global to ease debugging
-TEB tib;
 
 static std::string getExeName(const char *argv0) {
 	std::filesystem::path exePath(argv0 ? argv0 : "wibo");
@@ -347,16 +357,18 @@ int main(int argc, char **argv) {
 
 	files::init();
 
+	// Create PEB
+	PEB *peb = reinterpret_cast<PEB *>(wibo::heap::guestCalloc(1, sizeof(PEB)));
+	peb->ProcessParameters = toGuestPtr(wibo::heap::guestCalloc(1, sizeof(RTL_USER_PROCESS_PARAMETERS)));
+
 	// Create TIB
-	memset(&tib, 0, sizeof(tib));
-	wibo::tls::initializeTib(&tib);
-	tib.Tib.Self = &tib.Tib;
-	tib.Peb = static_cast<PEB *>(calloc(1, sizeof(PEB)));
-	tib.Peb->ProcessParameters =
-		static_cast<RTL_USER_PROCESS_PARAMETERS *>(calloc(1, sizeof(RTL_USER_PROCESS_PARAMETERS)));
-	wibo::processPeb = tib.Peb;
-	wibo::initializeTibStackInfo(&tib);
-	if (!wibo::installTibForCurrentThread(&tib)) {
+	TEB *tib = reinterpret_cast<TEB *>(wibo::heap::guestCalloc(1, sizeof(TEB)));
+	wibo::tls::initializeTib(tib);
+	tib->Tib.Self = toGuestPtr(tib);
+	tib->Peb = toGuestPtr(peb);
+	wibo::processPeb = peb;
+	wibo::initializeTibStackInfo(tib);
+	if (!wibo::installTibForCurrentThread(tib)) {
 		fprintf(stderr, "Failed to install TIB for main thread\n");
 		return 1;
 	}
@@ -506,7 +518,7 @@ int main(int argc, char **argv) {
 	call_EntryProc(entryPoint);
 	DEBUG_LOG("We came back\n");
 	wibo::shutdownModuleRegistry();
-	wibo::tls::cleanupTib(&tib);
+	wibo::tls::cleanupTib(tib);
 
 	return 1;
 }

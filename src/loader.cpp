@@ -86,11 +86,11 @@ struct PESectionHeader {
 	uint32_t characteristics;
 };
 struct PEImportDirectoryEntry {
-	uint32_t *importLookupTable;
+	uint32_t importLookupTable;
 	uint32_t timeDateStamp;
 	uint32_t forwarderChain;
-	char *name;
-	uint32_t *importAddressTable;
+	uint32_t name;
+	uint32_t importAddressTable;
 };
 struct PEHintNameTableEntry {
 	uint16_t hint;
@@ -254,7 +254,9 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 		allocStatus = wibo::heap::virtualAlloc(
 			&allocatedBase, &allocationSize, MEM_RESERVE | MEM_COMMIT, initialProtect, MEM_IMAGE);
 	}
-	if (allocStatus != wibo::heap::VmStatus::Success) {
+	if (allocStatus == wibo::heap::VmStatus::Success) {
+		DEBUG_LOG("loadPE: mapped image at %p\n", allocatedBase);
+	} else {
 		DEBUG_LOG("Image mapping failed (status=%u)\n", static_cast<unsigned>(allocStatus));
 		imageBase = nullptr;
 		return false;
@@ -425,10 +427,10 @@ bool wibo::Executable::resolveImports() {
 	}
 
 	while (dir->name) {
-		char *dllName = fromRVA(dir->name);
+		char *dllName = fromRVA<char>(dir->name);
 		DEBUG_LOG("DLL Name: %s\n", dllName);
-		uint32_t *lookupTable = fromRVA(dir->importLookupTable);
-		uint32_t *addressTable = fromRVA(dir->importAddressTable);
+		uint32_t *lookupTable = fromRVA<uint32_t>(dir->importLookupTable);
+		uint32_t *addressTable = fromRVA<uint32_t>(dir->importAddressTable);
 
 		ModuleInfo *module = loadModule(dllName);
 		if (!module && kernel32::getLastError() != ERROR_MOD_NOT_FOUND) {

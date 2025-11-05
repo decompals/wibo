@@ -17,8 +17,8 @@ enum SID_NAME_USE : DWORD {
 
 namespace advapi32 {
 
-BOOL WINAPI LookupAccountSidW(LPCWSTR lpSystemName, PSID Sid, LPWSTR Name, LPDWORD cchName,
-								LPWSTR ReferencedDomainName, LPDWORD cchReferencedDomainName, SID_NAME_USE *peUse);
+BOOL WINAPI LookupAccountSidW(LPCWSTR lpSystemName, PSID Sid, LPWSTR Name, LPDWORD cchName, LPWSTR ReferencedDomainName,
+							  LPDWORD cchReferencedDomainName, SID_NAME_USE *peUse);
 BOOL WINAPI LookupPrivilegeValueA(LPCSTR lpSystemName, LPCSTR lpName, PLUID lpLuid);
 BOOL WINAPI LookupPrivilegeValueW(LPCWSTR lpSystemName, LPCWSTR lpName, PLUID lpLuid);
 BOOL WINAPI GetUserNameA(LPSTR lpBuffer, LPDWORD pcbBuffer);

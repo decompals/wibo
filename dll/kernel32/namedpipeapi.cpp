@@ -355,8 +355,8 @@ BOOL WINAPI CreatePipe(PHANDLE hReadPipe, PHANDLE hWritePipe, LPSECURITY_ATTRIBU
 		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
-	*hReadPipe = nullptr;
-	*hWritePipe = nullptr;
+	*hReadPipe = NO_HANDLE;
+	*hWritePipe = NO_HANDLE;
 
 	int pipeFds[2];
 	if (pipe(pipeFds) != 0) {

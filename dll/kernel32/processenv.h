@@ -4,12 +4,13 @@
 
 namespace kernel32 {
 
-LPSTR WINAPI GetCommandLineA();
-LPWSTR WINAPI GetCommandLineW();
+GUEST_PTR WINAPI GetCommandLineA();
+GUEST_PTR WINAPI GetCommandLineW();
 HANDLE WINAPI GetStdHandle(DWORD nStdHandle);
 BOOL WINAPI SetStdHandle(DWORD nStdHandle, HANDLE hHandle);
-LPCH WINAPI GetEnvironmentStrings();
-LPWCH WINAPI GetEnvironmentStringsW();
+GUEST_PTR WINAPI GetEnvironmentStrings();
+GUEST_PTR WINAPI GetEnvironmentStringsA();
+GUEST_PTR WINAPI GetEnvironmentStringsW();
 BOOL WINAPI FreeEnvironmentStringsA(LPCH penv);
 BOOL WINAPI FreeEnvironmentStringsW(LPWCH penv);
 DWORD WINAPI GetEnvironmentVariableA(LPCSTR lpName, LPSTR lpBuffer, DWORD nSize);

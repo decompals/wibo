@@ -12,8 +12,8 @@ typedef void(_CC_CDECL *signal_handler)(int);
 typedef int(_CC_CDECL *sort_compare)(const void *, const void *);
 
 struct _utimbuf {
-	long actime;
-	long modtime;
+	LONG actime;
+	LONG modtime;
 };
 
 struct _timeb {
@@ -29,10 +29,10 @@ namespace msvcrt {
 
 extern int _commode;
 extern int _fmode;
-extern char **__initenv;
-extern WCHAR **__winitenv;
-extern WCHAR *_wpgmptr;
-extern char *_pgmptr;
+extern GUEST_PTR __initenv;
+extern GUEST_PTR __winitenv;
+extern GUEST_PTR _wpgmptr;
+extern GUEST_PTR _pgmptr;
 extern int __mb_cur_max;
 extern _FILE _iob[_IOB_ENTRIES];
 
@@ -42,23 +42,23 @@ void CDECL setbuf(_FILE *stream, char *buffer);
 void CDECL _splitpath(const char *path, char *drive, char *dir, char *fname, char *ext);
 int CDECL _fileno(_FILE *stream);
 int CDECL _getmbcp();
-int *CDECL __p___mb_cur_max();
+GUEST_PTR CDECL __p___mb_cur_max();
 int CDECL _setmbcp(int codepage);
-unsigned char *CDECL __p__mbctype();
-unsigned short **CDECL __p__pctype();
+GUEST_PTR CDECL __p__mbctype();
+GUEST_PTR CDECL __p__pctype();
 int CDECL _isctype(int ch, int mask);
 void CDECL __set_app_type(int at);
-int *CDECL __p__fmode();
-int *CDECL __p__commode();
-void CDECL _initterm(const _PVFV *ppfn, const _PVFV *end);
-int CDECL _initterm_e(const _PIFV *ppfn, const _PIFV *end);
+GUEST_PTR CDECL __p__fmode();
+GUEST_PTR CDECL __p__commode();
+void CDECL _initterm(GUEST_PTR *ppfn, GUEST_PTR *end);
+int CDECL _initterm_e(GUEST_PTR *ppfn, GUEST_PTR *end);
 unsigned int CDECL _controlfp(unsigned int newControl, unsigned int mask);
 int CDECL _controlfp_s(unsigned int *currentControl, unsigned int newControl, unsigned int mask);
 _onexit_t CDECL _onexit(_onexit_t func);
-int CDECL __wgetmainargs(int *wargc, WCHAR ***wargv, WCHAR ***wenv, int doWildcard, int *startInfo);
-int CDECL __getmainargs(int *argc, char ***argv, char ***env, int doWildcard, int *startInfo);
+int CDECL __wgetmainargs(int *wargc, GUEST_PTR *wargv, GUEST_PTR *wenv, int doWildcard, int *startInfo);
+int CDECL __getmainargs(int *argc, GUEST_PTR *argv, GUEST_PTR *env, int doWildcard, int *startInfo);
 char *CDECL getenv(const char *varname);
-char ***CDECL __p___initenv();
+GUEST_PTR CDECL __p___initenv();
 char *CDECL strcat(char *dest, const char *src);
 char *CDECL strcpy(char *dest, const char *src);
 int CDECL _access(const char *path, int mode);
@@ -84,31 +84,33 @@ int CDECL _ismbcdigit(unsigned int ch);
 int CDECL _stricmp(const char *lhs, const char *rhs);
 int CDECL _strnicmp(const char *lhs, const char *rhs, SIZE_T count);
 int CDECL _memicmp(const void *lhs, const void *rhs, SIZE_T count);
+#ifndef __x86_64__ // TODO
 int CDECL_NO_CONV _vsnprintf(char *buffer, SIZE_T count, const char *format, va_list args);
 int CDECL_NO_CONV _snprintf(char *buffer, SIZE_T count, const char *format, ...);
 int CDECL_NO_CONV sprintf(char *buffer, const char *format, ...);
 int CDECL_NO_CONV printf(const char *format, ...);
 int CDECL_NO_CONV sscanf(const char *buffer, const char *format, ...);
+#endif
 char *CDECL fgets(char *str, int count, _FILE *stream);
 SIZE_T CDECL fread(void *buffer, SIZE_T size, SIZE_T count, _FILE *stream);
 _FILE *CDECL _fsopen(const char *filename, const char *mode, int shflag);
 int CDECL _sopen(const char *path, int oflag, int shflag, int pmode);
 int CDECL _read(int fd, void *buffer, unsigned int count);
 int CDECL _close(int fd);
-long CDECL _lseek(int fd, long offset, int origin);
+LONG CDECL _lseek(int fd, LONG offset, int origin);
 int CDECL _unlink(const char *path);
 int CDECL _utime(const char *path, const _utimbuf *times);
-int CDECL _chsize(int fd, long size);
+int CDECL _chsize(int fd, LONG size);
 char *CDECL strncpy(char *dest, const char *src, SIZE_T count);
 char *CDECL strpbrk(const char *str, const char *accept);
 char *CDECL strstr(const char *haystack, const char *needle);
 char *CDECL strrchr(const char *str, int ch);
 char *CDECL strtok(char *str, const char *delim);
-long CDECL _adj_fdiv_r(long value);
-void CDECL _adjust_fdiv(long n);
+LONG CDECL _adj_fdiv_r(LONG value);
+void CDECL _adjust_fdiv(LONG n);
 int CDECL _ftime(struct _timeb *timeptr);
-unsigned long CDECL _ultoa(unsigned long value, char *str, int radix);
-char *CDECL _ltoa(long value, char *str, int radix);
+ULONG CDECL _ultoa(ULONG value, char *str, int radix);
+char *CDECL _ltoa(LONG value, char *str, int radix);
 char *CDECL _makepath(char *path, const char *drive, const char *dir, const char *fname, const char *ext);
 char *CDECL _fullpath(char *absPath, const char *relPath, SIZE_T maxLength);
 int CDECL _putenv(const char *envString);
@@ -119,7 +121,7 @@ TIME_T CDECL time(TIME_T *t);
 char *CDECL __unDName(char *outputString, const char *mangledName, int maxStringLength, void *(*allocFunc)(SIZE_T),
 					  void (*freeFunc)(void *), unsigned short);
 char *CDECL setlocale(int category, const char *locale);
-int CDECL _wdupenv_s(WCHAR **buffer, SIZE_T *numberOfElements, const WCHAR *varname);
+int CDECL _wdupenv_s(GUEST_PTR *buffer, SIZE_T *numberOfElements, const WCHAR *varname);
 int CDECL _wgetenv_s(SIZE_T *pReturnValue, WCHAR *buffer, SIZE_T numberOfElements, const WCHAR *varname);
 SIZE_T CDECL strlen(const char *str);
 int CDECL strcmp(const char *lhs, const char *rhs);
@@ -129,38 +131,40 @@ int CDECL strcpy_s(char *dest, SIZE_T dest_size, const char *src);
 int CDECL strcat_s(char *dest, SIZE_T numberOfElements, const char *src);
 int CDECL strncpy_s(char *dest, SIZE_T dest_size, const char *src, SIZE_T count);
 char *CDECL _strdup(const char *strSource);
-unsigned long CDECL strtoul(const char *str, char **endptr, int base);
+ULONG CDECL strtoul(const char *str, GUEST_PTR *endptr, int base);
 void *CDECL malloc(SIZE_T size);
 void *CDECL calloc(SIZE_T count, SIZE_T size);
 void *CDECL realloc(void *ptr, SIZE_T size);
 void *CDECL _malloc_crt(SIZE_T size);
 void CDECL _lock(int locknum);
 void CDECL _unlock(int locknum);
-_onexit_t CDECL __dllonexit(_onexit_t func, _onexit_t **pbegin, _onexit_t **pend);
+_onexit_t CDECL __dllonexit(_onexit_t func, GUEST_PTR *pbegin, GUEST_PTR *pend);
 void CDECL free(void *ptr);
 void *CDECL memcpy(void *dest, const void *src, SIZE_T count);
 void *CDECL memmove(void *dest, const void *src, SIZE_T count);
 int CDECL memcmp(const void *lhs, const void *rhs, SIZE_T count);
 void CDECL qsort(void *base, SIZE_T num, SIZE_T size, sort_compare compare);
 int CDECL fflush(_FILE *stream);
+#ifndef __x86_64__ // TODO
 int CDECL_NO_CONV vfwprintf(_FILE *stream, const WCHAR *format, va_list args);
+#endif
 _FILE *CDECL fopen(const char *filename, const char *mode);
 int CDECL _dup2(int fd1, int fd2);
 int CDECL _isatty(int fd);
-int CDECL fseek(_FILE *stream, long offset, int origin);
-long CDECL ftell(_FILE *stream);
+int CDECL fseek(_FILE *stream, LONG offset, int origin);
+LONG CDECL ftell(_FILE *stream);
 int CDECL feof(_FILE *stream);
 int CDECL fputws(const WCHAR *str, _FILE *stream);
 int CDECL _cputws(const WCHAR *string);
 WCHAR *CDECL fgetws(WCHAR *buffer, int size, _FILE *stream);
 WINT_T CDECL fgetwc(_FILE *stream);
-int CDECL _wfopen_s(_FILE **stream, const WCHAR *filename, const WCHAR *mode);
+int CDECL _wfopen_s(GUEST_PTR *stream, const WCHAR *filename, const WCHAR *mode);
 int CDECL _wcsicmp(const WCHAR *lhs, const WCHAR *rhs);
 int CDECL _wmakepath_s(WCHAR *path, SIZE_T sizeInWords, const WCHAR *drive, const WCHAR *dir, const WCHAR *fname,
 					   const WCHAR *ext);
 int CDECL _wputenv_s(const WCHAR *varname, const WCHAR *value);
-unsigned long CDECL wcsspn(const WCHAR *str1, const WCHAR *str2);
-long CDECL _wtol(const WCHAR *str);
+ULONG CDECL wcsspn(const WCHAR *str1, const WCHAR *str2);
+LONG CDECL _wtol(const WCHAR *str);
 int CDECL _wcsupr_s(WCHAR *str, SIZE_T size);
 int CDECL _wcslwr_s(WCHAR *str, SIZE_T size);
 WINT_T CDECL towlower(WINT_T ch);
@@ -172,8 +176,10 @@ int CDECL _crt_debugger_hook(int value);
 int CDECL _configthreadlocale(int mode);
 void CDECL __setusermatherr(void *handler);
 void CDECL _cexit();
+#ifndef __x86_64__ // TODO
 int CDECL_NO_CONV vfprintf(_FILE *stream, const char *format, va_list args);
 int CDECL_NO_CONV fprintf(_FILE *stream, const char *format, ...);
+#endif
 int CDECL fputc(int ch, _FILE *stream);
 SIZE_T CDECL fwrite(const void *buffer, SIZE_T size, SIZE_T count, _FILE *stream);
 char *CDECL strerror(int errnum);
@@ -188,9 +194,9 @@ void CDECL _invoke_watson(const WCHAR *, const WCHAR *, const WCHAR *, UINT, UIN
 void CDECL terminateShim();
 int CDECL _purecall();
 int CDECL _except_handler4_common(void *, void *, void *, void *);
-long CDECL _XcptFilter(unsigned long code, void *);
-int CDECL _get_wpgmptr(WCHAR **pValue);
-char **CDECL __p__pgmptr();
+LONG CDECL _XcptFilter(ULONG code, void *);
+int CDECL _get_wpgmptr(GUEST_PTR *pValue);
+GUEST_PTR CDECL __p__pgmptr();
 int CDECL _wsplitpath_s(const WCHAR *path, WCHAR *drive, SIZE_T driveNumberOfElements, WCHAR *dir,
 						SIZE_T dirNumberOfElements, WCHAR *fname, SIZE_T nameNumberOfElements, WCHAR *ext,
 						SIZE_T extNumberOfElements);
@@ -202,28 +208,32 @@ int CDECL wcsncpy_s(WCHAR *strDest, SIZE_T numberOfElements, const WCHAR *strSou
 int CDECL wcsncat_s(WCHAR *strDest, SIZE_T numberOfElements, const WCHAR *strSource, SIZE_T count);
 int CDECL _itow_s(int value, WCHAR *buffer, SIZE_T size, int radix);
 int CDECL _wtoi(const WCHAR *str);
-int CDECL _ltoa_s(long value, char *buffer, SIZE_T sizeInChars, int radix);
+int CDECL _ltoa_s(LONG value, char *buffer, SIZE_T sizeInChars, int radix);
 int CDECL wcscpy_s(WCHAR *dest, SIZE_T dest_size, const WCHAR *src);
+#ifndef __x86_64__ // TODO
 int CDECL_NO_CONV swprintf_s(WCHAR *buffer, SIZE_T sizeOfBuffer, const WCHAR *format, ...);
 int CDECL_NO_CONV swscanf_s(const WCHAR *buffer, const WCHAR *format, ...);
+#endif
 int *CDECL _get_osfhandle(int fd);
 int CDECL _write(int fd, const void *buffer, unsigned int count);
 void CDECL exit(int status);
 int CDECL wcsncmp(const WCHAR *string1, const WCHAR *string2, SIZE_T count);
+#ifndef __x86_64__ // TODO
 int CDECL_NO_CONV _vswprintf_c_l(WCHAR *buffer, SIZE_T size, const WCHAR *format, ...);
+#endif
 const WCHAR *CDECL wcsstr(const WCHAR *dest, const WCHAR *src);
 int CDECL iswspace(WINT_T w);
 int CDECL iswdigit(WINT_T w);
 const WCHAR *CDECL wcschr(const WCHAR *str, WCHAR c);
 const WCHAR *CDECL wcsrchr(const WCHAR *str, WCHAR c);
-unsigned long CDECL wcstoul(const WCHAR *strSource, WCHAR **endptr, int base);
+ULONG CDECL wcstoul(const WCHAR *strSource, GUEST_PTR *endptr, int base);
 _FILE *CDECL _wfsopen(const WCHAR *filename, const WCHAR *mode, int shflag);
 int CDECL puts(const char *str);
 int CDECL fclose(_FILE *stream);
 int CDECL _flushall();
 int *CDECL _errno();
-LONG_PTR CDECL _wspawnvp(int mode, const WCHAR *cmdname, const WCHAR *const *argv);
-LONG_PTR CDECL _spawnvp(int mode, const char *cmdname, const char *const *argv);
+LONG_PTR CDECL _wspawnvp(int mode, const WCHAR *cmdname, GUEST_PTR *argv);
+LONG_PTR CDECL _spawnvp(int mode, const char *cmdname, GUEST_PTR *argv);
 int CDECL _wunlink(const WCHAR *filename);
 WCHAR *CDECL _wfullpath(WCHAR *absPath, const WCHAR *relPath, SIZE_T maxLength);
 

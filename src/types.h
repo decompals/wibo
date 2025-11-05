@@ -4,11 +4,6 @@
 #define va_list __builtin_va_list
 #endif
 
-// On Windows, the incoming stack is aligned to a 4 byte boundary.
-// force_align_arg_pointer will realign the stack to match GCC's 16 byte alignment.
-#define WIN_ENTRY __attribute__((cdecl, force_align_arg_pointer))
-#define WIN_FUNC __attribute__((stdcall, force_align_arg_pointer))
-
 // Annotation macros for code generation
 #ifdef WIBO_CODEGEN
 #define WIBO_ANNOTATE(x) __attribute__((annotate(x)))
@@ -32,19 +27,41 @@
 #define _CC_STDCALL WIBO_ANNOTATE("CC:stdcall")
 
 // Instructs codegen to convert between calling conventions
+#ifdef __x86_64__
+#define WINAPI _CC_STDCALL
+#define CDECL _CC_CDECL
+#define CDECL_NO_CONV _CC_CDECL __attribute__((force_align_arg_pointer))
+#else
 #define WINAPI _CC_STDCALL __attribute__((fastcall))
 #define CDECL _CC_CDECL __attribute__((fastcall))
 #define CDECL_NO_CONV _CC_CDECL __attribute__((cdecl, force_align_arg_pointer))
+#endif
 
 // Used for host-to-guest calls
 #define GUEST_STDCALL __attribute__((stdcall))
 
+typedef unsigned int GUEST_PTR;
+constexpr GUEST_PTR GUEST_NULL = 0;
+
+#ifdef __x86_64__
+inline GUEST_PTR toGuestPtr(const void *addr) {
+	unsigned long long addr64 = reinterpret_cast<unsigned long long>(addr);
+	if (addr64 > 0xFFFFFFFF)
+		__builtin_unreachable();
+	return static_cast<GUEST_PTR>(addr64);
+}
+inline void *fromGuestPtr(GUEST_PTR addr) { return reinterpret_cast<void *>(addr); }
+#else
+inline GUEST_PTR toGuestPtr(const void *addr) { return static_cast<GUEST_PTR>(reinterpret_cast<unsigned long>(addr)); }
+inline void *fromGuestPtr(GUEST_PTR addr) { return reinterpret_cast<void *>(addr); }
+#endif
+
 using VOID = void;
-using HANDLE = VOID *;
-using HMODULE = VOID *;
-using HGLOBAL = HANDLE;
-using HLOCAL = HANDLE;
-using HRSRC = HANDLE;
+using HANDLE = int;
+using HMODULE = HANDLE;
+using HGLOBAL = GUEST_PTR;
+using HLOCAL = GUEST_PTR;
+using HRSRC = GUEST_PTR;
 using HINSTANCE = HANDLE;
 using LPHANDLE = HANDLE *;
 using PHANDLE = HANDLE *;
@@ -66,12 +83,9 @@ using ULONG = unsigned int;
 using PULONG = ULONG *;
 using LONGLONG = long long;
 using ULONGLONG = unsigned long long;
-using LONG_PTR = long;
-static_assert(sizeof(LONG_PTR) == sizeof(void *), "LONG_PTR must be pointer-sized");
-using ULONG_PTR = unsigned long;
-static_assert(sizeof(ULONG_PTR) == sizeof(void *), "ULONG_PTR must be pointer-sized");
-using UINT_PTR = unsigned long;
-static_assert(sizeof(UINT_PTR) == sizeof(void *), "UINT_PTR must be pointer-sized");
+using LONG_PTR = int;
+using ULONG_PTR = unsigned int;
+using UINT_PTR = unsigned int;
 using DWORD_PTR = ULONG_PTR;
 using PDWORD_PTR = DWORD_PTR *;
 using SHORT = short;
@@ -97,7 +111,7 @@ using BYTE = unsigned char;
 using BOOLEAN = unsigned char;
 using UINT = unsigned int;
 using PUINT = UINT *;
-using HKEY = VOID *;
+using HKEY = HANDLE;
 using PHKEY = HKEY *;
 using PSID = VOID *;
 using REGSAM = DWORD;
@@ -109,6 +123,8 @@ using HWND = HANDLE;
 using PBYTE = BYTE *;
 using LPBYTE = BYTE *;
 using PWSTR = WCHAR *;
+
+constexpr HANDLE NO_HANDLE = 0;
 
 using NTSTATUS = LONG;
 using HRESULT = LONG;
@@ -271,20 +287,23 @@ constexpr SIZE_T kTlsSlotCount = 64;
 typedef struct _UNICODE_STRING {
 	USHORT Length;
 	USHORT MaximumLength;
-	PWSTR Buffer;
-} UNICODE_STRING, *PUNICODE_STRING;
+	GUEST_PTR Buffer;
+} UNICODE_STRING;
+typedef GUEST_PTR PUNICODE_STRING;
 
 typedef struct _RTL_USER_PROCESS_PARAMETERS {
 	BYTE Reserved1[16];
-	PVOID Reserved2[10];
+	GUEST_PTR Reserved2[10];
 	UNICODE_STRING ImagePathName;
 	UNICODE_STRING CommandLine;
 } RTL_USER_PROCESS_PARAMETERS, *PRTL_USER_PROCESS_PARAMETERS;
 
 typedef struct _LIST_ENTRY {
-	struct _LIST_ENTRY *Flink;
-	struct _LIST_ENTRY *Blink;
-} LIST_ENTRY, *PLIST_ENTRY, PRLIST_ENTRY;
+	GUEST_PTR Flink;
+	GUEST_PTR Blink;
+} LIST_ENTRY;
+typedef GUEST_PTR PLIST_ENTRY;
+typedef GUEST_PTR PRLIST_ENTRY;
 
 typedef struct _PEB_LDR_DATA {
 	BYTE Reserved1[8];
@@ -299,23 +318,24 @@ typedef struct _PEB {
 	BYTE Reserved1[2];
 	BYTE BeingDebugged;
 	BYTE Reserved2[1];
-	PVOID Reserved3[2];
-	PPEB_LDR_DATA Ldr;
-	PRTL_USER_PROCESS_PARAMETERS ProcessParameters;
-	PVOID Reserved4[3];
-	PVOID AtlThunkSListPtr;
-	PVOID Reserved5;
+	GUEST_PTR Reserved3[2];
+	GUEST_PTR Ldr;
+	GUEST_PTR ProcessParameters;
+	GUEST_PTR Reserved4[3];
+	GUEST_PTR AtlThunkSListPtr;
+	GUEST_PTR Reserved5;
 	ULONG Reserved6;
-	PVOID Reserved7;
+	GUEST_PTR Reserved7;
 	ULONG Reserved8;
 	ULONG AtlThunkSListPtr32;
-	PVOID Reserved9[45];
+	GUEST_PTR Reserved9[45];
 	BYTE Reserved10[96];
-	PPS_POST_PROCESS_INIT_ROUTINE PostProcessInitRoutine;
+	GUEST_PTR PostProcessInitRoutine;
 	BYTE Reserved11[128];
-	PVOID Reserved12[1];
+	GUEST_PTR Reserved12[1];
 	ULONG SessionId;
-} PEB, *PPEB;
+} PEB;
+typedef GUEST_PTR PPEB;
 
 struct CLIENT_ID {
 	HANDLE UniqueProcess;
@@ -325,7 +345,7 @@ struct CLIENT_ID {
 struct _ACTIVATION_CONTEXT;
 
 typedef struct _RTL_ACTIVATION_CONTEXT_STACK_FRAME {
-	struct _RTL_ACTIVATION_CONTEXT_STACK_FRAME *Previous;
+	GUEST_PTR Previous;
 	_ACTIVATION_CONTEXT *ActivationContext;
 	ULONG Flags;
 } RTL_ACTIVATION_CONTEXT_STACK_FRAME, *PRTL_ACTIVATION_CONTEXT_STACK_FRAME;
@@ -339,6 +359,7 @@ typedef struct _ACTIVATION_CONTEXT_STACK {
 } ACTIVATION_CONTEXT_STACK, *PACTIVATION_CONTEXT_STACK;
 
 #define GDI_BATCH_BUFFER_SIZE 0x136
+
 typedef struct _GDI_TEB_BATCH {
 	ULONG Offset;
 	HANDLE HDC;
@@ -346,83 +367,86 @@ typedef struct _GDI_TEB_BATCH {
 } GDI_TEB_BATCH, *PGDI_TEB_BATCH;
 
 typedef struct _NT_TIB {
-	struct _EXCEPTION_REGISTRATION_RECORD *ExceptionList;
-	PVOID StackBase;
-	PVOID StackLimit;
-	PVOID SubSystemTib;
+	GUEST_PTR ExceptionList;
+	GUEST_PTR StackBase;
+	GUEST_PTR StackLimit;
+	GUEST_PTR SubSystemTib;
 	union {
-		PVOID FiberData;
+		GUEST_PTR FiberData;
 		DWORD Version;
 	} DUMMYUNIONNAME;
-	PVOID ArbitraryUserPointer;
-	struct _NT_TIB *Self;
+	GUEST_PTR ArbitraryUserPointer;
+	GUEST_PTR Self;
 } NT_TIB, *PNT_TIB;
 
 typedef struct _TEB {
 	NT_TIB Tib;
-	PVOID EnvironmentPointer;
+	GUEST_PTR EnvironmentPointer;
 	CLIENT_ID ClientId;
-	PVOID ActiveRpcHandle;
-	PVOID ThreadLocalStoragePointer;
+	GUEST_PTR ActiveRpcHandle;
+	GUEST_PTR ThreadLocalStoragePointer;
 	PPEB Peb;
 	ULONG LastErrorValue;
 	ULONG CountOfOwnedCriticalSections;
-	PVOID CsrClientThread;
-	PVOID Win32ThreadInfo;
+	GUEST_PTR CsrClientThread;
+	GUEST_PTR Win32ThreadInfo;
 	ULONG Win32ClientInfo[31]; /* used for user32 private data in Wine */
-	PVOID WOW32Reserved;
+	GUEST_PTR WOW32Reserved;
 	ULONG CurrentLocale;
 	ULONG FpSoftwareStatusRegister;
-	PVOID SystemReserved1[54]; /* used for kernel32 private data in Wine */
-	PVOID Spare1;
+	GUEST_PTR SystemReserved1[54]; /* used for kernel32 private data in Wine */
+	GUEST_PTR Spare1;
 	LONG ExceptionCode;
-	PVOID ActivationContextStackPointer;
+	GUEST_PTR ActivationContextStackPointer;
 	BYTE SpareBytes1[36];
-	PVOID SystemReserved2[10]; /* used for ntdll private data in Wine */
+	GUEST_PTR SystemReserved2[10]; /* used for ntdll private data in Wine */
 	GDI_TEB_BATCH GdiTebBatch;
 	ULONG gdiRgn;
 	ULONG gdiPen;
 	ULONG gdiBrush;
 	CLIENT_ID RealClientId;
-	HANDLE GdiCachedProcessHandle;
+	GUEST_PTR GdiCachedProcessHandle;
 	ULONG GdiClientPID;
 	ULONG GdiClientTID;
-	PVOID GdiThreadLocaleInfo;
-	PVOID UserReserved[5];
-	PVOID glDispatchTable[280];
+	GUEST_PTR GdiThreadLocaleInfo;
+	GUEST_PTR UserReserved[5];
+	GUEST_PTR glDispatchTable[280];
 	ULONG glReserved1[26];
-	PVOID glReserved2;
-	PVOID glSectionInfo;
-	PVOID glSection;
-	PVOID glTable;
-	PVOID glCurrentRC;
-	PVOID glContext;
+	GUEST_PTR glReserved2;
+	GUEST_PTR glSectionInfo;
+	GUEST_PTR glSection;
+	GUEST_PTR glTable;
+	GUEST_PTR glCurrentRC;
+	GUEST_PTR glContext;
 	ULONG LastStatusValue;
 	UNICODE_STRING StaticUnicodeString;
 	WCHAR StaticUnicodeBuffer[261];
-	PVOID DeallocationStack;
-	PVOID TlsSlots[64];
+	GUEST_PTR DeallocationStack;
+	GUEST_PTR TlsSlots[64];
 	LIST_ENTRY TlsLinks;
-	PVOID Vdm;
-	PVOID ReservedForNtRpc;
-	PVOID DbgSsReserved[2];
+	GUEST_PTR Vdm;
+	GUEST_PTR ReservedForNtRpc;
+	GUEST_PTR DbgSsReserved[2];
 	ULONG HardErrorDisabled;
-	PVOID Instrumentation[16];
-	PVOID WinSockData;
+	GUEST_PTR Instrumentation[16];
+	GUEST_PTR WinSockData;
 	ULONG GdiBatchCount;
 	ULONG Spare2;
 	ULONG Spare3;
 	ULONG Spare4;
-	PVOID ReservedForOle;
+	GUEST_PTR ReservedForOle;
 	ULONG WaitingOnLoaderLock;
-	PVOID Reserved5[3];
-	PVOID *TlsExpansionSlots;
+	GUEST_PTR Reserved5[3];
+	GUEST_PTR TlsExpansionSlots;
 	// wibo
 	WORD CurrentFsSelector;
 	WORD CurrentGsSelector;
-	PVOID CurrentStackPointer;
-} TEB, *PTEB;
-
+	void *CurrentStackPointer;
+#ifdef __x86_64__
+	void *CurrentFsBase;
+#endif
+} TEB;
+typedef GUEST_PTR PTEB;
 #ifndef offsetof
 #define offsetof(type, member) __builtin_offsetof(type, member)
 #endif
@@ -436,8 +460,8 @@ static_assert(offsetof(TEB, DeallocationStack) == 0xE0C, "DeallocationStack offs
 static_assert(offsetof(TEB, TlsSlots) == 0xE10, "TLS slots offset mismatch");
 
 typedef struct _MEMORY_BASIC_INFORMATION {
-	PVOID BaseAddress;
-	PVOID AllocationBase;
+	GUEST_PTR BaseAddress;
+	GUEST_PTR AllocationBase;
 	DWORD AllocationProtect;
 	SIZE_T RegionSize;
 	DWORD State;
@@ -451,12 +475,12 @@ typedef struct _iobuf {
 	_iobuf() : _file(-1) {}
 	explicit _iobuf(int file) : _file(file) {}
 
-	char *_ptr = nullptr;
+	GUEST_PTR _ptr = GUEST_NULL;
 	int _cnt = 0;
-	char *_base = nullptr;
+	GUEST_PTR _base = GUEST_NULL;
 	int _flag = 0;
 	int _file;
 	int _charbuf = 0;
 	int _bufsiz = 0;
-	char *_tmpfname = nullptr;
+	GUEST_PTR _tmpfname = GUEST_NULL;
 } _FILE;

@@ -1,10 +1,5 @@
 cmake_minimum_required(VERSION 3.13)
 
-set(CMAKE_C_FLAGS_INIT "-m32")
-set(CMAKE_CXX_FLAGS_INIT "-m32 -fno-exceptions -fno-rtti")
-set(CMAKE_EXE_LINKER_FLAGS_INIT "-m32")
-set(CMAKE_SHARED_LINKER_FLAGS_INIT "-m32")
-
 project(wibo LANGUAGES ASM C CXX)
 
 set(WIBO_VERSION "" CACHE STRING "Version string for the wibo binary; if empty, attempts to use git describe")
@@ -46,10 +41,20 @@ configure_file(
     @ONLY
 )
 
+option(WIBO_64 "Build wibo for 64-bit host" OFF)
 option(WIBO_ENABLE_FIXTURE_TESTS "Enable Win32 fixture tests (requires i686-w64-mingw32)" ON)
 option(WIBO_ENABLE_LIBURING "Enable liburing for asynchronous I/O" OFF)
 set(WIBO_ENABLE_LTO "AUTO" CACHE STRING "Enable link-time optimization (LTO)")
 set_property(CACHE WIBO_ENABLE_LTO PROPERTY STRINGS "AUTO" "ON" "OFF")
+
+add_compile_options(
+    $<IF:$<BOOL:${WIBO_64}>,-m64,-m32>
+    $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>
+    $<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>
+)
+add_link_options(
+    $<IF:$<BOOL:${WIBO_64}>,-m64,-m32>
+)
 
 if (WIBO_ENABLE_LTO STREQUAL "AUTO")
     if (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
@@ -88,6 +93,10 @@ FetchContent_MakeAvailable(mimalloc)
 # Disable `note: the alignment of '_Atomic long long int' fields changed in GCC 11.1`
 target_compile_options(mimalloc-obj PRIVATE -Wno-psabi)
 target_compile_definitions(mimalloc-obj PRIVATE MI_USE_BUILTIN_THREAD_POINTER=1)
+if (WIBO_64)
+    # Disable a noisy warning on startup
+    target_compile_definitions(mimalloc-obj PRIVATE MI_DEBUG=0)
+endif()
 
 if (WIBO_ENABLE_LIBURING)
     FetchContent_Declare(
@@ -126,12 +135,12 @@ endif()
 
 add_executable(wibo
     dll/advapi32.cpp
+    dll/advapi32/md5.c
     dll/advapi32/processthreadsapi.cpp
     dll/advapi32/securitybaseapi.cpp
     dll/advapi32/winbase.cpp
     dll/advapi32/wincrypt.cpp
     dll/advapi32/winreg.cpp
-    dll/advapi32/md5.c
     dll/bcrypt.cpp
     dll/crt.cpp
     dll/kernel32.cpp
@@ -144,8 +153,8 @@ add_executable(wibo
     dll/kernel32/interlockedapi.cpp
     dll/kernel32/ioapiset.cpp
     dll/kernel32/libloaderapi.cpp
-    dll/kernel32/namedpipeapi.cpp
     dll/kernel32/memoryapi.cpp
+    dll/kernel32/namedpipeapi.cpp
     dll/kernel32/processenv.cpp
     dll/kernel32/processthreadsapi.cpp
     dll/kernel32/profileapi.cpp
@@ -162,8 +171,8 @@ add_executable(wibo
     dll/mscoree.cpp
     dll/msvcrt.cpp
     dll/ntdll.cpp
-    dll/rpcrt4.cpp
     dll/ole32.cpp
+    dll/rpcrt4.cpp
     dll/user32.cpp
     dll/vcruntime.cpp
     dll/version.cpp
@@ -173,21 +182,22 @@ add_executable(wibo
     src/errors.cpp
     src/files.cpp
     src/handles.cpp
-    src/loader.cpp
     src/heap.cpp
+    src/loader.cpp
     src/main.cpp
     src/modules.cpp
     src/processes.cpp
     src/resources.cpp
+    src/setup.S
     src/strutil.cpp
     src/tls.cpp
 )
 target_compile_definitions(wibo PRIVATE _GNU_SOURCE _FILE_OFFSET_BITS=64 _TIME_BITS=64)
 target_compile_features(wibo PRIVATE cxx_std_20)
 target_compile_options(wibo PRIVATE -Wall -Wextra)
-target_link_options(wibo PRIVATE -no-pie -Wl,--image-base=0x90000000)
+target_link_options(wibo PRIVATE -no-pie -Wl,--image-base=0x70000000)
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(wibo PRIVATE -fno-pie -maccumulate-outgoing-args)
+    target_compile_options(wibo PRIVATE -maccumulate-outgoing-args)
     target_link_options(wibo PRIVATE -maccumulate-outgoing-args)
 endif()
 target_include_directories(wibo PRIVATE dll src ${WIBO_GENERATED_HEADER_DIR})
@@ -242,15 +252,17 @@ function(wibo_codegen_module)
                 --dll ${module_NAME}
                 --headers ${module_HEADERS}
                 --namespace ${module_NAME}
-                --arch x86
+                --arch $<IF:$<BOOL:${WIBO_64}>,x86_64,x86>
                 --out-asm ${out_asm}
                 --out-hdr ${out_hdr}
                 -I ${CMAKE_CURRENT_SOURCE_DIR}
                 -I ${CMAKE_CURRENT_SOURCE_DIR}/dll
                 -I ${CMAKE_CURRENT_SOURCE_DIR}/src
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_trampolines.py ${module_HEADERS})
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_trampolines.py
+                ${module_HEADERS}
+    )
     target_sources(wibo PRIVATE ${out_asm})
-    set_source_files_properties(${out_asm} PROPERTIES COMPILE_FLAGS "-m32")
+    set_source_files_properties(${out_asm} PROPERTIES COMPILE_FLAGS $<IF:$<BOOL:${WIBO_64}>,-m64,-m32>)
 endfunction()
 
 wibo_codegen_module(NAME advapi32 HEADERS

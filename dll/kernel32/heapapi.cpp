@@ -18,7 +18,7 @@ using kernel32::HeapObject;
 namespace {
 
 std::once_flag g_processHeapInitFlag;
-HANDLE g_processHeapHandle = nullptr;
+HANDLE g_processHeapHandle = NO_HANDLE;
 HeapObject *g_processHeapRecord = nullptr;
 
 void ensureProcessHeapInitialized() {
@@ -71,7 +71,7 @@ HeapObject::~HeapObject() {
 		heap = nullptr;
 	}
 	if (isProcessHeap) {
-		g_processHeapHandle = nullptr;
+		g_processHeapHandle = NO_HANDLE;
 		g_processHeapRecord = nullptr;
 	}
 }
@@ -83,13 +83,13 @@ HANDLE WINAPI HeapCreate(DWORD flOptions, SIZE_T dwInitialSize, SIZE_T dwMaximum
 	DEBUG_LOG("HeapCreate(%u, %zu, %zu)\n", flOptions, dwInitialSize, dwMaximumSize);
 	if (dwMaximumSize != 0 && dwInitialSize > dwMaximumSize) {
 		setLastError(ERROR_INVALID_PARAMETER);
-		return nullptr;
+		return NO_HANDLE;
 	}
 
 	mi_heap_t *heap = wibo::heap::createGuestHeap();
 	if (!heap) {
 		setLastError(ERROR_NOT_ENOUGH_MEMORY);
-		return nullptr;
+		return NO_HANDLE;
 	}
 
 	auto record = make_pin<HeapObject>(heap);

@@ -6,6 +6,7 @@
 #include "modules.h"
 #include "resources.h"
 #include "strutil.h"
+#include "types.h"
 
 #include <algorithm>
 #include <cassert>
@@ -20,13 +21,13 @@ HRSRC findResourceInternal(HMODULE hModule, const wibo::ResourceIdentifier &type
 	auto *exe = wibo::executableFromModule(hModule);
 	if (!exe) {
 		kernel32::setLastError(ERROR_RESOURCE_DATA_NOT_FOUND);
-		return nullptr;
+		return NO_HANDLE;
 	}
 	wibo::ResourceLocation loc;
 	if (!exe->findResource(type, name, language, loc)) {
-		return nullptr;
+		return NO_HANDLE;
 	}
-	return reinterpret_cast<HRSRC>(const_cast<void *>(loc.dataEntry));
+	return toGuestPtr(loc.dataEntry);
 }
 
 } // namespace
@@ -58,7 +59,7 @@ HMODULE WINAPI GetModuleHandleA(LPCSTR lpModuleName) {
 	const auto *module = wibo::findLoadedModule(lpModuleName);
 	if (!module) {
 		setLastError(ERROR_MOD_NOT_FOUND);
-		return nullptr;
+		return NO_HANDLE;
 	}
 	return module->handle;
 }
@@ -111,7 +112,7 @@ DWORD WINAPI GetModuleFileNameA(HMODULE hModule, LPSTR lpFilename, DWORD nSize) 
 
 DWORD WINAPI GetModuleFileNameW(HMODULE hModule, LPWSTR lpFilename, DWORD nSize) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("GetModuleFileNameW(%p, %s, %u)\n", hModule, wideStringToString(lpFilename).c_str(), nSize);
+	DEBUG_LOG("GetModuleFileNameW(%p, %p, %u)\n", hModule, lpFilename, nSize);
 	if (!lpFilename) {
 		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
@@ -187,25 +188,25 @@ HGLOBAL WINAPI LoadResource(HMODULE hModule, HRSRC hResInfo) {
 	DEBUG_LOG("LoadResource %p %p\n", hModule, hResInfo);
 	if (!hResInfo) {
 		setLastError(ERROR_RESOURCE_DATA_NOT_FOUND);
-		return nullptr;
+		return GUEST_NULL;
 	}
 	auto *exe = wibo::executableFromModule(hModule);
 	if (!exe || !exe->rsrcBase) {
 		setLastError(ERROR_RESOURCE_DATA_NOT_FOUND);
-		return nullptr;
+		return GUEST_NULL;
 	}
 	const auto *entry = reinterpret_cast<const wibo::ImageResourceDataEntry *>(hResInfo);
 	if (!wibo::resourceEntryBelongsToExecutable(*exe, entry)) {
 		setLastError(ERROR_INVALID_PARAMETER);
-		return nullptr;
+		return GUEST_NULL;
 	}
-	return const_cast<void *>(exe->fromRVA<const void>(entry->offsetToData));
+	return toGuestPtr(exe->fromRVA<const void>(entry->offsetToData));
 }
 
 LPVOID WINAPI LockResource(HGLOBAL hResData) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("LockResource(%p)\n", hResData);
-	return hResData;
+	return (LPVOID)hResData;
 }
 
 DWORD WINAPI SizeofResource(HMODULE hModule, HRSRC hResInfo) {
@@ -234,7 +235,7 @@ HMODULE WINAPI LoadLibraryA(LPCSTR lpLibFileName) {
 	const auto *info = wibo::loadModule(lpLibFileName);
 	if (!info) {
 		// lastError is set by loadModule
-		return nullptr;
+		return NO_HANDLE;
 	}
 	return info->handle;
 }
@@ -242,7 +243,7 @@ HMODULE WINAPI LoadLibraryA(LPCSTR lpLibFileName) {
 HMODULE WINAPI LoadLibraryW(LPCWSTR lpLibFileName) {
 	HOST_CONTEXT_GUARD();
 	if (!lpLibFileName) {
-		return nullptr;
+		return NO_HANDLE;
 	}
 	auto filename = wideStringToString(lpLibFileName);
 	DEBUG_LOG("LoadLibraryW(%s)\n", filename.c_str());

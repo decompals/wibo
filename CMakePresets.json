@@ -53,6 +53,46 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
+    },
+    {
+      "name": "debug64",
+      "displayName": "Debug (64-bit)",
+      "inherits": ["ninja-base"],
+      "binaryDir": "${sourceDir}/build/debug64",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "WIBO_64": "ON"
+      }
+    },
+    {
+      "name": "release64",
+      "displayName": "Release (64-bit)",
+      "inherits": ["ninja-base"],
+      "binaryDir": "${sourceDir}/build/release64",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "WIBO_64": "ON"
+      }
+    },
+    {
+      "name": "debug64-clang",
+      "displayName": "Debug (64-bit, Clang)",
+      "inherits": ["ninja-base", "clang-base"],
+      "binaryDir": "${sourceDir}/build/debug64-clang",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "WIBO_64": "ON"
+      }
+    },
+    {
+      "name": "release64-clang",
+      "displayName": "Release (64-bit, Clang)",
+      "inherits": ["ninja-base", "clang-base"],
+      "binaryDir": "${sourceDir}/build/release64-clang",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "WIBO_64": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -81,6 +121,34 @@
       "name": "release-clang",
       "displayName": "Build (Release, Clang)",
       "configurePreset": "release-clang",
+      "targets": ["wibo", "wibo_test_fixtures"],
+      "configuration": "Release"
+    },
+    {
+      "name": "debug64",
+      "displayName": "Build (Debug, 64-bit)",
+      "configurePreset": "debug64",
+      "targets": ["wibo", "wibo_test_fixtures"],
+      "configuration": "Debug"
+    },
+    {
+      "name": "release64",
+      "displayName": "Build (Release, 64-bit)",
+      "configurePreset": "release64",
+      "targets": ["wibo", "wibo_test_fixtures"],
+      "configuration": "Release"
+    },
+    {
+      "name": "debug64-clang",
+      "displayName": "Build (Debug, 64-bit, Clang)",
+      "configurePreset": "debug64-clang",
+      "targets": ["wibo", "wibo_test_fixtures"],
+      "configuration": "Debug"
+    },
+    {
+      "name": "release64-clang",
+      "displayName": "Build (Release, 64-bit, Clang)",
+      "configurePreset": "release64-clang",
       "targets": ["wibo", "wibo_test_fixtures"],
       "configuration": "Release"
     }
@@ -120,6 +188,46 @@
       "name": "release-clang",
       "displayName": "Run tests (Release, Clang)",
       "configurePreset": "release-clang",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      }
+    },
+    {
+      "name": "debug64",
+      "displayName": "Run tests (Debug, 64-bit)",
+      "configurePreset": "debug64",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      }
+    },
+    {
+      "name": "release64",
+      "displayName": "Run tests (Release, 64-bit)",
+      "configurePreset": "release64",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      }
+    },
+    {
+      "name": "debug64-clang",
+      "displayName": "Run tests (Debug, 64-bit, Clang)",
+      "configurePreset": "debug64-clang",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      }
+    },
+    {
+      "name": "release64-clang",
+      "displayName": "Run tests (Release, 64-bit, Clang)",
+      "configurePreset": "release64-clang",
       "configuration": "Release",
       "output": {
         "outputOnFailure": true,

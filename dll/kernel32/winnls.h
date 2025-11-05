@@ -19,6 +19,8 @@ namespace kernel32 {
 UINT WINAPI GetACP();
 LANGID WINAPI GetSystemDefaultLangID();
 LANGID WINAPI GetUserDefaultUILanguage();
+int WINAPI GetUserDefaultLocaleName(LPWSTR lpLocaleName, int cchLocaleName);
+LCID WINAPI LocaleNameToLCID(LPCWSTR lpName, DWORD dwFlags);
 BOOL WINAPI GetCPInfo(UINT CodePage, LPCPINFO lpCPInfo);
 int WINAPI CompareStringA(LCID Locale, DWORD dwCmpFlags, LPCSTR lpString1, int cchCount1, LPCSTR lpString2,
 							int cchCount2);

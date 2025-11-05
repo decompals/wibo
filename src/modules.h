@@ -4,6 +4,7 @@
 #include "entry.h"
 #include "msvcrt.h"
 #include "tls.h"
+#include "types.h"
 
 #include <optional>
 #include <unordered_map>
@@ -39,8 +40,7 @@ class Executable {
 	bool findResource(const ResourceIdentifier &type, const ResourceIdentifier &name, std::optional<uint16_t> language,
 					  ResourceLocation &out) const;
 
-	template <typename T> T *fromRVA(uintptr_t rva) const { return (T *)(rva + (uint8_t *)imageBase); }
-	template <typename T> T *fromRVA(T *rva) const { return fromRVA<T>((uintptr_t)rva); }
+	template <typename T> T *fromRVA(uint32_t rva) const { return (T *)(rva + (uint8_t *)imageBase); }
 
 	void *imageBase = nullptr;
 	size_t imageSize = 0;
@@ -77,7 +77,7 @@ struct ModuleTlsInfo {
 	uint32_t characteristics = 0;
 	size_t allocationSize = 0;
 	std::vector<PIMAGE_TLS_CALLBACK> callbacks;
-	std::unordered_map<TEB *, void *> threadAllocations;
+	std::unordered_map<TEB *, GUEST_PTR> threadAllocations;
 };
 
 struct ModuleInfo {
@@ -140,8 +140,8 @@ ModuleInfo *moduleInfoFromAddress(void *addr);
  * otherwise it will be a pointer to a `wibo::ModuleInfo`.
  */
 inline bool isMainModule(HMODULE hModule) {
-	return hModule == nullptr || hModule == reinterpret_cast<HMODULE>(mainModule) ||
-		   (mainModule && mainModule->executable && hModule == mainModule->executable->imageBase);
+	return hModule == NO_HANDLE || (mainModule && mainModule->executable &&
+									reinterpret_cast<void *>(hModule) == mainModule->executable->imageBase);
 }
 
 } // namespace wibo

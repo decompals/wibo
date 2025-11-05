@@ -4,7 +4,7 @@
 
 struct SECURITY_ATTRIBUTES {
 	DWORD nLength;
-	LPVOID lpSecurityDescriptor;
+	GUEST_PTR lpSecurityDescriptor;
 	BOOL bInheritHandle;
 };
 
@@ -86,7 +86,7 @@ typedef struct _OVERLAPPED {
 			DWORD Offset;
 			DWORD OffsetHigh;
 		};
-		PVOID Pointer;
+		GUEST_PTR Pointer;
 	};
 	HANDLE hEvent;
 } OVERLAPPED, *LPOVERLAPPED;

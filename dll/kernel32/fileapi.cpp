@@ -12,6 +12,7 @@
 #include "overlapped_util.h"
 #include "strutil.h"
 #include "timeutil.h"
+#include "types.h"
 
 #include <algorithm>
 #include <cctype>
@@ -146,24 +147,24 @@ struct FindSearchHandle {
 };
 
 std::mutex g_findHandleMutex;
-std::unordered_map<FindSearchHandle *, std::unique_ptr<FindSearchHandle>> g_findHandles;
+HANDLE g_nextFindHandle = 1;
+std::unordered_map<HANDLE, std::unique_ptr<FindSearchHandle>> g_findHandles;
 
 HANDLE registerFindHandle(std::unique_ptr<FindSearchHandle> handle) {
 	if (!handle) {
 		return INVALID_HANDLE_VALUE;
 	}
-	FindSearchHandle *raw = handle.get();
 	std::lock_guard lk(g_findHandleMutex);
+	HANDLE raw = g_nextFindHandle++;
 	g_findHandles.emplace(raw, std::move(handle));
-	return reinterpret_cast<HANDLE>(raw);
+	return raw;
 }
 
 FindSearchHandle *lookupFindHandleLocked(HANDLE handle) {
-	if (handle == nullptr) {
+	if (handle == NO_HANDLE) {
 		return nullptr;
 	}
-	auto *raw = reinterpret_cast<FindSearchHandle *>(handle);
-	auto it = g_findHandles.find(raw);
+	auto it = g_findHandles.find(handle);
 	if (it == g_findHandles.end()) {
 		return nullptr;
 	}
@@ -172,8 +173,7 @@ FindSearchHandle *lookupFindHandleLocked(HANDLE handle) {
 
 std::unique_ptr<FindSearchHandle> detachFindHandle(HANDLE handle) {
 	std::lock_guard lk(g_findHandleMutex);
-	auto *raw = reinterpret_cast<FindSearchHandle *>(handle);
-	auto it = g_findHandles.find(raw);
+	auto it = g_findHandles.find(handle);
 	if (it == g_findHandles.end()) {
 		return nullptr;
 	}
@@ -1185,7 +1185,7 @@ DWORD WINAPI SetFilePointer(HANDLE hFile, LONG lDistanceToMove, PLONG lpDistance
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetFilePointer(%p, %ld, %p, %u)\n", hFile, static_cast<long>(lDistanceToMove), lpDistanceToMoveHigh,
 			  dwMoveMethod);
-	if (hFile == nullptr) {
+	if (hFile == NO_HANDLE) {
 		setLastError(ERROR_INVALID_HANDLE);
 		return INVALID_SET_FILE_POINTER;
 	}
@@ -1224,7 +1224,8 @@ DWORD WINAPI SetFilePointer(HANDLE hFile, LONG lDistanceToMove, PLONG lpDistance
 BOOL WINAPI SetFilePointerEx(HANDLE hFile, LARGE_INTEGER liDistanceToMove, PLARGE_INTEGER lpNewFilePointer,
 							 DWORD dwMoveMethod) {
 	HOST_CONTEXT_GUARD();
-	if (hFile == nullptr) {
+	DEBUG_LOG("SetFilePointerEx(%p, %lld, %p, %u)\n", hFile, liDistanceToMove.QuadPart, lpNewFilePointer, dwMoveMethod);
+	if (hFile == NO_HANDLE) {
 		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
@@ -1537,12 +1538,12 @@ DWORD WINAPI GetFileType(HANDLE hFile) {
 	return type;
 }
 
-DWORD WINAPI GetFullPathNameA(LPCSTR lpFileName, DWORD nBufferLength, LPSTR lpBuffer, LPSTR *lpFilePart) {
+DWORD WINAPI GetFullPathNameA(LPCSTR lpFileName, DWORD nBufferLength, LPSTR lpBuffer, GUEST_PTR *lpFilePart) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetFullPathNameA(%s, %u)\n", lpFileName ? lpFileName : "(null)", nBufferLength);
 
 	if (lpFilePart) {
-		*lpFilePart = nullptr;
+		*lpFilePart = GUEST_NULL;
 	}
 
 	if (!lpFileName) {
@@ -1580,21 +1581,21 @@ DWORD WINAPI GetFullPathNameA(LPCSTR lpFileName, DWORD nBufferLength, LPSTR lpBu
 
 	if (lpFilePart) {
 		if (info.filePartOffset != std::string::npos && info.filePartOffset < pathLen) {
-			*lpFilePart = lpBuffer + info.filePartOffset;
+			*lpFilePart = toGuestPtr(lpBuffer + info.filePartOffset);
 		} else {
-			*lpFilePart = nullptr;
+			*lpFilePart = GUEST_NULL;
 		}
 	}
 
 	return static_cast<DWORD>(pathLen);
 }
 
-DWORD WINAPI GetFullPathNameW(LPCWSTR lpFileName, DWORD nBufferLength, LPWSTR lpBuffer, LPWSTR *lpFilePart) {
+DWORD WINAPI GetFullPathNameW(LPCWSTR lpFileName, DWORD nBufferLength, LPWSTR lpBuffer, GUEST_PTR *lpFilePart) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetFullPathNameW(%p, %u)\n", lpFileName, nBufferLength);
 
 	if (lpFilePart) {
-		*lpFilePart = nullptr;
+		*lpFilePart = GUEST_NULL;
 	}
 
 	if (!lpFileName) {
@@ -1633,9 +1634,9 @@ DWORD WINAPI GetFullPathNameW(LPCWSTR lpFileName, DWORD nBufferLength, LPWSTR lp
 
 	if (lpFilePart) {
 		if (info.filePartOffset != std::string::npos && info.filePartOffset < info.path.size()) {
-			*lpFilePart = lpBuffer + info.filePartOffset;
+			*lpFilePart = toGuestPtr(lpBuffer + info.filePartOffset);
 		} else {
-			*lpFilePart = nullptr;
+			*lpFilePart = GUEST_NULL;
 		}
 	}
 
@@ -1883,7 +1884,7 @@ BOOL WINAPI FindNextFileW(HANDLE hFindFile, LPWIN32_FIND_DATAW lpFindFileData) {
 BOOL WINAPI FindClose(HANDLE hFindFile) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FindClose(%p)\n", hFindFile);
-	if (hFindFile == nullptr) {
+	if (hFindFile == NO_HANDLE) {
 		DEBUG_LOG(" -> ERROR_INVALID_HANDLE\n");
 		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;

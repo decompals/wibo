@@ -64,8 +64,10 @@ struct ProcessObject final : WaitableObject {
 	int pidfd;
 	DWORD exitCode = STILL_ACTIVE;
 	bool forcedExitCode = false;
+	bool waitable = true;
 
-	explicit ProcessObject(pid_t pid, int pidfd) : WaitableObject(kType), pid(pid), pidfd(pidfd) {}
+	explicit ProcessObject(pid_t pid, int pidfd, bool waitable = true)
+		: WaitableObject(kType), pid(pid), pidfd(pidfd), waitable(waitable) {}
 
 	~ProcessObject() override {
 		if (pidfd != -1) {
@@ -75,6 +77,12 @@ struct ProcessObject final : WaitableObject {
 	}
 };
 
+#ifdef __linux__
+constexpr pthread_t pthread_null = 0;
+#else
+constexpr pthread_t pthread_null = nullptr;
+#endif
+
 struct ThreadObject final : WaitableObject {
 	static constexpr ObjectType kType = ObjectType::Thread;
 
@@ -83,7 +91,7 @@ struct ThreadObject final : WaitableObject {
 	unsigned int suspendCount = 0;
 	TEB *tib = nullptr;
 
-	explicit ThreadObject(pthread_t thread) : WaitableObject(kType), thread(thread) {}
+	explicit ThreadObject(pthread_t thread = pthread_null) : WaitableObject(kType), thread(thread) {}
 
 	~ThreadObject() override {
 		// Threads are detached at creation; we can safely drop

@@ -19,7 +19,7 @@ BOOL WINAPI OpenProcessToken(HANDLE ProcessHandle, DWORD DesiredAccess, PHANDLE 
 	}
 	Pin<ProcessObject> obj;
 	if (kernel32::isPseudoCurrentProcessHandle(ProcessHandle)) {
-		obj = make_pin<ProcessObject>(getpid(), -1);
+		obj = make_pin<ProcessObject>(getpid(), -1, false);
 	} else {
 		obj = wibo::handles().getAs<ProcessObject>(ProcessHandle);
 	}

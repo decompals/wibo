@@ -196,7 +196,11 @@ DWORD WINAPI GetCurrentProcessId() {
 DWORD WINAPI GetCurrentThreadId() {
 	HOST_CONTEXT_GUARD();
 	pthread_t thread = pthread_self();
+#ifdef __linux__
 	const auto threadId = static_cast<DWORD>(thread);
+#else
+	const auto threadId = static_cast<DWORD>(reinterpret_cast<uintptr_t>(thread));
+#endif
 	DEBUG_LOG("GetCurrentThreadId() -> %u\n", threadId);
 	return threadId;
 }
@@ -322,10 +326,25 @@ BOOL WINAPI TerminateProcess(HANDLE hProcess, UINT uExitCode) {
 	if (process->signaled) {
 		return TRUE;
 	}
-	if (syscall(SYS_pidfd_send_signal, process->pidfd, SIGKILL, nullptr, 0) != 0) {
-		int err = errno;
-		DEBUG_LOG("TerminateProcess: pidfd_send_signal(%d) failed: %s\n", process->pidfd, strerror(err));
-		switch (err) {
+	int killResult = 0;
+#if defined(__linux__)
+	if (process->pidfd != -1) {
+		if (syscall(SYS_pidfd_send_signal, process->pidfd, SIGKILL, nullptr, 0) != 0) {
+			killResult = errno;
+			DEBUG_LOG("TerminateProcess: pidfd_send_signal(%d) failed: %s\n", process->pidfd, strerror(killResult));
+		}
+	} else if (kill(process->pid, SIGKILL) != 0) {
+		killResult = errno;
+		DEBUG_LOG("TerminateProcess: kill(%d) failed: %s\n", process->pid, strerror(killResult));
+	}
+#else
+	if (kill(process->pid, SIGKILL) != 0) {
+		killResult = errno;
+		DEBUG_LOG("TerminateProcess: kill(%d) failed: %s\n", process->pid, strerror(killResult));
+	}
+#endif
+	if (killResult != 0) {
+		switch (killResult) {
 		case ESRCH:
 		case EPERM:
 			setLastError(ERROR_ACCESS_DENIED);
@@ -467,7 +486,7 @@ HANDLE WINAPI CreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dwSt
 		return NO_HANDLE;
 	}
 
-	Pin<ThreadObject> obj = make_pin<ThreadObject>(0); // tid set during pthread_create
+	Pin<ThreadObject> obj = make_pin<ThreadObject>(); // tid set during pthread_create
 	if ((dwCreationFlags & CREATE_SUSPENDED) != 0) {
 		obj->suspendCount = 1;
 	}
@@ -584,14 +603,16 @@ BOOL WINAPI GetThreadTimes(HANDLE hThread, FILETIME *lpCreationTime, FILETIME *l
 		lpExitTime->dwHighDateTime = 0;
 	}
 
-	struct rusage usage{};
+#ifdef __linux__
+	struct rusage usage {};
 	if (getrusage(RUSAGE_THREAD, &usage) == 0) {
 		*lpKernelTime = fileTimeFromTimeval(usage.ru_stime);
 		*lpUserTime = fileTimeFromTimeval(usage.ru_utime);
 		return TRUE;
 	}
+#endif
 
-	struct timespec cpuTime{};
+	struct timespec cpuTime {};
 	if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpuTime) == 0) {
 		*lpKernelTime = fileTimeFromDuration(0);
 		*lpUserTime = fileTimeFromTimespec(cpuTime);

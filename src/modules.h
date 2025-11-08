@@ -2,7 +2,6 @@
 
 #include "common.h"
 #include "entry.h"
-#include "msvcrt.h"
 #include "tls.h"
 #include "types.h"
 

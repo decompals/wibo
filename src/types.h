@@ -538,7 +538,8 @@ typedef struct _TEB {
 	WORD CurrentGsSelector;
 	void *CurrentStackPointer;
 #ifdef __x86_64__
-	void *CurrentFsBase;
+	void *HostFsBase;
+	void *HostGsBase;
 #endif
 } TEB;
 typedef GUEST_PTR PTEB;

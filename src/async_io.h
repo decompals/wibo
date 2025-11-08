@@ -24,7 +24,9 @@ namespace detail {
 #if WIBO_ENABLE_LIBURING
 std::unique_ptr<AsyncIOBackend> createIoUringBackend();
 #endif
+#ifdef __linux__
 std::unique_ptr<AsyncIOBackend> createEpollBackend();
+#endif
 
 } // namespace detail
 

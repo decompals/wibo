@@ -49,6 +49,8 @@ if "LIBCLANG_PATH" in os.environ:
             f"Warning: LIBCLANG_PATH={libclang_path} is not a file or directory\n"
         )
 
+SYMBOL_PREFIX = "_" if sys.platform == "darwin" else ""
+
 
 class Arch(str, Enum):
     X86 = "x86"
@@ -524,7 +526,7 @@ def emit_cc_thunk32(f: FuncInfo | TypedefInfo, lines: List[str]):
 
     # Get current TEB
     if host_to_guest:
-        lines.append("\tmov ecx, gs:[currentThreadTeb@ntpoff]")
+        lines.append("\tGET_TEB_HOST ecx")
     else:
         lines.append("\tmov ecx, fs:[TEB_SELF]")
 
@@ -613,7 +615,7 @@ def emit_cc_thunk32(f: FuncInfo | TypedefInfo, lines: List[str]):
     if host_to_guest:
         lines.append("\tmov ecx, fs:[TEB_SELF]")
     else:
-        lines.append("\tmov ecx, gs:[currentThreadTeb@ntpoff]")
+        lines.append("\tGET_TEB_HOST ecx")
     lines.append("\tmov ax, fs")
     lines.append("\tmov dx, word ptr [ecx+TEB_FS_SEL]")
     lines.append("\tmov word ptr [ecx+TEB_FS_SEL], ax")
@@ -699,7 +701,7 @@ def emit_cc_thunk64(f: FuncInfo | TypedefInfo, lines: List[str]):
         f.args,
         f.source_cc,
         Arch.X86_64 if host_to_guest else Arch.X86,
-        stack_offset=24 if host_to_guest else 16,
+        stack_offset=24 if host_to_guest else 20,
         skip_args=1 if host_to_guest else 0,
     )
     target_layout = compute_arg_layout(
@@ -710,22 +712,23 @@ def emit_cc_thunk64(f: FuncInfo | TypedefInfo, lines: List[str]):
         lines.append(".code64")
 
         # Save rbx and rbp
-        lines.append("\tpush rbx")
         lines.append("\tpush rbp")
+        lines.append("\tpush rbx")
 
         # Stash host stack in r10
         lines.append("\tmov r10, rsp")
 
         # Get current TEB
-        lines.append("\tmov rcx, fs:[currentThreadTeb@tpoff]")
+        lines.append("\tGET_TEB_HOST rbx")
 
-        # Save FS base
-        lines.append("\trdfsbase r9")
-        lines.append("\tmov qword ptr [rcx+TEB_FSBASE], r9")
+        if sys.platform != "darwin":
+            # Save FS base
+            lines.append("\trdfsbase r9")
+            lines.append("\tmov qword ptr [rbx+TEB_FSBASE], r9")
 
         # Save RSP and load guest stack
-        lines.append("\tmov rbp, qword ptr [rcx+TEB_SP]")
-        lines.append("\tmov qword ptr [rcx+TEB_SP], rsp")
+        lines.append("\tmov rbp, qword ptr [rbx+TEB_SP]")
+        lines.append("\tmov qword ptr [rbx+TEB_SP], rsp")
         lines.append("\tmov rsp, rbp")
 
         # Allocate stack space for arguments
@@ -758,36 +761,37 @@ def emit_cc_thunk64(f: FuncInfo | TypedefInfo, lines: List[str]):
             lines.append(f"\tmov {ptr_type} [rsp+{target.stack_offset}], {register}")
 
         # Jump to 32-bit mode
-        lines.append("\tLJMP32")
+        lines.append("\tLJMP32 rbx")
 
         # Setup FS selector
-        lines.append("\tmov ax, word ptr [ecx+TEB_FS_SEL]")
+        lines.append("\tmov ax, word ptr [ebx+TEB_FS_SEL]")
         lines.append("\tmov fs, ax")
 
         # Call into target
         lines.append(f"\tcall {call_target}")
 
-        # Get current TEB
-        lines.append("\tmov ecx, fs:[TEB_SELF]")
+        # Get current TEB (32-bit code may clobber ebx)
+        lines.append("\tmov ebx, fs:[TEB_SELF]")
 
         # Jump back to 64-bit
-        lines.append("\tLJMP64")
+        lines.append("\tLJMP64 ebx")
 
         # Sign extend return value if necessary
         if f.return_type.sign_extended:
             lines.append("\tcdqe")
 
-        # Restore FS base
-        lines.append("\tmov r9, qword ptr [rcx+TEB_FSBASE]")
-        lines.append("\twrfsbase r9")
+        if sys.platform != "darwin":
+            # Restore FS base
+            lines.append("\tmov r9, qword ptr [rbx+TEB_FSBASE]")
+            lines.append("\twrfsbase r9")
 
         # Restore host stack
-        lines.append("\tmov rsp, qword ptr [rcx+TEB_SP]")
-        lines.append("\tmov qword ptr [rcx+TEB_SP], rbp")
+        lines.append("\tmov rsp, qword ptr [rbx+TEB_SP]")
+        lines.append("\tmov qword ptr [rbx+TEB_SP], rbp")
 
         # Restore rbp, rbx and return
-        lines.append("\tpop rbp")
         lines.append("\tpop rbx")
+        lines.append("\tpop rbp")
         lines.append("\tret")
     else:
         lines.append(".code32")
@@ -796,27 +800,30 @@ def emit_cc_thunk64(f: FuncInfo | TypedefInfo, lines: List[str]):
         lines.append("\tpush ebp")
         lines.append("\tpush esi")
         lines.append("\tpush edi")
+        lines.append("\tpush ebx")
 
         # Get current TEB
-        lines.append("\tmov ecx, fs:[TEB_SELF]")
+        lines.append("\tmov ebx, fs:[TEB_SELF]")
 
-        # Save fs segment
-        lines.append("\tmov di, fs")
-        lines.append("\tmov word ptr [ecx+TEB_FS_SEL], di")
+        if sys.platform != "darwin":
+            # Save fs segment
+            lines.append("\tmov di, fs")
+            lines.append("\tmov word ptr [ebx+TEB_FS_SEL], di")
 
         # Jump back to 64-bit
-        lines.append("\tLJMP64")
+        lines.append("\tLJMP64 ebx")
 
-        # Restore FS base
-        lines.append("\tmov r9, qword ptr [rcx+TEB_FSBASE]")
-        lines.append("\twrfsbase r9")
+        if sys.platform != "darwin":
+            # Restore FS base
+            lines.append("\tmov r9, qword ptr [rbx+TEB_FSBASE]")
+            lines.append("\twrfsbase r9")
 
         # Stash guest stack in r10
         lines.append("\tmov r10, rsp")
 
         # Restore host stack
-        lines.append("\tmov rbp, qword ptr [rcx+TEB_SP]")
-        lines.append("\tmov qword ptr [rcx+TEB_SP], rsp")
+        lines.append("\tmov rbp, qword ptr [rbx+TEB_SP]")
+        lines.append("\tmov qword ptr [rbx+TEB_SP], rsp")
         lines.append("\tmov rsp, rbp")
 
         # Allocate stack space for arguments
@@ -881,21 +888,20 @@ def emit_cc_thunk64(f: FuncInfo | TypedefInfo, lines: List[str]):
         # Call into target
         lines.append(f"\tcall {call_target}")
 
-        # Get current TEB
-        lines.append("\tmov rcx, fs:[currentThreadTeb@tpoff]")
-
         # Restore host stack
-        lines.append("\tmov rsp, qword ptr [rcx+TEB_SP]")
-        lines.append("\tmov qword ptr [rcx+TEB_SP], rbp")
+        lines.append("\tmov rsp, qword ptr [rbx+TEB_SP]")
+        lines.append("\tmov qword ptr [rbx+TEB_SP], rbp")
 
         # Jump to 32-bit mode
-        lines.append("\tLJMP32")
+        lines.append("\tLJMP32 rbx")
 
-        # Setup FS selector
-        lines.append("\tmov di, word ptr [ecx+TEB_FS_SEL]")
-        lines.append("\tmov fs, di")
+        if sys.platform != "darwin":
+            # Setup FS selector
+            lines.append("\tmov di, word ptr [ebx+TEB_FS_SEL]")
+            lines.append("\tmov fs, di")
 
         # Restore registers
+        lines.append("\tpop ebx")
         lines.append("\tpop edi")
         lines.append("\tpop esi")
         lines.append("\tpop ebp")
@@ -918,7 +924,7 @@ def emit_guest_to_host_thunks(
     lines: List[str], dll: str, funcs: Iterable[FuncInfo], arch: Arch
 ) -> None:
     for f in funcs:
-        thunk = f"thunk_{dll}_{f.name}"
+        thunk = f"{SYMBOL_PREFIX}thunk_{dll}_{f.name}"
         lines.append("")
         lines.append(
             f"# {f.qualified_ns}::{f.name} (source_cc={f.source_cc.name}, target_cc={f.target_cc.name}, variadic={f.variadic})"
@@ -933,17 +939,19 @@ def emit_guest_to_host_thunks(
             details.append(f"sign_extended={arg.sign_extended}")
             lines.append(f"\t# Arg {i} ({', '.join(details)})")
         lines.append(f".globl {thunk}")
-        lines.append(f".type {thunk}, @function")
+        if sys.platform != "darwin":
+            lines.append(f".type {thunk}, @function")
         lines.append(f"{thunk}:")
         emit_cc_thunk(f, lines, arch)
-        lines.append(f".size {thunk}, .-{thunk}")
+        if sys.platform != "darwin":
+            lines.append(f".size {thunk}, .-{thunk}")
 
 
 def emit_host_to_guest_thunks(
     lines: List[str], typedefs: Iterable[TypedefInfo], arch: Arch
 ) -> None:
     for f in typedefs:
-        thunk = f"call_{f.name}"
+        thunk = f"{SYMBOL_PREFIX}call_{f.name}"
         lines.append("")
         lines.append(
             f"# {f.name} (target_cc={f.target_cc.name}, variadic={f.variadic})"
@@ -961,11 +969,16 @@ def emit_host_to_guest_thunks(
         # details.append(f"class={f.return_type.arg_class.value}")
         # details.append(f"sign_extended={f.return_type.sign_extended}")
         # lines.append(f"\t# Ret ({', '.join(details)})")
-        lines.append(f".weak {thunk}")
-        lines.append(f".type {thunk}, @function")
+        if sys.platform == "darwin":
+            lines.append(f".globl {thunk}")
+            lines.append(f".weak_definition {thunk}")
+        else:
+            lines.append(f".weak {thunk}")
+            lines.append(f".type {thunk}, @function")
         lines.append(f"{thunk}:")
         emit_cc_thunk(f, lines, arch)
-        lines.append(f".size {thunk}, .-{thunk}")
+        if sys.platform != "darwin":
+            lines.append(f".size {thunk}, .-{thunk}")
 
 
 def emit_header_mapping(
@@ -1079,12 +1092,16 @@ def main() -> int:
 
     if args.arch == "x86":
         arch = Arch.X86
+        target = "i686-pc-linux-gnu"
     elif args.arch == "x86_64":
         arch = Arch.X86_64
+        if sys.platform == "darwin":
+            target = "x86_64-apple-darwin"
+        else:
+            target = "x86_64-pc-linux-gnu"
     else:
         raise ValueError(f"Unsupported architecture: {args.arch}")
 
-    target = "i686-pc-linux-gnu" if args.arch == "x86" else "x86_64-pc-linux-gnu"
     tu = parse_tu(args.headers, args.incs, target)
     funcs = collect_functions(tu, args.ns, arch)
     typedefs = collect_typedefs(tu, arch)
@@ -1097,7 +1114,8 @@ def main() -> int:
     lines: List[str] = []
     lines.append("# Auto-generated thunks; DO NOT EDIT.")
     lines.append('#include "macros.S"')
-    lines.append('.section .note.GNU-stack, "", @progbits')
+    if sys.platform != "darwin":
+        lines.append('.section .note.GNU-stack, "", @progbits')
     lines.append(".text")
 
     emit_guest_to_host_thunks(lines, args.dll, funcs, arch)

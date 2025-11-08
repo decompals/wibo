@@ -10,12 +10,6 @@
 #include "types.h"
 #include "version_info.h"
 
-#ifdef __x86_64__
-#include "setup.h"
-#endif
-
-#include <asm/ldt.h>
-#include <asm/prctl.h>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -26,9 +20,17 @@
 #include <pthread.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
-#include <threads.h>
 #include <unistd.h>
-#include <vector>
+
+#ifdef __x86_64__
+#include "setup.h"
+#endif
+
+#ifdef __linux__
+#include <asm/ldt.h>
+#include <asm/prctl.h>
+#include <threads.h>
+#endif
 
 char **wibo::argv;
 int wibo::argc;
@@ -49,7 +51,11 @@ void wibo::debug_log(const char *fmt, ...) {
 		for (size_t i = 0; i < wibo::debugIndent; i++)
 			fprintf(stderr, "\t");
 		pthread_t threadId = pthread_self();
+#ifdef __APPLE__
+		fprintf(stderr, "[thread %p] ", threadId);
+#else
 		fprintf(stderr, "[thread %lu] ", threadId);
+#endif
 		vfprintf(stderr, fmt, args);
 		fflush(stderr);
 	}
@@ -101,8 +107,8 @@ bool wibo::installTibForCurrentThread(TEB *tibPtr) {
 
 	currentThreadTeb = tibPtr;
 #ifdef __x86_64__
-	tibEntryNumber = x86_64_thread_setup(tibEntryNumber, tibPtr);
-	if (tibEntryNumber == -1 || tibPtr->CurrentFsSelector == 0) {
+	tibEntryNumber = tebThreadSetup(tibEntryNumber, tibPtr);
+	if (tibEntryNumber < 0 || tibPtr->CurrentFsSelector == 0) {
 		perror("x86_64_thread_setup failed");
 		return false;
 	}

@@ -2,6 +2,13 @@ cmake_minimum_required(VERSION 3.13)
 
 project(wibo LANGUAGES ASM C CXX)
 
+set(CMAKE_CXX_STANDARD 20)
+
+if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15")
+    set(CMAKE_OSX_ARCHITECTURES "x86_64" CACHE INTERNAL "" FORCE)
+endif()
+
 set(WIBO_VERSION "" CACHE STRING "Version string for the wibo binary; if empty, attempts to use git describe")
 
 if(NOT "${WIBO_VERSION}" STREQUAL "")
@@ -92,13 +99,15 @@ FetchContent_MakeAvailable(mimalloc)
 
 # Disable `note: the alignment of '_Atomic long long int' fields changed in GCC 11.1`
 target_compile_options(mimalloc-obj PRIVATE -Wno-psabi)
-target_compile_definitions(mimalloc-obj PRIVATE MI_USE_BUILTIN_THREAD_POINTER=1)
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_compile_definitions(mimalloc-obj PRIVATE MI_USE_BUILTIN_THREAD_POINTER=1)
+endif()
 if (WIBO_64)
     # Disable a noisy warning on startup
     target_compile_definitions(mimalloc-obj PRIVATE MI_DEBUG=0)
 endif()
 
-if (WIBO_ENABLE_LIBURING)
+if (WIBO_ENABLE_LIBURING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     FetchContent_Declare(
         liburing
         GIT_REPOSITORY https://github.com/axboe/liburing.git
@@ -142,7 +151,6 @@ add_executable(wibo
     dll/advapi32/wincrypt.cpp
     dll/advapi32/winreg.cpp
     dll/bcrypt.cpp
-    dll/crt.cpp
     dll/kernel32.cpp
     dll/kernel32/debugapi.cpp
     dll/kernel32/errhandlingapi.cpp
@@ -169,7 +177,6 @@ add_executable(wibo
     dll/kernel32/wow64apiset.cpp
     dll/lmgr.cpp
     dll/mscoree.cpp
-    dll/msvcrt.cpp
     dll/ntdll.cpp
     dll/ole32.cpp
     dll/rpcrt4.cpp
@@ -178,7 +185,6 @@ add_executable(wibo
     dll/version.cpp
     src/access.cpp
     src/async_io.cpp
-    src/async_io_epoll.cpp
     src/errors.cpp
     src/files.cpp
     src/handles.cpp
@@ -186,23 +192,52 @@ add_executable(wibo
     src/loader.cpp
     src/main.cpp
     src/modules.cpp
-    src/processes.cpp
+    src/processes_common.cpp
     src/resources.cpp
     src/setup.S
     src/strutil.cpp
     src/tls.cpp
 )
+
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_sources(wibo PRIVATE
+        src/async_io_epoll.cpp
+        src/processes_linux.cpp
+    )
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    target_sources(wibo PRIVATE
+        src/processes_darwin.cpp
+        src/setup_darwin.cpp
+    )
+    set_source_files_properties(src/setup_darwin.cpp PROPERTIES COMPILE_FLAGS "-fms-extensions")
+else()
+    message(FATAL_ERROR "Unsupported platform for ProcessManager")
+endif()
 target_compile_definitions(wibo PRIVATE _GNU_SOURCE _FILE_OFFSET_BITS=64 _TIME_BITS=64)
 target_compile_features(wibo PRIVATE cxx_std_20)
 target_compile_options(wibo PRIVATE -Wall -Wextra)
-target_link_options(wibo PRIVATE -no-pie -Wl,--image-base=0x70000000)
+if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    target_link_options(wibo PRIVATE
+        -Wl,-no_pie,-no_fixup_chains
+        -Wl,-segalign,0x1000
+        -Wl,-pagezero_size,0x1000
+        -Wl,-image_base,0x7E001000
+        -Wl,-segaddr,RESV32,0x1000
+        -Wl,-segprot,RESV32,-,-
+    )
+else()
+    target_link_options(wibo PRIVATE -no-pie -Wl,--image-base=0x70000000)
+endif()
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(wibo PRIVATE -maccumulate-outgoing-args)
     target_link_options(wibo PRIVATE -maccumulate-outgoing-args)
 endif()
 target_include_directories(wibo PRIVATE dll src ${WIBO_GENERATED_HEADER_DIR})
-target_link_libraries(wibo PRIVATE mimalloc-obj atomic)
-if (WIBO_ENABLE_LIBURING)
+target_link_libraries(wibo PRIVATE mimalloc-obj)
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(wibo PRIVATE atomic)
+endif()
+if (WIBO_ENABLE_LIBURING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_compile_definitions(wibo PRIVATE WIBO_ENABLE_LIBURING=1)
     target_link_libraries(wibo PRIVATE liburing)
     target_sources(wibo PRIVATE src/async_io_uring.cpp)
@@ -216,7 +251,11 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 # Track down libclang for trampoline generation.
 # find_package(Clang) ends up requiring too many dependencies,
 # so a quick-and-dirty manual search is done here instead.
-set(CLANG_ROOT "/usr" CACHE PATH "Path to Clang installation")
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(CLANG_ROOT "/usr" CACHE PATH "Path to Clang installation")
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    set(CLANG_ROOT "/Library/Developer/CommandLineTools/usr/lib" CACHE PATH "Path to Clang installation")
+endif()
 set(_LLVM_MIN_VER 17)
 set(_LLVM_MAX_VER 25)
 set(_CLANG_LIB_SUFFIXES "")
@@ -274,9 +313,7 @@ wibo_codegen_module(NAME advapi32 HEADERS
 )
 wibo_codegen_module(NAME bcrypt HEADERS dll/bcrypt.h)
 wibo_codegen_module(NAME entry HEADERS src/entry.h)
-wibo_codegen_module(NAME crt HEADERS dll/crt.h)
 wibo_codegen_module(NAME mscoree HEADERS dll/mscoree.h)
-wibo_codegen_module(NAME msvcrt HEADERS dll/msvcrt.h)
 wibo_codegen_module(NAME version HEADERS dll/version.h)
 wibo_codegen_module(NAME rpcrt4 HEADERS dll/rpcrt4.h)
 wibo_codegen_module(NAME vcruntime HEADERS dll/vcruntime.h)
@@ -431,4 +468,8 @@ if (WIBO_ENABLE_FIXTURE_TESTS)
 
         add_test(NAME wibo.build_fixtures COMMAND ${_wibo_fixture_build_command})
     endif()
+endif()
+
+if (NOT TARGET wibo_test_fixtures)
+    add_custom_target(wibo_test_fixtures)
 endif()

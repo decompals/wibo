@@ -3,34 +3,47 @@
 #include "kernel32/internal.h"
 
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
-#include <thread>
 #include <vector>
 
 using kernel32::ProcessObject;
 
 namespace wibo {
 
+namespace detail {
+
+class ProcessManagerImpl {
+  public:
+	virtual ~ProcessManagerImpl() = default;
+	virtual bool init() = 0;
+	virtual void shutdown() = 0;
+	virtual bool addProcess(Pin<ProcessObject> po) = 0;
+	[[nodiscard]] virtual bool running() const = 0;
+};
+
+struct SpawnProcessInfo {
+	pid_t pid = -1;
+	int pidfd = -1;
+};
+
+std::unique_ptr<ProcessManagerImpl> createProcessManagerImpl();
+int spawnProcess(char *const argv[], char *const envp[], SpawnProcessInfo &info);
+
+} // namespace detail
+
 class ProcessManager {
   public:
+	ProcessManager();
 	~ProcessManager();
 	bool init();
 	void shutdown();
 	bool addProcess(Pin<ProcessObject> po);
-	bool running() const { return mRunning.load(std::memory_order_acquire); }
+	[[nodiscard]] bool running() const;
 
   private:
-	void runLoop();
-	void wake() const;
-	void checkPidfd(int pidfd);
-
-	mutable std::shared_mutex m;
-	std::atomic<bool> mRunning = false;
-	std::thread mThread;
-	int mEpollFd = -1;
-	int mWakeFd = -1;
-	std::unordered_map<int, Pin<ProcessObject>> mReg;
+	std::unique_ptr<detail::ProcessManagerImpl> mImpl;
 };
 
 ProcessManager &processes();

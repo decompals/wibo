@@ -15,6 +15,9 @@ constexpr ULONG BCRYPT_RNG_USE_ENTROPY_IN_BUFFER = 0x00000001;
 constexpr ULONG BCRYPT_USE_SYSTEM_PREFERRED_RNG = 0x00000002;
 
 bool fillWithSystemRandom(PUCHAR buffer, size_t length) {
+#ifdef __APPLE__
+	arc4random_buf(buffer, length);
+#else
 	while (length > 0) {
 		ssize_t written = getrandom(buffer, length, 0);
 		if (written < 0) {
@@ -27,6 +30,7 @@ bool fillWithSystemRandom(PUCHAR buffer, size_t length) {
 		buffer += written;
 		length -= static_cast<size_t>(written);
 	}
+#endif
 	return true;
 }
 

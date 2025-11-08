@@ -368,11 +368,13 @@ BOOL WINAPI CreatePipe(PHANDLE hReadPipe, PHANDLE hWritePipe, LPSECURITY_ATTRIBU
 	configureInheritability(pipeFds[0], inheritHandles);
 	configureInheritability(pipeFds[1], inheritHandles);
 
+#ifdef __linux__
 	if (nSize != 0) {
 		// Best-effort adjustment; ignore failures as recommended by docs.
 		fcntl(pipeFds[0], F_SETPIPE_SZ, static_cast<int>(nSize));
 		fcntl(pipeFds[1], F_SETPIPE_SZ, static_cast<int>(nSize));
 	}
+#endif
 
 	auto readObj = make_pin<FileObject>(pipeFds[0]);
 	readObj->shareAccess = FILE_SHARE_READ | FILE_SHARE_WRITE;
@@ -384,8 +386,8 @@ BOOL WINAPI CreatePipe(PHANDLE hReadPipe, PHANDLE hWritePipe, LPSECURITY_ATTRIBU
 }
 
 HANDLE WINAPI CreateNamedPipeA(LPCSTR lpName, DWORD dwOpenMode, DWORD dwPipeMode, DWORD nMaxInstances,
-								 DWORD nOutBufferSize, DWORD nInBufferSize, DWORD nDefaultTimeOut,
-								 LPSECURITY_ATTRIBUTES lpSecurityAttributes) {
+							   DWORD nOutBufferSize, DWORD nInBufferSize, DWORD nDefaultTimeOut,
+							   LPSECURITY_ATTRIBUTES lpSecurityAttributes) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CreateNamedPipeA(%s, 0x%08x, 0x%08x, %u, %u, %u, %u, %p)\n", lpName ? lpName : "(null)", dwOpenMode,
 			  dwPipeMode, nMaxInstances, nOutBufferSize, nInBufferSize, nDefaultTimeOut, lpSecurityAttributes);
@@ -479,15 +481,19 @@ HANDLE WINAPI CreateNamedPipeA(LPCSTR lpName, DWORD dwOpenMode, DWORD dwPipeMode
 		if (accessMode == PIPE_ACCESS_INBOUND) {
 			serverFd = fds[0];
 			companionFd = fds[1];
+#ifdef __linux__
 			if (nInBufferSize != 0) {
 				fcntl(serverFd, F_SETPIPE_SZ, static_cast<int>(nInBufferSize));
 			}
+#endif
 		} else {
 			serverFd = fds[1];
 			companionFd = fds[0];
+#ifdef __linux__
 			if (nOutBufferSize != 0) {
 				fcntl(serverFd, F_SETPIPE_SZ, static_cast<int>(nOutBufferSize));
 			}
+#endif
 		}
 	}
 

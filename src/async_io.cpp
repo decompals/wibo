@@ -49,7 +49,9 @@ static constexpr BackendEntry kBackends[] = {
 #if WIBO_ENABLE_LIBURING
 	{"io_uring", detail::createIoUringBackend},
 #endif
+#ifdef __linux__
 	{"epoll", detail::createEpollBackend},
+#endif
 };
 
 AsyncIOBackend &asyncIO() {

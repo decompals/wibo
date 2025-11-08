@@ -17,15 +17,17 @@
 #include <utility>
 #include <vector>
 
+#ifdef __linux__
 // Alpine hack: rename duplicate prctl_mm_map (sys/prctl.h also includes it)
 #define prctl_mm_map _prctl_mm_map
 #include <linux/prctl.h>
 #undef prctl_mm_map
+#include <sys/prctl.h>
+#endif
 
 #include <mimalloc.h>
 #include <mimalloc/internal.h>
 #include <sys/mman.h>
-#include <sys/prctl.h>
 #include <unistd.h>
 
 // Pre-initialization logging macros
@@ -36,8 +38,14 @@ namespace {
 
 constexpr uintptr_t kLowMemoryStart = 0x00110000UL; // 1 MiB + 64 KiB
 constexpr uintptr_t kHeapMax = 0x60000000UL;		// 1 GiB
+#ifdef __APPLE__
+// On macOS, our program is mapped at 0x7E001000
+constexpr uintptr_t kTopDownStart = 0x7D000000UL;
+constexpr uintptr_t kTwoGB = 0x7E000000UL;
+#else
 constexpr uintptr_t kTopDownStart = 0x7F000000UL;	// Just below 2GB
 constexpr uintptr_t kTwoGB = 0x80000000UL;
+#endif
 constexpr std::size_t kGuestArenaSize = 512ULL * 1024ULL * 1024ULL; // 512 MiB
 constexpr std::size_t kVirtualAllocationGranularity = 64ULL * 1024ULL;
 
@@ -69,6 +77,7 @@ struct VirtualAllocation {
 
 std::map<uintptr_t, VirtualAllocation> g_virtualAllocations;
 
+#ifndef __APPLE__
 const uintptr_t kDefaultMmapMinAddr = 0x10000u;
 
 uintptr_t readMmapMinAddr() {
@@ -98,6 +107,7 @@ uintptr_t mmapMinAddr() {
 	static uintptr_t minAddr = readMmapMinAddr();
 	return minAddr;
 }
+#endif
 
 uintptr_t alignDown(uintptr_t value, std::size_t alignment) {
 	const uintptr_t mask = static_cast<uintptr_t>(alignment) - 1;
@@ -311,9 +321,13 @@ bool mapAtAddr(uintptr_t addr, std::size_t size, const char *name, void **outPtr
 	if (p == MAP_FAILED) {
 		return false;
 	}
+#ifdef __linux__
 	if (name) {
 		prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, addr, size, name);
 	}
+#else
+    (void)name;
+#endif
 	recordGuestMapping(addr, size, PAGE_READWRITE, MEM_RESERVE, PAGE_READWRITE, MEM_PRIVATE);
 	if (outPtr) {
 		*outPtr = p;
@@ -668,11 +682,13 @@ VmStatus virtualAlloc(void **baseAddress, std::size_t *regionSize, DWORD allocat
 		if (mapped == MAP_FAILED) {
 			return vmStatusFromErrno(errno);
 		}
+#ifdef __linux__
 		if (type == MEM_IMAGE) {
 			prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, base, length, "wibo guest image");
 		} else {
 			prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, base, length, "wibo guest allocated");
 		}
+#endif
 		uintptr_t actualBase = reinterpret_cast<uintptr_t>(mapped);
 		VirtualAllocation allocation{};
 		allocation.base = actualBase;
@@ -739,7 +755,9 @@ VmStatus virtualAlloc(void **baseAddress, std::size_t *regionSize, DWORD allocat
 		if (res == MAP_FAILED) {
 			return vmStatusFromErrno(errno);
 		}
+#ifdef __linux__
 		prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, run.first, run.second, "wibo guest committed");
+#endif
 		markCommitted(*region, run.first, run.second, protect);
 	}
 
@@ -791,7 +809,9 @@ VmStatus virtualFree(void *baseAddress, std::size_t regionSize, DWORD freeType) 
 		if (res == MAP_FAILED) {
 			return vmStatusFromErrno(errno);
 		}
+#ifdef __linux__
 		prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, base, length, "wibo reserved");
+#endif
 		eraseGuestMapping(base);
 		return VmStatus::Success;
 	}
@@ -828,7 +848,9 @@ VmStatus virtualFree(void *baseAddress, std::size_t regionSize, DWORD freeType) 
 	if (res == MAP_FAILED) {
 		return vmStatusFromErrno(errno);
 	}
+#ifdef __linux__
 	prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, res, length, "wibo reserved");
+#endif
 	markDecommitted(region, start, length);
 	refreshGuestMapping(region);
 	return VmStatus::Success;
@@ -1043,6 +1065,7 @@ bool reserveGuestStack(std::size_t stackSizeBytes, void **outStackLimit, void **
 
 } // namespace wibo::heap
 
+#ifndef __APPLE__
 static void debugPrintMaps() {
 	char buf[1024];
 	int fd = open("/proc/self/maps", O_RDONLY);
@@ -1194,7 +1217,9 @@ static size_t blockLower2GB(MEMORY_BASIC_INFORMATION mappings[MAX_NUM_MAPPINGS])
 				perror("heap: failed reserve memory");
 				exit(1);
 			}
+#ifdef __linux__
 			prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, ptr, len, "wibo reserved");
+#endif
 		}
 
 		lastMapEnd = mapEnd;
@@ -1203,27 +1228,36 @@ static size_t blockLower2GB(MEMORY_BASIC_INFORMATION mappings[MAX_NUM_MAPPINGS])
 
 	return numMappings;
 }
+#endif
 
 #if defined(__clang__)
 __attribute__((constructor(101)))
 #else
 __attribute__((constructor))
 #endif
-__attribute__((used)) static void wibo_heap_constructor() {
+__attribute__((used)) static void
+wibo_heap_constructor() {
+#ifndef __APPLE__
 	MEMORY_BASIC_INFORMATION mappings[MAX_NUM_MAPPINGS];
 	memset(mappings, 0, sizeof(mappings));
+#endif
 	bool debug = getenv("WIBO_DEBUG_HEAP") != nullptr;
 	if (debug) {
 		LOG_OUT("heap: initializing...\n");
+#ifndef __APPLE__
 		debugPrintMaps();
+#endif
 	}
+#ifndef __APPLE__
 	size_t numMappings = blockLower2GB(mappings);
+#endif
 	// Now we can allocate memory
 	if (debug) {
 		mi_option_enable(mi_option_show_stats);
 		mi_option_enable(mi_option_verbose);
 	}
 	g_mappings = new std::map<uintptr_t, MEMORY_BASIC_INFORMATION>;
+#ifndef __APPLE__
 	for (size_t i = 0; i < numMappings; ++i) {
 		if (debug) {
 			fprintf(stderr, "Existing %zu: BaseAddress=%x, RegionSize=%u\n", i, mappings[i].BaseAddress,
@@ -1231,4 +1265,5 @@ __attribute__((used)) static void wibo_heap_constructor() {
 		}
 		g_mappings->emplace(reinterpret_cast<uintptr_t>(fromGuestPtr(mappings[i].BaseAddress)), mappings[i]);
 	}
+#endif
 }

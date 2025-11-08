@@ -175,9 +175,8 @@ StubFuncType resolveMissingFuncName(const char *dllName, const char *funcName) {
 }
 
 StubFuncType resolveMissingFuncOrdinal(const char *dllName, uint16_t ordinal) {
-	char buf[16];
-	sprintf(buf, "%d", ordinal);
-	return resolveMissingFuncName(dllName, buf);
+	std::string funcName = std::to_string(ordinal);
+	return resolveMissingFuncName(dllName, funcName.c_str());
 }
 
 struct ModuleRegistry {

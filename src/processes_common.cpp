@@ -1,223 +1,60 @@
 #include "processes.h"
+
 #include "common.h"
 #include "files.h"
 #include "handles.h"
 #include "kernel32/internal.h"
+
 #include <algorithm>
 #include <cassert>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <fcntl.h>
 #include <filesystem>
-#include <linux/sched.h>
-#include <mutex>
 #include <optional>
-#include <shared_mutex>
-#include <spawn.h>
 #include <string>
-#include <strings.h>
-#include <sys/epoll.h>
-#include <sys/eventfd.h>
-#include <sys/prctl.h>
-#include <sys/syscall.h>
-#include <sys/wait.h>
-#include <unistd.h>
 #include <vector>
 
-namespace {
+extern char **environ;
 
-inline DWORD decodeExitCode(const siginfo_t &si) {
-	switch (si.si_code) {
-	case CLD_EXITED:
-		return static_cast<DWORD>(si.si_status);
-	case CLD_KILLED:
-	case CLD_DUMPED:
-		return 0xC0000000u | static_cast<DWORD>(si.si_status);
-	default:
-		return 0;
-	}
-}
-
-} // namespace
+using kernel32::ProcessObject;
 
 namespace wibo {
 
-ProcessManager::~ProcessManager() { shutdown(); }
+ProcessManager::ProcessManager() : mImpl(detail::createProcessManagerImpl()) {}
+
+ProcessManager::~ProcessManager() = default;
 
 bool ProcessManager::init() {
-	if (mRunning.load(std::memory_order_acquire)) {
-		return true;
-	}
-
-	mEpollFd = epoll_create1(EPOLL_CLOEXEC);
-	if (mEpollFd < 0) {
-		perror("epoll_create1");
+	if (!mImpl) {
 		return false;
 	}
-
-	mWakeFd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
-	if (mWakeFd < 0) {
-		perror("eventfd");
-		close(mEpollFd);
-		mEpollFd = -1;
-		return false;
-	}
-
-	epoll_event ev{};
-	ev.events = EPOLLIN;
-	ev.data.fd = mWakeFd;
-	if (epoll_ctl(mEpollFd, EPOLL_CTL_ADD, mWakeFd, &ev) < 0) {
-		perror("epoll_ctl");
-		close(mWakeFd);
-		mWakeFd = -1;
-		close(mEpollFd);
-		mEpollFd = -1;
-		return false;
-	}
-
-	mRunning.store(true, std::memory_order_release);
-	mThread = std::thread(&ProcessManager::runLoop, this);
-	DEBUG_LOG("ProcessManager initialized\n");
-	return true;
+	return mImpl->init();
 }
 
 void ProcessManager::shutdown() {
-	if (!mRunning.exchange(false, std::memory_order_acq_rel)) {
-		return;
-	}
-	wake();
-	if (mThread.joinable()) {
-		mThread.join();
-	}
-	std::lock_guard lk(m);
-	mReg.clear();
-	if (mWakeFd >= 0) {
-		close(mWakeFd);
-		mWakeFd = -1;
-	}
-	if (mEpollFd >= 0) {
-		close(mEpollFd);
-		mEpollFd = -1;
+	if (mImpl) {
+		mImpl->shutdown();
 	}
 }
 
 bool ProcessManager::addProcess(Pin<ProcessObject> po) {
-	if (!po) {
+	if (!mImpl) {
 		return false;
 	}
-	pid_t pid;
-	int pidfd;
-	{
-		std::lock_guard lk(po->m);
-		pid = po->pid;
-		pidfd = po->pidfd;
-		if (pidfd < 0) {
-			return false;
-		}
-
-		epoll_event ev{};
-		ev.events = EPOLLIN;
-		ev.data.fd = pidfd;
-		if (epoll_ctl(mEpollFd, EPOLL_CTL_ADD, pidfd, &ev) < 0) {
-			perror("epoll_ctl");
-			close(pidfd);
-			po->pidfd = -1;
-			return false;
-		}
-	}
-	{
-		std::lock_guard lk(m);
-		mReg.emplace(pidfd, std::move(po));
-	}
-	DEBUG_LOG("ProcessManager: registered pid %d with pidfd %d\n", pid, pidfd);
-	wake();
-	return true;
+	return mImpl->addProcess(std::move(po));
 }
 
-void ProcessManager::runLoop() {
-	constexpr int kMaxEvents = 64;
-	std::array<epoll_event, kMaxEvents> events{};
-	while (mRunning.load(std::memory_order_acquire)) {
-		int n = epoll_wait(mEpollFd, events.data(), kMaxEvents, -1);
-		if (n < 0) {
-			if (errno == EINTR) {
-				continue;
-			}
-			perror("epoll_wait");
-			break;
-		}
-		for (int i = 0; i < n; ++i) {
-			const auto &ev = events[i];
-			if (ev.data.fd == mWakeFd) {
-				// Drain eventfd
-				uint64_t n;
-				while (read(mWakeFd, &n, sizeof(n)) == sizeof(n)) {
-				}
-				continue;
-			}
-			checkPidfd(ev.data.fd);
-		}
-	}
-}
-
-void ProcessManager::wake() const {
-	if (mWakeFd < 0) {
-		return;
-	}
-	uint64_t n = 1;
-	ssize_t r [[maybe_unused]] = write(mWakeFd, &n, sizeof(n));
-}
-
-void ProcessManager::checkPidfd(int pidfd) {
-	DEBUG_LOG("ProcessManager: checking pidfd %d\n", pidfd);
-
-	siginfo_t si{};
-	si.si_code = CLD_DUMPED;
-	if (pidfd >= 0) {
-		int rc = waitid(P_PIDFD, pidfd, &si, WEXITED | WNOHANG);
-		if (rc < 0) {
-			// TODO: what to do here?
-			perror("waitid");
-		} else if (rc == 0 && si.si_pid == 0) {
-			return;
-		}
-		epoll_ctl(mEpollFd, EPOLL_CTL_DEL, pidfd, nullptr);
-	}
-
-	DEBUG_LOG("ProcessManager: pidfd %d exited: code=%d status=%d\n", pidfd, si.si_code, si.si_status);
-
-	Pin<ProcessObject> po;
-	{
-		std::unique_lock lk(m);
-		auto it = mReg.find(pidfd);
-		if (it != mReg.end()) {
-			po = std::move(it->second);
-			mReg.erase(it);
-		}
-	}
-	close(pidfd);
-	if (!po) {
-		return;
-	}
-	{
-		std::lock_guard lk(po->m);
-		po->signaled = true;
-		po->pidfd = -1;
-		if (!po->forcedExitCode) {
-			po->exitCode = decodeExitCode(si);
-		}
-	}
-	po->cv.notify_all();
-	po->notifyWaiters(false);
+bool ProcessManager::running() const {
+	return mImpl && mImpl->running();
 }
 
 ProcessManager &processes() {
 	static ProcessManager mgr;
 	if (!mgr.init()) {
-		fprintf(stderr, "Failed to initialize ProcessManager\n");
-		abort();
+		std::fprintf(stderr, "Failed to initialize ProcessManager\n");
+		std::abort();
 	}
 	return mgr;
 }
@@ -307,7 +144,7 @@ static std::vector<std::filesystem::path> buildSearchDirectories() {
 		}
 	};
 	addFromEnv("WIBO_PATH");
-	addFromEnv("WINEPATH"); // Wine compatibility
+	addFromEnv("WINEPATH");
 	addFromEnv("PATH");
 	return dirs;
 }
@@ -371,22 +208,6 @@ std::optional<std::filesystem::path> resolveExecutable(const std::string &comman
 	return std::nullopt;
 }
 
-static int spawnClone(pid_t &pid, int &pidfd, char **argv, char **envp) {
-	pid = static_cast<pid_t>(syscall(SYS_clone, CLONE_PIDFD, nullptr, &pidfd));
-	if (pid < 0) {
-		int err = errno;
-		perror("clone");
-		return err;
-	} else if (pid == 0) {
-		prctl(PR_SET_PDEATHSIG, SIGKILL);
-		execve("/proc/self/exe", argv, envp);
-		// If we're still here, something went wrong
-		perror("execve");
-		_exit(127);
-	}
-	return 0;
-}
-
 static int spawnInternal(const std::vector<std::string> &args, Pin<kernel32::ProcessObject> &pinOut) {
 	std::vector<char *> argv;
 	argv.reserve(args.size() + 2);
@@ -423,20 +244,19 @@ static int spawnInternal(const std::vector<std::string> &args, Pin<kernel32::Pro
 		envp.push_back(const_cast<char *>(s.c_str()));
 	envp.push_back(nullptr);
 
-	pid_t pid = -1;
-	int pidfd = -1;
-	int rc = spawnClone(pid, pidfd, argv.data(), envp.data());
+	detail::SpawnProcessInfo info;
+	int rc = detail::spawnProcess(argv.data(), envp.data(), info);
 	if (rc != 0) {
 		return rc;
 	}
 
-	DEBUG_LOG("Spawned process with PID %d (pidfd=%d)\n", pid, pidfd);
+	DEBUG_LOG("Spawned process with PID %d (pidfd=%d)\n", info.pid, info.pidfd);
 
-	auto obj = make_pin<kernel32::ProcessObject>(pid, pidfd);
+	auto obj = make_pin<kernel32::ProcessObject>(info.pid, info.pidfd, true);
 	pinOut = obj.clone();
 	if (!processes().addProcess(std::move(obj))) {
-		fprintf(stderr, "Failed to add process to process manager\n");
-		abort();
+		std::fprintf(stderr, "Failed to add process to process manager\n");
+		std::abort();
 	}
 	return 0;
 }
@@ -531,3 +351,4 @@ std::vector<std::string> splitCommandLine(const char *commandLine) {
 }
 
 } // namespace wibo
+

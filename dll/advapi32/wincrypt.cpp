@@ -92,12 +92,15 @@ BOOL WINAPI CryptGenRandom(HCRYPTPROV hProv, DWORD dwLen, BYTE *pbBuffer) {
 		return FALSE;
 	}
 
+#ifdef __APPLE__
+	arc4random_buf(pbBuffer, dwLen);
+#else
 	ssize_t ret = getrandom(pbBuffer, dwLen, 0);
 	if (ret < 0 || static_cast<DWORD>(ret) != dwLen) {
 		kernel32::setLastError(ERROR_NOT_SUPPORTED);
 		return FALSE;
 	}
-
+#endif
 	return TRUE;
 }
 

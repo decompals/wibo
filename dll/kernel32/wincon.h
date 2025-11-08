@@ -42,5 +42,6 @@ BOOL WINAPI PeekConsoleInputA(HANDLE hConsoleInput, INPUT_RECORD *lpBuffer, DWOR
 								LPDWORD lpNumberOfEventsRead);
 BOOL WINAPI ReadConsoleInputA(HANDLE hConsoleInput, INPUT_RECORD *lpBuffer, DWORD nLength,
 								LPDWORD lpNumberOfEventsRead);
+BOOL WINAPI VerifyConsoleIoHandle(HANDLE handle);
 
 } // namespace kernel32

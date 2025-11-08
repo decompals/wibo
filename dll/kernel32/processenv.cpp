@@ -15,6 +15,10 @@
 #include <strings.h>
 #include <unistd.h>
 
+#ifdef __APPLE__
+extern char **environ;
+#endif
+
 namespace {
 
 GUEST_PTR g_commandLineA = GUEST_NULL;

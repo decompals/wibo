@@ -437,9 +437,12 @@ DWORD WINAPI WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds) {
 	case ObjectType::Process: {
 		auto po = std::move(obj).downcast<ProcessObject>();
 		std::unique_lock lk(po->m);
-		if (po->pidfd == -1) {
+		if (!po->signaled && !po->waitable) {
 			// Windows actually allows you to wait on your own process, but why bother?
 			return WAIT_TIMEOUT;
+		}
+		if (po->signaled) {
+			return WAIT_OBJECT_0;
 		}
 		bool ok = doWait(lk, po->cv, [&] { return po->signaled; });
 		return ok ? WAIT_OBJECT_0 : WAIT_TIMEOUT;

@@ -62,7 +62,7 @@ BOOL WINAPI GetConsoleScreenBufferInfo(HANDLE hConsoleOutput, CONSOLE_SCREEN_BUF
 }
 
 BOOL WINAPI WriteConsoleW(HANDLE hConsoleOutput, LPCVOID lpBuffer, DWORD nNumberOfCharsToWrite,
-							LPDWORD lpNumberOfCharsWritten, LPVOID lpReserved) {
+						  LPDWORD lpNumberOfCharsWritten, LPVOID lpReserved) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("WriteConsoleW(%p, %p, %u, %p, %p)\n", hConsoleOutput, lpBuffer, nNumberOfCharsToWrite,
 			  lpNumberOfCharsWritten, lpReserved);
@@ -110,7 +110,7 @@ DWORD WINAPI GetConsoleTitleW(LPWSTR lpConsoleTitle, DWORD nSize) {
 }
 
 BOOL WINAPI PeekConsoleInputA(HANDLE hConsoleInput, INPUT_RECORD *lpBuffer, DWORD nLength,
-								LPDWORD lpNumberOfEventsRead) {
+							  LPDWORD lpNumberOfEventsRead) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: PeekConsoleInputA(%p, %p, %u)\n", hConsoleInput, lpBuffer, nLength);
 	(void)hConsoleInput;
@@ -123,7 +123,7 @@ BOOL WINAPI PeekConsoleInputA(HANDLE hConsoleInput, INPUT_RECORD *lpBuffer, DWOR
 }
 
 BOOL WINAPI ReadConsoleInputA(HANDLE hConsoleInput, INPUT_RECORD *lpBuffer, DWORD nLength,
-								LPDWORD lpNumberOfEventsRead) {
+							  LPDWORD lpNumberOfEventsRead) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: ReadConsoleInputA(%p, %p, %u)\n", hConsoleInput, lpBuffer, nLength);
 	(void)hConsoleInput;
@@ -133,6 +133,13 @@ BOOL WINAPI ReadConsoleInputA(HANDLE hConsoleInput, INPUT_RECORD *lpBuffer, DWOR
 		*lpNumberOfEventsRead = 0;
 	}
 	return TRUE;
+}
+
+BOOL WINAPI VerifyConsoleIoHandle(HANDLE handle) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("STUB: VerifyConsoleIoHandle(%p)\n", handle);
+	(void)handle;
+	return FALSE;
 }
 
 } // namespace kernel32

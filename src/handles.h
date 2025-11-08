@@ -32,7 +32,8 @@ enum class ObjectType : uint16_t {
 enum ObjectFlags : uint16_t {
 	Of_None = 0x0,
 	Of_Waitable = 0x1,
-	Of_File = 0x2,
+	Of_FsObject = 0x2,
+	Of_File = 0x4,
 };
 
 struct ObjectBase {

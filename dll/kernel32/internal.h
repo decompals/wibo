@@ -22,7 +22,7 @@ struct FsObject : ObjectBase {
 	[[nodiscard]] bool valid() const { return fd >= 0; }
 
   protected:
-	explicit FsObject(ObjectType type, int fd) : ObjectBase(type), fd(fd) {}
+	explicit FsObject(ObjectType type, int fd) : ObjectBase(type), fd(fd) { flags |= Of_FsObject; }
 };
 
 struct FileObject : FsObject {
@@ -163,13 +163,9 @@ struct HeapObject : public ObjectBase {
 inline constexpr HANDLE kPseudoCurrentProcessHandleValue = static_cast<HANDLE>(-1);
 inline constexpr HANDLE kPseudoCurrentThreadHandleValue = static_cast<HANDLE>(-2);
 
-inline bool isPseudoCurrentProcessHandle(HANDLE h) {
-	return h == kPseudoCurrentProcessHandleValue;
-}
+inline bool isPseudoCurrentProcessHandle(HANDLE h) { return h == kPseudoCurrentProcessHandleValue; }
 
-inline bool isPseudoCurrentThreadHandle(HANDLE h) {
-	return h == kPseudoCurrentThreadHandleValue;
-}
+inline bool isPseudoCurrentThreadHandle(HANDLE h) { return h == kPseudoCurrentThreadHandleValue; }
 
 void tryMarkExecutable(void *mem);
 void setLastErrorFromErrno();
@@ -181,6 +177,10 @@ void setLastError(DWORD error);
 } // namespace kernel32
 
 namespace detail {
+
+template <> constexpr bool typeMatches<kernel32::FsObject>(const ObjectBase *o) noexcept {
+	return o && (o->flags & Of_FsObject);
+}
 
 template <> constexpr bool typeMatches<kernel32::FileObject>(const ObjectBase *o) noexcept {
 	return o && (o->flags & Of_File);

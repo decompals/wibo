@@ -29,9 +29,10 @@
 .endm
 
 .macro LJMP64
-    push CS_64          # 64-bit code segment (Linux)
-    push offset 1f      # 64-bit code offset
-    retf                # far jump into 64-bit code
+// Annoyingly, we can't assemble this in Intel syntax
+.att_syntax prefix
+    ljmp $CS_64, $1f
+.intel_syntax noprefix
 .code64
 1:
     endbr64

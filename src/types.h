@@ -50,11 +50,10 @@ inline GUEST_PTR toGuestPtr(const void *addr) {
 		__builtin_unreachable();
 	return static_cast<GUEST_PTR>(addr64);
 }
-inline void *fromGuestPtr(GUEST_PTR addr) { return reinterpret_cast<void *>(addr); }
 #else
 inline GUEST_PTR toGuestPtr(const void *addr) { return static_cast<GUEST_PTR>(reinterpret_cast<unsigned long>(addr)); }
-inline void *fromGuestPtr(GUEST_PTR addr) { return reinterpret_cast<void *>(addr); }
 #endif
+template <typename T = void> inline T *fromGuestPtr(GUEST_PTR addr) { return reinterpret_cast<T *>(addr); }
 
 using VOID = void;
 using HANDLE = int;
@@ -81,8 +80,8 @@ using LONG = int;
 using PLONG = LONG *;
 using ULONG = unsigned int;
 using PULONG = ULONG *;
-using LONGLONG = long long;
-using ULONGLONG = unsigned long long;
+using LONGLONG __attribute__((aligned(8))) = long long;
+using ULONGLONG __attribute__((aligned(8))) = unsigned long long;
 using LONG_PTR = int;
 using ULONG_PTR = unsigned int;
 using UINT_PTR = unsigned int;
@@ -129,6 +128,48 @@ constexpr HANDLE NO_HANDLE = 0;
 using NTSTATUS = LONG;
 using HRESULT = LONG;
 
+template <typename T = void> struct guest_ptr {
+	GUEST_PTR ptr;
+
+	explicit guest_ptr(GUEST_PTR p) : ptr(p) {}
+	explicit guest_ptr(const T *p) : ptr(toGuestPtr(p)) {}
+	guest_ptr(const guest_ptr &p) = default;
+	guest_ptr(guest_ptr &&p) : ptr(p.ptr) {}
+	guest_ptr &operator=(T *p) {
+		ptr = toGuestPtr(p);
+		return *this;
+	}
+	guest_ptr &operator=(guest_ptr p) {
+		ptr = p.ptr;
+		return *this;
+	}
+	[[nodiscard]] T *get() const { return reinterpret_cast<T *>(ptr); }
+	T &operator*() const { return *reinterpret_cast<T *>(ptr); }
+	T *operator->() const { return reinterpret_cast<T *>(ptr); }
+	operator T *() const { return reinterpret_cast<T *>(ptr); } // NOLINT(google-explicit-constructor)
+	operator bool() const { return ptr != GUEST_NULL; }			// NOLINT(google-explicit-constructor)
+	T &operator[](SIZE_T index) const { return get()[index]; }
+};
+
+template <> struct guest_ptr<void> {
+	GUEST_PTR ptr;
+
+	explicit guest_ptr(GUEST_PTR p) : ptr(p) {}
+	explicit guest_ptr(void *p) : ptr(toGuestPtr(p)) {}
+	guest_ptr(const guest_ptr &p) = default;
+	guest_ptr(guest_ptr &&p) : ptr(p.ptr) {}
+	guest_ptr &operator=(void *p) {
+		ptr = toGuestPtr(p);
+		return *this;
+	}
+	guest_ptr &operator=(guest_ptr p) {
+		ptr = p.ptr;
+		return *this;
+	}
+	[[nodiscard]] void *get() const { return reinterpret_cast<void *>(ptr); }
+	operator bool() const { return ptr != GUEST_NULL; } // NOLINT(google-explicit-constructor)
+};
+
 typedef union _LARGE_INTEGER {
 	struct {
 		DWORD LowPart;
@@ -152,6 +193,60 @@ typedef union _ULARGE_INTEGER {
 	} u;
 	ULONGLONG QuadPart;
 } ULARGE_INTEGER, *PULARGE_INTEGER;
+
+typedef struct _RTL_BITMAP {
+	ULONG SizeOfBitMap;
+	guest_ptr<ULONG> Buffer;
+} RTL_BITMAP, *PRTL_BITMAP;
+
+enum FILE_INFORMATION_CLASS {
+	FileDirectoryInformation = 1,
+	FileFullDirectoryInformation = 2,
+	FileBothDirectoryInformation = 3,
+	FileBasicInformation = 4,
+	FileStandardInformation = 5,
+	FileInternalInformation = 6,
+	FileEaInformation = 7,
+	FileAccessInformation = 8,
+	FileNameInformation = 9,
+	FileRenameInformation = 10,
+	FileLinkInformation = 11,
+	FileNamesInformation = 12,
+	FileDispositionInformation = 13,
+	FilePositionInformation = 14,
+	FileFullEaInformation = 15,
+	FileModeInformation = 16,
+	FileAlignmentInformation = 17,
+	FileAllInformation = 18,
+	FileAllocationInformation = 19,
+	FileEndOfFileInformation = 20,
+};
+
+typedef struct _FILE_BASIC_INFORMATION {
+	LARGE_INTEGER CreationTime;
+	LARGE_INTEGER LastAccessTime;
+	LARGE_INTEGER LastWriteTime;
+	LARGE_INTEGER ChangeTime;
+	ULONG FileAttributes;
+} FILE_BASIC_INFORMATION, *PFILE_BASIC_INFORMATION;
+
+typedef struct _FILE_STANDARD_INFORMATION {
+	LARGE_INTEGER AllocationSize;
+	LARGE_INTEGER EndOfFile;
+	ULONG NumberOfLinks;
+	BOOLEAN DeletePending;
+	BOOLEAN Directory;
+	USHORT Reserved;
+} FILE_STANDARD_INFORMATION, *PFILE_STANDARD_INFORMATION;
+
+typedef struct _FILE_POSITION_INFORMATION {
+	LARGE_INTEGER CurrentByteOffset;
+} FILE_POSITION_INFORMATION, *PFILE_POSITION_INFORMATION;
+
+typedef struct _FILE_NAME_INFORMATION {
+	ULONG FileNameLength;
+	WCHAR FileName[1];
+} FILE_NAME_INFORMATION, *PFILE_NAME_INFORMATION;
 
 struct GUID {
 	DWORD Data1;

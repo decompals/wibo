@@ -1,20 +1,15 @@
 #include "macros.S"
-#ifndef __APPLE__
-.section .note.GNU-stack, "", @progbits
-#endif
 .text
 
 #ifdef __APPLE__
-.zerofill RESV32,RESV32,_wibo_reserve,0x7E000000-0x1000
+.zerofill RESV32, RESV32, _wibo_reserve, 0x7E000000 - 0x1000
 .no_dead_strip _wibo_reserve
 #endif
 
-#if defined(__x86_64__) && !defined(__APPLE__)
+#if defined(__x86_64__) && defined(__linux__)
 
 # int tebThreadSetup(int entryNumber, TEB *teb)
-.globl tebThreadSetup
-.type tebThreadSetup, @function
-tebThreadSetup:
+ASM_GLOBAL(tebThreadSetup, @function)
     push rbx                             # save rbx
 	mov r8, rsp                          # save host stack
 	rdfsbase r9                          # read host FS base
@@ -51,33 +46,23 @@ tebThreadSetup:
 	wrfsbase r9                          # restore host FS base
 	pop rbx                              # restore rbx
 	ret
-.size tebThreadSetup, .-tebThreadSetup
+ASM_END(tebThreadSetup)
 
 #endif // __x86_64__
 
 .code32
 
 .macro stubThunkX number
-#if defined(__APPLE__)
-.globl __Z9stubThunkILm\()\number\()EEvv
-__Z9stubThunkILm\()\number\()EEvv:
-#elif defined(__x86_64__)
-.globl _Z9stubThunkILm\()\number\()EEvv
-.type  _Z9stubThunkILm\()\number\()EEvv, @function
-_Z9stubThunkILm\()\number\()EEvv:
+#if defined(__x86_64__)
+ASM_GLOBAL(_Z9stubThunkILm\()\number\()EEvv, @function)
 #else
-.globl _Z9stubThunkILj\()\number\()EEvv
-.type  _Z9stubThunkILj\()\number\()EEvv, @function
-_Z9stubThunkILj\()\number\()EEvv:
+ASM_GLOBAL(_Z9stubThunkILj\()\number\()EEvv, @function)
 #endif
     pop eax
     push \number
     push eax
-#ifdef __APPLE__
-    jmp _thunk_entry_stubBase
-#else
-    jmp thunk_entry_stubBase
-#endif
+    jmp SYMBOL_NAME(thunk_entry_stubBase)
+ASM_END(STUB_THUNK_SYMBOL)
 .endm
 
 stubThunkX 0

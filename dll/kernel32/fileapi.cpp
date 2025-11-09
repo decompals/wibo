@@ -1736,19 +1736,23 @@ DWORD WINAPI GetTempPathA(DWORD nBufferLength, LPSTR lpBuffer) {
 		return 0;
 	}
 
-	const char *path = getenv("WIBO_TMP_DIR");
-	if (!path) {
-		path = "Z:\\tmp\\";
+	const char *tmpDirEnv = getenv("TMPDIR");
+	std::string pathStr;
+	if (tmpDirEnv) {
+		auto path = std::filesystem::canonical(tmpDirEnv);
+		pathStr = files::pathToWindows(path);
+	} else {
+		pathStr = "Z:\\tmp\\";
 	}
-	size_t len = strlen(path);
+	size_t len = pathStr.length();
 	if (len + 1 > nBufferLength) {
 		setLastError(ERROR_INSUFFICIENT_BUFFER);
 		DEBUG_LOG(" -> ERROR_INSUFFICIENT_BUFFER\n");
 		return static_cast<DWORD>(len + 1);
 	}
 
-	DEBUG_LOG(" -> %s\n", path);
-	strncpy(lpBuffer, path, nBufferLength);
+	DEBUG_LOG(" -> %s\n", pathStr.c_str());
+	strncpy(lpBuffer, pathStr.c_str(), nBufferLength);
 	lpBuffer[nBufferLength - 1] = '\0';
 	return static_cast<DWORD>(len);
 }

@@ -1,30 +1,37 @@
-.intel_syntax noprefix
+#include "macros.h"
 
-.equ TEB_SELF, 0x18     # Self
-.equ TEB_FS_SEL, 0xf98  # CurrentFsSelector
-.equ TEB_GS_SEL, 0xf9a  # CurrentGsSelector
+#ifdef __clang__
+#define ASM_TYPE(NAME, TYPE)
+#define ASM_END(NAME)
+#else
+#define ASM_TYPE(NAME, TYPE) .type NAME, TYPE
+#define ASM_END(NAME) .size NAME, .- NAME
+#endif
 
-#ifdef __i386__
-
-.equ TEB_SP, 0xf9c      # CurrentStackPointer
-
-#endif // __i386__
-
-#ifdef __x86_64__
-
-.equ TEB_SP, 0xfa0      # CurrentStackPointer
-.equ TEB_FSBASE, 0xfa8  # HostFsBase
-.equ TEB_GSBASE, 0xfb0  # HostGsBase
+#define ASM_GLOBAL(NAME, TYPE)                                                                                         \
+	.globl SYMBOL_NAME(NAME);                                                                                          \
+	ASM_TYPE(SYMBOL_NAME(NAME), TYPE);                                                                                 \
+	SYMBOL_NAME(NAME) :
+#ifdef __clang__
+#define ASM_WEAK(NAME, TYPE)                                                                                           \
+	.globl SYMBOL_NAME(NAME);                                                                                          \
+	.weak_definition SYMBOL_NAME(NAME);                                                                                \
+	ASM_TYPE(SYMBOL_NAME(NAME), TYPE)                                                                                  \
+	SYMBOL_NAME(NAME) :
+#else
+#define ASM_WEAK(NAME, TYPE)                                                                                           \
+	.weak SYMBOL_NAME(NAME);                                                                                           \
+	ASM_TYPE(SYMBOL_NAME(NAME), TYPE)                                                                                  \
+	SYMBOL_NAME(NAME) :
+#endif
 
 #ifdef __linux__
-.equ CS_32, 0x23        # 32-bit code segment (Linux)
-.equ CS_64, 0x33        # 64-bit code segment (Linux)
-.equ DS_32, 0x2b        # 32-bit data segment (Linux)
-#elif defined(__APPLE__)
-.equ CS_64, 0x2b        # 64-bit code segment (macOS)
-#else
-#error "Unsupported platform"
+.section .note.GNU-stack, "", @progbits
 #endif
+
+.intel_syntax noprefix
+
+#ifdef __x86_64__
 
 .macro LJMP32 teb_reg
 #ifdef __APPLE__

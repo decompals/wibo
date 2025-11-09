@@ -28,11 +28,12 @@
 
 extern const wibo::ModuleStub lib_advapi32;
 extern const wibo::ModuleStub lib_bcrypt;
-extern const wibo::ModuleStub lib_crt;
 extern const wibo::ModuleStub lib_kernel32;
 extern const wibo::ModuleStub lib_lmgr;
 extern const wibo::ModuleStub lib_mscoree;
+#if WIBO_HAS_MSVCRT
 extern const wibo::ModuleStub lib_msvcrt;
+#endif
 extern const wibo::ModuleStub lib_ntdll;
 extern const wibo::ModuleStub lib_rpcrt4;
 extern const wibo::ModuleStub lib_ole32;
@@ -42,26 +43,6 @@ extern const wibo::ModuleStub lib_version;
 
 // setup.S
 template <size_t Index> void stubThunk();
-
-/*
- apiset api-ms-win-core-crt-l1-1-0 = msvcrt.dll
- apiset api-ms-win-core-crt-l2-1-0 = msvcrt.dll
- apiset api-ms-win-crt-conio-l1-1-0 = msvcrt.dll
- apiset api-ms-win-crt-convert-l1-1-0 = msvcrt.dll
- apiset api-ms-win-crt-environment-l1-1-0 = ucrtbase.dll
- apiset api-ms-win-crt-filesystem-l1-1-0 = ucrtbase.dll
- apiset api-ms-win-crt-heap-l1-1-0 = ucrtbase.dll
- apiset api-ms-win-crt-locale-l1-1-0 = ucrtbase.dll
- apiset api-ms-win-crt-math-l1-1-0 = ucrtbase.dll
- apiset api-ms-win-crt-multibyte-l1-1-0 = ucrtbase.dll
- apiset api-ms-win-crt-private-l1-1-0 = ucrtbase.dll
- apiset api-ms-win-crt-process-l1-1-0 = ucrtbase.dll
- apiset api-ms-win-crt-runtime-l1-1-0 = ucrtbase.dll
- apiset api-ms-win-crt-stdio-l1-1-0 = ucrtbase.dll
- apiset api-ms-win-crt-string-l1-1-0 = ucrtbase.dll
- apiset api-ms-win-crt-time-l1-1-0 = ucrtbase.dll
- apiset api-ms-win-crt-utility-l1-1-0 = ucrtbase.dll
-*/
 
 namespace {
 
@@ -83,20 +64,6 @@ const std::array<std::pair<std::string_view, std::string_view>, 17> kApiSet = {
 	std::pair{"api-ms-win-crt-string-l1-1-0.dll", "ucrtbase.dll"},
 	std::pair{"api-ms-win-crt-time-l1-1-0.dll", "ucrtbase.dll"},
 	std::pair{"api-ms-win-crt-utility-l1-1-0.dll", "ucrtbase.dll"},
-};
-
-const std::array<std::pair<std::string_view, std::string_view>, 11> kFallbacks = {
-	std::pair{"ucrtbase.dll", "msvcrt.dll"},
-	std::pair{"msvcrt40.dll", "msvcrt.dll"},
-	std::pair{"msvcr70.dll", "msvcrt.dll"},
-	std::pair{"msvcr71.dll", "msvcrt.dll"},
-	std::pair{"msvcr80.dll", "msvcrt.dll"},
-	std::pair{"msvcr90.dll", "msvcrt.dll"},
-	std::pair{"msvcr100.dll", "msvcrt.dll"},
-	std::pair{"msvcr110.dll", "msvcrt.dll"},
-	std::pair{"msvcr120.dll", "msvcrt.dll"},
-	std::pair{"msvcr130.dll", "msvcrt.dll"},
-	std::pair{"msvcr140.dll", "msvcrt.dll"},
 };
 
 constexpr DWORD DLL_PROCESS_DETACH = 0;
@@ -217,10 +184,20 @@ LockedRegistry registry() {
 	if (!reg.initialized) {
 		reg.initialized = true;
 		const wibo::ModuleStub *builtins[] = {
-			&lib_advapi32, &lib_bcrypt,	   /*&lib_crt,*/ &lib_kernel32,
-			&lib_lmgr,	   &lib_mscoree, /*&lib_msvcrt,*/
-			&lib_ntdll,	   &lib_ole32,	   &lib_rpcrt4,
-			&lib_user32,   &lib_vcruntime, &lib_version,
+			&lib_advapi32,
+			&lib_bcrypt,
+			&lib_kernel32,
+			&lib_lmgr,
+			&lib_mscoree,
+#if WIBO_HAS_MSVCRT
+			&lib_msvcrt,
+#endif
+			&lib_ntdll,
+			&lib_ole32,
+			&lib_rpcrt4,
+			&lib_user32,
+			&lib_vcruntime,
+			&lib_version,
 			nullptr,
 		};
 		for (const wibo::ModuleStub **module = builtins; *module; ++module) {
@@ -560,15 +537,26 @@ void registerBuiltinModule(ModuleRegistry &reg, const wibo::ModuleStub *module) 
 	if (!module) {
 		return;
 	}
+
+	std::unique_ptr<wibo::Executable> executable;
+	if (!module->dllData.empty()) {
+		executable = std::make_unique<wibo::Executable>();
+		if (!executable->loadPE(module->dllData, true)) {
+			DEBUG_LOG("  loadPE failed for %s\n", module->names[0] ? module->names[0] : "<unnamed builtin>");
+			return;
+		}
+	}
+
 	wibo::ModulePtr entry = std::make_shared<wibo::ModuleInfo>();
 	HANDLE handle = g_nextStubHandle++;
 	g_modules[handle] = entry;
 	entry->handle = handle;
 	entry->moduleStub = module;
+	entry->executable = std::move(executable);
 	entry->refCount = UINT_MAX;
 	entry->originalName = module->names[0] ? module->names[0] : "";
 	entry->normalizedName = normalizedBaseKey(parseModuleName(entry->originalName));
-	entry->exportsInitialized = true;
+	entry->exportsInitialized = (entry->executable == nullptr);
 	auto storageKey = storageKeyForBuiltin(entry->normalizedName);
 	auto raw = entry.get();
 	reg.modulesByKey[storageKey] = std::move(entry);
@@ -702,9 +690,6 @@ bool shouldDeliverThreadNotifications(const wibo::ModuleInfo &info) {
 	if (&info == wibo::mainModule) {
 		return false;
 	}
-	if (info.moduleStub != nullptr) {
-		return false;
-	}
 	if (!info.executable) {
 		return false;
 	}
@@ -718,10 +703,9 @@ bool shouldDeliverThreadNotifications(const wibo::ModuleInfo &info) {
 }
 
 void ensureExportsInitialized(wibo::ModuleInfo &info) {
-	if (info.moduleStub || info.exportsInitialized)
+	if (info.exportsInitialized || !info.executable) {
 		return;
-	if (!info.executable)
-		return;
+	}
 	auto *exe = info.executable.get();
 	if (!exe->exportDirectoryRVA || !exe->exportDirectorySize) {
 		info.exportsInitialized = true;
@@ -763,6 +747,24 @@ void ensureExportsInitialized(wibo::ModuleInfo &info) {
 		}
 	}
 	info.exportsInitialized = true;
+}
+
+bool ensureModuleReady(wibo::ModuleInfo &info) {
+	ensureExportsInitialized(info);
+	if (!info.executable) {
+		return true;
+	}
+	if (!info.executable->resolveImports()) {
+		return false;
+	}
+	if (!wibo::initializeModuleTls(info)) {
+		return false;
+	}
+	if (!callDllMain(info, DLL_PROCESS_ATTACH, nullptr)) {
+		kernel32::setLastError(ERROR_DLL_INIT_FAILED);
+		return false;
+	}
+	return true;
 }
 
 } // namespace
@@ -1251,7 +1253,12 @@ static ModuleInfo *loadModuleInternal(const std::string &dllName) {
 			}
 		}
 		DEBUG_LOG("  returning builtin module %s\n", existing->originalName.c_str());
-		return existing;
+		ModuleInfo *builtin = existing;
+		reg.lock.unlock();
+		if (!ensureModuleReady(*builtin)) {
+			return nullptr;
+		}
+		return builtin;
 	}
 
 	if (ModuleInfo *external = resolveAndLoadExternal()) {
@@ -1276,6 +1283,10 @@ static ModuleInfo *loadModuleInternal(const std::string &dllName) {
 	}
 	if (builtin && builtin->moduleStub != nullptr) {
 		DEBUG_LOG("  falling back to builtin module %s\n", builtin->originalName.c_str());
+		reg.lock.unlock();
+		if (!ensureModuleReady(*builtin)) {
+			return nullptr;
+		}
 		return builtin;
 	}
 
@@ -1283,7 +1294,7 @@ static ModuleInfo *loadModuleInternal(const std::string &dllName) {
 	return nullptr;
 }
 
-ModuleInfo *loadModule(const char* dllName) {
+ModuleInfo *loadModule(const char *dllName) {
 	if (!dllName || *dllName == '\0') {
 		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return nullptr;
@@ -1294,7 +1305,7 @@ ModuleInfo *loadModule(const char* dllName) {
 	const auto parsed = parseModuleName(requested);
 	std::string normalized = normalizedBaseKey(parsed);
 
-	for (auto& [alias, module] : kApiSet) {
+	for (auto &[alias, module] : kApiSet) {
 		if (alias == normalized) {
 			DEBUG_LOG("  resolved api set %s -> %s\n", alias.data(), module.data());
 			requested = module;
@@ -1303,23 +1314,23 @@ ModuleInfo *loadModule(const char* dllName) {
 		}
 	}
 
-	DWORD lastError = kernel32::getLastError();
-	if (auto* info = loadModuleInternal(std::string{requested})) {
+	// DWORD lastError = kernel32::getLastError();
+	if (auto *info = loadModuleInternal(std::string{requested})) {
 		return info;
 	}
 	if (kernel32::getLastError() != ERROR_MOD_NOT_FOUND) {
 		return nullptr;
 	}
 
-	kernel32::setLastError(lastError);
-	for (auto& [module, fallback] : kFallbacks) {
-		if (module == normalized) {
-			DEBUG_LOG("  trying fallback %s -> %s\n", module.data(), fallback.data());
-			return loadModuleInternal(std::string{fallback});
-		}
-	}
+	// kernel32::setLastError(lastError);
+	// for (auto &[module, fallback] : kFallbacks) {
+	// 	if (module == normalized) {
+	// 		DEBUG_LOG("  trying fallback %s -> %s\n", module.data(), fallback.data());
+	// 		return loadModuleInternal(std::string{fallback});
+	// 	}
+	// }
 
-	kernel32::setLastError(ERROR_MOD_NOT_FOUND);
+	// kernel32::setLastError(ERROR_MOD_NOT_FOUND);
 	return nullptr;
 }
 
@@ -1363,14 +1374,14 @@ void *resolveFuncByName(ModuleInfo *info, const char *funcName) {
 		}
 	}
 	ensureExportsInitialized(*info);
-	if (!info->moduleStub) {
-		auto it = info->exportNameToOrdinal.find(funcName);
-		if (it != info->exportNameToOrdinal.end()) {
-			return resolveFuncByOrdinal(info, it->second);
-		}
-		return nullptr;
+	auto it = info->exportNameToOrdinal.find(funcName);
+	if (it != info->exportNameToOrdinal.end()) {
+		return resolveFuncByOrdinal(info, it->second);
 	}
-	return reinterpret_cast<void *>(resolveMissingFuncName(info->originalName.c_str(), funcName));
+	if (info->moduleStub) {
+		return reinterpret_cast<void *>(resolveMissingFuncName(info->originalName.c_str(), funcName));
+	}
+	return nullptr;
 }
 
 void *resolveFuncByOrdinal(ModuleInfo *info, uint16_t ordinal) {
@@ -1383,20 +1394,20 @@ void *resolveFuncByOrdinal(ModuleInfo *info, uint16_t ordinal) {
 			return func;
 		}
 	}
-	if (!info->moduleStub) {
-		ensureExportsInitialized(*info);
-		if (!info->exportsByOrdinal.empty() && ordinal >= info->exportOrdinalBase) {
-			auto index = static_cast<size_t>(ordinal - info->exportOrdinalBase);
-			if (index < info->exportsByOrdinal.size()) {
-				void *addr = info->exportsByOrdinal[index];
-				if (addr) {
-					return addr;
-				}
+	ensureExportsInitialized(*info);
+	if (!info->exportsByOrdinal.empty() && ordinal >= info->exportOrdinalBase) {
+		auto index = static_cast<size_t>(ordinal - info->exportOrdinalBase);
+		if (index < info->exportsByOrdinal.size()) {
+			void *addr = info->exportsByOrdinal[index];
+			if (addr) {
+				return addr;
 			}
 		}
-		return nullptr;
 	}
-	return reinterpret_cast<void *>(resolveMissingFuncOrdinal(info->originalName.c_str(), ordinal));
+	if (info->moduleStub) {
+		return reinterpret_cast<void *>(resolveMissingFuncOrdinal(info->originalName.c_str(), ordinal));
+	}
+	return nullptr;
 }
 
 void *resolveMissingImportByName(const char *dllName, const char *funcName) {

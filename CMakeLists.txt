@@ -142,6 +142,22 @@ if (WIBO_ENABLE_LIBURING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_include_directories(liburing PRIVATE ${liburing_SOURCE_DIR})
 endif()
 
+if (NOT DEFINED MSVCRT_DLL)
+    set(MSVCRT_DLL ${CMAKE_CURRENT_BINARY_DIR}/vendor/msvcrt.dll)
+    file(DOWNLOAD
+        https://github.com/encounter/winedll/releases/download/2025-11-08/msvcrt.dll
+        ${MSVCRT_DLL}
+        EXPECTED_HASH SHA256=4a29890d7ee8722415b7b185321476db2cd20dbe964124189b85893f0d301e29
+    )
+endif()
+
+function(embed_binary SRC FILE)
+    set_source_files_properties(${SRC} PROPERTIES
+        OBJECT_DEPENDS "${FILE}"
+        COMPILE_DEFINITIONS "EMBED_PATH=\"${FILE}\""
+    )
+endfunction()
+
 add_executable(wibo
     dll/advapi32.cpp
     dll/advapi32/md5.c
@@ -198,6 +214,13 @@ add_executable(wibo
     src/strutil.cpp
     src/tls.cpp
 )
+if ("${MSVCRT_DLL}" STREQUAL "")
+    target_compile_definitions(wibo PRIVATE WIBO_HAS_MSVCRT=0)
+else()
+    target_compile_definitions(wibo PRIVATE WIBO_HAS_MSVCRT=1)
+    target_sources(wibo PRIVATE dll/msvcrt.cpp)
+    embed_binary(dll/msvcrt.cpp "${MSVCRT_DLL}")
+endif()
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_sources(wibo PRIVATE

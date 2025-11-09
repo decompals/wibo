@@ -1,5 +1,10 @@
 #pragma once
 
+#include "macros.h"
+
+#ifndef offsetof
+#define offsetof(type, member) __builtin_offsetof(type, member)
+#endif
 #ifndef va_list
 #define va_list __builtin_va_list
 #endif
@@ -543,17 +548,23 @@ typedef struct _TEB {
 #endif
 } TEB;
 typedef GUEST_PTR PTEB;
-#ifndef offsetof
-#define offsetof(type, member) __builtin_offsetof(type, member)
-#endif
 
-static_assert(offsetof(NT_TIB, Self) == 0x18, "Self pointer offset mismatch");
+static_assert(offsetof(NT_TIB, Self) == TEB_SELF, "Self pointer offset mismatch");
 static_assert(offsetof(TEB, ThreadLocalStoragePointer) == 0x2C, "TLS pointer offset mismatch");
 static_assert(offsetof(TEB, Peb) == 0x30, "PEB pointer offset mismatch");
 static_assert(offsetof(TEB, LastErrorValue) == 0x34, "LastErrorValue offset mismatch");
 static_assert(offsetof(TEB, GdiTebBatch) == 0x1FC, "GdiTebBatch offset mismatch");
 static_assert(offsetof(TEB, DeallocationStack) == 0xE0C, "DeallocationStack offset mismatch");
 static_assert(offsetof(TEB, TlsSlots) == 0xE10, "TLS slots offset mismatch");
+static_assert(offsetof(TEB, CurrentFsSelector) == TEB_FS_SEL);
+static_assert(offsetof(TEB, CurrentGsSelector) == TEB_GS_SEL);
+static_assert(offsetof(TEB, CurrentStackPointer) == TEB_SP);
+#ifdef TEB_FSBASE
+static_assert(offsetof(TEB, HostFsBase) == TEB_FSBASE);
+#endif
+#ifdef TEB_GSBASE
+static_assert(offsetof(TEB, HostGsBase) == TEB_GSBASE);
+#endif
 
 typedef struct _MEMORY_BASIC_INFORMATION {
 	GUEST_PTR BaseAddress;

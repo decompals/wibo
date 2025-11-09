@@ -6,10 +6,18 @@
 #include "types.h"
 
 #include <algorithm>
+#include <array>
+#include <cstdio>
 #include <cstring>
+#include <limits>
+#include <memory>
+#include <optional>
+#include <span>
 #include <strings.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+#include <variant>
 
 struct PEHeader {
 	uint8_t magic[4]; // "PE\0\0"
@@ -171,17 +179,6 @@ static DWORD sectionProtectFromCharacteristics(uint32_t characteristics) {
 	return protect;
 }
 
-uint16_t read16(FILE *file) {
-	uint16_t v = 0;
-	fread(&v, 2, 1, file);
-	return v;
-}
-uint32_t read32(FILE *file) {
-	uint32_t v = 0;
-	fread(&v, 4, 1, file);
-	return v;
-}
-
 wibo::Executable::~Executable() {
 	if (imageBase) {
 		wibo::heap::virtualFree(imageBase, 0, MEM_RELEASE);
@@ -189,118 +186,323 @@ wibo::Executable::~Executable() {
 	}
 }
 
-/**
- * Load a PE file into memory.
- *
- * @param file The file to load.
- * @param exec Whether to make the loaded image executable.
- */
-bool wibo::Executable::loadPE(FILE *file, bool exec) {
-	// Skip to PE header
-	fseek(file, 0x3C, SEEK_SET);
-	uint32_t offsetToPE = read32(file);
-	fseek(file, offsetToPE, SEEK_SET);
+namespace {
 
-	// Read headers
-	PEHeader header;
-	fread(&header, sizeof header, 1, file);
-	if (memcmp(header.magic, "PE\0\0", 4) != 0)
+struct ImageMemoryDeleter {
+	void operator()(void *ptr) const {
+		if (ptr) {
+			wibo::heap::virtualFree(ptr, 0, MEM_RELEASE);
+		}
+	}
+};
+
+class PeInputView {
+  public:
+	explicit PeInputView(FILE *file) : source_(FileSource{file, computeFileSize(file)}) {}
+	explicit PeInputView(std::span<const uint8_t> bytes) : source_(SpanSource{bytes}) {}
+
+	bool read(uint64_t offset, void *dest, size_t size) const {
+		if (size == 0) {
+			return true;
+		}
+		return std::visit([&](const auto &source) { return readImpl(source, offset, dest, size); }, source_);
+	}
+
+	template <typename T> std::optional<T> readObject(uint64_t offset) const {
+		T value{};
+		if (!read(offset, &value, sizeof(T))) {
+			return std::nullopt;
+		}
+		return value;
+	}
+
+	std::optional<uint64_t> size() const {
+		return std::visit([](const auto &source) -> std::optional<uint64_t> { return sizeImpl(source); }, source_);
+	}
+
+  private:
+	struct FileSource {
+		FILE *file;
+		std::optional<uint64_t> fileSize;
+	};
+	struct SpanSource {
+		std::span<const uint8_t> bytes;
+	};
+
+	static std::optional<uint64_t> computeFileSize(FILE *file) {
+		if (!file) {
+			return std::nullopt;
+		}
+		int fd = fileno(file);
+		if (fd < 0) {
+			return std::nullopt;
+		}
+		struct stat st {};
+		if (fstat(fd, &st) != 0) {
+			return std::nullopt;
+		}
+		if (st.st_size < 0) {
+			return std::nullopt;
+		}
+		return static_cast<uint64_t>(st.st_size);
+	}
+
+	static bool readImpl(const FileSource &source, uint64_t offset, void *dest, size_t size) {
+		if (!source.file) {
+			return false;
+		}
+		if (offset > static_cast<uint64_t>(std::numeric_limits<off_t>::max())) {
+			return false;
+		}
+		if (source.fileSize) {
+			if (offset > *source.fileSize) {
+				return false;
+			}
+			uint64_t remaining = *source.fileSize - offset;
+			if (remaining < size) {
+				return false;
+			}
+		}
+		if (fseeko(source.file, static_cast<off_t>(offset), SEEK_SET) != 0) {
+			return false;
+		}
+		size_t readCount = fread(dest, 1, size, source.file);
+		return readCount == size;
+	}
+
+	static bool readImpl(const SpanSource &source, uint64_t offset, void *dest, size_t size) {
+		if (offset > source.bytes.size()) {
+			return false;
+		}
+		size_t start = static_cast<size_t>(offset);
+		if (source.bytes.size() - start < size) {
+			return false;
+		}
+		auto slice = source.bytes.subspan(start, size);
+		std::memcpy(dest, slice.data(), size);
+		return true;
+	}
+
+	static std::optional<uint64_t> sizeImpl(const FileSource &source) { return source.fileSize; }
+	static std::optional<uint64_t> sizeImpl(const SpanSource &source) {
+		return static_cast<uint64_t>(source.bytes.size());
+	}
+
+	std::variant<FileSource, SpanSource> source_;
+};
+
+void resetExecutableState(wibo::Executable &executable) {
+	if (executable.imageBase) {
+		wibo::heap::virtualFree(executable.imageBase, 0, MEM_RELEASE);
+	}
+	executable.imageBase = nullptr;
+	executable.imageSize = 0;
+	executable.entryPoint = nullptr;
+	executable.rsrcBase = nullptr;
+	executable.rsrcSize = 0;
+	executable.preferredImageBase = 0;
+	executable.relocationDelta = 0;
+	executable.exportDirectoryRVA = 0;
+	executable.exportDirectorySize = 0;
+	executable.relocationDirectoryRVA = 0;
+	executable.relocationDirectorySize = 0;
+	executable.importDirectoryRVA = 0;
+	executable.importDirectorySize = 0;
+	executable.delayImportDirectoryRVA = 0;
+	executable.delayImportDirectorySize = 0;
+	executable.tlsDirectoryRVA = 0;
+	executable.tlsDirectorySize = 0;
+	executable.execMapped = false;
+	executable.importsResolved = false;
+	executable.importsResolving = false;
+	executable.sectionsProtected = false;
+	executable.sections.clear();
+}
+
+bool loadPEFromSource(wibo::Executable &executable, const PeInputView &source, bool exec) {
+	resetExecutableState(executable);
+	kernel32::setLastError(ERROR_BAD_EXE_FORMAT);
+
+	auto dosSignature = source.readObject<uint16_t>(0);
+	if (!dosSignature || *dosSignature != 0x5A4D) {
+		DEBUG_LOG("loadPE: missing MZ header signature\n");
 		return false;
-	if (header.machine != 0x14C) // i386
+	}
+
+	auto offsetToPeOpt = source.readObject<uint32_t>(0x3C);
+	if (!offsetToPeOpt) {
+		DEBUG_LOG("loadPE: failed to read e_lfanew\n");
 		return false;
+	}
+	uint32_t offsetToPE = *offsetToPeOpt;
 
-	DEBUG_LOG("Sections: %d / Size of optional header: %x\n", header.numberOfSections, header.sizeOfOptionalHeader);
+	if (auto totalSize = source.size()) {
+		if (offsetToPE > *totalSize || (*totalSize - offsetToPE) < sizeof(PEHeader)) {
+			DEBUG_LOG("loadPE: PE header offset outside data (offset=%u size=%llu)\n", offsetToPE,
+					  static_cast<unsigned long long>(*totalSize));
+			return false;
+		}
+	}
 
-	PE32Header header32;
-	memset(&header32, 0, sizeof header32);
-	fread(&header32, std::min(sizeof(header32), (size_t)header.sizeOfOptionalHeader), 1, file);
-	if (header32.magic != 0x10B)
+	PEHeader header{};
+	if (!source.read(offsetToPE, &header, sizeof(header))) {
+		DEBUG_LOG("loadPE: unable to read PE header\n");
 		return false;
+	}
+	if (std::memcmp(header.magic, "PE\0\0", 4) != 0) {
+		DEBUG_LOG("loadPE: invalid PE signature\n");
+		return false;
+	}
+	if (header.machine != 0x14C) {
+		DEBUG_LOG("loadPE: unsupported machine 0x%x\n", header.machine);
+		return false;
+	}
+	if (header.numberOfSections == 0 || header.numberOfSections > 1024) {
+		DEBUG_LOG("loadPE: unreasonable section count %u\n", header.numberOfSections);
+		return false;
+	}
 
+	constexpr size_t kOptionalHeaderMinimumSize = offsetof(PE32Header, reserved) + sizeof(PEImageDataDirectory);
+	if (header.sizeOfOptionalHeader < kOptionalHeaderMinimumSize) {
+		DEBUG_LOG("loadPE: optional header too small (%u bytes)\n", header.sizeOfOptionalHeader);
+		return false;
+	}
+
+	// IMAGE_OPTIONAL_HEADER32 layout: https://learn.microsoft.com/windows/win32/debug/pe-format
+	PE32Header header32{};
+	size_t optionalBytes = std::min<std::size_t>(sizeof(header32), header.sizeOfOptionalHeader);
+	if (!source.read(offsetToPE + sizeof(header), &header32, optionalBytes)) {
+		DEBUG_LOG("loadPE: failed to read optional header\n");
+		return false;
+	}
+	if (header32.magic != 0x10B) {
+		DEBUG_LOG("loadPE: unsupported optional header magic 0x%x\n", header32.magic);
+		return false;
+	}
+	if (header32.sizeOfImage == 0 || header32.sizeOfHeaders == 0 || header32.sizeOfHeaders > header32.sizeOfImage) {
+		DEBUG_LOG("loadPE: invalid image/header sizes (image=%u headers=%u)\n", header32.sizeOfImage,
+				  header32.sizeOfHeaders);
+		return false;
+	}
+	if (header32.fileAlignment == 0 || header32.sectionAlignment == 0) {
+		DEBUG_LOG("loadPE: invalid alignment (file=%u section=%u)\n", header32.fileAlignment,
+				  header32.sectionAlignment);
+		return false;
+	}
+
+	DEBUG_LOG("Sections: %u / Size of optional header: %x\n", header.numberOfSections, header.sizeOfOptionalHeader);
 	DEBUG_LOG("Image Base: %x / Size: %x\n", header32.imageBase, header32.sizeOfImage);
 
 	long pageSize = sysconf(_SC_PAGE_SIZE);
-	DEBUG_LOG("Page size: %x\n", (unsigned int)pageSize);
 	const size_t pageSizeValue = pageSize > 0 ? static_cast<size_t>(pageSize) : static_cast<size_t>(4096);
+	DEBUG_LOG("Page size: %x\n", static_cast<unsigned int>(pageSizeValue));
 
-	preferredImageBase = header32.imageBase;
-	exportDirectoryRVA = header32.exportTable.virtualAddress;
-	exportDirectorySize = header32.exportTable.size;
-	relocationDirectoryRVA = header32.baseRelocationTable.virtualAddress;
-	relocationDirectorySize = header32.baseRelocationTable.size;
-	importDirectoryRVA = header32.importTable.virtualAddress;
-	importDirectorySize = header32.importTable.size;
-	delayImportDirectoryRVA = header32.delayImportDescriptor.virtualAddress;
-	delayImportDirectorySize = header32.delayImportDescriptor.size;
-	tlsDirectoryRVA = header32.tlsTable.virtualAddress;
-	tlsDirectorySize = header32.tlsTable.size;
-	execMapped = exec;
-	importsResolved = false;
-	importsResolving = false;
+	executable.preferredImageBase = header32.imageBase;
+	executable.exportDirectoryRVA = header32.exportTable.virtualAddress;
+	executable.exportDirectorySize = header32.exportTable.size;
+	executable.relocationDirectoryRVA = header32.baseRelocationTable.virtualAddress;
+	executable.relocationDirectorySize = header32.baseRelocationTable.size;
+	executable.importDirectoryRVA = header32.importTable.virtualAddress;
+	executable.importDirectorySize = header32.importTable.size;
+	executable.delayImportDirectoryRVA = header32.delayImportDescriptor.virtualAddress;
+	executable.delayImportDirectorySize = header32.delayImportDescriptor.size;
+	executable.tlsDirectoryRVA = header32.tlsTable.virtualAddress;
+	executable.tlsDirectorySize = header32.tlsTable.size;
+	executable.execMapped = exec;
+	executable.importsResolved = false;
+	executable.importsResolving = false;
+	executable.sectionsProtected = false;
 
-	// Build buffer
-	imageSize = header32.sizeOfImage;
+	executable.imageSize = header32.sizeOfImage;
 	DWORD initialProtect = exec ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE;
 	void *preferredBase = reinterpret_cast<void *>(static_cast<uintptr_t>(header32.imageBase));
 	void *allocatedBase = preferredBase;
 	std::size_t allocationSize = static_cast<std::size_t>(header32.sizeOfImage);
-	wibo::heap::VmStatus allocStatus = wibo::heap::virtualAlloc(
-		&allocatedBase, &allocationSize, MEM_RESERVE | MEM_COMMIT, initialProtect, MEM_IMAGE);
+	wibo::heap::VmStatus allocStatus =
+		wibo::heap::virtualAlloc(&allocatedBase, &allocationSize, MEM_RESERVE | MEM_COMMIT, initialProtect, MEM_IMAGE);
 	if (allocStatus != wibo::heap::VmStatus::Success) {
 		DEBUG_LOG("loadPE: preferred base allocation failed (status=%u), retrying anywhere\n",
-			  static_cast<unsigned>(allocStatus));
+				  static_cast<unsigned>(allocStatus));
 		allocatedBase = nullptr;
 		allocationSize = static_cast<std::size_t>(header32.sizeOfImage);
-		allocStatus = wibo::heap::virtualAlloc(
-			&allocatedBase, &allocationSize, MEM_RESERVE | MEM_COMMIT, initialProtect, MEM_IMAGE);
+		allocStatus = wibo::heap::virtualAlloc(&allocatedBase, &allocationSize, MEM_RESERVE | MEM_COMMIT,
+											   initialProtect, MEM_IMAGE);
 	}
-	if (allocStatus == wibo::heap::VmStatus::Success) {
-		DEBUG_LOG("loadPE: mapped image at %p\n", allocatedBase);
-	} else {
+	if (allocStatus != wibo::heap::VmStatus::Success) {
 		DEBUG_LOG("Image mapping failed (status=%u)\n", static_cast<unsigned>(allocStatus));
-		imageBase = nullptr;
 		return false;
 	}
-	imageBase = allocatedBase;
-	relocationDelta =
-		static_cast<intptr_t>(reinterpret_cast<uintptr_t>(imageBase) - static_cast<uintptr_t>(header32.imageBase));
-	memset(imageBase, 0, header32.sizeOfImage);
-	sections.clear();
-	uintptr_t imageBaseAddr = reinterpret_cast<uintptr_t>(imageBase);
+
+	std::unique_ptr<void, ImageMemoryDeleter> imageGuard(allocatedBase);
+	executable.imageBase = allocatedBase;
+	executable.relocationDelta = static_cast<intptr_t>(reinterpret_cast<uintptr_t>(executable.imageBase) -
+													   static_cast<uintptr_t>(header32.imageBase));
+	std::memset(executable.imageBase, 0, header32.sizeOfImage);
+	executable.sections.clear();
+
+	uintptr_t imageBaseAddr = reinterpret_cast<uintptr_t>(executable.imageBase);
 	uintptr_t headerSpan = alignUp(static_cast<uintptr_t>(header32.sizeOfHeaders), pageSizeValue);
 	if (headerSpan != 0) {
-		Executable::SectionInfo headerInfo{};
+		wibo::Executable::SectionInfo headerInfo{};
 		headerInfo.base = imageBaseAddr;
 		headerInfo.size = static_cast<size_t>(headerSpan);
 		headerInfo.protect = PAGE_READONLY;
-		sections.push_back(headerInfo);
+		executable.sections.push_back(headerInfo);
 	}
 
-	// Read the sections
-	fseek(file, offsetToPE + sizeof header + header.sizeOfOptionalHeader, SEEK_SET);
-
-	for (int i = 0; i < header.numberOfSections; i++) {
-		PESectionHeader section;
-		fread(&section, sizeof section, 1, file);
-
-		char name[9];
-		memcpy(name, section.name, 8);
-		name[8] = 0;
-		DEBUG_LOG("Section %d: name=%s addr=%x size=%x (raw=%x) ptr=%x\n", i, name, section.virtualAddress,
-				  section.virtualSize, section.sizeOfRawData, section.pointerToRawData);
-
-		void *sectionBase = (void *)((uintptr_t)imageBase + section.virtualAddress);
-		if (section.pointerToRawData > 0 && section.sizeOfRawData > 0) {
-			// Grab this data
-			long savePos = ftell(file);
-			fseek(file, section.pointerToRawData, SEEK_SET);
-			fread(sectionBase, section.sizeOfRawData, 1, file);
-			fseek(file, savePos, SEEK_SET);
+	const uint64_t sectionHeadersOffset =
+		static_cast<uint64_t>(offsetToPE) + sizeof(header) + header.sizeOfOptionalHeader;
+	if (auto totalSize = source.size()) {
+		uint64_t sectionTableBytes = static_cast<uint64_t>(header.numberOfSections) * sizeof(PESectionHeader);
+		if (sectionHeadersOffset > *totalSize || sectionTableBytes > (*totalSize - sectionHeadersOffset)) {
+			DEBUG_LOG("loadPE: section table exceeds available data\n");
+			return false;
+		}
+	}
+	for (uint16_t i = 0; i < header.numberOfSections; ++i) {
+		uint64_t currentOffset = sectionHeadersOffset + static_cast<uint64_t>(i) * sizeof(PESectionHeader);
+		PESectionHeader section{};
+		if (!source.read(currentOffset, &section, sizeof(section))) {
+			DEBUG_LOG("loadPE: failed to read section header %u\n", i);
+			return false;
 		}
 
-		if (strcmp(name, ".rsrc") == 0) {
-			rsrcBase = sectionBase;
-			rsrcSize = std::max(section.virtualSize, section.sizeOfRawData);
+		char name[9];
+		std::memcpy(name, section.name, 8);
+		name[8] = '\0';
+		DEBUG_LOG("Section %u: name=%s addr=%x size=%x (raw=%x) ptr=%x\n", i, name, section.virtualAddress,
+				  section.virtualSize, section.sizeOfRawData, section.pointerToRawData);
+
+		const uint64_t sectionEndVirtual =
+			static_cast<uint64_t>(section.virtualAddress) + static_cast<uint64_t>(section.virtualSize);
+		if (section.virtualAddress > header32.sizeOfImage || sectionEndVirtual > header32.sizeOfImage) {
+			DEBUG_LOG("loadPE: section %s exceeds image size\n", name);
+			return false;
+		}
+
+		void *sectionBase = reinterpret_cast<void *>(imageBaseAddr + section.virtualAddress);
+		if (section.pointerToRawData != 0 && section.sizeOfRawData != 0) {
+			uint64_t sectionDataEnd =
+				static_cast<uint64_t>(section.pointerToRawData) + static_cast<uint64_t>(section.sizeOfRawData);
+			if (sectionDataEnd < static_cast<uint64_t>(section.pointerToRawData)) {
+				DEBUG_LOG("loadPE: raw data overflow for section %s\n", name);
+				return false;
+			}
+			uint64_t mappedEnd =
+				static_cast<uint64_t>(section.virtualAddress) + static_cast<uint64_t>(section.sizeOfRawData);
+			if (mappedEnd > header32.sizeOfImage) {
+				DEBUG_LOG("loadPE: raw section data for %s exceeds image size\n", name);
+				return false;
+			}
+			if (!source.read(section.pointerToRawData, sectionBase, section.sizeOfRawData)) {
+				DEBUG_LOG("loadPE: failed to load section %s data\n", name);
+				return false;
+			}
+		}
+
+		if (std::strcmp(name, ".rsrc") == 0) {
+			executable.rsrcBase = sectionBase;
+			executable.rsrcSize = std::max(section.virtualSize, section.sizeOfRawData);
 		}
 
 		size_t sectionSpan = std::max(section.virtualSize, section.sizeOfRawData);
@@ -310,29 +512,34 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 			uintptr_t sectionEnd = alignUp(imageBaseAddr + static_cast<uintptr_t>(section.virtualAddress) +
 											   static_cast<uintptr_t>(sectionSpan),
 										   pageSizeValue);
+			if (sectionEnd < sectionStart) {
+				DEBUG_LOG("loadPE: invalid span for section %s\n", name);
+				return false;
+			}
 			if (sectionEnd > sectionStart) {
-				Executable::SectionInfo sectionInfo{};
+				wibo::Executable::SectionInfo sectionInfo{};
 				sectionInfo.base = sectionStart;
 				sectionInfo.size = static_cast<size_t>(sectionEnd - sectionStart);
 				sectionInfo.protect = sectionProtectFromCharacteristics(section.characteristics);
 				sectionInfo.characteristics = section.characteristics;
-				sections.push_back(sectionInfo);
+				executable.sections.push_back(sectionInfo);
 			}
 		}
 	}
-	std::sort(sections.begin(), sections.end(),
-			  [](const SectionInfo &lhs, const SectionInfo &rhs) { return lhs.base < rhs.base; });
 
-	if (exec && relocationDelta != 0) {
-		if (relocationDirectoryRVA == 0 || relocationDirectorySize == 0) {
+	std::sort(executable.sections.begin(), executable.sections.end(),
+			  [](const wibo::Executable::SectionInfo &lhs, const wibo::Executable::SectionInfo &rhs) {
+				  return lhs.base < rhs.base;
+			  });
+
+	if (exec && executable.relocationDelta != 0) {
+		if (executable.relocationDirectoryRVA == 0 || executable.relocationDirectorySize == 0) {
 			DEBUG_LOG("Relocation required but no relocation directory present\n");
-			wibo::heap::virtualFree(imageBase, 0, MEM_RELEASE);
-			imageBase = nullptr;
 			return false;
 		}
 
-		uint8_t *relocCursor = fromRVA<uint8_t>(relocationDirectoryRVA);
-		uint8_t *relocEnd = relocCursor + relocationDirectorySize;
+		uint8_t *relocCursor = executable.fromRVA<uint8_t>(executable.relocationDirectoryRVA);
+		uint8_t *relocEnd = relocCursor + executable.relocationDirectorySize;
 		while (relocCursor < relocEnd) {
 			auto *block = reinterpret_cast<PEBaseRelocationBlock *>(relocCursor);
 			if (block->sizeOfBlock < sizeof(PEBaseRelocationBlock) ||
@@ -350,11 +557,11 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 				uint16_t offset = entry & 0x0FFF;
 				if (type == IMAGE_REL_BASED_ABSOLUTE)
 					continue;
-				uintptr_t target = reinterpret_cast<uintptr_t>(imageBase) + block->virtualAddress + offset;
+				uintptr_t target = reinterpret_cast<uintptr_t>(executable.imageBase) + block->virtualAddress + offset;
 				switch (type) {
 				case IMAGE_REL_BASED_HIGHLOW: {
 					auto *addr = reinterpret_cast<uint32_t *>(target);
-					*addr += static_cast<uint32_t>(relocationDelta);
+					*addr += static_cast<uint32_t>(executable.relocationDelta);
 					break;
 				}
 				default:
@@ -366,9 +573,36 @@ bool wibo::Executable::loadPE(FILE *file, bool exec) {
 		}
 	}
 
-	entryPoint = header32.addressOfEntryPoint ? fromRVA<void>(header32.addressOfEntryPoint) : nullptr;
+	executable.entryPoint =
+		header32.addressOfEntryPoint ? executable.fromRVA<void>(header32.addressOfEntryPoint) : nullptr;
 
+	(void)imageGuard.release();
+	kernel32::setLastError(ERROR_SUCCESS);
 	return true;
+}
+
+} // namespace
+
+/**
+ * Load a PE file into memory.
+ *
+ * @param file The file to load.
+ * @param exec Whether to make the loaded image executable.
+ */
+bool wibo::Executable::loadPE(FILE *file, bool exec) {
+	if (!file) {
+		kernel32::setLastError(ERROR_BAD_EXE_FORMAT);
+		return false;
+	}
+	return loadPEFromSource(*this, PeInputView(file), exec);
+}
+
+bool wibo::Executable::loadPE(std::span<const uint8_t> image, bool exec) {
+	if (image.empty()) {
+		kernel32::setLastError(ERROR_BAD_EXE_FORMAT);
+		return false;
+	}
+	return loadPEFromSource(*this, PeInputView(image), exec);
 }
 
 bool wibo::Executable::resolveImports() {
@@ -385,7 +619,7 @@ bool wibo::Executable::resolveImports() {
 				wibo::heap::virtualProtect(sectionAddress, section.size, section.protect, nullptr);
 			if (status != wibo::heap::VmStatus::Success) {
 				DEBUG_LOG("resolveImports: failed to set section protection at %p (size=%zu, protect=0x%x) status=%u\n",
-					  sectionAddress, section.size, section.protect, static_cast<unsigned>(status));
+						  sectionAddress, section.size, section.protect, static_cast<unsigned>(status));
 				kernel32::setLastError(wibo::heap::win32ErrorFromVmStatus(status));
 				return false;
 			}

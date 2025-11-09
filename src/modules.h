@@ -6,6 +6,7 @@
 #include "types.h"
 
 #include <optional>
+#include <span>
 #include <unordered_map>
 
 namespace wibo {
@@ -18,8 +19,9 @@ struct ResourceLocation;
 
 struct ModuleStub {
 	const char **names;
-	ResolveByName byName;
-	ResolveByOrdinal byOrdinal;
+	ResolveByName byName = nullptr;
+	ResolveByOrdinal byOrdinal = nullptr;
+	std::span<const uint8_t> dllData{};
 };
 
 class Executable {
@@ -35,6 +37,7 @@ class Executable {
 	~Executable();
 
 	bool loadPE(FILE *file, bool exec);
+	bool loadPE(std::span<const uint8_t> image, bool exec);
 	bool resolveImports();
 	bool findResource(const ResourceIdentifier &type, const ResourceIdentifier &name, std::optional<uint16_t> language,
 					  ResourceLocation &out) const;

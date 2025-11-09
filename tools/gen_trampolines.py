@@ -49,8 +49,6 @@ if "LIBCLANG_PATH" in os.environ:
             f"Warning: LIBCLANG_PATH={libclang_path} is not a file or directory\n"
         )
 
-SYMBOL_PREFIX = "_" if sys.platform == "darwin" else ""
-
 
 class Arch(str, Enum):
     X86 = "x86"
@@ -924,7 +922,7 @@ def emit_guest_to_host_thunks(
     lines: List[str], dll: str, funcs: Iterable[FuncInfo], arch: Arch
 ) -> None:
     for f in funcs:
-        thunk = f"{SYMBOL_PREFIX}thunk_{dll}_{f.name}"
+        thunk = f"thunk_{dll}_{f.name}"
         lines.append("")
         lines.append(
             f"# {f.qualified_ns}::{f.name} (source_cc={f.source_cc.name}, target_cc={f.target_cc.name}, variadic={f.variadic})"
@@ -938,20 +936,16 @@ def emit_guest_to_host_thunks(
             details.append(f"class={arg.arg_class.value}")
             details.append(f"sign_extended={arg.sign_extended}")
             lines.append(f"\t# Arg {i} ({', '.join(details)})")
-        lines.append(f".globl {thunk}")
-        if sys.platform != "darwin":
-            lines.append(f".type {thunk}, @function")
-        lines.append(f"{thunk}:")
+        lines.append(f"ASM_GLOBAL({thunk}, @function)")
         emit_cc_thunk(f, lines, arch)
-        if sys.platform != "darwin":
-            lines.append(f".size {thunk}, .-{thunk}")
+        lines.append(f"ASM_END({thunk})")
 
 
 def emit_host_to_guest_thunks(
     lines: List[str], typedefs: Iterable[TypedefInfo], arch: Arch
 ) -> None:
     for f in typedefs:
-        thunk = f"{SYMBOL_PREFIX}call_{f.name}"
+        thunk = f"call_{f.name}"
         lines.append("")
         lines.append(
             f"# {f.name} (target_cc={f.target_cc.name}, variadic={f.variadic})"
@@ -969,16 +963,9 @@ def emit_host_to_guest_thunks(
         # details.append(f"class={f.return_type.arg_class.value}")
         # details.append(f"sign_extended={f.return_type.sign_extended}")
         # lines.append(f"\t# Ret ({', '.join(details)})")
-        if sys.platform == "darwin":
-            lines.append(f".globl {thunk}")
-            lines.append(f".weak_definition {thunk}")
-        else:
-            lines.append(f".weak {thunk}")
-            lines.append(f".type {thunk}, @function")
-        lines.append(f"{thunk}:")
+        lines.append(f"ASM_WEAK({thunk}, @function)")
         emit_cc_thunk(f, lines, arch)
-        if sys.platform != "darwin":
-            lines.append(f".size {thunk}, .-{thunk}")
+        lines.append(f"ASM_END({thunk})")
 
 
 def emit_header_mapping(
@@ -1114,8 +1101,6 @@ def main() -> int:
     lines: List[str] = []
     lines.append("# Auto-generated thunks; DO NOT EDIT.")
     lines.append('#include "macros.S"')
-    if sys.platform != "darwin":
-        lines.append('.section .note.GNU-stack, "", @progbits')
     lines.append(".text")
 
     emit_guest_to_host_thunks(lines, args.dll, funcs, arch)

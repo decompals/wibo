@@ -13,36 +13,62 @@ env:
 
 jobs:
   build:
-    name: Build (${{ matrix.display }})
+    name: Build ${{ matrix.display }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
           - id: ubuntu-debug
-            display: Debug
+            display: Debug (32-bit)
             dockerfile: Dockerfile.ubuntu
-            build_type: Debug
+            build_type: debug
             default: false
             suffix: -ubuntu-debug
           - id: ubuntu-release
-            display: Release
+            display: Release (32-bit)
             dockerfile: Dockerfile.ubuntu
-            build_type: Release
+            build_type: release
             default: false
             suffix: -ubuntu
+          - id: ubuntu-debug64
+            display: Debug (64-bit)
+            dockerfile: Dockerfile.ubuntu
+            build_type: debug64
+            default: false
+            suffix: 64-ubuntu-debug
+          - id: ubuntu-release64
+            display: Release (64-bit)
+            dockerfile: Dockerfile.ubuntu
+            build_type: release64
+            default: false
+            suffix: 64-ubuntu
           - id: static-debug
-            display: Static, Debug
+            display: Debug (Static, 32-bit)
             dockerfile: Dockerfile
-            build_type: Debug
+            build_type: debug
+            platform: linux/386
             default: false
             suffix: -alpine-debug
           - id: static-release
-            display: Static, Release
+            display: Release (Static, 32-bit)
             dockerfile: Dockerfile
-            build_type: Release
+            build_type: release
+            platform: linux/386
             default: true
             suffix: -alpine
+          - id: static-debug64
+            display: Debug (Static, 64-bit)
+            dockerfile: Dockerfile
+            build_type: debug
+            default: false
+            suffix: 64-alpine-debug
+          - id: static-release64
+            display: Release (Static, 64-bit)
+            dockerfile: Dockerfile
+            build_type: release
+            default: false
+            suffix: 64-alpine
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -79,6 +105,7 @@ jobs:
             BUILD_TYPE=${{ matrix.build_type }}
             WIBO_VERSION=${{ steps.version.outputs.wibo_version }}
           target: build
+          platforms: ${{ matrix.platform || 'linux/amd64' }}
 
       - name: Tests
         run: >

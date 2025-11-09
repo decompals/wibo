@@ -1,26 +1,26 @@
 #include "macros.h"
 
-#ifdef __clang__
-#define ASM_TYPE(NAME, TYPE)
-#define ASM_END(NAME)
-#else
+#if GNU_ASSEMBLER
 #define ASM_TYPE(NAME, TYPE) .type NAME, TYPE
 #define ASM_END(NAME) .size NAME, .- NAME
+#else
+#define ASM_TYPE(NAME, TYPE)
+#define ASM_END(NAME)
 #endif
 
 #define ASM_GLOBAL(NAME, TYPE)                                                                                         \
 	.globl SYMBOL_NAME(NAME);                                                                                          \
 	ASM_TYPE(SYMBOL_NAME(NAME), TYPE);                                                                                 \
 	SYMBOL_NAME(NAME) :
-#ifdef __clang__
+#if GNU_ASSEMBLER
 #define ASM_WEAK(NAME, TYPE)                                                                                           \
-	.globl SYMBOL_NAME(NAME);                                                                                          \
-	.weak_definition SYMBOL_NAME(NAME);                                                                                \
-	ASM_TYPE(SYMBOL_NAME(NAME), TYPE)                                                                                  \
+	.weak SYMBOL_NAME(NAME);                                                                                           \
+	ASM_TYPE(SYMBOL_NAME(NAME), TYPE);                                                                                 \
 	SYMBOL_NAME(NAME) :
 #else
 #define ASM_WEAK(NAME, TYPE)                                                                                           \
-	.weak SYMBOL_NAME(NAME);                                                                                           \
+	.globl SYMBOL_NAME(NAME);                                                                                          \
+	.weak_definition SYMBOL_NAME(NAME);                                                                                \
 	ASM_TYPE(SYMBOL_NAME(NAME), TYPE)                                                                                  \
 	SYMBOL_NAME(NAME) :
 #endif

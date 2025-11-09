@@ -1,5 +1,5 @@
 # Build stage
-FROM --platform=linux/i386 alpine:latest AS build
+FROM alpine:latest AS build
 
 # Install dependencies
 RUN apk add --no-cache \
@@ -11,6 +11,7 @@ RUN apk add --no-cache \
     coreutils \
     git \
     linux-headers \
+    lld \
     llvm-dev \
     make \
     mingw-w64-binutils \
@@ -22,8 +23,11 @@ RUN apk add --no-cache \
 WORKDIR /wibo
 COPY . /wibo
 
-# Build type (Release, Debug, RelWithDebInfo, MinSizeRel)
-ARG BUILD_TYPE=Release
+# Target platform (automatically set by Docker buildx)
+ARG TARGETPLATFORM
+
+# Build type (release, debug)
+ARG BUILD_TYPE=release
 
 # Enable link-time optimization (LTO) (AUTO, ON, OFF)
 ARG ENABLE_LTO=AUTO
@@ -32,24 +36,32 @@ ARG ENABLE_LTO=AUTO
 ARG WIBO_VERSION
 
 # Build static binary
-RUN cmake -S /wibo -B /wibo/build -G Ninja \
-        -DCMAKE_BUILD_TYPE:STRING="$BUILD_TYPE" \
-        -DCMAKE_C_COMPILER:STRING=clang \
-        -DCMAKE_CXX_COMPILER:STRING=clang++ \
-        -DCMAKE_C_FLAGS:STRING="-static" \
-        -DCMAKE_CXX_FLAGS:STRING="-static" \
-        -DMI_LIBC_MUSL:BOOL=ON \
-        -DWIBO_ENABLE_LIBURING:BOOL=ON \
+RUN if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
+        PRESET="${BUILD_TYPE}64-clang"; \
+        TOOLCHAIN="/wibo/cmake/toolchains/x86_64-alpine-linux-musl.cmake"; \
+    elif [ "$TARGETPLATFORM" = "linux/386" ]; then \
+        PRESET="${BUILD_TYPE}-clang"; \
+        TOOLCHAIN="/wibo/cmake/toolchains/i586-alpine-linux-musl.cmake"; \
+    else \
+        echo "Error: Unsupported platform '$TARGETPLATFORM'. Supported platforms: linux/amd64, linux/386" >&2; \
+        exit 1; \
+    fi; \
+    echo "Building for $TARGETPLATFORM with preset $PRESET" \
+    && cmake -S /wibo --preset "$PRESET" \
+        -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
         -DWIBO_ENABLE_LTO:STRING="$ENABLE_LTO" \
         -DWIBO_VERSION:STRING="$WIBO_VERSION" \
-    && cmake --build /wibo/build --verbose \
-    && ( [ "$BUILD_TYPE" != "Release" ] || strip -g /wibo/build/wibo )
+    && cmake --build --preset "$PRESET" --verbose \
+    && ( [ "$BUILD_TYPE" != "release"* ] || strip -g "/wibo/build/$PRESET/wibo" ) \
+    && cp "/wibo/build/$PRESET/wibo" /usr/local/bin/wibo
 
 # Export binary (usage: docker build --target export --output build .)
 FROM scratch AS export
-COPY --from=build /wibo/build/wibo .
+
+COPY --from=build /usr/local/bin/wibo .
 
 # Runnable container
 FROM alpine:latest
-COPY --from=build /wibo/build/wibo /usr/local/sbin/wibo
-CMD /usr/local/sbin/wibo
+
+COPY --from=build /usr/local/bin/wibo /usr/local/bin/wibo
+CMD ["/usr/local/bin/wibo"]

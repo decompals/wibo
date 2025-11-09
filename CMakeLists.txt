@@ -4,11 +4,6 @@ project(wibo LANGUAGES ASM C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 
-if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15")
-    set(CMAKE_OSX_ARCHITECTURES "x86_64" CACHE INTERNAL "" FORCE)
-endif()
-
 set(WIBO_VERSION "" CACHE STRING "Version string for the wibo binary; if empty, attempts to use git describe")
 
 if(NOT "${WIBO_VERSION}" STREQUAL "")
@@ -35,11 +30,6 @@ if(NOT DEFINED WIBO_VERSION_STRING OR "${WIBO_VERSION_STRING}" STREQUAL "")
     set(WIBO_VERSION_STRING "unknown")
 endif()
 
-# Clang on Linux needs help finding the 32-bit headers
-if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    include_directories(/usr/i686-linux-gnu/include)
-endif()
-
 set(WIBO_GENERATED_HEADER_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
 file(MAKE_DIRECTORY ${WIBO_GENERATED_HEADER_DIR})
 configure_file(
@@ -48,19 +38,26 @@ configure_file(
     @ONLY
 )
 
-option(WIBO_64 "Build wibo for 64-bit host" OFF)
+# Detect if we're building for 64-bit based on the target architecture
+# CMAKE_SIZEOF_VOID_P is set by the project() command and the toolchain
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(WIBO_64 ON)
+    message(STATUS "Detected 64-bit target architecture")
+elseif(CMAKE_SIZEOF_VOID_P EQUAL 4)
+    set(WIBO_64 OFF)
+    message(STATUS "Detected 32-bit target architecture")
+else()
+    message(FATAL_ERROR "Unknown pointer size: ${CMAKE_SIZEOF_VOID_P}")
+endif()
+
 option(WIBO_ENABLE_FIXTURE_TESTS "Enable Win32 fixture tests (requires i686-w64-mingw32)" ON)
 option(WIBO_ENABLE_LIBURING "Enable liburing for asynchronous I/O" OFF)
 set(WIBO_ENABLE_LTO "AUTO" CACHE STRING "Enable link-time optimization (LTO)")
 set_property(CACHE WIBO_ENABLE_LTO PROPERTY STRINGS "AUTO" "ON" "OFF")
 
 add_compile_options(
-    $<IF:$<BOOL:${WIBO_64}>,-m64,-m32>
     $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>
     $<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>
-)
-add_link_options(
-    $<IF:$<BOOL:${WIBO_64}>,-m64,-m32>
 )
 
 if (WIBO_ENABLE_LTO STREQUAL "AUTO")
@@ -324,7 +321,6 @@ function(wibo_codegen_module)
                 ${module_HEADERS}
     )
     target_sources(wibo PRIVATE ${out_asm})
-    set_source_files_properties(${out_asm} PROPERTIES COMPILE_FLAGS $<IF:$<BOOL:${WIBO_64}>,-m64,-m32>)
 endfunction()
 
 wibo_codegen_module(NAME advapi32 HEADERS

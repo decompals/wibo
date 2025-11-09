@@ -26,6 +26,16 @@
 #error "Unsupported platform"
 #endif
 
+#endif
+
+#if defined(__linux__)
+#define GNU_ASSEMBLER 1
+#elif defined(__clang__)
+#define GNU_ASSEMBLER 0
+#else
+#error "Unsupported platform"
+#endif
+
 #ifndef __USER_LABEL_PREFIX__
 #define __USER_LABEL_PREFIX__
 #endif
@@ -46,7 +56,7 @@
 #define ASM_SIZE_TYPE "long"
 #endif
 #if __ELF__
-#define ASM_RODATA_SECTION ".rodata"
+#define ASM_RODATA_SECTION ".section .rodata"
 #else
 #define ASM_RODATA_SECTION ".section __TEXT, __const"
 #endif
@@ -68,6 +78,4 @@
 	static_cast<std::size_t>(reinterpret_cast<std::uintptr_t>(&GLUE(symbol, End)) -                                    \
 							 reinterpret_cast<std::uintptr_t>(&symbol))
 #define INCLUDE_BIN_SPAN(symbol) std::span<const std::uint8_t>(symbol, INCLUDE_BIN_SIZE(symbol))
-#endif
-
 #endif

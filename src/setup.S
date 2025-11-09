@@ -54,9 +54,11 @@ ASM_END(tebThreadSetup)
 
 .macro stubThunkX number
 #if defined(__x86_64__)
-ASM_GLOBAL(_Z9stubThunkILm\()\number\()EEvv, @function)
+#define STUB_THUNK_SYMBOL _Z9stubThunkILm\()\number\()EEvv
+ASM_GLOBAL(STUB_THUNK_SYMBOL, @function)
 #else
-ASM_GLOBAL(_Z9stubThunkILj\()\number\()EEvv, @function)
+#define STUB_THUNK_SYMBOL _Z9stubThunkILj\()\number\()EEvv
+ASM_GLOBAL(STUB_THUNK_SYMBOL, @function)
 #endif
     pop eax
     push \number

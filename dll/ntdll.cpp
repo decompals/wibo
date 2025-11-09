@@ -101,8 +101,8 @@ LONGLONG timespecToFileTime(const timespec &ts) {
 	if (ticks < 0.0L) {
 		return 0;
 	}
-	if (ticks > static_cast<long double>(std::numeric_limits<LONGLONG>::max())) {
-		return std::numeric_limits<LONGLONG>::max();
+	if (ticks > static_cast<long double>(std::numeric_limits<long long>::max())) {
+		return std::numeric_limits<long long>::max();
 	}
 	return static_cast<LONGLONG>(ticks);
 #endif

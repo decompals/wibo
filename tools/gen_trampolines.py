@@ -1079,13 +1079,13 @@ def main() -> int:
 
     if args.arch == "x86":
         arch = Arch.X86
-        target = "i686-pc-linux-gnu"
+        target = "i686-linux-gnu"
     elif args.arch == "x86_64":
         arch = Arch.X86_64
         if sys.platform == "darwin":
             target = "x86_64-apple-darwin"
         else:
-            target = "x86_64-pc-linux-gnu"
+            target = "x86_64-linux-gnu"
     else:
         raise ValueError(f"Unsupported architecture: {args.arch}")
 

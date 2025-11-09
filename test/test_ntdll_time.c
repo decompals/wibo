@@ -89,7 +89,7 @@ static void test_rtl_time_to_seconds_invalid_inputs(void) {
     TEST_CHECK_EQ(FALSE, gFns.time_to_seconds(&before_epoch, &seconds));
 
     LARGE_INTEGER beyond_range = {
-        .QuadPart = (LONGLONG)(kUnixEpochAsFileTime + (0x1'00000000ULL * kHundredNsPerSecond))};
+        .QuadPart = (LONGLONG)(kUnixEpochAsFileTime + (0x100000000ULL * kHundredNsPerSecond))};
     TEST_CHECK_EQ(FALSE, gFns.time_to_seconds(&beyond_range, &seconds));
 }
 

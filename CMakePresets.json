@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "configurePresets": [
     {
       "name": "ninja-base",
@@ -21,19 +21,65 @@
     {
       "name": "debug",
       "displayName": "Debug",
+      "description": "Debug build (32-bit Linux)",
       "inherits": ["ninja-base"],
       "binaryDir": "${sourceDir}/build/debug",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchains/i686-linux-gcc.cmake"
+      }
+    },
+    {
+      "name": "debug-macos",
+      "displayName": "Debug",
+      "description": "Debug build (64-bit macOS)",
+      "inherits": ["ninja-base"],
+      "binaryDir": "${sourceDir}/build/debug",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchains/x86_64-darwin.cmake"
       }
     },
     {
       "name": "release",
       "displayName": "Release",
+      "description": "Release build (32-bit Linux)",
       "inherits": ["ninja-base"],
       "binaryDir": "${sourceDir}/build/release",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release"
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchains/i686-linux-gcc.cmake"
+      }
+    },
+    {
+      "name": "release-macos",
+      "displayName": "Release",
+      "description": "Release build (64-bit macOS)",
+      "inherits": ["ninja-base"],
+      "binaryDir": "${sourceDir}/build/release",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchains/x86_64-darwin.cmake"
       }
     },
     {
@@ -41,8 +87,14 @@
       "displayName": "Debug (Clang)",
       "inherits": ["ninja-base", "clang-base"],
       "binaryDir": "${sourceDir}/build/debug-clang",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchains/i686-linux-clang.cmake"
       }
     },
     {
@@ -50,8 +102,14 @@
       "displayName": "Release (Clang)",
       "inherits": ["ninja-base", "clang-base"],
       "binaryDir": "${sourceDir}/build/release-clang",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release"
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchains/i686-linux-clang.cmake"
       }
     },
     {
@@ -59,9 +117,14 @@
       "displayName": "Debug (64-bit)",
       "inherits": ["ninja-base"],
       "binaryDir": "${sourceDir}/build/debug64",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "WIBO_64": "ON"
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchains/x86_64-linux-gcc.cmake"
       }
     },
     {
@@ -69,9 +132,14 @@
       "displayName": "Release (64-bit)",
       "inherits": ["ninja-base"],
       "binaryDir": "${sourceDir}/build/release64",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "WIBO_64": "ON"
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchains/x86_64-linux-gcc.cmake"
       }
     },
     {
@@ -79,9 +147,14 @@
       "displayName": "Debug (64-bit, Clang)",
       "inherits": ["ninja-base", "clang-base"],
       "binaryDir": "${sourceDir}/build/debug64-clang",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "WIBO_64": "ON"
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchains/x86_64-linux-clang.cmake"
       }
     },
     {
@@ -89,9 +162,14 @@
       "displayName": "Release (64-bit, Clang)",
       "inherits": ["ninja-base", "clang-base"],
       "binaryDir": "${sourceDir}/build/release64-clang",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "WIBO_64": "ON"
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchains/x86_64-linux-clang.cmake"
       }
     }
   ],
@@ -104,9 +182,23 @@
       "configuration": "Debug"
     },
     {
+      "name": "debug-macos",
+      "displayName": "Build (Debug)",
+      "configurePreset": "debug-macos",
+      "targets": ["wibo", "wibo_test_fixtures"],
+      "configuration": "Debug"
+    },
+    {
       "name": "release",
       "displayName": "Build (Release)",
       "configurePreset": "release",
+      "targets": ["wibo", "wibo_test_fixtures"],
+      "configuration": "Release"
+    },
+    {
+      "name": "release-macos",
+      "displayName": "Build (Release)",
+      "configurePreset": "release-macos",
       "targets": ["wibo", "wibo_test_fixtures"],
       "configuration": "Release"
     },
@@ -165,9 +257,29 @@
       }
     },
     {
+      "name": "debug-macos",
+      "displayName": "Run tests (Debug)",
+      "configurePreset": "debug-macos",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      }
+    },
+    {
       "name": "release",
       "displayName": "Run tests (Release)",
       "configurePreset": "release",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      }
+    },
+    {
+      "name": "release-macos",
+      "displayName": "Run tests (Release)",
+      "configurePreset": "release-macos",
       "configuration": "Release",
       "output": {
         "outputOnFailure": true,

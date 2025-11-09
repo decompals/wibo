@@ -34,8 +34,8 @@ RUN apt-get update \
 WORKDIR /wibo
 COPY . /wibo
 
-# Build type (Release, Debug, RelWithDebInfo, MinSizeRel)
-ARG BUILD_TYPE=Release
+# Build type (release, debug, release64, debug64)
+ARG BUILD_TYPE=release
 
 # Enable link-time optimization (LTO) (AUTO, ON, OFF)
 ARG ENABLE_LTO=AUTO
@@ -43,22 +43,22 @@ ARG ENABLE_LTO=AUTO
 # Version string (if not provided, defaults to "unknown")
 ARG WIBO_VERSION
 
-RUN cmake -S /wibo -B /wibo/build -G Ninja \
+# Build dynamic binary
+RUN PRESET=${BUILD_TYPE}-clang; \
+    cmake -S /wibo --preset "$PRESET" \
         -DCMAKE_AR:PATH=/usr/bin/llvm-ar \
         -DCMAKE_RANLIB:PATH=/usr/bin/llvm-ranlib \
-        -DCMAKE_BUILD_TYPE:STRING="$BUILD_TYPE" \
-        -DCMAKE_EXE_LINKER_FLAGS:STRING="-m32 -fuse-ld=lld" \
-        -DWIBO_ENABLE_LIBURING:BOOL=ON \
         -DWIBO_ENABLE_LTO:STRING="$ENABLE_LTO" \
         -DWIBO_VERSION:STRING="$WIBO_VERSION" \
-    && LIBCLANG_PATH=/usr/lib/llvm-18/lib cmake --build /wibo/build --verbose \
-    && ( [ "$BUILD_TYPE" != "Release" ] || strip -g /wibo/build/wibo )
+    && LIBCLANG_PATH=/usr/lib/llvm-18/lib cmake --build --preset "$PRESET" --verbose \
+    && ( [ "$BUILD_TYPE" != "release"* ] || strip -g "/wibo/build/$PRESET/wibo" ) \
+    && cp "/wibo/build/$PRESET/wibo" /usr/local/bin/wibo
 
 # Export binary (usage: docker build -f Dockerfile.ubuntu --target export --output dist .)
 FROM scratch AS export
-COPY --from=build /wibo/build/wibo .
+COPY --from=build /usr/local/bin/wibo .
 
 # Runnable container
 FROM ubuntu:24.04
-COPY --from=build /wibo/build/wibo /usr/local/sbin/wibo
-CMD ["/usr/local/sbin/wibo"]
+COPY --from=build /usr/local/bin/wibo /usr/local/bin/wibo
+CMD ["/usr/local/bin/wibo"]

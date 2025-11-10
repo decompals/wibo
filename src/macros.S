@@ -41,8 +41,7 @@ m1632:
     .long 1f             # 32-bit code offset
     .long 0              # 32-bit code segment (filled in at runtime)
 .text
-    mov r10w, word ptr [\teb_reg+TEB_FS_SEL]
-    sub r10w, 16
+    mov r10w, word ptr [\teb_reg+TEB_CS_SEL]
     mov word ptr [rip+m1632+4], r10w
     jmp fword ptr [rip+m1632]
 #else

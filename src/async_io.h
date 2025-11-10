@@ -27,6 +27,9 @@ std::unique_ptr<AsyncIOBackend> createIoUringBackend();
 #ifdef __linux__
 std::unique_ptr<AsyncIOBackend> createEpollBackend();
 #endif
+#ifdef __APPLE__
+std::unique_ptr<AsyncIOBackend> createKqueueBackend();
+#endif
 
 } // namespace detail
 

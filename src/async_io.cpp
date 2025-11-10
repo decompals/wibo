@@ -52,6 +52,9 @@ static constexpr BackendEntry kBackends[] = {
 #ifdef __linux__
 	{"epoll", detail::createEpollBackend},
 #endif
+#ifdef __APPLE__
+	{"kqueue", detail::createKqueueBackend},
+#endif
 };
 
 AsyncIOBackend &asyncIO() {

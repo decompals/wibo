@@ -41,6 +41,7 @@ TEB *allocateTib();
 void destroyTib(TEB *tib);
 void initializeTibStackInfo(TEB *tib);
 bool installTibForCurrentThread(TEB *tib);
+void uninstallTebForCurrentThread();
 
 void debug_log(const char *fmt, ...);
 

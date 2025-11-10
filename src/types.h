@@ -541,6 +541,10 @@ typedef struct _TEB {
 	// wibo
 	WORD CurrentFsSelector;
 	WORD CurrentGsSelector;
+#ifdef __x86_64__
+	WORD CodeSelector;
+	WORD DataSelector;
+#endif
 	void *CurrentStackPointer;
 #ifdef __x86_64__
 	void *HostFsBase;
@@ -558,6 +562,12 @@ static_assert(offsetof(TEB, DeallocationStack) == 0xE0C, "DeallocationStack offs
 static_assert(offsetof(TEB, TlsSlots) == 0xE10, "TLS slots offset mismatch");
 static_assert(offsetof(TEB, CurrentFsSelector) == TEB_FS_SEL);
 static_assert(offsetof(TEB, CurrentGsSelector) == TEB_GS_SEL);
+#ifdef TEB_CS_SEL
+static_assert(offsetof(TEB, CodeSelector) == TEB_CS_SEL);
+#endif
+#ifdef TEB_DS_SEL
+static_assert(offsetof(TEB, DataSelector) == TEB_DS_SEL);
+#endif
 static_assert(offsetof(TEB, CurrentStackPointer) == TEB_SP);
 #ifdef TEB_FSBASE
 static_assert(offsetof(TEB, HostFsBase) == TEB_FSBASE);

@@ -2,13 +2,14 @@
 
 #include "types.h"
 
+#define USER_PRIVILEGE 3
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#ifdef __x86_64__
-int tebThreadSetup(int entryNumber, TEB *teb);
-#endif
+bool tebThreadSetup(TEB *teb);
+bool tebThreadTeardown(TEB *teb);
 
 #ifdef __cplusplus
 }

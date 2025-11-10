@@ -761,9 +761,10 @@ def emit_cc_thunk64(f: FuncInfo | TypedefInfo, lines: List[str]):
         # Jump to 32-bit mode
         lines.append("\tLJMP32 rbx")
 
-        # Setup FS selector
-        lines.append("\tmov ax, word ptr [ebx+TEB_FS_SEL]")
-        lines.append("\tmov fs, ax")
+        if sys.platform != "darwin":
+            # Setup FS selector
+            lines.append("\tmov ax, word ptr [ebx+TEB_FS_SEL]")
+            lines.append("\tmov fs, ax")
 
         # Call into target
         lines.append(f"\tcall {call_target}")

@@ -223,9 +223,11 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_sources(wibo PRIVATE
         src/async_io_epoll.cpp
         src/processes_linux.cpp
+        src/setup_linux.cpp
     )
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     target_sources(wibo PRIVATE
+        src/async_io_kqueue.cpp
         src/processes_darwin.cpp
         src/setup_darwin.cpp
     )

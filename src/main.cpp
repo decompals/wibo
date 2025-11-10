@@ -5,6 +5,7 @@
 #include "heap.h"
 #include "modules.h"
 #include "processes.h"
+#include "setup.h"
 #include "strutil.h"
 #include "tls.h"
 #include "types.h"
@@ -14,23 +15,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <fcntl.h>
 #include <filesystem>
 #include <memory>
-#include <pthread.h>
-#include <sys/mman.h>
-#include <sys/syscall.h>
-#include <unistd.h>
-
-#ifdef __x86_64__
-#include "setup.h"
-#endif
-
-#ifdef __linux__
-#include <asm/ldt.h>
-#include <asm/prctl.h>
-#include <threads.h>
-#endif
 
 char **wibo::argv;
 int wibo::argc;
@@ -104,41 +90,13 @@ bool wibo::installTibForCurrentThread(TEB *tibPtr) {
 	if (!tibPtr) {
 		return false;
 	}
-
 	currentThreadTeb = tibPtr;
-#ifdef __x86_64__
-	tibEntryNumber = tebThreadSetup(tibEntryNumber, tibPtr);
-	if (tibEntryNumber < 0 || tibPtr->CurrentFsSelector == 0) {
-		perror("x86_64_thread_setup failed");
-		return false;
-	}
-#else
-	struct user_desc desc;
-	std::memset(&desc, 0, sizeof(desc));
-	desc.entry_number = tibEntryNumber;
-	desc.base_addr = reinterpret_cast<uintptr_t>(tibPtr);
-	desc.limit = static_cast<unsigned int>(sizeof(TEB) - 1);
-	desc.seg_32bit = 1;
-	desc.contents = 0;
-	desc.read_exec_only = 0;
-	desc.limit_in_pages = 0;
-	desc.seg_not_present = 0;
-	desc.useable = 1;
-	if (syscall(SYS_set_thread_area, &desc) != 0) {
-		perror("set_thread_area failed");
-		return false;
-	}
-	if (tibEntryNumber != static_cast<int>(desc.entry_number)) {
-		tibEntryNumber = static_cast<int>(desc.entry_number);
-		DEBUG_LOG("set_thread_area: allocated entry=%d base=%p\n", tibEntryNumber, tibPtr);
-	} else {
-		DEBUG_LOG("set_thread_area: reused entry=%d base=%p\n", tibEntryNumber, tibPtr);
-	}
+	return tebThreadSetup(tibPtr);
+}
 
-	tibPtr->CurrentFsSelector = static_cast<uint16_t>((desc.entry_number << 3) | 3);
-	tibPtr->CurrentGsSelector = 0;
-#endif
-	return true;
+void wibo::uninstallTebForCurrentThread() {
+	TEB* teb = std::exchange(currentThreadTeb, nullptr);
+	tebThreadTeardown(teb);
 }
 
 static std::string getExeName(const char *argv0) {
@@ -375,7 +333,7 @@ int main(int argc, char **argv) {
 	wibo::processPeb = peb;
 	wibo::initializeTibStackInfo(tib);
 	if (!wibo::installTibForCurrentThread(tib)) {
-		fprintf(stderr, "Failed to install TIB for main thread\n");
+		perror("Failed to install TIB for main thread");
 		return 1;
 	}
 

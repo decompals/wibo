@@ -8,8 +8,8 @@
 
 #if defined(__x86_64__) && defined(__linux__)
 
-# int tebThreadSetup(int entryNumber, TEB *teb)
-ASM_GLOBAL(tebThreadSetup, @function)
+# int tebThreadSetup64(int entryNumber, TEB *teb)
+ASM_GLOBAL(tebThreadSetup64, @function)
     push rbx                             # save rbx
 	mov r8, rsp                          # save host stack
 	rdfsbase r9                          # read host FS base
@@ -28,17 +28,9 @@ ASM_GLOBAL(tebThreadSetup, @function)
 	mov eax, 0xf3                        # SYS_set_thread_area
 	int 0x80                             # syscall
 	test eax, eax                        # check for error
-	jnz 1f                               # skip selector setup
+	jnz 1f                               # skip if error
 	mov eax, dword ptr [esp]             # entry_number
-	cmp eax, -1                          # check for invalid entry_number
-	jz 2f                                # skip selector setup
-	lea ebx, [eax*8+3]                   # create selector
-	mov fs, bx                           # setup fs segment
-	mov word ptr [esi+TEB_FS_SEL], bx    # save selector
-	jmp 2f                               # skip error handling
 1:
-    mov eax, -1                          # return -1
-2:
 	add esp, 0x10                        # cleanup stack
 	LJMP64 esi                           # far jump into 64-bit code
     cdqe                                 # sign-extend eax to rax
@@ -46,11 +38,26 @@ ASM_GLOBAL(tebThreadSetup, @function)
 	wrfsbase r9                          # restore host FS base
 	pop rbx                              # restore rbx
 	ret
-ASM_END(tebThreadSetup)
+ASM_END(tebThreadSetup64)
 
-#endif // __x86_64__
+#endif // defined(__x86_64__) && defined(__linux__)
 
-.code32
+#if defined(__x86_64__) && defined(__APPLE__)
+
+# bool installSelectors(TEB *teb)
+ASM_GLOBAL(installSelectors, @function)
+    mov ax, word ptr [rdi+TEB_DS_SEL]    # fetch data segment selector
+    mov dx, word ptr [rdi+TEB_FS_SEL]    # fetch fs selector
+    LJMP32 rdi                           # far jump into 32-bit code (sets cs)
+    mov ds, ax                           # setup data segment
+    mov es, ax                           # setup extra segment
+    mov fs, dx                           # setup fs segment
+    LJMP64 edi                           # far jump into 64-bit code
+    mov rax, 1                           # return true
+    ret
+ASM_END(installSelectors)
+
+#endif
 
 .macro stubThunkX number
 #if defined(__x86_64__)
@@ -67,6 +74,7 @@ ASM_GLOBAL(STUB_THUNK_SYMBOL, @function)
 ASM_END(STUB_THUNK_SYMBOL)
 .endm
 
+.code32
 stubThunkX 0
 stubThunkX 1
 stubThunkX 2

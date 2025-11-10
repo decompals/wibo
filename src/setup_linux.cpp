@@ -11,13 +11,15 @@ namespace {
 std::mutex g_tebSetupMutex;
 int g_entryNumber = -1;
 
-} // namespace
-
 constexpr uint16_t createSelector(int entryNumber) {
 	return static_cast<uint16_t>((entryNumber << 3) | USER_PRIVILEGE);
 }
 
+} // namespace
+
 #if defined(__x86_64__)
+
+#include <cpuid.h>
 
 // Implemented in setup.S
 extern "C" int tebThreadSetup64(int entryNumber, TEB *teb);
@@ -37,6 +39,15 @@ bool tebThreadSetup(TEB *teb) {
 
 	teb->CurrentFsSelector = createSelector(ret);
 	teb->CurrentGsSelector = 0;
+
+	// Check for FSBASE/GSBASE instruction support
+	unsigned int regs[4];
+	int cpuidMax = __get_cpuid_max(0, nullptr);
+	if (cpuidMax >= 0x7 && __get_cpuid_count(0x7, 0, &regs[0], &regs[1], &regs[2], &regs[3])) {
+		teb->HasFsGsBase = !!(regs[1] & 1);
+	}
+	DEBUG_LOG("setup_linux: FSBASE/GSBASE instruction support: %s\n", teb->HasFsGsBase ? "yes" : "no");
+
 	return true;
 }
 

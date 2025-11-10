@@ -721,7 +721,7 @@ def emit_cc_thunk64(f: FuncInfo | TypedefInfo, lines: List[str]):
 
         if sys.platform != "darwin":
             # Save FS base
-            lines.append("\trdfsbase r9")
+            lines.append("\tREAD_FSBASE r9, rbx")
             lines.append("\tmov qword ptr [rbx+TEB_FSBASE], r9")
 
         # Save RSP and load guest stack
@@ -782,7 +782,7 @@ def emit_cc_thunk64(f: FuncInfo | TypedefInfo, lines: List[str]):
         if sys.platform != "darwin":
             # Restore FS base
             lines.append("\tmov r9, qword ptr [rbx+TEB_FSBASE]")
-            lines.append("\twrfsbase r9")
+            lines.append("\tWRITE_FSBASE r9, rbx")
 
         # Restore host stack
         lines.append("\tmov rsp, qword ptr [rbx+TEB_SP]")

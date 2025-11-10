@@ -64,6 +64,52 @@ m1632:
     endbr64
 .endm
 
+.macro READ_FSBASE out_reg teb_reg
+    push rax
+    movzx rax, byte ptr [\teb_reg+TEB_HAS_FSGSBASE]
+    test rax, rax
+    jz 1f
+    rdfsbase \out_reg
+    jmp 2f
+1:
+    push rdi
+    push rsi
+    push rcx
+    sub rsp, 8
+    mov rsi, rsp    # addr
+    mov rdi, 0x1003 # ARCH_GET_FS
+    mov rax, 158    # SYS_arch_prctl
+    syscall
+    pop \out_reg
+    pop rcx
+    pop rsi
+    pop rdi
+2:
+    pop rax
+.endm
+
+.macro WRITE_FSBASE in_reg teb_reg
+    push rax
+    movzx rax, byte ptr [\teb_reg+TEB_HAS_FSGSBASE]
+    test rax, rax
+    jz 1f
+    wrfsbase \in_reg
+    jmp 2f
+1:
+    push rdi
+    push rsi
+    push rcx
+    mov rsi, \in_reg # addr
+    mov rdi, 0x1002  # ARCH_SET_FS
+    mov rax, 158     # SYS_arch_prctl
+    syscall
+    pop rcx
+    pop rsi
+    pop rdi
+2:
+    pop rax
+.endm
+
 #endif // __x86_64__
 
 .macro GET_TEB_HOST reg

@@ -12,11 +12,12 @@
 
 #ifdef __x86_64__
 
-#define TEB_CS_SEL 0xf9c // CodeSelector
-#define TEB_DS_SEL 0xf9e // DataSelector
-#define TEB_SP 0xfa0	 // CurrentStackPointer
-#define TEB_FSBASE 0xfa8 // HostFsBase
-#define TEB_GSBASE 0xfb0 // HostGsBase
+#define TEB_CS_SEL 0xf9c	 // CodeSelector
+#define TEB_DS_SEL 0xf9e	 // DataSelector
+#define TEB_SP 0xfa0		 // CurrentStackPointer
+#define TEB_FSBASE 0xfa8	 // HostFsBase
+#define TEB_GSBASE 0xfb0	 // HostGsBase
+#define TEB_HAS_FSGSBASE 0xfb8 // HasFsGsBase
 
 #ifdef __linux__
 #define CS_32 0x23 // 32-bit code segment (Linux)

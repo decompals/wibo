@@ -90,8 +90,8 @@ LONGLONG timespecToFileTime(const timespec &ts) {
 	if (ticks < 0) {
 		return 0;
 	}
-	if (ticks > static_cast<__int128>(std::numeric_limits<LONGLONG>::max())) {
-		return std::numeric_limits<LONGLONG>::max();
+	if (ticks > static_cast<__int128>(std::numeric_limits<int64_t>::max())) {
+		return std::numeric_limits<int64_t>::max();
 	}
 	return static_cast<LONGLONG>(ticks);
 #else
@@ -827,6 +827,13 @@ NTSTATUS WINAPI NtQueryInformationProcess(HANDLE ProcessHandle, PROCESSINFOCLASS
 		DEBUG_LOG("-> 0x%x\n", STATUS_INVALID_INFO_CLASS);
 		return STATUS_INVALID_INFO_CLASS;
 	}
+}
+
+NTSTATUS WINAPI LdrAddRefDll(ULONG Flags, HMODULE Module) {
+	DEBUG_LOG("STUB: LdrAddRefDll(%x, %p)\n", Flags, Module);
+	(void)Flags;
+	(void)Module;
+	return STATUS_SUCCESS;
 }
 
 } // namespace ntdll

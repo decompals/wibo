@@ -6,22 +6,33 @@
 #include "handles.h"
 #include "heap.h"
 #include "internal.h"
+#include "processthreadsapi.h"
 #include "strutil.h"
 #include "types.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
-#include <limits>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <pthread.h>
 #include <string>
 #include <sys/wait.h>
+#include <thread>
 #include <unistd.h>
+#include <unordered_map>
 #include <vector>
 
 namespace {
+
+constexpr DWORD kSrwLockExclusive = 0x1u;
+constexpr DWORD kSrwLockSharedIncrement = 0x2u;
+constexpr GUEST_PTR kInitOnceStateMask = 0x3u;
+constexpr GUEST_PTR kInitOnceCompletedFlag = 0x2u;
+constexpr GUEST_PTR kInitOnceReservedMask = (1u << INIT_ONCE_CTX_RESERVED_BITS) - 1;
 
 std::u16string makeU16String(LPCWSTR name) {
 	if (!name) {
@@ -125,6 +136,81 @@ struct WaitBlock {
 	std::mutex mutex;
 	std::condition_variable cv;
 };
+
+struct InitOnceState {
+	std::mutex mutex;
+	std::condition_variable cv;
+	bool completed = false;
+	bool success = false;
+	GUEST_PTR context = GUEST_NULL;
+};
+
+std::mutex g_initOnceMutex;
+std::unordered_map<LPINIT_ONCE, std::shared_ptr<InitOnceState>> g_initOnceStates;
+
+void insertInitOnceState(LPINIT_ONCE once, const std::shared_ptr<InitOnceState> &state) {
+	std::lock_guard lk(g_initOnceMutex);
+	g_initOnceStates[once] = state;
+}
+
+std::shared_ptr<InitOnceState> getInitOnceState(LPINIT_ONCE once) {
+	std::lock_guard lk(g_initOnceMutex);
+	auto it = g_initOnceStates.find(once);
+	if (it == g_initOnceStates.end()) {
+		return nullptr;
+	}
+	return it->second;
+}
+
+void eraseInitOnceState(LPINIT_ONCE once) {
+	std::lock_guard lk(g_initOnceMutex);
+	g_initOnceStates.erase(once);
+}
+
+inline DWORD owningThreadId(LPCRITICAL_SECTION crit) {
+	std::atomic_ref<DWORD> owner(*reinterpret_cast<DWORD *>(&crit->OwningThread));
+	return owner.load(std::memory_order_acquire);
+}
+
+inline void setOwningThread(LPCRITICAL_SECTION crit, DWORD threadId) {
+	std::atomic_ref<DWORD> owner(*reinterpret_cast<DWORD *>(&crit->OwningThread));
+	owner.store(threadId, std::memory_order_release);
+}
+
+void waitForCriticalSection(LPCRITICAL_SECTION cs) {
+	std::atomic_ref<LONG> sequence(reinterpret_cast<LONG &>(cs->LockSemaphore));
+	LONG observed = sequence.load(std::memory_order_acquire);
+	while (owningThreadId(cs) != 0) {
+		sequence.wait(observed, std::memory_order_relaxed);
+		observed = sequence.load(std::memory_order_acquire);
+	}
+}
+
+void signalCriticalSection(LPCRITICAL_SECTION cs) {
+	std::atomic_ref<LONG> sequence(reinterpret_cast<LONG &>(cs->LockSemaphore));
+	sequence.fetch_add(1, std::memory_order_release);
+	sequence.notify_one();
+}
+
+inline bool trySpinAcquireCriticalSection(LPCRITICAL_SECTION cs, DWORD threadId) {
+	if (!cs || cs->SpinCount == 0) {
+		return false;
+	}
+	for (ULONG_PTR spins = cs->SpinCount; spins > 0; --spins) {
+		if (kernel32::TryEnterCriticalSection(cs)) {
+			return true;
+		}
+		if (cs->LockCount > 0) {
+			break;
+		}
+		std::this_thread::yield();
+		if (owningThreadId(cs) == threadId) {
+			// Owner is self, TryEnter would have succeeded; bail out.
+			break;
+		}
+	}
+	return false;
+}
 
 } // namespace
 
@@ -550,7 +636,7 @@ DWORD WINAPI WaitForMultipleObjects(DWORD nCount, const HANDLE *lpHandles, BOOL 
 
 void WINAPI InitializeCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
 	HOST_CONTEXT_GUARD();
-	VERBOSE_LOG("InitializeCriticalSection(%p)\n", lpCriticalSection);
+	DEBUG_LOG("InitializeCriticalSection(%p)\n", lpCriticalSection);
 	InitializeCriticalSectionEx(lpCriticalSection, 0, 0);
 }
 
@@ -586,25 +672,117 @@ BOOL WINAPI InitializeCriticalSectionAndSpinCount(LPCRITICAL_SECTION lpCriticalS
 
 void WINAPI DeleteCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
 	HOST_CONTEXT_GUARD();
-	VERBOSE_LOG("STUB: DeleteCriticalSection(%p)\n", lpCriticalSection);
-	(void)lpCriticalSection;
+	DEBUG_LOG("DeleteCriticalSection(%p)\n", lpCriticalSection);
+	if (!lpCriticalSection) {
+		return;
+	}
+
+	if (lpCriticalSection->DebugInfo && lpCriticalSection->DebugInfo != static_cast<GUEST_PTR>(-1)) {
+		auto *debugInfo = fromGuestPtr<RTL_CRITICAL_SECTION_DEBUG>(lpCriticalSection->DebugInfo);
+		if (debugInfo && debugInfo->Spare[0] == 0) {
+			wibo::heap::guestFree(debugInfo);
+		}
+	}
+
+	lpCriticalSection->DebugInfo = GUEST_NULL;
+	lpCriticalSection->RecursionCount = 0;
+	lpCriticalSection->SpinCount = 0;
+	setOwningThread(lpCriticalSection, 0);
+
+	std::atomic_ref<LONG> sequence(reinterpret_cast<LONG &>(lpCriticalSection->LockSemaphore));
+	sequence.store(0, std::memory_order_release);
+	sequence.notify_all();
+
+	std::atomic_ref<LONG> lockCount(lpCriticalSection->LockCount);
+	lockCount.store(-1, std::memory_order_release);
+	lockCount.notify_all();
+}
+
+BOOL WINAPI TryEnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
+	HOST_CONTEXT_GUARD();
+	VERBOSE_LOG("TryEnterCriticalSection(%p)\n", lpCriticalSection);
+	if (!lpCriticalSection) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+
+	std::atomic_ref<LONG> lockCount(lpCriticalSection->LockCount);
+	const DWORD threadId = GetCurrentThreadId();
+
+	LONG expected = -1;
+	if (lockCount.compare_exchange_strong(expected, 0, std::memory_order_acq_rel, std::memory_order_acquire)) {
+		setOwningThread(lpCriticalSection, threadId);
+		lpCriticalSection->RecursionCount = 1;
+		return TRUE;
+	}
+
+	if (owningThreadId(lpCriticalSection) == threadId) {
+		lockCount.fetch_add(1, std::memory_order_acq_rel);
+		lpCriticalSection->RecursionCount++;
+		return TRUE;
+	}
+	return FALSE;
 }
 
 void WINAPI EnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
 	HOST_CONTEXT_GUARD();
-	VERBOSE_LOG("STUB: EnterCriticalSection(%p)\n", lpCriticalSection);
-	(void)lpCriticalSection;
+	VERBOSE_LOG("EnterCriticalSection(%p)\n", lpCriticalSection);
+	if (!lpCriticalSection) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return;
+	}
+
+	const DWORD threadId = GetCurrentThreadId();
+	if (trySpinAcquireCriticalSection(lpCriticalSection, threadId)) {
+		return;
+	}
+
+	std::atomic_ref<LONG> lockCount(lpCriticalSection->LockCount);
+	LONG result = lockCount.fetch_add(1, std::memory_order_acq_rel) + 1;
+	if (result) {
+		if (owningThreadId(lpCriticalSection) == threadId) {
+			lpCriticalSection->RecursionCount++;
+			return;
+		}
+		waitForCriticalSection(lpCriticalSection);
+	}
+	setOwningThread(lpCriticalSection, threadId);
+	lpCriticalSection->RecursionCount = 1;
 }
 
 void WINAPI LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
 	HOST_CONTEXT_GUARD();
-	VERBOSE_LOG("STUB: LeaveCriticalSection(%p)\n", lpCriticalSection);
-	(void)lpCriticalSection;
+	VERBOSE_LOG("LeaveCriticalSection(%p)\n", lpCriticalSection);
+	if (!lpCriticalSection) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return;
+	}
+
+	const DWORD threadId = GetCurrentThreadId();
+	if (owningThreadId(lpCriticalSection) != threadId || lpCriticalSection->RecursionCount <= 0) {
+		DEBUG_LOG("LeaveCriticalSection: thread %u does not own %p (owner=%u, recursion=%ld)\n", threadId,
+				  lpCriticalSection, owningThreadId(lpCriticalSection),
+				  static_cast<long>(lpCriticalSection->RecursionCount));
+		return;
+	}
+
+	if (--lpCriticalSection->RecursionCount > 0) {
+		std::atomic_ref<LONG> lockCount(lpCriticalSection->LockCount);
+		lockCount.fetch_sub(1, std::memory_order_acq_rel);
+		return;
+	}
+
+	setOwningThread(lpCriticalSection, 0);
+	std::atomic_ref<LONG> lockCount(lpCriticalSection->LockCount);
+	LONG newValue = lockCount.fetch_sub(1, std::memory_order_acq_rel) - 1;
+	if (newValue >= 0) {
+		signalCriticalSection(lpCriticalSection);
+	}
 }
 
 BOOL WINAPI InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBOOL fPending, GUEST_PTR *lpContext) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("STUB: InitOnceBeginInitialize(%p, %u, %p, %p)\n", lpInitOnce, dwFlags, fPending, lpContext);
+	DEBUG_LOG("InitOnceBeginInitialize(%p, %u, %p, %p)\n", lpInitOnce, dwFlags, fPending, lpContext);
 	if (!lpInitOnce) {
 		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
@@ -613,59 +791,272 @@ BOOL WINAPI InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBOOL
 		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
-	if (fPending) {
-		*fPending = TRUE;
+
+	std::atomic_ref<GUEST_PTR> state(lpInitOnce->Ptr);
+
+	if (dwFlags & INIT_ONCE_CHECK_ONLY) {
+		if (dwFlags & INIT_ONCE_ASYNC) {
+			setLastError(ERROR_INVALID_PARAMETER);
+			return FALSE;
+		}
+		GUEST_PTR val = state.load(std::memory_order_acquire);
+		if ((val & kInitOnceStateMask) != kInitOnceCompletedFlag) {
+			if (fPending) {
+				*fPending = TRUE;
+			}
+			setLastError(ERROR_GEN_FAILURE);
+			return FALSE;
+		}
+		if (fPending) {
+			*fPending = FALSE;
+		}
+		if (lpContext) {
+			*lpContext = val & ~kInitOnceStateMask;
+		}
+		return TRUE;
 	}
-	if (lpContext) {
-		*lpContext = GUEST_NULL;
+
+	while (true) {
+		GUEST_PTR val = state.load(std::memory_order_acquire);
+		switch (val & kInitOnceStateMask) {
+		case 0: { // first time
+			if (dwFlags & INIT_ONCE_ASYNC) {
+				GUEST_PTR expected = 0;
+				if (state.compare_exchange_strong(expected, static_cast<GUEST_PTR>(3), std::memory_order_acq_rel,
+												  std::memory_order_acquire)) {
+					if (fPending) {
+						*fPending = TRUE;
+					}
+					return TRUE;
+				}
+			} else {
+				auto syncState = std::make_shared<InitOnceState>();
+				GUEST_PTR expected = 0;
+				if (state.compare_exchange_strong(expected, static_cast<GUEST_PTR>(1), std::memory_order_acq_rel,
+												  std::memory_order_acquire)) {
+					insertInitOnceState(lpInitOnce, syncState);
+					if (fPending) {
+						*fPending = TRUE;
+					}
+					return TRUE;
+				}
+			}
+			break;
+		}
+		case 1: { // synchronous initialization in progress
+			if (dwFlags & INIT_ONCE_ASYNC) {
+				setLastError(ERROR_INVALID_PARAMETER);
+				return FALSE;
+			}
+			auto syncState = getInitOnceState(lpInitOnce);
+			if (!syncState) {
+				continue;
+			}
+			std::unique_lock lk(syncState->mutex);
+			while (!syncState->completed) {
+				syncState->cv.wait(lk);
+			}
+			if (!syncState->success) {
+				lk.unlock();
+				continue;
+			}
+			GUEST_PTR ctx = syncState->context;
+			lk.unlock();
+			if (fPending) {
+				*fPending = FALSE;
+			}
+			if (lpContext) {
+				*lpContext = ctx;
+			}
+			return TRUE;
+		}
+		case kInitOnceCompletedFlag: {
+			if (fPending) {
+				*fPending = FALSE;
+			}
+			if (lpContext) {
+				*lpContext = val & ~kInitOnceStateMask;
+			}
+			return TRUE;
+		}
+		case 3: { // async pending
+			if (!(dwFlags & INIT_ONCE_ASYNC)) {
+				setLastError(ERROR_INVALID_PARAMETER);
+				return FALSE;
+			}
+			if (fPending) {
+				*fPending = TRUE;
+			}
+			return TRUE;
+		}
+		default:
+			break;
+		}
 	}
-	return TRUE;
 }
 
 BOOL WINAPI InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpContext) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("STUB: InitOnceComplete(%p, %u, %p)\n", lpInitOnce, dwFlags, lpContext);
+	DEBUG_LOG("InitOnceComplete(%p, %u, %p)\n", lpInitOnce, dwFlags, lpContext);
 	if (!lpInitOnce) {
 		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
-	if ((dwFlags & INIT_ONCE_INIT_FAILED) && (dwFlags & INIT_ONCE_ASYNC)) {
+	if (dwFlags & ~(INIT_ONCE_ASYNC | INIT_ONCE_INIT_FAILED)) {
 		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
-	(void)lpContext;
-	return TRUE;
+	const bool markFailed = (dwFlags & INIT_ONCE_INIT_FAILED) != 0;
+	if (markFailed) {
+		if (lpContext) {
+			setLastError(ERROR_INVALID_PARAMETER);
+			return FALSE;
+		}
+		if (dwFlags & INIT_ONCE_ASYNC) {
+			setLastError(ERROR_INVALID_PARAMETER);
+			return FALSE;
+		}
+	}
+
+	const GUEST_PTR contextValue = static_cast<GUEST_PTR>(reinterpret_cast<uintptr_t>(lpContext));
+	if (!markFailed && (contextValue & kInitOnceReservedMask)) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+
+	std::atomic_ref<GUEST_PTR> state(lpInitOnce->Ptr);
+	const GUEST_PTR finalValue = markFailed ? 0 : (contextValue | kInitOnceCompletedFlag);
+
+	while (true) {
+		GUEST_PTR val = state.load(std::memory_order_acquire);
+		switch (val & kInitOnceStateMask) {
+		case 1: {
+			auto syncState = getInitOnceState(lpInitOnce);
+			if (!syncState) {
+				setLastError(ERROR_GEN_FAILURE);
+				return FALSE;
+			}
+			if (!state.compare_exchange_strong(val, finalValue, std::memory_order_acq_rel, std::memory_order_acquire)) {
+				continue;
+			}
+			{
+				std::lock_guard lk(syncState->mutex);
+				syncState->completed = true;
+				syncState->success = !markFailed;
+				syncState->context = markFailed ? GUEST_NULL : contextValue;
+			}
+			syncState->cv.notify_all();
+			eraseInitOnceState(lpInitOnce);
+			return TRUE;
+		}
+		case 3:
+			if (!(dwFlags & INIT_ONCE_ASYNC)) {
+				setLastError(ERROR_INVALID_PARAMETER);
+				return FALSE;
+			}
+			if (!state.compare_exchange_strong(val, finalValue, std::memory_order_acq_rel, std::memory_order_acquire)) {
+				continue;
+			}
+			return TRUE;
+		default:
+			setLastError(ERROR_GEN_FAILURE);
+			return FALSE;
+		}
+	}
 }
 
 void WINAPI AcquireSRWLockShared(PSRWLOCK SRWLock) {
 	HOST_CONTEXT_GUARD();
-	(void)SRWLock;
-	VERBOSE_LOG("STUB: AcquireSRWLockShared(%p)\n", SRWLock);
+	VERBOSE_LOG("AcquireSRWLockShared(%p)\n", SRWLock);
+	if (!SRWLock) {
+		return;
+	}
+	std::atomic_ref<ULONG> value(SRWLock->Value);
+	while (true) {
+		ULONG current = value.load(std::memory_order_acquire);
+		if (current & kSrwLockExclusive) {
+			value.wait(current, std::memory_order_relaxed);
+			continue;
+		}
+		ULONG desired = current + kSrwLockSharedIncrement;
+		if (value.compare_exchange_weak(current, desired, std::memory_order_acq_rel, std::memory_order_acquire)) {
+			return;
+		}
+	}
 }
 
 void WINAPI ReleaseSRWLockShared(PSRWLOCK SRWLock) {
 	HOST_CONTEXT_GUARD();
-	(void)SRWLock;
-	VERBOSE_LOG("STUB: ReleaseSRWLockShared(%p)\n", SRWLock);
+	VERBOSE_LOG("ReleaseSRWLockShared(%p)\n", SRWLock);
+	if (!SRWLock) {
+		return;
+	}
+	std::atomic_ref<ULONG> value(SRWLock->Value);
+	ULONG previous = value.fetch_sub(kSrwLockSharedIncrement, std::memory_order_acq_rel);
+	ULONG newValue = previous - kSrwLockSharedIncrement;
+	if (newValue == 0) {
+		value.notify_all();
+	}
 }
 
 void WINAPI AcquireSRWLockExclusive(PSRWLOCK SRWLock) {
 	HOST_CONTEXT_GUARD();
-	(void)SRWLock;
-	VERBOSE_LOG("STUB: AcquireSRWLockExclusive(%p)\n", SRWLock);
+	VERBOSE_LOG("AcquireSRWLockExclusive(%p)\n", SRWLock);
+	if (!SRWLock) {
+		return;
+	}
+	std::atomic_ref<ULONG> value(SRWLock->Value);
+	while (true) {
+		ULONG expected = 0;
+		if (value.compare_exchange_strong(expected, kSrwLockExclusive, std::memory_order_acq_rel,
+										  std::memory_order_acquire)) {
+			return;
+		}
+		value.wait(expected, std::memory_order_relaxed);
+	}
 }
 
 void WINAPI ReleaseSRWLockExclusive(PSRWLOCK SRWLock) {
 	HOST_CONTEXT_GUARD();
-	(void)SRWLock;
-	VERBOSE_LOG("STUB: ReleaseSRWLockExclusive(%p)\n", SRWLock);
+	VERBOSE_LOG("ReleaseSRWLockExclusive(%p)\n", SRWLock);
+	if (!SRWLock) {
+		return;
+	}
+	std::atomic_ref<ULONG> value(SRWLock->Value);
+	value.store(0, std::memory_order_release);
+	value.notify_all();
 }
 
 BOOLEAN WINAPI TryAcquireSRWLockExclusive(PSRWLOCK SRWLock) {
 	HOST_CONTEXT_GUARD();
-	(void)SRWLock;
-	VERBOSE_LOG("STUB: TryAcquireSRWLockExclusive(%p)\n", SRWLock);
-	return TRUE;
+	VERBOSE_LOG("TryAcquireSRWLockExclusive(%p)\n", SRWLock);
+	if (!SRWLock) {
+		return FALSE;
+	}
+	std::atomic_ref<ULONG> value(SRWLock->Value);
+	ULONG expected = 0;
+	if (value.compare_exchange_strong(expected, kSrwLockExclusive, std::memory_order_acq_rel,
+									  std::memory_order_acquire)) {
+		return TRUE;
+	}
+	return FALSE;
+}
+
+BOOLEAN WINAPI TryAcquireSRWLockShared(PSRWLOCK SRWLock) {
+	HOST_CONTEXT_GUARD();
+	VERBOSE_LOG("TryAcquireSRWLockShared(%p)\n", SRWLock);
+	if (!SRWLock) {
+		return FALSE;
+	}
+	std::atomic_ref<ULONG> value(SRWLock->Value);
+	ULONG current = value.load(std::memory_order_acquire);
+	while (!(current & kSrwLockExclusive)) {
+		ULONG desired = current + kSrwLockSharedIncrement;
+		if (value.compare_exchange_weak(current, desired, std::memory_order_acq_rel, std::memory_order_acquire)) {
+			return TRUE;
+		}
+	}
+	return FALSE;
 }
 
 } // namespace kernel32

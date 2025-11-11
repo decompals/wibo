@@ -348,18 +348,20 @@ const uint16_t kComputerNameWide[] = {u'C', u'O', u'M', u'P', u'N', u'A', u'M', 
 
 struct DllRedirectionEntry {
 	std::string nameLower;
-	ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION dllData;
+	wibo::heap::guest_ptr<ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION> dllData;
 };
 
 struct ActivationContext {
 	std::vector<DllRedirectionEntry> dllRedirections;
 };
 
-ActivationContext g_builtinActCtx;
+wibo::heap::guest_ptr<ActivationContext> g_builtinActCtx;
 
 ActivationContext *currentActivationContext() {
-	// TODO: hook into real activation context stack once we have it.
-	return &g_builtinActCtx;
+	if (!g_builtinActCtx) {
+		g_builtinActCtx = wibo::heap::make_guest_unique<ActivationContext>();
+	}
+	return g_builtinActCtx.get();
 }
 
 } // namespace
@@ -371,11 +373,12 @@ void ensureDefaultActivationContext() {
 		auto addDll = [ctx](const std::string &name) {
 			DllRedirectionEntry entry;
 			entry.nameLower = stringToLower(name);
-			entry.dllData.Size = sizeof(entry.dllData);
-			entry.dllData.Flags = ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION_PATH_OMITS_ASSEMBLY_ROOT;
-			entry.dllData.TotalPathLength = 0;
-			entry.dllData.PathSegmentCount = 0;
-			entry.dllData.PathSegmentOffset = 0;
+			entry.dllData = wibo::heap::make_guest_unique<ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION>();
+			entry.dllData->Size = sizeof(entry.dllData);
+			entry.dllData->Flags = ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION_PATH_OMITS_ASSEMBLY_ROOT;
+			entry.dllData->TotalPathLength = 0;
+			entry.dllData->PathSegmentCount = 0;
+			entry.dllData->PathSegmentOffset = 0;
 			ctx->dllRedirections.emplace_back(std::move(entry));
 		};
 		for (const auto &[key, module] : wibo::allLoadedModules()) {
@@ -697,7 +700,7 @@ BOOL WINAPI FindActCtxSectionStringW(DWORD dwFlags, const GUID *lpExtensionGuid,
 	ReturnedData->ulDataFormatVersion = 1;
 	ReturnedData->ulFlags = ACTCTX_SECTION_KEYED_DATA_FLAG_FOUND_IN_ACTCTX;
 	if (dwFlags & FIND_ACTCTX_SECTION_KEY_RETURN_HACTCTX) {
-		ReturnedData->hActCtx = toGuestPtr(&g_builtinActCtx);
+		ReturnedData->hActCtx = static_cast<HANDLE>(toGuestPtr(currentActivationContext()));
 	}
 
 	if (!matchedEntry) {
@@ -705,10 +708,10 @@ BOOL WINAPI FindActCtxSectionStringW(DWORD dwFlags, const GUID *lpExtensionGuid,
 		return FALSE;
 	}
 
-	ReturnedData->lpData = toGuestPtr(&matchedEntry->dllData);
-	ReturnedData->ulLength = matchedEntry->dllData.Size;
-	ReturnedData->lpSectionBase = toGuestPtr(&matchedEntry->dllData);
-	ReturnedData->ulSectionTotalLength = matchedEntry->dllData.Size;
+	ReturnedData->lpData = toGuestPtr(matchedEntry->dllData.get());
+	ReturnedData->ulLength = matchedEntry->dllData->Size;
+	ReturnedData->lpSectionBase = toGuestPtr(matchedEntry->dllData.get());
+	ReturnedData->ulSectionTotalLength = matchedEntry->dllData->Size;
 	ReturnedData->ulAssemblyRosterIndex = 1;
 	ReturnedData->AssemblyMetadata = {};
 

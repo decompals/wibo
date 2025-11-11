@@ -266,8 +266,19 @@ class PeInputView {
 		if (fseeko(source.file, static_cast<off_t>(offset), SEEK_SET) != 0) {
 			return false;
 		}
-		size_t readCount = fread(dest, 1, size, source.file);
-		return readCount == size;
+		unsigned char *buffer = static_cast<unsigned char *>(dest);
+		size_t totalRead = 0;
+		while (totalRead < size) {
+			size_t chunk = fread(buffer + totalRead, 1, size - totalRead, source.file);
+			if (chunk == 0) {
+				if (feof(source.file)) {
+					break;
+				}
+				return false;
+			}
+			totalRead += chunk;
+		}
+		return totalRead == size;
 	}
 
 	static bool readImpl(const SpanSource &source, uint64_t offset, void *dest, size_t size) {

@@ -12,7 +12,7 @@ struct CPINFO {
 };
 
 using LPCPINFO = CPINFO *;
-typedef BOOL (_CC_STDCALL *LOCALE_ENUMPROCA)(LPSTR);
+typedef BOOL(_CC_STDCALL *LOCALE_ENUMPROCA)(LPSTR);
 
 namespace kernel32 {
 
@@ -23,13 +23,14 @@ int WINAPI GetUserDefaultLocaleName(LPWSTR lpLocaleName, int cchLocaleName);
 LCID WINAPI LocaleNameToLCID(LPCWSTR lpName, DWORD dwFlags);
 BOOL WINAPI GetCPInfo(UINT CodePage, LPCPINFO lpCPInfo);
 int WINAPI CompareStringA(LCID Locale, DWORD dwCmpFlags, LPCSTR lpString1, int cchCount1, LPCSTR lpString2,
-							int cchCount2);
+						  int cchCount2);
 int WINAPI CompareStringW(LCID Locale, DWORD dwCmpFlags, LPCWCH lpString1, int cchCount1, LPCWCH lpString2,
-							int cchCount2);
+						  int cchCount2);
 BOOL WINAPI IsValidCodePage(UINT CodePage);
 BOOL WINAPI IsValidLocale(LCID Locale, DWORD dwFlags);
 int WINAPI GetLocaleInfoA(LCID Locale, LCTYPE LCType, LPSTR lpLCData, int cchData);
 int WINAPI GetLocaleInfoW(LCID Locale, LCTYPE LCType, LPWSTR lpLCData, int cchData);
+int WINAPI GetLocaleInfoEx(LPCWSTR lpLocaleName, LCTYPE LCType, LPWSTR lpLCData, int cchData);
 BOOL WINAPI EnumSystemLocalesA(LOCALE_ENUMPROCA lpLocaleEnumProc, DWORD dwFlags);
 LCID WINAPI GetUserDefaultLCID();
 BOOL WINAPI IsDBCSLeadByte(BYTE TestChar);

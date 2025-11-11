@@ -47,6 +47,8 @@ struct RTL_CRITICAL_SECTION {
 	ULONG_PTR SpinCount;
 };
 
+static_assert(sizeof(RTL_CRITICAL_SECTION) == 24);
+
 using PRTL_CRITICAL_SECTION = RTL_CRITICAL_SECTION *;
 using LPCRITICAL_SECTION = RTL_CRITICAL_SECTION *;
 using PCRITICAL_SECTION = RTL_CRITICAL_SECTION *;
@@ -64,7 +66,7 @@ using LPINIT_ONCE = INIT_ONCE *;
 constexpr INIT_ONCE INIT_ONCE_STATIC_INIT{GUEST_NULL};
 
 union RTL_SRWLOCK {
-	GUEST_PTR Ptr;
+	ULONG Value;
 };
 
 using SRWLOCK = RTL_SRWLOCK;
@@ -98,6 +100,7 @@ BOOL WINAPI InitializeCriticalSectionAndSpinCount(LPCRITICAL_SECTION lpCriticalS
 void WINAPI DeleteCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 void WINAPI EnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 void WINAPI LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
+BOOL WINAPI TryEnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 BOOL WINAPI InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBOOL fPending, GUEST_PTR *lpContext);
 BOOL WINAPI InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpContext);
 void WINAPI AcquireSRWLockShared(PSRWLOCK SRWLock);
@@ -105,5 +108,6 @@ void WINAPI ReleaseSRWLockShared(PSRWLOCK SRWLock);
 void WINAPI AcquireSRWLockExclusive(PSRWLOCK SRWLock);
 void WINAPI ReleaseSRWLockExclusive(PSRWLOCK SRWLock);
 BOOLEAN WINAPI TryAcquireSRWLockExclusive(PSRWLOCK SRWLock);
+BOOLEAN WINAPI TryAcquireSRWLockShared(PSRWLOCK SRWLock);
 
 } // namespace kernel32

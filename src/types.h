@@ -52,7 +52,7 @@ constexpr GUEST_PTR GUEST_NULL = 0;
 inline GUEST_PTR toGuestPtr(const void *addr) {
 	unsigned long long addr64 = reinterpret_cast<unsigned long long>(addr);
 	if (addr64 > 0xFFFFFFFF)
-		__builtin_unreachable();
+		__builtin_trap();
 	return static_cast<GUEST_PTR>(addr64);
 }
 #else
@@ -149,6 +149,7 @@ template <typename T = void> struct guest_ptr {
 		return *this;
 	}
 	[[nodiscard]] T *get() const { return reinterpret_cast<T *>(ptr); }
+	[[nodiscard]] GUEST_PTR get_guest() const { return ptr; }
 	T &operator*() const { return *reinterpret_cast<T *>(ptr); }
 	T *operator->() const { return reinterpret_cast<T *>(ptr); }
 	operator T *() const { return reinterpret_cast<T *>(ptr); } // NOLINT(google-explicit-constructor)
@@ -172,6 +173,7 @@ template <> struct guest_ptr<void> {
 		return *this;
 	}
 	[[nodiscard]] void *get() const { return reinterpret_cast<void *>(ptr); }
+	[[nodiscard]] GUEST_PTR get_guest() const { return ptr; }
 	operator bool() const { return ptr != GUEST_NULL; } // NOLINT(google-explicit-constructor)
 };
 

@@ -43,7 +43,7 @@ constexpr uintptr_t kHeapMax = 0x60000000UL;		// 1 GiB
 constexpr uintptr_t kTopDownStart = 0x7D000000UL;
 constexpr uintptr_t kTwoGB = 0x7E000000UL;
 #else
-constexpr uintptr_t kTopDownStart = 0x7F000000UL;	// Just below 2GB
+constexpr uintptr_t kTopDownStart = 0x7F000000UL; // Just below 2GB
 constexpr uintptr_t kTwoGB = 0x80000000UL;
 #endif
 constexpr std::size_t kGuestArenaSize = 512ULL * 1024ULL * 1024ULL; // 512 MiB
@@ -64,8 +64,6 @@ std::once_flag g_initOnce;
 
 std::mutex g_mappingsMutex;
 std::map<uintptr_t, MEMORY_BASIC_INFORMATION> *g_mappings = nullptr;
-
-std::mutex g_virtualAllocMutex;
 
 struct VirtualAllocation {
 	uintptr_t base = 0;
@@ -188,7 +186,7 @@ void markDecommitted(VirtualAllocation &region, uintptr_t start, std::size_t len
 	}
 }
 
-bool overlapsExistingMapping(uintptr_t base, std::size_t length) {
+bool overlapsExistingMappingLocked(uintptr_t base, std::size_t length) {
 	if (g_mappings == nullptr || length == 0) {
 		return false;
 	}
@@ -196,7 +194,6 @@ bool overlapsExistingMapping(uintptr_t base, std::size_t length) {
 		return true;
 	}
 	uintptr_t end = base + length;
-	std::lock_guard guard(g_mappingsMutex);
 	auto it = g_mappings->upper_bound(base);
 	if (it != g_mappings->begin()) {
 		--it;
@@ -219,8 +216,8 @@ bool overlapsExistingMapping(uintptr_t base, std::size_t length) {
 	return false;
 }
 
-void recordGuestMapping(uintptr_t base, std::size_t size, DWORD allocationProtect, DWORD state, DWORD protect,
-						DWORD type) {
+void recordGuestMappingLocked(uintptr_t base, std::size_t size, DWORD allocationProtect, DWORD state, DWORD protect,
+							  DWORD type) {
 	if (g_mappings == nullptr) {
 		return;
 	}
@@ -232,15 +229,13 @@ void recordGuestMapping(uintptr_t base, std::size_t size, DWORD allocationProtec
 	info.State = state;
 	info.Protect = protect;
 	info.Type = type;
-	std::lock_guard guard(g_mappingsMutex);
 	(*g_mappings)[base] = info;
 }
 
-void eraseGuestMapping(uintptr_t base) {
+void eraseGuestMappingLocked(uintptr_t base) {
 	if (g_mappings == nullptr) {
 		return;
 	}
-	std::lock_guard guard(g_mappingsMutex);
 	g_mappings->erase(base);
 }
 
@@ -282,7 +277,7 @@ wibo::heap::VmStatus vmStatusFromErrno(int err) {
 	}
 }
 
-void refreshGuestMapping(const VirtualAllocation &region) {
+void refreshGuestMappingLocked(const VirtualAllocation &region) {
 	if (g_mappings == nullptr) {
 		return;
 	}
@@ -312,10 +307,10 @@ void refreshGuestMapping(const VirtualAllocation &region) {
 		}
 	}
 	DWORD allocationProtect = region.allocationProtect != 0 ? region.allocationProtect : PAGE_NOACCESS;
-	recordGuestMapping(region.base, region.size, allocationProtect, state, protect, region.type);
+	recordGuestMappingLocked(region.base, region.size, allocationProtect, state, protect, region.type);
 }
 
-bool mapAtAddr(uintptr_t addr, std::size_t size, const char *name, void **outPtr) {
+bool mapAtAddrLocked(uintptr_t addr, std::size_t size, const char *name, void **outPtr) {
 	void *p = mmap(reinterpret_cast<void *>(addr), size, PROT_READ | PROT_WRITE,
 				   MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
 	if (p == MAP_FAILED) {
@@ -326,16 +321,16 @@ bool mapAtAddr(uintptr_t addr, std::size_t size, const char *name, void **outPtr
 		prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, addr, size, name);
 	}
 #else
-    (void)name;
+	(void)name;
 #endif
-	recordGuestMapping(addr, size, PAGE_READWRITE, MEM_RESERVE, PAGE_READWRITE, MEM_PRIVATE);
+	recordGuestMappingLocked(addr, size, PAGE_READWRITE, MEM_RESERVE, PAGE_READWRITE, MEM_PRIVATE);
 	if (outPtr) {
 		*outPtr = p;
 	}
 	return true;
 }
 
-bool findFreeMapping(std::size_t size, uintptr_t minAddr, uintptr_t maxAddr, bool preferTop, uintptr_t *outAddr) {
+bool findFreeMappingLocked(std::size_t size, uintptr_t minAddr, uintptr_t maxAddr, bool preferTop, uintptr_t *outAddr) {
 	if (outAddr == nullptr || size == 0 || g_mappings == nullptr) {
 		return false;
 	}
@@ -349,8 +344,6 @@ bool findFreeMapping(std::size_t size, uintptr_t minAddr, uintptr_t maxAddr, boo
 	if (searchMax <= searchMin || alignedSize > (searchMax - searchMin)) {
 		return false;
 	}
-
-	std::lock_guard<std::mutex> guard(g_mappingsMutex);
 
 	auto tryGap = [&](uintptr_t gapStart, uintptr_t gapEnd, uintptr_t &result) -> bool {
 		if (gapEnd <= gapStart) {
@@ -428,13 +421,14 @@ bool findFreeMapping(std::size_t size, uintptr_t minAddr, uintptr_t maxAddr, boo
 
 bool mapArena(std::size_t size, uintptr_t minAddr, uintptr_t maxAddr, bool preferTop, const char *name,
 			  ArenaRange &out) {
+	std::lock_guard<std::mutex> guard(g_mappingsMutex);
 	const std::size_t ps = wibo::heap::systemPageSize();
 	size = (size + ps - 1) & ~(ps - 1);
 	uintptr_t cand = 0;
 	void *p = nullptr;
-	if (findFreeMapping(size, minAddr, maxAddr, preferTop, &cand)) {
+	if (findFreeMappingLocked(size, minAddr, maxAddr, preferTop, &cand)) {
 		DEBUG_LOG("heap: found free mapping at %lx\n", cand);
-		if (mapAtAddr(cand, size, name, &p)) {
+		if (mapAtAddrLocked(cand, size, name, &p)) {
 			out.start = p;
 			out.size = size;
 			return true;
@@ -565,12 +559,13 @@ VmStatus virtualReset(void *baseAddress, std::size_t regionSize) {
 	if (length == 0) {
 		return VmStatus::InvalidParameter;
 	}
-	std::unique_lock allocLock(g_virtualAllocMutex);
-	VirtualAllocation *region = lookupRegion(start);
-	if (!region || !rangeWithinRegion(*region, start, length)) {
-		return VmStatus::InvalidAddress;
+	{
+		std::lock_guard allocLock(g_mappingsMutex);
+		VirtualAllocation *region = lookupRegion(start);
+		if (!region || !rangeWithinRegion(*region, start, length)) {
+			return VmStatus::InvalidAddress;
+		}
 	}
-	allocLock.unlock();
 #ifdef MADV_FREE
 	int advice = MADV_FREE;
 #else
@@ -632,7 +627,7 @@ VmStatus virtualAlloc(void **baseAddress, std::size_t *regionSize, DWORD allocat
 		return VmStatus::InvalidParameter;
 	}
 
-	std::unique_lock allocLock(g_virtualAllocMutex);
+	std::unique_lock allocLock(g_mappingsMutex);
 
 	if (reserve) {
 		uintptr_t base = 0;
@@ -656,7 +651,7 @@ VmStatus virtualAlloc(void **baseAddress, std::size_t *regionSize, DWORD allocat
 			if (base >= kTwoGB || (base + length) > kTwoGB) {
 				return VmStatus::InvalidAddress;
 			}
-			if (overlapsExistingMapping(base, length)) {
+			if (overlapsExistingMappingLocked(base, length)) {
 				return VmStatus::InvalidAddress;
 			}
 		} else {
@@ -665,7 +660,7 @@ VmStatus virtualAlloc(void **baseAddress, std::size_t *regionSize, DWORD allocat
 				return VmStatus::InvalidParameter;
 			}
 			length = static_cast<std::size_t>(aligned);
-			if (!findFreeMapping(length, kLowMemoryStart, kTopDownStart, topDown, &base)) {
+			if (!findFreeMappingLocked(length, kLowMemoryStart, kTopDownStart, topDown, &base)) {
 				return VmStatus::NoMemory;
 			}
 			if (base >= kTwoGB || (base + length) > kTwoGB) {
@@ -697,7 +692,7 @@ VmStatus virtualAlloc(void **baseAddress, std::size_t *regionSize, DWORD allocat
 		allocation.type = type;
 		allocation.pageProtect.assign(length / pageSize, commit ? protect : 0);
 		g_virtualAllocations[actualBase] = std::move(allocation);
-		refreshGuestMapping(g_virtualAllocations[actualBase]);
+		refreshGuestMappingLocked(g_virtualAllocations[actualBase]);
 
 		if (baseAddress) {
 			*baseAddress = reinterpret_cast<void *>(actualBase);
@@ -761,7 +756,7 @@ VmStatus virtualAlloc(void **baseAddress, std::size_t *regionSize, DWORD allocat
 		markCommitted(*region, run.first, run.second, protect);
 	}
 
-	refreshGuestMapping(*region);
+	refreshGuestMappingLocked(*region);
 
 	if (baseAddress) {
 		*baseAddress = reinterpret_cast<void *>(start);
@@ -785,7 +780,7 @@ VmStatus virtualFree(void *baseAddress, std::size_t regionSize, DWORD freeType) 
 	}
 
 	const uintptr_t pageSize = wibo::heap::systemPageSize();
-	std::unique_lock allocLock(g_virtualAllocMutex);
+	std::lock_guard lk(g_mappingsMutex);
 
 	if (release) {
 		uintptr_t base = reinterpret_cast<uintptr_t>(baseAddress);
@@ -802,7 +797,6 @@ VmStatus virtualFree(void *baseAddress, std::size_t regionSize, DWORD freeType) 
 		}
 		std::size_t length = it->second.size;
 		g_virtualAllocations.erase(it);
-		allocLock.unlock();
 		// Replace with PROT_NONE + MAP_NORESERVE to release physical memory
 		void *res = mmap(reinterpret_cast<void *>(base), length, PROT_NONE,
 						 MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED | MAP_NORESERVE, -1, 0);
@@ -812,7 +806,7 @@ VmStatus virtualFree(void *baseAddress, std::size_t regionSize, DWORD freeType) 
 #ifdef __linux__
 		prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, base, length, "wibo reserved");
 #endif
-		eraseGuestMapping(base);
+		eraseGuestMappingLocked(base);
 		return VmStatus::Success;
 	}
 
@@ -852,7 +846,7 @@ VmStatus virtualFree(void *baseAddress, std::size_t regionSize, DWORD freeType) 
 	prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, res, length, "wibo reserved");
 #endif
 	markDecommitted(region, start, length);
-	refreshGuestMapping(region);
+	refreshGuestMappingLocked(region);
 	return VmStatus::Success;
 }
 
@@ -869,7 +863,7 @@ VmStatus virtualProtect(void *baseAddress, std::size_t regionSize, DWORD newProt
 		return VmStatus::InvalidParameter;
 	}
 
-	std::unique_lock allocLock(g_virtualAllocMutex);
+	std::unique_lock allocLock(g_mappingsMutex);
 	VirtualAllocation *region = lookupRegion(start);
 	if (!region || !rangeWithinRegion(*region, start, static_cast<std::size_t>(end - start))) {
 		return VmStatus::InvalidAddress;
@@ -898,7 +892,8 @@ VmStatus virtualProtect(void *baseAddress, std::size_t regionSize, DWORD newProt
 	for (std::size_t i = 0; i < pageCount; ++i) {
 		region->pageProtect[firstPage + i] = newProtect;
 	}
-	refreshGuestMapping(*region);
+	refreshGuestMappingLocked(*region);
+	allocLock.unlock();
 
 	if (oldProtect) {
 		*oldProtect = previousProtect;
@@ -918,7 +913,7 @@ VmStatus virtualQuery(const void *address, MEMORY_BASIC_INFORMATION *outInfo) {
 	}
 	uintptr_t pageBase = alignDown(request, pageSize);
 
-	std::unique_lock allocLock(g_virtualAllocMutex);
+	std::unique_lock allocLock(g_mappingsMutex);
 	VirtualAllocation *region = lookupRegion(pageBase);
 	if (!region) {
 		uintptr_t regionStart = pageBase;
@@ -1013,10 +1008,13 @@ VmStatus reserveViewRange(std::size_t regionSize, uintptr_t minAddr, uintptr_t m
 		return VmStatus::InvalidParameter;
 	}
 	uintptr_t candidate = 0;
-	if (!findFreeMapping(aligned, minAddr, maxAddr, false, &candidate)) {
-		return VmStatus::NoMemory;
+	{
+		std::lock_guard allocLock(g_mappingsMutex);
+		if (!findFreeMappingLocked(aligned, minAddr, maxAddr, false, &candidate)) {
+			return VmStatus::NoMemory;
+		}
+		recordGuestMappingLocked(candidate, aligned, PAGE_NOACCESS, MEM_RESERVE, PAGE_NOACCESS, MEM_MAPPED);
 	}
-	recordGuestMapping(candidate, aligned, PAGE_NOACCESS, MEM_RESERVE, PAGE_NOACCESS, MEM_MAPPED);
 	*baseAddress = reinterpret_cast<void *>(candidate);
 	return VmStatus::Success;
 }
@@ -1027,15 +1025,17 @@ void registerViewRange(void *baseAddress, std::size_t regionSize, DWORD allocati
 	}
 	const uintptr_t pageSize = wibo::heap::systemPageSize();
 	std::size_t aligned = static_cast<std::size_t>(alignUp(static_cast<uintptr_t>(regionSize), pageSize));
-	recordGuestMapping(reinterpret_cast<uintptr_t>(baseAddress), aligned, allocationProtect, MEM_COMMIT, protect,
-					   MEM_MAPPED);
+	std::lock_guard allocLock(g_mappingsMutex);
+	recordGuestMappingLocked(reinterpret_cast<uintptr_t>(baseAddress), aligned, allocationProtect, MEM_COMMIT, protect,
+							 MEM_MAPPED);
 }
 
 void releaseViewRange(void *baseAddress) {
 	if (!baseAddress) {
 		return;
 	}
-	eraseGuestMapping(reinterpret_cast<uintptr_t>(baseAddress));
+	std::lock_guard allocLock(g_mappingsMutex);
+	eraseGuestMappingLocked(reinterpret_cast<uintptr_t>(baseAddress));
 }
 
 bool reserveGuestStack(std::size_t stackSizeBytes, void **outStackLimit, void **outStackBase) {
@@ -1044,7 +1044,7 @@ bool reserveGuestStack(std::size_t stackSizeBytes, void **outStackLimit, void **
 
 	ArenaRange r;
 	if (!mapArena(total, kTopDownStart, kTwoGB, true, "wibo guest stack", r)) {
-		DEBUG_LOG("heap: reserveGuestStack: failed to map low region\n");
+		DEBUG_LOG("heap: reserveGuestStack: failed to map region\n");
 		return false;
 	}
 
@@ -1110,7 +1110,7 @@ static size_t readMaps(char *buffer) {
 	char *cur = buffer;
 	char *bufferEnd = buffer + MAPS_BUFFER_SIZE;
 	while (cur < bufferEnd) {
-		int ret = read(fd, cur, static_cast<size_t>(bufferEnd - cur));
+		ssize_t ret = read(fd, cur, static_cast<size_t>(bufferEnd - cur));
 		if (ret == -1) {
 			if (errno == EINTR) {
 				continue;
@@ -1157,8 +1157,10 @@ static size_t blockLower2GB(MEMORY_BASIC_INFORMATION mappings[MAX_NUM_MAPPINGS])
 		}
 
 		uintptr_t mapStart = 0;
-		const char *lineEnd = procLine.data() + procLine.size();
-		auto result = std::from_chars(procLine.data(), lineEnd, mapStart, 16);
+		const char *lineStart = procLine.data();
+		const char *lineEnd = procLine.data() + newline;
+		procLine = procLine.substr(newline + 1);
+		auto result = std::from_chars(lineStart, lineEnd, mapStart, 16);
 		if (result.ec != std::errc()) {
 			break;
 		}
@@ -1169,6 +1171,12 @@ static size_t blockLower2GB(MEMORY_BASIC_INFORMATION mappings[MAX_NUM_MAPPINGS])
 		result = std::from_chars(result.ptr + 1, lineEnd, mapEnd, 16);
 		if (result.ec != std::errc()) {
 			break;
+		}
+		if (mapStart >= kTwoGB) {
+			break;
+		}
+		if (mapStart + mapEnd > kTwoGB) {
+			mapEnd = kTwoGB - mapStart;
 		}
 		if (mapStart == mapEnd || mapStart > mapEnd) {
 			continue;
@@ -1223,7 +1231,6 @@ static size_t blockLower2GB(MEMORY_BASIC_INFORMATION mappings[MAX_NUM_MAPPINGS])
 		}
 
 		lastMapEnd = mapEnd;
-		procLine = procLine.substr(newline + 1);
 	}
 
 	return numMappings;
@@ -1235,8 +1242,7 @@ __attribute__((constructor(101)))
 #else
 __attribute__((constructor))
 #endif
-__attribute__((used)) static void
-wibo_heap_constructor() {
+__attribute__((used)) static void wibo_heap_constructor() {
 #ifndef __APPLE__
 	MEMORY_BASIC_INFORMATION mappings[MAX_NUM_MAPPINGS];
 	memset(mappings, 0, sizeof(mappings));

@@ -184,20 +184,11 @@ LockedRegistry registry() {
 	if (!reg.initialized) {
 		reg.initialized = true;
 		const wibo::ModuleStub *builtins[] = {
-			&lib_advapi32,
-			&lib_bcrypt,
-			&lib_kernel32,
-			&lib_lmgr,
-			&lib_mscoree,
+			&lib_advapi32, &lib_bcrypt, &lib_kernel32, &lib_lmgr,	   &lib_mscoree, &lib_ntdll,
+			&lib_ole32,	   &lib_rpcrt4, &lib_user32,   &lib_vcruntime, &lib_version,
 #if WIBO_HAS_MSVCRT
 			&lib_msvcrt,
 #endif
-			&lib_ntdll,
-			&lib_ole32,
-			&lib_rpcrt4,
-			&lib_user32,
-			&lib_vcruntime,
-			&lib_version,
 			nullptr,
 		};
 		for (const wibo::ModuleStub **module = builtins; *module; ++module) {
@@ -538,25 +529,16 @@ void registerBuiltinModule(ModuleRegistry &reg, const wibo::ModuleStub *module) 
 		return;
 	}
 
-	std::unique_ptr<wibo::Executable> executable;
-	if (!module->dllData.empty()) {
-		executable = std::make_unique<wibo::Executable>();
-		if (!executable->loadPE(module->dllData, true)) {
-			DEBUG_LOG("  loadPE failed for %s\n", module->names[0] ? module->names[0] : "<unnamed builtin>");
-			return;
-		}
-	}
-
 	wibo::ModulePtr entry = std::make_shared<wibo::ModuleInfo>();
 	HANDLE handle = g_nextStubHandle++;
 	g_modules[handle] = entry;
 	entry->handle = handle;
 	entry->moduleStub = module;
-	entry->executable = std::move(executable);
+	entry->executable = nullptr;
 	entry->refCount = UINT_MAX;
 	entry->originalName = module->names[0] ? module->names[0] : "";
 	entry->normalizedName = normalizedBaseKey(parseModuleName(entry->originalName));
-	entry->exportsInitialized = (entry->executable == nullptr);
+	entry->exportsInitialized = false;
 	auto storageKey = storageKeyForBuiltin(entry->normalizedName);
 	auto raw = entry.get();
 	reg.modulesByKey[storageKey] = std::move(entry);
@@ -750,6 +732,15 @@ void ensureExportsInitialized(wibo::ModuleInfo &info) {
 }
 
 bool ensureModuleReady(wibo::ModuleInfo &info) {
+	if (info.moduleStub && !info.moduleStub->dllData.empty() && !info.executable) {
+		DEBUG_LOG("registerBuiltinModule: loading PE for %s\n", info.originalName.c_str());
+		auto executable = std::make_unique<wibo::Executable>();
+		if (!executable->loadPE(info.moduleStub->dllData, true)) {
+			DEBUG_LOG("  loadPE failed for %s\n", info.originalName.c_str());
+			return false;
+		}
+		info.executable = std::move(executable);
+	}
 	ensureExportsInitialized(info);
 	if (!info.executable) {
 		return true;

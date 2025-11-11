@@ -195,7 +195,7 @@ RPC_STATUS WINAPI RpcBindingFree(GUEST_PTR *binding) {
 	if (!binding) {
 		return RPC_S_INVALID_ARG;
 	}
-	RPC_BINDING_HANDLE handle = reinterpret_cast<RPC_BINDING_HANDLE>(fromGuestPtr(*binding));
+	RPC_BINDING_HANDLE handle = fromGuestPtr(*binding);
 	if (!handle) {
 		return RPC_S_INVALID_BINDING;
 	}
@@ -214,7 +214,7 @@ RPC_STATUS WINAPI RpcStringFreeW(GUEST_PTR *string) {
 	if (!string) {
 		return RPC_S_INVALID_ARG;
 	}
-	RPC_WSTR value = reinterpret_cast<RPC_WSTR>(fromGuestPtr(*string));
+	RPC_WSTR value = fromGuestPtr<WCHAR>(*string);
 	if (!value) {
 		return RPC_S_OK;
 	}

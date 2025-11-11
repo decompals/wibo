@@ -11,6 +11,13 @@
       }
     },
     {
+      "name": "gnu-base",
+      "hidden": true,
+      "cacheVariables": {
+        "WIBO_ENABLE_LTO": "OFF"
+      }
+    },
+    {
       "name": "clang-base",
       "hidden": true,
       "cacheVariables": {
@@ -22,7 +29,7 @@
       "name": "debug",
       "displayName": "Debug",
       "description": "Debug build (32-bit Linux)",
-      "inherits": ["ninja-base"],
+      "inherits": ["ninja-base", "gnu-base"],
       "binaryDir": "${sourceDir}/build/debug",
       "condition": {
         "type": "equals",
@@ -54,7 +61,7 @@
       "name": "release",
       "displayName": "Release",
       "description": "Release build (32-bit Linux)",
-      "inherits": ["ninja-base"],
+      "inherits": ["ninja-base", "gnu-base"],
       "binaryDir": "${sourceDir}/build/release",
       "condition": {
         "type": "equals",
@@ -115,7 +122,7 @@
     {
       "name": "debug64",
       "displayName": "Debug (64-bit)",
-      "inherits": ["ninja-base"],
+      "inherits": ["ninja-base", "gnu-base"],
       "binaryDir": "${sourceDir}/build/debug64",
       "condition": {
         "type": "equals",
@@ -130,7 +137,7 @@
     {
       "name": "release64",
       "displayName": "Release (64-bit)",
-      "inherits": ["ninja-base"],
+      "inherits": ["ninja-base", "gnu-base"],
       "binaryDir": "${sourceDir}/build/release64",
       "condition": {
         "type": "equals",

@@ -815,7 +815,7 @@ def emit_cc_thunk64(f: FuncInfo | TypedefInfo, lines: List[str]):
         if sys.platform != "darwin":
             # Restore FS base
             lines.append("\tmov r9, qword ptr [rbx+TEB_FSBASE]")
-            lines.append("\twrfsbase r9")
+            lines.append("\tWRITE_FSBASE r9, rbx")
 
         # Stash guest stack in r10
         lines.append("\tmov r10, rsp")

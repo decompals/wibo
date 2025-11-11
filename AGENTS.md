@@ -21,9 +21,10 @@
 
 ## Shim Implementation Guidelines
 - Target pre-XP behavior; our binaries are old and don't expect modern WinAPI behavior.
-- Use the `microsoft_docs` tools to fetch WinAPI signatures and documentation; always fetch the documentation when working on an API function.
+- Use the `microsoft_docs` tools to fetch WinAPI signatures and documentation; always fetch the documentation when working on an API function. When searching, simply include the function name; nothing else.
 - Create minimal, self-contained repros in `test/` when implementing or debugging APIs; this aids both development and future testing.
 - Add `DEBUG_LOG` calls to trace execution and parameter values; these are invaluable when diagnosing issues with real-world binaries.
+- Add prototypes to the public shim headers (e.g., `dll/kernel32/*.h`), rebuild, and the code generator automatically handles exports.
 
 ## Testing Guidelines
 - Fixture tests live in `test/` and are compiled automatically with `i686-w64-mingw32-gcc`.

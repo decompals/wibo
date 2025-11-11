@@ -1,8 +1,14 @@
 # wibo
 
-A minimal, low-fuss wrapper that can run simple command-line 32-bit Windows binaries on 32-bit Linux - developed to run Windows compilers faster than Wine.
+A minimal, low-fuss wrapper that can run simple command-line 32-bit Windows binaries on Linux and macOS - developed to run Windows compilers faster than Wine.
 
 Download the latest release from [GitHub releases](https://github.com/decompals/wibo/releases) or build from source.
+
+Available builds:
+
+- `wibo-i686`: Linux x86 (static binary)
+- `wibo-x86_64`: Linux x86_64 (static binary, experimental)
+- `wibo-macos`: macOS x86_64 (experimental, Rosetta 2 supported)
 
 ## Building
 
@@ -11,9 +17,16 @@ cmake --preset debug
 cmake --build --preset debug
 ```
 
-This will produce a debug binary at `build/debug/wibo`.
+This will produce an x86 (32-bit) debug Linux binary at `build/debug/wibo`.
 
-Use `--preset release` to produce an optimized binary at `build/release/wibo`.
+Available presets:
+
+- `debug`: Debug Linux x86
+- `release`: Release Linux x86
+- `debug64`: Debug Linux x86_64
+- `release64`: Release Linux x86_64
+- `debug-macos`: Debug macOS x86_64
+- `release-macos`: Release macOS x86_64
 
 ## Usage
 
@@ -64,6 +77,8 @@ wibo -- test.exe a b c
 ## Tests
 
 Self-checking Windows fixtures run through CTest. They require a 32-bit MinGW cross toolchain (`i686-w64-mingw32-gcc` and `i686-w64-mingw32-windres`).
+
+On macOS: use `brew install mingw-w64`.
 
 ```sh
 ctest --preset debug

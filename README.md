@@ -79,4 +79,8 @@ This will cross-compile the fixture executables, run them through `wibo`, and fa
 
 ## License
 
-wibo is licensed under the MIT License. See `LICENSE` for details.
+wibo is licensed under the MIT License. See [`LICENSE`](LICENSE) for details.
+
+Optionally, wibo embeds a custom build of Wine's `msvcrt.dll` from [encounter/winedll](https://github.com/encounter/winedll). To disable, set `-DMSVCRT_DLL=`.
+
+Wine is licensed under the LGPLv2.1+. See [`winedll/LICENSE`](https://github.com/encounter/winedll/blob/main/LICENSE) and [`winedll/COPYING.LIB`](https://github.com/encounter/winedll/blob/main/COPYING.LIB) for details.

@@ -155,11 +155,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - id: debug-macos
+          - id: macos-debug
             display: Debug
             preset: debug-macos
             build_dir: debug
-          - id: release-macos
+          - id: macos-release
             display: Release
             preset: release-macos
             build_dir: release

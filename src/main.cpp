@@ -333,7 +333,7 @@ int main(int argc, char **argv) {
 	wibo::processPeb = peb;
 	wibo::initializeTibStackInfo(tib);
 	if (!wibo::installTibForCurrentThread(tib)) {
-		perror("Failed to install TIB for main thread");
+		perror("Failed to setup x86 segments and TEB");
 		return 1;
 	}
 

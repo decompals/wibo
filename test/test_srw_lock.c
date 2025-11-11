@@ -191,8 +191,8 @@ static void test_try_acquire(void) {
 
 int main(void) {
 	test_shared_readers();
-	// test_exclusive_blocks_shared();
-	// test_shared_then_exclusive();
-	// test_try_acquire();
+	test_exclusive_blocks_shared();
+	test_shared_then_exclusive();
+	test_try_acquire();
 	return 0;
 }

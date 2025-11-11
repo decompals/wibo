@@ -34,31 +34,32 @@
 #ifdef __x86_64__
 
 .macro LJMP32 teb_reg
-#ifdef __APPLE__
-#define m1632 m1632_\@
+#define m64to32 m64to32_\@
 .data
-m1632:
+m64to32:
     .long 1f             # 32-bit code offset
     .long 0              # 32-bit code segment (filled in at runtime)
 .text
     mov r10w, word ptr [\teb_reg+TEB_CS_SEL]
-    mov word ptr [rip+m1632+4], r10w
-    jmp fword ptr [rip+m1632]
-#else
-	jmp fword ptr [rip] # far jump into 32-bit code
-    .long 1f            # 32-bit code offset
-    .word CS_32         # 32-bit code segment
-#endif
+    mov word ptr [rip+m64to32+4], r10w
+    jmp fword ptr [rip+m64to32]
 .code32
 1:
     endbr32
 .endm
 
 .macro LJMP64 teb_reg
-// Annoyingly, we can't assemble this in Intel syntax
-.att_syntax prefix
-    ljmp $CS_64, $1f
-.intel_syntax noprefix
+#define m32to64 m32to64_\@
+.data
+m32to64:
+    .long 1f             # 64-bit code offset
+    .long 0              # 64-bit code segment (filled in at runtime)
+.text
+    push eax
+    mov ax, word ptr [\teb_reg+TEB_HOST_CS_SEL]
+    mov word ptr [m32to64+4], ax
+    pop eax
+    jmp fword ptr [m32to64]
 .code64
 1:
     endbr64

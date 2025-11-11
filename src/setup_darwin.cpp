@@ -98,8 +98,7 @@ bool initializeLdtBitmapLocked() {
 	if (count > kMaxLdtEntries) {
 		DEBUG_LOG("setup_darwin: i386_get_ldt returned too many entries (%d), truncating to %d\n", count,
 				  kMaxLdtEntries);
-		errno = ENOSPC;
-		return false;
+		count = kMaxLdtEntries;
 	}
 	for (int i = 0; i < count; ++i) {
 		markLdtEntryUsed(i);

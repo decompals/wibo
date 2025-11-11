@@ -552,6 +552,7 @@ typedef struct _TEB {
 	void *HostFsBase;
 	void *HostGsBase;
 	bool HasFsGsBase;
+	WORD HostCodeSelector;
 #endif
 } TEB;
 typedef GUEST_PTR PTEB;
@@ -580,6 +581,9 @@ static_assert(offsetof(TEB, HostGsBase) == TEB_GSBASE);
 #endif
 #ifdef TEB_HAS_FSGSBASE
 static_assert(offsetof(TEB, HasFsGsBase) == TEB_HAS_FSGSBASE);
+#endif
+#ifdef TEB_HOST_CS_SEL
+static_assert(offsetof(TEB, HostCodeSelector) == TEB_HOST_CS_SEL);
 #endif
 
 typedef struct _MEMORY_BASIC_INFORMATION {

@@ -110,7 +110,7 @@ void threadCleanup(void *param) {
 	}
 	g_currentThreadObject = nullptr;
 	wibo::notifyDllThreadDetach();
-	currentThreadTeb = nullptr;
+	wibo::uninstallTebForCurrentThread();
 	// TODO: mark mutexes owned by this thread as abandoned
 	obj->cv.notify_all();
 	obj->notifyWaiters(false);

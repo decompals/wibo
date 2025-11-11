@@ -8,16 +8,30 @@
 
 #if defined(__x86_64__) && defined(__linux__)
 
-# int tebThreadSetup64(int entryNumber, TEB *teb)
-ASM_GLOBAL(tebThreadSetup64, @function)
+# void installSelectors(TEB *teb)
+# Installs ds/es selectors in 32-bit mode
+ASM_GLOBAL(installSelectors, @function)
+	mov r8, rsp                             # save host stack
+	mov rdx, qword ptr [rdi+TEB_SP]         # fetch guest stack
+	mov ax, cs                              # fetch host code segment selector
+	mov word ptr [rdi+TEB_HOST_CS_SEL], ax  # store host code segment selector
+	mov ax, word ptr [rdi+TEB_DS_SEL]       # user data segment selector
+	LJMP32 rdi                              # far jump into 32-bit code
+	mov ds, ax                              # setup data segment
+	mov es, ax                              # setup extra segment
+	mov esp, edx                            # switch to guest stack
+	LJMP64 edi                              # far jump into 64-bit code
+	mov rsp, r8                             # switch to host stack
+	ret
+ASM_END(installSelectors)
+
+# int setThreadArea64(int entryNumber, TEB *teb)
+# Runs syscall SYS_set_thread_area in 32-bit mode
+ASM_GLOBAL(setThreadArea64, @function)
     push rbx                             # save rbx
 	mov r8, rsp                          # save host stack
-	rdfsbase r9                          # read host FS base
 	mov rdx, qword ptr [rsi+TEB_SP]      # fetch guest stack
 	LJMP32 rsi                           # far jump into 32-bit code
-	mov ax, 0x2b                         # user data segment (Linux)
-	mov ds, ax                           # setup data segment
-	mov es, ax                           # setup extra segment
 	mov esp, edx                         # switch to guest stack
 	sub esp, 0x10                        # sizeof(user_desc)
 	mov dword ptr [esp], edi             # entry_number (arg 0)
@@ -35,10 +49,9 @@ ASM_GLOBAL(tebThreadSetup64, @function)
 	LJMP64 esi                           # far jump into 64-bit code
     cdqe                                 # sign-extend eax to rax
 	mov rsp, r8                          # switch to host stack
-	wrfsbase r9                          # restore host FS base
 	pop rbx                              # restore rbx
 	ret
-ASM_END(tebThreadSetup64)
+ASM_END(setThreadArea64)
 
 #endif // defined(__x86_64__) && defined(__linux__)
 

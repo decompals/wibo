@@ -197,14 +197,14 @@ inline void platformNotifyAddress(void *address, size_t, bool wakeOne) {
 	}
 }
 
-#elif defined(__linux__)
+#else
 
 template <typename T> void platformWaitIndefinite(T volatile *address, T expected) {
-	std::atomic_ref<T> ref(*address);
+	std::atomic_ref<T> ref(*const_cast<T *>(address));
 	ref.wait(expected, std::memory_order_relaxed);
 }
 
-template <typename T> void linuxNotify(void *address, bool wakeOne) {
+template <typename T> void atomicNotify(void *address, bool wakeOne) {
 	auto *typed = reinterpret_cast<T *>(address);
 	std::atomic_ref<T> ref(*typed);
 	if (wakeOne) {
@@ -217,31 +217,21 @@ template <typename T> void linuxNotify(void *address, bool wakeOne) {
 inline void platformNotifyAddress(void *address, size_t size, bool wakeOne) {
 	switch (size) {
 	case 1:
-		linuxNotify<uint8_t>(address, wakeOne);
+		atomicNotify<uint8_t>(address, wakeOne);
 		break;
 	case 2:
-		linuxNotify<uint16_t>(address, wakeOne);
+		atomicNotify<uint16_t>(address, wakeOne);
 		break;
 	case 4:
-		linuxNotify<uint32_t>(address, wakeOne);
+		atomicNotify<uint32_t>(address, wakeOne);
 		break;
 	case 8:
-		linuxNotify<uint64_t>(address, wakeOne);
+		atomicNotify<uint64_t>(address, wakeOne);
 		break;
 	default:
 		break;
 	}
 }
-
-#else
-
-template <typename T> void platformWaitIndefinite(T volatile *address, T expected) {
-	while (__atomic_load_n(address, __ATOMIC_ACQUIRE) == expected) {
-		std::this_thread::sleep_for(std::chrono::milliseconds(1));
-	}
-}
-
-inline void platformNotifyAddress(void *, size_t, bool) {}
 
 #endif
 

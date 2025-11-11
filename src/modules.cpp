@@ -46,7 +46,7 @@ template <size_t Index> void stubThunk();
 
 namespace {
 
-const std::array<std::pair<std::string_view, std::string_view>, 17> kApiSet = {
+const std::array<std::pair<std::string_view, std::string_view>, 18> kApiSet = {
 	std::pair{"api-ms-win-core-crt-l1-1-0.dll", "msvcrt.dll"},
 	std::pair{"api-ms-win-core-crt-l2-1-0.dll", "msvcrt.dll"},
 	std::pair{"api-ms-win-crt-conio-l1-1-0.dll", "msvcrt.dll"},
@@ -64,6 +64,7 @@ const std::array<std::pair<std::string_view, std::string_view>, 17> kApiSet = {
 	std::pair{"api-ms-win-crt-string-l1-1-0.dll", "ucrtbase.dll"},
 	std::pair{"api-ms-win-crt-time-l1-1-0.dll", "ucrtbase.dll"},
 	std::pair{"api-ms-win-crt-utility-l1-1-0.dll", "ucrtbase.dll"},
+	std::pair{"api-ms-win-core-synch-l1-2-0.dll", "kernelbase.dll"},
 };
 
 constexpr DWORD DLL_PROCESS_DETACH = 0;

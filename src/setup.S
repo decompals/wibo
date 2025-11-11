@@ -28,7 +28,7 @@ ASM_END(installSelectors)
 # int setThreadArea64(int entryNumber, TEB *teb)
 # Runs syscall SYS_set_thread_area in 32-bit mode
 ASM_GLOBAL(setThreadArea64, @function)
-    push rbx                             # save rbx
+	push rbx                             # save rbx
 	mov r8, rsp                          # save host stack
 	mov rdx, qword ptr [rsi+TEB_SP]      # fetch guest stack
 	LJMP32 rsi                           # far jump into 32-bit code
@@ -47,7 +47,7 @@ ASM_GLOBAL(setThreadArea64, @function)
 1:
 	add esp, 0x10                        # cleanup stack
 	LJMP64 esi                           # far jump into 64-bit code
-    cdqe                                 # sign-extend eax to rax
+	cdqe                                 # sign-extend eax to rax
 	mov rsp, r8                          # switch to host stack
 	pop rbx                              # restore rbx
 	ret
@@ -59,15 +59,17 @@ ASM_END(setThreadArea64)
 
 # bool installSelectors(TEB *teb)
 ASM_GLOBAL(installSelectors, @function)
-    mov ax, word ptr [rdi+TEB_DS_SEL]    # fetch data segment selector
-    mov dx, word ptr [rdi+TEB_FS_SEL]    # fetch fs selector
-    LJMP32 rdi                           # far jump into 32-bit code (sets cs)
-    mov ds, ax                           # setup data segment
-    mov es, ax                           # setup extra segment
-    mov fs, dx                           # setup fs segment
-    LJMP64 edi                           # far jump into 64-bit code
-    mov rax, 1                           # return true
-    ret
+	mov ax, cs                              # fetch host code segment selector
+	mov word ptr [rdi+TEB_HOST_CS_SEL], ax  # store host code segment selector
+	mov ax, word ptr [rdi+TEB_DS_SEL]       # fetch data segment selector
+	mov dx, word ptr [rdi+TEB_FS_SEL]       # fetch fs selector
+	LJMP32 rdi                              # far jump into 32-bit code (sets cs)
+	mov ds, ax                              # setup data segment
+	mov es, ax                              # setup extra segment
+	mov fs, dx                              # setup fs segment
+	LJMP64 edi                              # far jump into 64-bit code
+	mov rax, 1                              # return true
+	ret
 ASM_END(installSelectors)
 
 #endif
@@ -80,10 +82,10 @@ ASM_GLOBAL(STUB_THUNK_SYMBOL, @function)
 #define STUB_THUNK_SYMBOL _Z9stubThunkILj\()\number\()EEvv
 ASM_GLOBAL(STUB_THUNK_SYMBOL, @function)
 #endif
-    pop eax
-    push \number
-    push eax
-    jmp SYMBOL_NAME(thunk_entry_stubBase)
+	pop eax
+	push \number
+	push eax
+	jmp SYMBOL_NAME(thunk_entry_stubBase)
 ASM_END(STUB_THUNK_SYMBOL)
 .endm
 

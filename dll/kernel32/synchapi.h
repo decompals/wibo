@@ -109,5 +109,8 @@ void WINAPI AcquireSRWLockExclusive(PSRWLOCK SRWLock);
 void WINAPI ReleaseSRWLockExclusive(PSRWLOCK SRWLock);
 BOOLEAN WINAPI TryAcquireSRWLockExclusive(PSRWLOCK SRWLock);
 BOOLEAN WINAPI TryAcquireSRWLockShared(PSRWLOCK SRWLock);
+BOOL WINAPI WaitOnAddress(volatile VOID *Address, PVOID CompareAddress, SIZE_T AddressSize, DWORD dwMilliseconds);
+void WINAPI WakeByAddressSingle(PVOID Address);
+void WINAPI WakeByAddressAll(PVOID Address);
 
 } // namespace kernel32

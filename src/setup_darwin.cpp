@@ -29,6 +29,13 @@ std::array<uint32_t, kMaxLdtEntries / kBitsPerWord> g_ldtBitmap{};
 bool g_ldtBitmapInitialized = false;
 int g_ldtHint = 1;
 
+inline ldt_entry newLdtEntry() {
+	ldt_entry entry; // NOLINT(cppcoreguidelines-pro-type-member-init)
+	// Must memset to zero to avoid uninitialized padding bytes
+	std::memset(&entry, 0, sizeof(ldt_entry));
+	return entry;
+}
+
 inline ldt_entry createLdtEntry(uint32_t base, uint32_t size, bool code) {
 	uint32_t limit;
 	uint8_t granular;
@@ -39,9 +46,7 @@ inline ldt_entry createLdtEntry(uint32_t base, uint32_t size, bool code) {
 		limit = size - 1;
 		granular = DESC_GRAN_BYTE;
 	}
-	ldt_entry entry; // NOLINT(cppcoreguidelines-pro-type-member-init)
-	// Must memset to zero to avoid uninitialized padding bytes
-	std::memset(&entry, 0, sizeof(ldt_entry));
+	ldt_entry entry = newLdtEntry();
 	entry.code.limit00 = static_cast<uint16_t>(limit);
 	entry.code.base00 = static_cast<uint16_t>(base);
 	entry.code.base16 = static_cast<uint8_t>(base >> 16);
@@ -228,7 +233,7 @@ bool tebThreadSetup(TEB *teb) {
 		return false;
 	}
 	teb->CurrentFsSelector = createSelector(entryNumber);
-	DEBUG_LOG("Installing cs %d, ds %d, fs %d\n", teb->CodeSelector, teb->DataSelector, teb->CurrentFsSelector);
+	DEBUG_LOG("setup_darwin: Installing cs %d, ds %d, fs %d\n", teb->CodeSelector, teb->DataSelector, teb->CurrentFsSelector);
 	installSelectors(teb);
 	return true;
 }
@@ -244,7 +249,8 @@ bool tebThreadTeardown(TEB *teb) {
 		return true;
 	}
 	int entryNumber = selector >> 3;
-	int ret = i386_set_ldt(entryNumber, nullptr, 1);
+	ldt_entry entry = newLdtEntry();
+	int ret = i386_set_ldt(entryNumber, &entry, 1);
 	if (ret < 0) {
 		return false;
 	}

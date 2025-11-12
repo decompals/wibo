@@ -12,14 +12,13 @@
 # Installs ds/es selectors in 32-bit mode
 ASM_GLOBAL(installSelectors, @function)
 	mov r8, rsp                             # save host stack
-	mov rdx, qword ptr [rdi+TEB_SP]         # fetch guest stack
+	mov rsp, qword ptr [rdi+TEB_SP]         # switch to guest stack
 	mov ax, cs                              # fetch host code segment selector
 	mov word ptr [rdi+TEB_HOST_CS_SEL], ax  # store host code segment selector
 	mov ax, word ptr [rdi+TEB_DS_SEL]       # user data segment selector
 	LJMP32 rdi                              # far jump into 32-bit code
 	mov ds, ax                              # setup data segment
 	mov es, ax                              # setup extra segment
-	mov esp, edx                            # switch to guest stack
 	LJMP64 edi                              # far jump into 64-bit code
 	mov rsp, r8                             # switch to host stack
 	ret
@@ -30,9 +29,8 @@ ASM_END(installSelectors)
 ASM_GLOBAL(setThreadArea64, @function)
 	push rbx                             # save rbx
 	mov r8, rsp                          # save host stack
-	mov rdx, qword ptr [rsi+TEB_SP]      # fetch guest stack
+	mov rsp, qword ptr [rsi+TEB_SP]      # switch to guest stack
 	LJMP32 rsi                           # far jump into 32-bit code
-	mov esp, edx                         # switch to guest stack
 	sub esp, 0x10                        # sizeof(user_desc)
 	mov dword ptr [esp], edi             # entry_number (arg 0)
 	mov dword ptr [esp+4], esi           # base_addr (arg 1)
@@ -59,6 +57,8 @@ ASM_END(setThreadArea64)
 
 # bool installSelectors(TEB *teb)
 ASM_GLOBAL(installSelectors, @function)
+	mov r8, rsp                             # save host stack
+	mov rsp, qword ptr [rsi+TEB_SP]         # fetch guest stack
 	mov ax, cs                              # fetch host code segment selector
 	mov word ptr [rdi+TEB_HOST_CS_SEL], ax  # store host code segment selector
 	mov ax, word ptr [rdi+TEB_DS_SEL]       # fetch data segment selector
@@ -68,6 +68,7 @@ ASM_GLOBAL(installSelectors, @function)
 	mov es, ax                              # setup extra segment
 	mov fs, dx                              # setup fs segment
 	LJMP64 edi                              # far jump into 64-bit code
+	mov rsp, r8                             # switch to host stack
 	mov rax, 1                              # return true
 	ret
 ASM_END(installSelectors)

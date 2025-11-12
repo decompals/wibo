@@ -206,7 +206,7 @@ HGLOBAL WINAPI LoadResource(HMODULE hModule, HRSRC hResInfo) {
 LPVOID WINAPI LockResource(HGLOBAL hResData) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("LockResource(%p)\n", hResData);
-	return (LPVOID)hResData;
+	return fromGuestPtr(hResData);
 }
 
 DWORD WINAPI SizeofResource(HMODULE hModule, HRSRC hResInfo) {

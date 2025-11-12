@@ -74,8 +74,9 @@ GUEST_PTR WINAPI GetCommandLineW() {
 
 HANDLE WINAPI GetStdHandle(DWORD nStdHandle) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("GetStdHandle(%d)\n", nStdHandle);
-	return files::getStdHandle(nStdHandle);
+	HANDLE handle = files::getStdHandle(nStdHandle);
+	DEBUG_LOG("GetStdHandle(%d) -> %p\n", nStdHandle, handle);
+	return handle;
 }
 
 BOOL WINAPI SetStdHandle(DWORD nStdHandle, HANDLE hHandle) {
@@ -163,7 +164,7 @@ BOOL WINAPI FreeEnvironmentStringsA(LPCH penv) {
 		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
-	free(penv);
+	wibo::heap::guestFree(penv);
 	return TRUE;
 }
 
@@ -174,7 +175,7 @@ BOOL WINAPI FreeEnvironmentStringsW(LPWCH penv) {
 		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
-	free(penv);
+	wibo::heap::guestFree(penv);
 	return TRUE;
 }
 

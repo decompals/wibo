@@ -65,7 +65,7 @@ void wibo::destroyTib(TEB *tibPtr) {
 		return;
 	}
 	tls::cleanupTib(tibPtr);
-	std::free(tibPtr);
+	wibo::heap::guestFree(tibPtr);
 }
 
 void wibo::initializeTibStackInfo(TEB *tibPtr) {

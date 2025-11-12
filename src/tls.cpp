@@ -117,7 +117,7 @@ bool ensureGlobalExpansionCapacityLocked(size_t required) {
 		auto *newArr = allocateTlsArray(target);
 		if (!newArr) {
 			for (auto &entry : pending) {
-				std::free(entry.newArr);
+				wibo::heap::guestFree(entry.newArr);
 			}
 			return false;
 		}
@@ -131,7 +131,7 @@ bool ensureGlobalExpansionCapacityLocked(size_t required) {
 	}
 	for (auto &entry : pending) {
 		if (entry.oldArr) {
-			std::free(entry.oldArr);
+			wibo::heap::guestFree(entry.oldArr);
 		}
 	}
 	g_expansionCapacity = target;
@@ -193,7 +193,7 @@ bool ensureModuleArrayCapacityLocked(size_t required) {
 		auto *newArray = allocateTlsArray(target);
 		if (!newArray) {
 			for (auto &entry : pending) {
-				std::free(entry.newArray);
+				wibo::heap::guestFree(entry.newArray);
 			}
 			return false;
 		}
@@ -261,16 +261,16 @@ void cleanupTib(TEB *tib) {
 	}
 	std::lock_guard lock(g_tlsMutex);
 	if (auto *arr = getExpansionArray(tib)) {
-		std::free(arr);
+		wibo::heap::guestFree(arr);
 		setExpansionArray(tib, nullptr);
 	}
 	if (auto *arr = getModuleArray(tib)) {
 		g_moduleArrays.erase(tib);
-		std::free(arr);
+		wibo::heap::guestFree(arr);
 	}
 	if (auto garbageIt = g_moduleGarbage.find(tib); garbageIt != g_moduleGarbage.end()) {
 		for (auto *oldArray : garbageIt->second) {
-			std::free(oldArray);
+			wibo::heap::guestFree(oldArray);
 		}
 		g_moduleGarbage.erase(garbageIt);
 	}

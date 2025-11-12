@@ -222,7 +222,7 @@ RPC_STATUS WINAPI RpcStringFreeW(GUEST_PTR *string) {
 	if (it != g_stringBindings.end()) {
 		g_stringBindings.erase(it);
 	}
-	std::free(reinterpret_cast<void *>(value));
+	wibo::heap::guestFree(reinterpret_cast<void *>(value));
 	*string = GUEST_NULL;
 	return RPC_S_OK;
 }

@@ -18,6 +18,7 @@ BOOL WINAPI DuplicateHandle(HANDLE hSourceProcessHandle, HANDLE hSourceHandle, H
 	(void)dwDesiredAccess;
 	(void)dwOptions;
 	if (!lpTargetHandle) {
+		DEBUG_LOG("-> ERROR_INVALID_PARAMETER\n");
 		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
@@ -53,9 +54,11 @@ BOOL WINAPI DuplicateHandle(HANDLE hSourceProcessHandle, HANDLE hSourceHandle, H
 	}
 
 	if (!handles.duplicateTo(hSourceHandle, handles, *lpTargetHandle, dwDesiredAccess, bInheritHandle, dwOptions)) {
+		DEBUG_LOG("-> ERROR_INVALID_HANDLE\n");
 		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
+	DEBUG_LOG("-> %p\n", *lpTargetHandle);
 	return TRUE;
 }
 

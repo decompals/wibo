@@ -812,7 +812,7 @@ HGLOBAL WINAPI GlobalAlloc(UINT uFlags, SIZE_T dwBytes) {
 	}
 	bool zero = (uFlags & GMEM_ZEROINIT) != 0;
 	void *ret = doAlloc(static_cast<UINT>(dwBytes), zero);
-	DEBUG_LOG("-> %p\n", ret);
+	VERBOSE_LOG("-> %p\n", ret);
 	return toGuestPtr(ret);
 }
 
@@ -820,10 +820,10 @@ HGLOBAL WINAPI GlobalFree(HGLOBAL hMem) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("GlobalFree(%p)\n", hMem);
 	if (doFree(reinterpret_cast<void *>(hMem))) {
-		DEBUG_LOG("-> success\n");
+		VERBOSE_LOG("-> success\n");
 		return NO_HANDLE;
 	} else {
-		DEBUG_LOG("-> failure\n");
+		VERBOSE_LOG("-> failure\n");
 		return hMem;
 	}
 }
@@ -837,7 +837,7 @@ HGLOBAL WINAPI GlobalReAlloc(HGLOBAL hMem, SIZE_T dwBytes, UINT uFlags) {
 	}
 	bool zero = (uFlags & GMEM_ZEROINIT) != 0;
 	void *ret = doRealloc(reinterpret_cast<void *>(hMem), static_cast<UINT>(dwBytes), zero);
-	DEBUG_LOG("-> %p\n", ret);
+	VERBOSE_LOG("-> %p\n", ret);
 	return toGuestPtr(ret);
 }
 
@@ -853,7 +853,7 @@ HLOCAL WINAPI LocalAlloc(UINT uFlags, SIZE_T uBytes) {
 	VERBOSE_LOG("LocalAlloc(%x, %zu)\n", uFlags, static_cast<size_t>(uBytes));
 	bool zero = (uFlags & LMEM_ZEROINIT) != 0;
 	if ((uFlags & LMEM_MOVEABLE) != 0) {
-		DEBUG_LOG("  ignoring LMEM_MOVEABLE\n");
+		VERBOSE_LOG("  ignoring LMEM_MOVEABLE\n");
 	}
 	void *result = doAlloc(static_cast<UINT>(uBytes), zero);
 	if (!result) {
@@ -862,7 +862,7 @@ HLOCAL WINAPI LocalAlloc(UINT uFlags, SIZE_T uBytes) {
 	}
 	// Legacy Windows applications (pre-NX and DEP) may expect executable memory from LocalAlloc.
 	tryMarkExecutable(result);
-	DEBUG_LOG("  -> %p\n", result);
+	VERBOSE_LOG("  -> %p\n", result);
 	return toGuestPtr(result);
 }
 
@@ -870,10 +870,10 @@ HLOCAL WINAPI LocalFree(HLOCAL hMem) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("LocalFree(%p)\n", hMem);
 	if (doFree(reinterpret_cast<void *>(hMem))) {
-		DEBUG_LOG("-> success\n");
+		VERBOSE_LOG("-> success\n");
 		return NO_HANDLE;
 	} else {
-		DEBUG_LOG("-> failure\n");
+		VERBOSE_LOG("-> failure\n");
 		return hMem;
 	}
 }
@@ -883,7 +883,7 @@ HLOCAL WINAPI LocalReAlloc(HLOCAL hMem, SIZE_T uBytes, UINT uFlags) {
 	VERBOSE_LOG("LocalReAlloc(%p, %zu, %x)\n", hMem, static_cast<size_t>(uBytes), uFlags);
 	bool zero = (uFlags & LMEM_ZEROINIT) != 0;
 	if ((uFlags & LMEM_MOVEABLE) != 0) {
-		DEBUG_LOG("  ignoring LMEM_MOVEABLE\n");
+		VERBOSE_LOG("  ignoring LMEM_MOVEABLE\n");
 	}
 	void *result = doRealloc(reinterpret_cast<void *>(hMem), static_cast<UINT>(uBytes), zero);
 	if (!result && uBytes != 0) {
@@ -892,7 +892,7 @@ HLOCAL WINAPI LocalReAlloc(HLOCAL hMem, SIZE_T uBytes, UINT uFlags) {
 	}
 	// Legacy Windows applications (pre-NX and DEP) may expect executable memory from LocalReAlloc.
 	tryMarkExecutable(result);
-	DEBUG_LOG("  -> %p\n", result);
+	VERBOSE_LOG("  -> %p\n", result);
 	return toGuestPtr(result);
 }
 
@@ -904,7 +904,7 @@ HLOCAL WINAPI LocalHandle(LPCVOID pMem) {
 
 LPVOID WINAPI LocalLock(HLOCAL hMem) {
 	HOST_CONTEXT_GUARD();
-	VERBOSE_LOG("LocalLock(%p)\n", hMem);
+	VERBOSE_LOG("STUB: LocalLock(%p)\n", hMem);
 	return reinterpret_cast<void *>(hMem);
 }
 
@@ -923,7 +923,7 @@ SIZE_T WINAPI LocalSize(HLOCAL hMem) {
 
 UINT WINAPI LocalFlags(HLOCAL hMem) {
 	HOST_CONTEXT_GUARD();
-	VERBOSE_LOG("LocalFlags(%p)\n", hMem);
+	VERBOSE_LOG("STUB: LocalFlags(%p)\n", hMem);
 	(void)hMem;
 	return 0;
 }

@@ -153,7 +153,7 @@ DWORD WINAPI GetModuleFileNameW(HMODULE hModule, LPWSTR lpFilename, DWORD nSize)
 
 HRSRC WINAPI FindResourceA(HMODULE hModule, LPCSTR lpName, LPCSTR lpType) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("FindResourceA %p %p %p\n", hModule, lpName, lpType);
+	DEBUG_LOG("FindResourceA(%p, %s, %s)\n", hModule, lpName, lpType);
 	auto type = wibo::resourceIdentifierFromAnsi(lpType);
 	auto name = wibo::resourceIdentifierFromAnsi(lpName);
 	return findResourceInternal(hModule, type, name, std::nullopt);
@@ -161,7 +161,7 @@ HRSRC WINAPI FindResourceA(HMODULE hModule, LPCSTR lpName, LPCSTR lpType) {
 
 HRSRC WINAPI FindResourceExA(HMODULE hModule, LPCSTR lpType, LPCSTR lpName, WORD wLanguage) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("FindResourceExA %p %p %p %u\n", hModule, lpName, lpType, wLanguage);
+	DEBUG_LOG("FindResourceExA(%p, %s, %s, %u)\n", hModule, lpName, lpType, wLanguage);
 	auto type = wibo::resourceIdentifierFromAnsi(lpType);
 	auto name = wibo::resourceIdentifierFromAnsi(lpName);
 	return findResourceInternal(hModule, type, name, wLanguage);
@@ -169,7 +169,7 @@ HRSRC WINAPI FindResourceExA(HMODULE hModule, LPCSTR lpType, LPCSTR lpName, WORD
 
 HRSRC WINAPI FindResourceW(HMODULE hModule, LPCWSTR lpName, LPCWSTR lpType) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("FindResourceW %p\n", hModule);
+	DEBUG_LOG("FindResourceW(%p, %p, %p)\n", hModule, lpName, lpType);
 	auto type = wibo::resourceIdentifierFromWide(lpType);
 	auto name = wibo::resourceIdentifierFromWide(lpName);
 	return findResourceInternal(hModule, type, name, std::nullopt);
@@ -177,7 +177,7 @@ HRSRC WINAPI FindResourceW(HMODULE hModule, LPCWSTR lpName, LPCWSTR lpType) {
 
 HRSRC WINAPI FindResourceExW(HMODULE hModule, LPCWSTR lpType, LPCWSTR lpName, WORD wLanguage) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("FindResourceExW %p %u\n", hModule, wLanguage);
+	DEBUG_LOG("FindResourceExW(%p, %p, %p, %u)\n", hModule, lpName, lpType, wLanguage);
 	auto type = wibo::resourceIdentifierFromWide(lpType);
 	auto name = wibo::resourceIdentifierFromWide(lpName);
 	return findResourceInternal(hModule, type, name, wLanguage);
@@ -185,7 +185,7 @@ HRSRC WINAPI FindResourceExW(HMODULE hModule, LPCWSTR lpType, LPCWSTR lpName, WO
 
 HGLOBAL WINAPI LoadResource(HMODULE hModule, HRSRC hResInfo) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("LoadResource %p %p\n", hModule, hResInfo);
+	DEBUG_LOG("LoadResource(%p, %p)\n", hModule, hResInfo);
 	if (!hResInfo) {
 		setLastError(ERROR_RESOURCE_DATA_NOT_FOUND);
 		return GUEST_NULL;

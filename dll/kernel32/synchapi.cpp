@@ -1125,10 +1125,12 @@ BOOL WINAPI InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBOOL
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("InitOnceBeginInitialize(%p, %u, %p, %p)\n", lpInitOnce, dwFlags, fPending, lpContext);
 	if (!lpInitOnce) {
+		DEBUG_LOG("-> ERROR_INVALID_PARAMETER\n");
 		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	if (dwFlags & ~(INIT_ONCE_CHECK_ONLY | INIT_ONCE_ASYNC)) {
+		DEBUG_LOG("-> ERROR_INVALID_PARAMETER\n");
 		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
@@ -1137,6 +1139,7 @@ BOOL WINAPI InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBOOL
 
 	if (dwFlags & INIT_ONCE_CHECK_ONLY) {
 		if (dwFlags & INIT_ONCE_ASYNC) {
+			DEBUG_LOG("-> ERROR_INVALID_PARAMETER\n");
 			setLastError(ERROR_INVALID_PARAMETER);
 			return FALSE;
 		}
@@ -1145,6 +1148,7 @@ BOOL WINAPI InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBOOL
 			if (fPending) {
 				*fPending = TRUE;
 			}
+			DEBUG_LOG("-> ERROR_GEN_FAILURE\n");
 			setLastError(ERROR_GEN_FAILURE);
 			return FALSE;
 		}
@@ -1186,6 +1190,7 @@ BOOL WINAPI InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBOOL
 		}
 		case 1: { // synchronous initialization in progress
 			if (dwFlags & INIT_ONCE_ASYNC) {
+				DEBUG_LOG("-> ERROR_INVALID_PARAMETER\n");
 				setLastError(ERROR_INVALID_PARAMETER);
 				return FALSE;
 			}
@@ -1222,6 +1227,7 @@ BOOL WINAPI InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBOOL
 		}
 		case 3: { // async pending
 			if (!(dwFlags & INIT_ONCE_ASYNC)) {
+				DEBUG_LOG("-> ERROR_INVALID_PARAMETER\n");
 				setLastError(ERROR_INVALID_PARAMETER);
 				return FALSE;
 			}
@@ -1240,20 +1246,24 @@ BOOL WINAPI InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpCon
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("InitOnceComplete(%p, %u, %p)\n", lpInitOnce, dwFlags, lpContext);
 	if (!lpInitOnce) {
+		DEBUG_LOG("-> ERROR_INVALID_PARAMETER\n");
 		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	if (dwFlags & ~(INIT_ONCE_ASYNC | INIT_ONCE_INIT_FAILED)) {
+		DEBUG_LOG("-> ERROR_INVALID_PARAMETER\n");
 		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
 	const bool markFailed = (dwFlags & INIT_ONCE_INIT_FAILED) != 0;
 	if (markFailed) {
 		if (lpContext) {
+			DEBUG_LOG("-> ERROR_INVALID_PARAMETER\n");
 			setLastError(ERROR_INVALID_PARAMETER);
 			return FALSE;
 		}
 		if (dwFlags & INIT_ONCE_ASYNC) {
+			DEBUG_LOG("-> ERROR_INVALID_PARAMETER\n");
 			setLastError(ERROR_INVALID_PARAMETER);
 			return FALSE;
 		}
@@ -1261,6 +1271,7 @@ BOOL WINAPI InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpCon
 
 	const GUEST_PTR contextValue = static_cast<GUEST_PTR>(reinterpret_cast<uintptr_t>(lpContext));
 	if (!markFailed && (contextValue & kInitOnceReservedMask)) {
+		DEBUG_LOG("-> ERROR_INVALID_PARAMETER\n");
 		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
@@ -1274,6 +1285,7 @@ BOOL WINAPI InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpCon
 		case 1: {
 			auto syncState = getInitOnceState(lpInitOnce);
 			if (!syncState) {
+				DEBUG_LOG("-> ERROR_GEN_FAILURE\n");
 				setLastError(ERROR_GEN_FAILURE);
 				return FALSE;
 			}
@@ -1292,6 +1304,7 @@ BOOL WINAPI InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpCon
 		}
 		case 3:
 			if (!(dwFlags & INIT_ONCE_ASYNC)) {
+				DEBUG_LOG("-> ERROR_INVALID_PARAMETER\n");
 				setLastError(ERROR_INVALID_PARAMETER);
 				return FALSE;
 			}
@@ -1300,6 +1313,7 @@ BOOL WINAPI InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpCon
 			}
 			return TRUE;
 		default:
+			DEBUG_LOG("-> ERROR_GEN_FAILURE\n");
 			setLastError(ERROR_GEN_FAILURE);
 			return FALSE;
 		}

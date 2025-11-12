@@ -40,6 +40,7 @@ extern const wibo::ModuleStub lib_ole32;
 extern const wibo::ModuleStub lib_user32;
 extern const wibo::ModuleStub lib_vcruntime;
 extern const wibo::ModuleStub lib_version;
+extern const wibo::ModuleStub lib_ws2;
 
 // setup.S
 template <size_t Index> void stubThunk();
@@ -186,7 +187,7 @@ LockedRegistry registry() {
 		reg.initialized = true;
 		const wibo::ModuleStub *builtins[] = {
 			&lib_advapi32, &lib_bcrypt, &lib_kernel32, &lib_lmgr,	   &lib_mscoree, &lib_ntdll,
-			&lib_ole32,	   &lib_rpcrt4, &lib_user32,   &lib_vcruntime, &lib_version,
+			&lib_ole32,	   &lib_rpcrt4, &lib_user32,   &lib_vcruntime, &lib_version, &lib_ws2,
 #if WIBO_HAS_MSVCRT
 			&lib_msvcrt,
 #endif
@@ -1173,39 +1174,41 @@ static ModuleInfo *loadModuleInternal(const std::string &dllName) {
 		ModuleInfo *raw = info.get();
 		reg->modulesByKey[key] = std::move(info);
 		registerExternalModuleAliases(*reg, dllName, raw->resolvedPath, raw);
-		reg.lock.unlock();
-		ensureExportsInitialized(*raw);
-		if (!raw->executable->resolveImports()) {
-			DEBUG_LOG("  resolveImports failed for %s\n", raw->originalName.c_str());
-			reg.lock.lock();
-			reg->modulesByKey.erase(key);
-			diskError = kernel32::getLastError();
-			return nullptr;
-		}
-		if (!initializeModuleTls(*raw)) {
-			DEBUG_LOG("  initializeModuleTls failed for %s\n", raw->originalName.c_str());
-			reg.lock.lock();
-			reg->modulesByKey.erase(key);
-			diskError = kernel32::getLastError();
-			return nullptr;
-		}
-		reg.lock.lock();
-		if (!callDllMain(*raw, DLL_PROCESS_ATTACH, nullptr)) {
-			DEBUG_LOG("  DllMain failed for %s\n", raw->originalName.c_str());
-			releaseModuleTls(*raw);
-			// runPendingOnExit(*raw);
-			for (auto it = reg->modulesByAlias.begin(); it != reg->modulesByAlias.end();) {
-				if (it->second == raw) {
-					it = reg->modulesByAlias.erase(it);
-				} else {
-					++it;
-				}
+		if (raw->executable->isDll) {
+			reg.lock.unlock();
+			ensureExportsInitialized(*raw);
+			if (!raw->executable->resolveImports()) {
+				DEBUG_LOG("  resolveImports failed for %s\n", raw->originalName.c_str());
+				reg.lock.lock();
+				reg->modulesByKey.erase(key);
+				diskError = kernel32::getLastError();
+				return nullptr;
 			}
-			reg->pinnedModules.erase(raw);
-			reg->modulesByKey.erase(key);
-			diskError = ERROR_DLL_INIT_FAILED;
-			kernel32::setLastError(ERROR_DLL_INIT_FAILED);
-			return nullptr;
+			if (!initializeModuleTls(*raw)) {
+				DEBUG_LOG("  initializeModuleTls failed for %s\n", raw->originalName.c_str());
+				reg.lock.lock();
+				reg->modulesByKey.erase(key);
+				diskError = kernel32::getLastError();
+				return nullptr;
+			}
+			reg.lock.lock();
+			if (!callDllMain(*raw, DLL_PROCESS_ATTACH, nullptr)) {
+				DEBUG_LOG("  DllMain failed for %s\n", raw->originalName.c_str());
+				releaseModuleTls(*raw);
+				// runPendingOnExit(*raw);
+				for (auto it = reg->modulesByAlias.begin(); it != reg->modulesByAlias.end();) {
+					if (it->second == raw) {
+						it = reg->modulesByAlias.erase(it);
+					} else {
+						++it;
+					}
+				}
+				reg->pinnedModules.erase(raw);
+				reg->modulesByKey.erase(key);
+				diskError = ERROR_DLL_INIT_FAILED;
+				kernel32::setLastError(ERROR_DLL_INIT_FAILED);
+				return nullptr;
+			}
 		}
 		return raw;
 	};

@@ -65,6 +65,7 @@ class Executable {
 	bool importsResolved = false;
 	bool importsResolving = false;
 	bool sectionsProtected = false;
+	bool isDll = false;
 	std::vector<SectionInfo> sections;
 };
 

@@ -196,6 +196,7 @@ add_executable(wibo
     dll/user32.cpp
     dll/vcruntime.cpp
     dll/version.cpp
+    dll/ws2.cpp
     src/access.cpp
     src/async_io.cpp
     src/errors.cpp

@@ -19,6 +19,8 @@
 #include <unistd.h>
 #include <variant>
 
+constexpr uint16_t IMAGE_FILE_DLL = 0x2000;
+
 struct PEHeader {
 	uint8_t magic[4]; // "PE\0\0"
 	uint16_t machine;
@@ -372,6 +374,7 @@ bool loadPEFromSource(wibo::Executable &executable, const PeInputView &source, b
 		DEBUG_LOG("loadPE: unreasonable section count %u\n", header.numberOfSections);
 		return false;
 	}
+	executable.isDll = !!(header.characteristics & IMAGE_FILE_DLL);
 
 	constexpr size_t kOptionalHeaderMinimumSize = offsetof(PE32Header, reserved) + sizeof(PEImageDataDirectory);
 	if (header.sizeOfOptionalHeader < kOptionalHeaderMinimumSize) {
@@ -440,9 +443,10 @@ bool loadPEFromSource(wibo::Executable &executable, const PeInputView &source, b
 											   initialProtect, MEM_IMAGE);
 	}
 	if (allocStatus != wibo::heap::VmStatus::Success) {
-		DEBUG_LOG("Image mapping failed (status=%u)\n", static_cast<unsigned>(allocStatus));
+		DEBUG_LOG("loadPE: mapping failed (status=%u)\n", static_cast<unsigned>(allocStatus));
 		return false;
 	}
+	DEBUG_LOG("loadPE: mapping succeeded (base=%p, size=%zu)\n", allocatedBase, allocationSize);
 
 	std::unique_ptr<void, ImageMemoryDeleter> imageGuard(allocatedBase);
 	executable.imageBase = allocatedBase;

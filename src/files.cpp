@@ -342,9 +342,11 @@ void init() {
 	stdinHandle = handles.alloc(std::move(stdinObject), FILE_GENERIC_READ, 0);
 	auto stdoutObject = make_pin<FileObject>(STDOUT_FILENO);
 	stdoutObject->closeOnDestroy = false;
+	stdoutObject->appendOnly = true;
 	stdoutHandle = handles.alloc(std::move(stdoutObject), FILE_GENERIC_WRITE, 0);
 	auto stderrObject = make_pin<FileObject>(STDERR_FILENO);
 	stderrObject->closeOnDestroy = false;
+	stderrObject->appendOnly = true;
 	stderrHandle = handles.alloc(std::move(stderrObject), FILE_GENERIC_WRITE, 0);
 }
 

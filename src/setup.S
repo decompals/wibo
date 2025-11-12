@@ -58,7 +58,7 @@ ASM_END(setThreadArea64)
 # bool installSelectors(TEB *teb)
 ASM_GLOBAL(installSelectors, @function)
 	mov r8, rsp                             # save host stack
-	mov rsp, qword ptr [rsi+TEB_SP]         # fetch guest stack
+	mov rsp, qword ptr [rdi+TEB_SP]         # switch to guest stack
 	mov ax, cs                              # fetch host code segment selector
 	mov word ptr [rdi+TEB_HOST_CS_SEL], ax  # store host code segment selector
 	mov ax, word ptr [rdi+TEB_DS_SEL]       # fetch data segment selector

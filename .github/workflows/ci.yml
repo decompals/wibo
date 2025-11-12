@@ -150,19 +150,25 @@ jobs:
 
   build-macos:
     name: Build macOS ${{ matrix.display }}
-    runs-on: macos-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - id: macos-debug
+            os: macos-latest
             display: Debug
             preset: debug-macos
             build_dir: debug
           - id: macos-release
+            os: macos-latest
             display: Release
             preset: release-macos
             build_dir: release
+          # For testing only
+          - os: macos-15-intel
+            display: Release (Intel)
+            preset: release-macos
     steps:
       - name: Install dependencies
         run: |
@@ -183,6 +189,7 @@ jobs:
 
       - name: Upload artifact
         uses: actions/upload-artifact@v5
+        if: ${{ matrix.id }}
         with:
           name: ${{ matrix.id }}
           path: build/${{ matrix.build_dir }}/wibo

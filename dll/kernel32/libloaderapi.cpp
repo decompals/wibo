@@ -205,7 +205,7 @@ HGLOBAL WINAPI LoadResource(HMODULE hModule, HRSRC hResInfo) {
 
 LPVOID WINAPI LockResource(HGLOBAL hResData) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("LockResource(%p)\n", hResData);
+	DEBUG_LOG("STUB: LockResource(%p)\n", hResData);
 	return fromGuestPtr(hResData);
 }
 

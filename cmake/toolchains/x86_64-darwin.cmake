@@ -10,7 +10,7 @@ set(CMAKE_ASM_COMPILER_TARGET ${TARGET})
 
 # Force x86_64 architecture
 set(CMAKE_OSX_ARCHITECTURES "x86_64" CACHE STRING "Build architecture for macOS" FORCE)
-set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS deployment version" FORCE)
+set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Minimum macOS deployment version" FORCE)
 
 # Search for programs in the build host directories
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)

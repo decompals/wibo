@@ -45,20 +45,20 @@ ARG WIBO_VERSION
 
 # Build dynamic binary
 RUN PRESET=${BUILD_TYPE}-clang; \
-    cmake -S /wibo --preset "$PRESET" \
+    echo "Building with preset $PRESET" \
+    && cmake -S /wibo -B /wibo/build --preset "$PRESET" \
         -DCMAKE_AR:PATH=/usr/bin/llvm-ar \
         -DCMAKE_RANLIB:PATH=/usr/bin/llvm-ranlib \
         -DWIBO_ENABLE_LTO:STRING="$ENABLE_LTO" \
         -DWIBO_VERSION:STRING="$WIBO_VERSION" \
-    && LIBCLANG_PATH=/usr/lib/llvm-18/lib cmake --build --preset "$PRESET" --verbose \
-    && ( [ "$BUILD_TYPE" != "release"* ] || strip -g "/wibo/build/$PRESET/wibo" ) \
-    && cp "/wibo/build/$PRESET/wibo" /usr/local/bin/wibo
+    && LIBCLANG_PATH=/usr/lib/llvm-18/lib cmake --build /wibo/build --verbose \
+    && ( [ "$BUILD_TYPE" != "release"* ] || strip -g /wibo/build/wibo )
 
 # Export binary (usage: docker build -f Dockerfile.ubuntu --target export --output dist .)
 FROM scratch AS export
-COPY --from=build /usr/local/bin/wibo .
+COPY --from=build /wibo/build/wibo .
 
 # Runnable container
 FROM ubuntu:24.04
-COPY --from=build /usr/local/bin/wibo /usr/local/bin/wibo
+COPY --from=build /wibo/build/wibo /usr/local/bin/wibo
 CMD ["/usr/local/bin/wibo"]

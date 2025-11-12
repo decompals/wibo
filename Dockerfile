@@ -47,21 +47,20 @@ RUN if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
         exit 1; \
     fi; \
     echo "Building for $TARGETPLATFORM with preset $PRESET" \
-    && cmake -S /wibo --preset "$PRESET" \
+    && cmake -S /wibo -B /wibo/build --preset "$PRESET" \
         -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
         -DWIBO_ENABLE_LTO:STRING="$ENABLE_LTO" \
         -DWIBO_VERSION:STRING="$WIBO_VERSION" \
-    && cmake --build --preset "$PRESET" --verbose \
-    && ( [ "$BUILD_TYPE" != "release"* ] || strip -g "/wibo/build/$PRESET/wibo" ) \
-    && cp "/wibo/build/$PRESET/wibo" /usr/local/bin/wibo
+    && cmake --build /wibo/build --verbose \
+    && ( [ "$BUILD_TYPE" != "release"* ] || strip -g /wibo/build/wibo )
 
 # Export binary (usage: docker build --target export --output build .)
 FROM scratch AS export
 
-COPY --from=build /usr/local/bin/wibo .
+COPY --from=build /wibo/build/wibo .
 
 # Runnable container
 FROM alpine:latest
 
-COPY --from=build /usr/local/bin/wibo /usr/local/bin/wibo
+COPY --from=build /wibo/build/wibo /usr/local/bin/wibo
 CMD ["/usr/local/bin/wibo"]

@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <csignal>
 #include <cstddef>
 #include <cstdio>
 #include <mutex>
@@ -334,6 +335,7 @@ BOOL setStdHandle(DWORD nStdHandle, HANDLE hHandle) {
 }
 
 void init() {
+	signal(SIGPIPE, SIG_IGN);
 	auto &handles = wibo::handles();
 	auto stdinObject = make_pin<FileObject>(STDIN_FILENO);
 	stdinObject->closeOnDestroy = false;

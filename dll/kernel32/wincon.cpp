@@ -61,7 +61,7 @@ BOOL WINAPI GetConsoleScreenBufferInfo(HANDLE hConsoleOutput, CONSOLE_SCREEN_BUF
 	return TRUE;
 }
 
-BOOL WINAPI WriteConsoleW(HANDLE hConsoleOutput, LPCVOID lpBuffer, DWORD nNumberOfCharsToWrite,
+BOOL WINAPI WriteConsoleW(HANDLE hConsoleOutput, LPCWSTR lpBuffer, DWORD nNumberOfCharsToWrite,
 						  LPDWORD lpNumberOfCharsWritten, LPVOID lpReserved) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("WriteConsoleW(%p, %p, %u, %p, %p)\n", hConsoleOutput, lpBuffer, nNumberOfCharsToWrite,
@@ -77,10 +77,14 @@ BOOL WINAPI WriteConsoleW(HANDLE hConsoleOutput, LPCVOID lpBuffer, DWORD nNumber
 
 	auto file = wibo::handles().getAs<FileObject>(hConsoleOutput);
 	if (file->fd == STDOUT_FILENO || file->fd == STDERR_FILENO) {
-		auto str = wideStringToString(static_cast<const uint16_t *>(lpBuffer), static_cast<int>(nNumberOfCharsToWrite));
-		dprintf(file->fd, "%s", str.c_str());
+		auto str = wideStringToString(lpBuffer, static_cast<int>(nNumberOfCharsToWrite));
+		auto io = files::write(file.get(), str.c_str(), str.size(), std::nullopt, true);
 		if (lpNumberOfCharsWritten) {
-			*lpNumberOfCharsWritten = nNumberOfCharsToWrite;
+			*lpNumberOfCharsWritten = io.bytesTransferred;
+		}
+		if (io.unixError != 0) {
+			setLastError(wibo::winErrorFromErrno(io.unixError));
+			return FALSE;
 		}
 		return TRUE;
 	}

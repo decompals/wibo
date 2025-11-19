@@ -168,13 +168,16 @@ BOOL WINAPI IsProcessorFeaturePresent(DWORD ProcessorFeature) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("IsProcessorFeaturePresent(%u)\n", ProcessorFeature);
 	if (ProcessorFeature == 0) { // PF_FLOATING_POINT_PRECISION_ERRATA
-		return TRUE;
+		return FALSE;
+	}
+	if (ProcessorFeature == 1) { // PF_FLOATING_POINT_EMULATED
+		return FALSE;
 	}
 	if (ProcessorFeature == 10) { // PF_XMMI64_INSTRUCTIONS_AVAILABLE (SSE2)
 		return TRUE;
 	}
-	if (ProcessorFeature == 23) { // PF_FASTFAIL_AVAILABLE (__fastfail() supported)
-		return TRUE;
+	if (ProcessorFeature == 23) { // PF_FASTFAIL_AVAILABLE (__fastfail)
+		return FALSE;
 	}
 	DEBUG_LOG("  IsProcessorFeaturePresent: unknown feature %u, returning TRUE\n", ProcessorFeature);
 	return TRUE;
@@ -599,7 +602,7 @@ BOOL WINAPI GetThreadTimes(HANDLE hThread, FILETIME *lpCreationTime, FILETIME *l
 	}
 
 #ifdef __linux__
-	struct rusage usage {};
+	struct rusage usage{};
 	if (getrusage(RUSAGE_THREAD, &usage) == 0) {
 		*lpKernelTime = fileTimeFromTimeval(usage.ru_stime);
 		*lpUserTime = fileTimeFromTimeval(usage.ru_utime);
@@ -607,7 +610,7 @@ BOOL WINAPI GetThreadTimes(HANDLE hThread, FILETIME *lpCreationTime, FILETIME *l
 	}
 #endif
 
-	struct timespec cpuTime {};
+	struct timespec cpuTime{};
 	if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpuTime) == 0) {
 		*lpKernelTime = fileTimeFromDuration(0);
 		*lpUserTime = fileTimeFromTimespec(cpuTime);

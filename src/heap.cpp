@@ -75,9 +75,9 @@ struct VirtualAllocation {
 
 std::map<uintptr_t, VirtualAllocation> g_virtualAllocations;
 
-#ifndef __APPLE__
 const uintptr_t kDefaultMmapMinAddr = 0x10000u;
 
+#ifdef __linux__
 uintptr_t readMmapMinAddr() {
 	char buf[64];
 	int fd = open("/proc/sys/vm/mmap_min_addr", O_RDONLY | O_CLOEXEC, 0);
@@ -100,19 +100,31 @@ uintptr_t readMmapMinAddr() {
 	}
 	return value;
 }
-
-uintptr_t mmapMinAddr() {
-	static uintptr_t minAddr = readMmapMinAddr();
-	return minAddr;
-}
 #endif
 
-uintptr_t alignDown(uintptr_t value, std::size_t alignment) {
+inline uintptr_t mmapMinAddr() {
+#ifdef __linux__
+	static uintptr_t minAddr = readMmapMinAddr();
+	return minAddr;
+#else
+	return kDefaultMmapMinAddr;
+#endif
+}
+
+inline void setVirtualAllocationName(void *ptr, std::size_t len, const char *name) {
+#ifdef __linux__
+	if (name) {
+		prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, ptr, len, name);
+	}
+#endif
+}
+
+constexpr uintptr_t alignDown(uintptr_t value, std::size_t alignment) {
 	const uintptr_t mask = static_cast<uintptr_t>(alignment) - 1;
 	return value & ~mask;
 }
 
-uintptr_t alignUp(uintptr_t value, std::size_t alignment) {
+constexpr uintptr_t alignUp(uintptr_t value, std::size_t alignment) {
 	const uintptr_t mask = static_cast<uintptr_t>(alignment) - 1;
 	if (mask == std::numeric_limits<uintptr_t>::max()) {
 		return value;
@@ -123,11 +135,11 @@ uintptr_t alignUp(uintptr_t value, std::size_t alignment) {
 	return (value + mask) & ~mask;
 }
 
-bool addOverflows(uintptr_t base, std::size_t amount) {
+constexpr bool addOverflows(uintptr_t base, std::size_t amount) {
 	return base > std::numeric_limits<uintptr_t>::max() - static_cast<uintptr_t>(amount);
 }
 
-uintptr_t regionEnd(const VirtualAllocation &region) { return region.base + region.size; }
+constexpr uintptr_t regionEnd(const VirtualAllocation &region) { return region.base + region.size; }
 
 std::map<uintptr_t, VirtualAllocation>::iterator findRegionIterator(uintptr_t address) {
 	auto it = g_virtualAllocations.upper_bound(address);
@@ -149,7 +161,7 @@ VirtualAllocation *lookupRegion(uintptr_t address) {
 	return &it->second;
 }
 
-bool rangeWithinRegion(const VirtualAllocation &region, uintptr_t start, std::size_t length) {
+constexpr bool rangeWithinRegion(const VirtualAllocation &region, uintptr_t start, std::size_t length) {
 	if (length == 0) {
 		return start >= region.base && start <= regionEnd(region);
 	}
@@ -316,14 +328,9 @@ bool mapAtAddrLocked(uintptr_t addr, std::size_t size, const char *name, void **
 	if (p == MAP_FAILED) {
 		return false;
 	}
-#ifdef __linux__
-	if (name) {
-		prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, addr, size, name);
-	}
-#else
-	(void)name;
-#endif
-	recordGuestMappingLocked(addr, size, PAGE_READWRITE, MEM_RESERVE, PAGE_READWRITE, MEM_PRIVATE);
+	setVirtualAllocationName(p, size, name);
+	recordGuestMappingLocked(reinterpret_cast<uintptr_t>(p), size, PAGE_READWRITE, MEM_RESERVE, PAGE_READWRITE,
+							 MEM_PRIVATE);
 	if (outPtr) {
 		*outPtr = p;
 	}
@@ -677,13 +684,11 @@ VmStatus virtualAlloc(void **baseAddress, std::size_t *regionSize, DWORD allocat
 		if (mapped == MAP_FAILED) {
 			return vmStatusFromErrno(errno);
 		}
-#ifdef __linux__
 		if (type == MEM_IMAGE) {
-			prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, base, length, "wibo guest image");
+			setVirtualAllocationName(mapped, length, "wibo guest image");
 		} else {
-			prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, base, length, "wibo guest allocated");
+			setVirtualAllocationName(mapped, length, "wibo guest allocated");
 		}
-#endif
 		uintptr_t actualBase = reinterpret_cast<uintptr_t>(mapped);
 		VirtualAllocation allocation{};
 		allocation.base = actualBase;
@@ -750,9 +755,7 @@ VmStatus virtualAlloc(void **baseAddress, std::size_t *regionSize, DWORD allocat
 		if (res == MAP_FAILED) {
 			return vmStatusFromErrno(errno);
 		}
-#ifdef __linux__
-		prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, run.first, run.second, "wibo guest committed");
-#endif
+		setVirtualAllocationName(res, run.second, "wibo guest committed");
 		markCommitted(*region, run.first, run.second, protect);
 	}
 
@@ -803,9 +806,7 @@ VmStatus virtualFree(void *baseAddress, std::size_t regionSize, DWORD freeType) 
 		if (res == MAP_FAILED) {
 			return vmStatusFromErrno(errno);
 		}
-#ifdef __linux__
-		prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, base, length, "wibo reserved");
-#endif
+		setVirtualAllocationName(res, length, "wibo reserved");
 		eraseGuestMappingLocked(base);
 		return VmStatus::Success;
 	}
@@ -842,9 +843,7 @@ VmStatus virtualFree(void *baseAddress, std::size_t regionSize, DWORD freeType) 
 	if (res == MAP_FAILED) {
 		return vmStatusFromErrno(errno);
 	}
-#ifdef __linux__
-	prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, res, length, "wibo reserved");
-#endif
+	setVirtualAllocationName(res, length, "wibo reserved");
 	markDecommitted(region, start, length);
 	refreshGuestMappingLocked(region);
 	return VmStatus::Success;
@@ -1065,7 +1064,7 @@ bool reserveGuestStack(std::size_t stackSizeBytes, void **outStackLimit, void **
 
 } // namespace wibo::heap
 
-#ifndef __APPLE__
+#ifdef __linux__
 static void debugPrintMaps() {
 	char buf[1024];
 	int fd = open("/proc/self/maps", O_RDONLY);
@@ -1225,9 +1224,7 @@ static size_t blockLower2GB(MEMORY_BASIC_INFORMATION mappings[MAX_NUM_MAPPINGS])
 				perror("heap: failed reserve memory");
 				exit(1);
 			}
-#ifdef __linux__
-			prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, ptr, len, "wibo reserved");
-#endif
+			setVirtualAllocationName(ptr, len, "wibo reserved");
 		}
 
 		lastMapEnd = mapEnd;
@@ -1243,27 +1240,39 @@ __attribute__((constructor(101)))
 __attribute__((constructor))
 #endif
 __attribute__((used)) static void wibo_heap_constructor() {
-#ifndef __APPLE__
+#ifdef __linux__
 	MEMORY_BASIC_INFORMATION mappings[MAX_NUM_MAPPINGS];
 	memset(mappings, 0, sizeof(mappings));
 #endif
 	bool debug = getenv("WIBO_DEBUG_HEAP") != nullptr;
 	if (debug) {
 		LOG_OUT("heap: initializing...\n");
-#ifndef __APPLE__
+#ifdef __linux__
 		debugPrintMaps();
 #endif
 	}
-#ifndef __APPLE__
+#ifdef __linux__
 	size_t numMappings = blockLower2GB(mappings);
 #endif
+	// Mark DOS area as read-only
+	const uintptr_t minAddr = mmapMinAddr();
+	if (minAddr < kLowMemoryStart) {
+		size_t len = static_cast<size_t>(kLowMemoryStart - minAddr);
+		void *ptr = mmap(reinterpret_cast<void *>(minAddr), len, PROT_READ,
+						 MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1, 0);
+		if (ptr == MAP_FAILED) {
+			LOG_ERR("heap: failed to allocate DOS area\n");
+		} else {
+			setVirtualAllocationName(ptr, len, "wibo DOS area");
+		}
+	}
 	// Now we can allocate memory
 	if (debug) {
 		mi_option_enable(mi_option_show_stats);
 		mi_option_enable(mi_option_verbose);
 	}
 	g_mappings = new std::map<uintptr_t, MEMORY_BASIC_INFORMATION>;
-#ifndef __APPLE__
+#ifdef __linux__
 	for (size_t i = 0; i < numMappings; ++i) {
 		if (debug) {
 			fprintf(stderr, "Existing %zu: BaseAddress=%x, RegionSize=%u\n", i, mappings[i].BaseAddress,

@@ -36,12 +36,7 @@ void wibo::debug_log(const char *fmt, ...) {
 	if (wibo::debugEnabled) {
 		for (size_t i = 0; i < wibo::debugIndent; i++)
 			fprintf(stderr, "\t");
-		pthread_t threadId = pthread_self();
-#ifdef __APPLE__
-		fprintf(stderr, "[thread %p] ", threadId);
-#else
-		fprintf(stderr, "[thread %lu] ", threadId);
-#endif
+		fprintf(stderr, "[thread %x] ", getThreadId());
 		vfprintf(stderr, fmt, args);
 		fflush(stderr);
 	}
@@ -95,7 +90,7 @@ bool wibo::installTibForCurrentThread(TEB *tibPtr) {
 }
 
 void wibo::uninstallTebForCurrentThread() {
-	TEB* teb = std::exchange(currentThreadTeb, nullptr);
+	TEB *teb = std::exchange(currentThreadTeb, nullptr);
 	tebThreadTeardown(teb);
 }
 

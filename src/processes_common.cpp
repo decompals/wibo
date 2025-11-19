@@ -16,7 +16,11 @@
 #include <string>
 #include <vector>
 
+#include <pthread.h>
+
+#ifdef __APPLE__
 extern char **environ;
+#endif
 
 using kernel32::ProcessObject;
 
@@ -46,9 +50,7 @@ bool ProcessManager::addProcess(Pin<ProcessObject> po) {
 	return mImpl->addProcess(std::move(po));
 }
 
-bool ProcessManager::running() const {
-	return mImpl && mImpl->running();
-}
+bool ProcessManager::running() const { return mImpl && mImpl->running(); }
 
 ProcessManager &processes() {
 	static ProcessManager mgr;
@@ -350,5 +352,18 @@ std::vector<std::string> splitCommandLine(const char *commandLine) {
 	return result;
 }
 
-} // namespace wibo
+DWORD getThreadId() {
+#if HAVE_PTHREAD_GETTID_NP
+	pid_t threadId = pthread_gettid_np(pthread_self());
+#elif defined(__linux__)
+	pid_t threadId = gettid();
+#elif defined(__APPLE__)
+	uint64_t threadId = 0;
+	pthread_threadid_np(nullptr, &threadId);
+#else
+#error "Unknown platform"
+#endif
+	return static_cast<DWORD>(threadId);
+}
 
+} // namespace wibo

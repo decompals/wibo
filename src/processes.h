@@ -55,4 +55,6 @@ int spawnWithArgv(const std::string &applicationName, const std::vector<std::str
 				  Pin<kernel32::ProcessObject> &pinOut);
 std::vector<std::string> splitCommandLine(const char *commandLine);
 
+DWORD getThreadId();
+
 } // namespace wibo

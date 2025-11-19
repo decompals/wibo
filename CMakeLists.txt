@@ -271,6 +271,13 @@ else()
 endif()
 install(TARGETS wibo DESTINATION bin)
 
+# Check for features
+include(CheckSymbolExists)
+set(CMAKE_REQUIRED_DEFINITIONS -D_GNU_SOURCE)
+set(CMAKE_REQUIRED_LIBRARIES pthread)
+check_symbol_exists(pthread_gettid_np "pthread.h" HAVE_PTHREAD_GETTID_NP)
+target_compile_definitions(wibo PRIVATE -DHAVE_PTHREAD_GETTID_NP=${HAVE_PTHREAD_GETTID_NP})
+
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 # Track down libclang for trampoline generation.

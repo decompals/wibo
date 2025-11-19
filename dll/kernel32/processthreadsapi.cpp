@@ -182,7 +182,7 @@ BOOL WINAPI IsProcessorFeaturePresent(DWORD ProcessorFeature) {
 
 HANDLE WINAPI GetCurrentProcess() {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("GetCurrentProcess() -> %p\n", reinterpret_cast<void *>(static_cast<uintptr_t>(-1)));
+	DEBUG_LOG("GetCurrentProcess() -> %d\n", kPseudoCurrentProcessHandleValue);
 	return kPseudoCurrentProcessHandleValue;
 }
 
@@ -195,12 +195,7 @@ DWORD WINAPI GetCurrentProcessId() {
 
 DWORD WINAPI GetCurrentThreadId() {
 	HOST_CONTEXT_GUARD();
-	pthread_t thread = pthread_self();
-#ifdef __linux__
-	const auto threadId = static_cast<DWORD>(thread);
-#else
-	const auto threadId = static_cast<DWORD>(reinterpret_cast<uintptr_t>(thread));
-#endif
+	DWORD threadId = wibo::getThreadId();
 	DEBUG_LOG("GetCurrentThreadId() -> %u\n", threadId);
 	return threadId;
 }

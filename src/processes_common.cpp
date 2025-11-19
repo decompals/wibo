@@ -353,7 +353,7 @@ std::vector<std::string> splitCommandLine(const char *commandLine) {
 }
 
 DWORD getThreadId() {
-#if HAVE_PTHREAD_GETTID_NP
+#if defined(HAVE_PTHREAD_GETTID_NP)
 	pid_t threadId = pthread_gettid_np(pthread_self());
 #elif defined(__linux__)
 	pid_t threadId = gettid();

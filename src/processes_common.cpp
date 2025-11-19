@@ -356,7 +356,7 @@ DWORD getThreadId() {
 #if defined(HAVE_PTHREAD_GETTID_NP)
 	pid_t threadId = pthread_gettid_np(pthread_self());
 #elif defined(__linux__)
-	pid_t threadId = gettid();
+	static thread_local pid_t threadId = gettid();
 #elif defined(__APPLE__)
 	uint64_t threadId = 0;
 	pthread_threadid_np(nullptr, &threadId);

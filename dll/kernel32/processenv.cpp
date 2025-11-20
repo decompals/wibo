@@ -54,7 +54,7 @@ GUEST_PTR WINAPI GetCommandLineA() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetCommandLineA() -> %s\n", wibo::commandLine.c_str());
 	if (g_commandLineA == GUEST_NULL) {
-		void *tmp = wibo::heap::guestCalloc(1, wibo::commandLine.size() + 1);
+		void *tmp = wibo::heap::guestMalloc(wibo::commandLine.size() + 1, true);
 		memcpy(tmp, wibo::commandLine.c_str(), wibo::commandLine.size());
 		g_commandLineA = toGuestPtr(tmp);
 	}
@@ -65,7 +65,7 @@ GUEST_PTR WINAPI GetCommandLineW() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetCommandLineW() -> %s\n", wideStringToString(wibo::commandLineW.data()).c_str());
 	if (g_commandLineW == GUEST_NULL) {
-		void *tmp = wibo::heap::guestCalloc(1, wibo::commandLineW.size() * sizeof(WCHAR) + sizeof(WCHAR));
+		void *tmp = wibo::heap::guestMalloc(wibo::commandLineW.size() * sizeof(WCHAR) + sizeof(WCHAR), true);
 		memcpy(tmp, wibo::commandLineW.data(), wibo::commandLineW.size() * sizeof(WCHAR));
 		g_commandLineW = toGuestPtr(tmp);
 	}
@@ -85,9 +85,7 @@ BOOL WINAPI SetStdHandle(DWORD nStdHandle, HANDLE hHandle) {
 	return files::setStdHandle(nStdHandle, hHandle);
 }
 
-GUEST_PTR WINAPI GetEnvironmentStrings() {
-	return GetEnvironmentStringsA();
-}
+GUEST_PTR WINAPI GetEnvironmentStrings() { return GetEnvironmentStringsA(); }
 
 GUEST_PTR WINAPI GetEnvironmentStringsA() {
 	HOST_CONTEXT_GUARD();

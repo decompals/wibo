@@ -45,7 +45,7 @@ void wibo::debug_log(const char *fmt, ...) {
 }
 
 TEB *wibo::allocateTib() {
-	auto *newTib = static_cast<TEB *>(wibo::heap::guestCalloc(1, sizeof(TEB)));
+	auto *newTib = static_cast<TEB *>(wibo::heap::guestMalloc(sizeof(TEB), true));
 	if (!newTib) {
 		return nullptr;
 	}
@@ -317,11 +317,11 @@ int main(int argc, char **argv) {
 	files::init();
 
 	// Create PEB
-	PEB *peb = reinterpret_cast<PEB *>(wibo::heap::guestCalloc(1, sizeof(PEB)));
-	peb->ProcessParameters = toGuestPtr(wibo::heap::guestCalloc(1, sizeof(RTL_USER_PROCESS_PARAMETERS)));
+	PEB *peb = reinterpret_cast<PEB *>(wibo::heap::guestMalloc(sizeof(PEB), true));
+	peb->ProcessParameters = toGuestPtr(wibo::heap::guestMalloc(sizeof(RTL_USER_PROCESS_PARAMETERS), true));
 
 	// Create TIB
-	TEB *tib = reinterpret_cast<TEB *>(wibo::heap::guestCalloc(1, sizeof(TEB)));
+	TEB *tib = reinterpret_cast<TEB *>(wibo::heap::guestMalloc(sizeof(TEB), true));
 	wibo::tls::initializeTib(tib);
 	tib->Tib.Self = toGuestPtr(tib);
 	tib->Peb = toGuestPtr(peb);

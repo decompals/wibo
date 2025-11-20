@@ -2,10 +2,11 @@
 
 #include "common.h"
 #include "handles.h"
-#include "mimalloc.h"
+#include "heap.h"
 #include "types.h"
 
 #include <condition_variable>
+#include <optional>
 #include <pthread.h>
 
 namespace kernel32 {
@@ -153,7 +154,7 @@ struct SemaphoreObject final : WaitableObject {
 struct HeapObject : public ObjectBase {
 	static constexpr ObjectType kType = ObjectType::Heap;
 
-	mi_heap_t *heap;
+	std::optional<wibo::Heap> heap;
 	const pthread_t owner;
 	DWORD createFlags = 0;
 	SIZE_T initialSize = 0;
@@ -161,11 +162,12 @@ struct HeapObject : public ObjectBase {
 	DWORD compatibility = 0;
 	bool isProcessHeap = false;
 
-	explicit HeapObject(mi_heap_t *heap) : ObjectBase(kType), heap(heap), owner(pthread_self()) {}
+	explicit HeapObject(std::optional<wibo::Heap> heap)
+		: ObjectBase(kType), heap(std::move(heap)), owner(pthread_self()) {}
 	~HeapObject() override;
 
 	[[nodiscard]] inline bool isOwner() const { return pthread_equal(owner, pthread_self()); }
-	[[nodiscard]] inline bool canAccess() const { return isProcessHeap || (isOwner() && heap != nullptr); }
+	[[nodiscard]] inline bool canAccess() const { return isProcessHeap || (isOwner() && heap.has_value()); }
 };
 
 inline constexpr HANDLE kPseudoCurrentProcessHandleValue = static_cast<HANDLE>(-1);

@@ -9,8 +9,8 @@
 
 #include <algorithm>
 #include <cstring>
-#include <mimalloc.h>
 #include <mutex>
+#include <optional>
 #include <sys/mman.h>
 
 using kernel32::HeapObject;
@@ -23,7 +23,7 @@ HeapObject *g_processHeapRecord = nullptr;
 
 void ensureProcessHeapInitialized() {
 	std::call_once(g_processHeapInitFlag, []() {
-		auto record = make_pin<HeapObject>(nullptr);
+		auto record = make_pin<HeapObject>(std::nullopt);
 		if (!record) {
 			return;
 		}
@@ -41,10 +41,6 @@ LPVOID heapAllocFromRecord(HeapObject *record, DWORD dwFlags, SIZE_T dwBytes) {
 	if (!record) {
 		return nullptr;
 	}
-	auto *heap = record->heap;
-	if (!heap && record->isProcessHeap) {
-		heap = wibo::heap::getGuestHeap();
-	}
 	if ((record->createFlags | dwFlags) & HEAP_GENERATE_EXCEPTIONS) {
 		DEBUG_LOG("HeapAlloc: HEAP_GENERATE_EXCEPTIONS not supported\n");
 		kernel32::setLastError(ERROR_INVALID_PARAMETER);
@@ -52,7 +48,8 @@ LPVOID heapAllocFromRecord(HeapObject *record, DWORD dwFlags, SIZE_T dwBytes) {
 	}
 	const bool zeroMemory = (dwFlags & HEAP_ZERO_MEMORY) != 0;
 	const SIZE_T requestSize = std::max<SIZE_T>(1, dwBytes);
-	void *mem = zeroMemory ? mi_heap_zalloc(heap, requestSize) : mi_heap_malloc(heap, requestSize);
+	void *mem =
+		record->heap ? record->heap->malloc(requestSize, zeroMemory) : wibo::heap::guestMalloc(requestSize, zeroMemory);
 	if (!mem) {
 		kernel32::setLastError(ERROR_NOT_ENOUGH_MEMORY);
 		return nullptr;
@@ -66,10 +63,6 @@ LPVOID heapAllocFromRecord(HeapObject *record, DWORD dwFlags, SIZE_T dwBytes) {
 } // namespace
 
 HeapObject::~HeapObject() {
-	if (heap) {
-		mi_heap_destroy(heap);
-		heap = nullptr;
-	}
 	if (isProcessHeap) {
 		g_processHeapHandle = NO_HANDLE;
 		g_processHeapRecord = nullptr;
@@ -86,13 +79,7 @@ HANDLE WINAPI HeapCreate(DWORD flOptions, SIZE_T dwInitialSize, SIZE_T dwMaximum
 		return NO_HANDLE;
 	}
 
-	mi_heap_t *heap = wibo::heap::createGuestHeap();
-	if (!heap) {
-		setLastError(ERROR_NOT_ENOUGH_MEMORY);
-		return NO_HANDLE;
-	}
-
-	auto record = make_pin<HeapObject>(heap);
+	auto record = make_pin<HeapObject>(wibo::Heap());
 	record->createFlags = flOptions;
 	record->initialSize = dwInitialSize;
 	record->maximumSize = dwMaximumSize;
@@ -107,8 +94,7 @@ BOOL WINAPI HeapDestroy(HANDLE hHeap) {
 		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
-	mi_heap_destroy(record->heap);
-	record->heap = nullptr;
+	record->heap.reset();
 	wibo::handles().release(hHeap);
 	return TRUE;
 }
@@ -178,11 +164,6 @@ LPVOID WINAPI HeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dwBy
 		VERBOSE_LOG("-> %p (alloc)\n", alloc);
 		return alloc;
 	}
-	if (!mi_is_in_heap_region(lpMem)) {
-		VERBOSE_LOG("-> NULL (not owned)\n");
-		setLastError(ERROR_INVALID_PARAMETER);
-		return nullptr;
-	}
 	if ((record->createFlags | dwFlags) & HEAP_GENERATE_EXCEPTIONS) {
 		VERBOSE_LOG("-> NULL (exceptions unsupported)\n");
 		setLastError(ERROR_NOT_SUPPORTED);
@@ -192,7 +173,7 @@ LPVOID WINAPI HeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dwBy
 	const bool zeroMemory = (dwFlags & HEAP_ZERO_MEMORY) != 0;
 	if (dwBytes == 0) {
 		if (!inplaceOnly) {
-			mi_free(lpMem);
+			wibo::heap::guestFree(lpMem);
 			VERBOSE_LOG("-> NULL (freed)\n");
 			return nullptr;
 		}
@@ -202,7 +183,7 @@ LPVOID WINAPI HeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dwBy
 	}
 
 	const SIZE_T requestSize = std::max<SIZE_T>(1, dwBytes);
-	const SIZE_T oldSize = mi_usable_size(lpMem);
+	const SIZE_T oldSize = wibo::heap::guestSize(lpMem);
 	if (inplaceOnly || requestSize <= oldSize) {
 		if (requestSize > oldSize) {
 			VERBOSE_LOG("-> NULL (cannot grow in place)\n");
@@ -213,22 +194,8 @@ LPVOID WINAPI HeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dwBy
 		return lpMem;
 	}
 
-	auto *heap = record->heap;
-	if (!heap && record->isProcessHeap) {
-		heap = wibo::heap::getGuestHeap();
-	}
-	void *ret = mi_heap_realloc(heap, lpMem, requestSize);
-	if (!ret) {
-		setLastError(ERROR_NOT_ENOUGH_MEMORY);
-		return nullptr;
-	}
-	if (zeroMemory && requestSize > oldSize) {
-		size_t newUsable = mi_usable_size(ret);
-		if (newUsable > oldSize) {
-			size_t zeroLen = std::min<SIZE_T>(newUsable, requestSize) - oldSize;
-			std::memset(static_cast<char *>(ret) + oldSize, 0, zeroLen);
-		}
-	}
+	void *ret = record->heap ? record->heap->realloc(lpMem, requestSize, zeroMemory)
+							 : wibo::heap::guestRealloc(lpMem, requestSize, zeroMemory);
 	if (isExecutableHeap(record.get())) {
 		tryMarkExecutable(ret);
 	}
@@ -251,13 +218,7 @@ SIZE_T WINAPI HeapSize(HANDLE hHeap, DWORD dwFlags, LPCVOID lpMem) {
 		setLastError(ERROR_INVALID_PARAMETER);
 		return static_cast<SIZE_T>(-1);
 	}
-	if (!mi_is_in_heap_region(lpMem)) {
-		VERBOSE_LOG("-> ERROR_INVALID_PARAMETER (not owned)\n");
-		setLastError(ERROR_INVALID_PARAMETER);
-		return static_cast<SIZE_T>(-1);
-	}
-	size_t size = mi_usable_size(lpMem);
-	return static_cast<SIZE_T>(size);
+	return static_cast<SIZE_T>(wibo::heap::guestSize(lpMem));
 }
 
 BOOL WINAPI HeapFree(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem) {
@@ -273,12 +234,12 @@ BOOL WINAPI HeapFree(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem) {
 		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
-	if (!mi_is_in_heap_region(lpMem)) {
+	bool ret = record->heap ? record->heap->free(lpMem) : wibo::heap::guestFree(lpMem);
+	if (!ret) {
 		VERBOSE_LOG("-> ERROR_INVALID_PARAMETER (not owned)\n");
 		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
-	mi_free(lpMem);
 	VERBOSE_LOG("-> SUCCESS\n");
 	return TRUE;
 }

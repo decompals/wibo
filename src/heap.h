@@ -7,17 +7,53 @@
 #include <cstdio>
 #include <limits>
 #include <memory>
+#include <vector>
 
 struct mi_heap_s;
 typedef struct mi_heap_s mi_heap_t;
 
+namespace wibo {
+
+namespace detail {
+
+struct HeapInternal {
+	uint32_t heapTag;
+	// Previously used arena
+	uint32_t arenaHint = 0;
+	// Thread-local mi_heap objects per arena
+	std::vector<mi_heap_t *> heaps;
+
+	explicit HeapInternal(uint32_t heapTag) : heapTag(heapTag) {}
+	~HeapInternal() = default;
+};
+
+}; // namespace detail
+
+class Heap {
+  public:
+	Heap();
+	~Heap();
+
+	Heap(const Heap &) = delete;
+	Heap &operator=(const Heap &) = delete;
+	Heap(Heap &&) noexcept = default;
+	Heap &operator=(Heap &&) noexcept = default;
+
+	void *malloc(size_t size, bool zero = false);
+	void *realloc(void *ptr, size_t newSize, bool zero = false);
+	bool free(void *ptr);
+
+  private:
+	uint32_t threadId;
+	detail::HeapInternal internal;
+};
+
+}; // namespace wibo
+
 namespace wibo::heap {
 
-bool initialize();
 uintptr_t systemPageSize();
 uintptr_t allocationGranularity();
-mi_heap_t *getGuestHeap();
-mi_heap_t *createGuestHeap();
 
 enum class VmStatus : uint32_t {
 	Success = 0,
@@ -31,10 +67,10 @@ enum class VmStatus : uint32_t {
 };
 
 // Guest heap memory allocation helpers
-void *guestMalloc(std::size_t size);
-void *guestCalloc(std::size_t count, std::size_t size);
-void *guestRealloc(void *ptr, std::size_t newSize);
-void guestFree(void *ptr);
+void *guestMalloc(std::size_t size, bool zero = false);
+void *guestRealloc(void *ptr, std::size_t newSize, bool zero = false);
+bool guestFree(void *ptr);
+size_t guestSize(const void *ptr);
 
 VmStatus virtualAlloc(void **baseAddress, std::size_t *regionSize, DWORD allocationType, DWORD protect,
 					  DWORD type = MEM_PRIVATE);

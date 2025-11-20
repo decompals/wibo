@@ -1,9 +1,11 @@
 #include "heap.h"
 #include "common.h"
 #include "errors.h"
+#include "processes.h"
 #include "types.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <charconv>
 #include <cstdint>
@@ -26,7 +28,6 @@
 #endif
 
 #include <mimalloc.h>
-#include <mimalloc/internal.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -37,7 +38,7 @@
 namespace {
 
 constexpr uintptr_t kLowMemoryStart = 0x00110000UL; // 1 MiB + 64 KiB
-constexpr uintptr_t kHeapMax = 0x60000000UL;		// 1 GiB
+constexpr uintptr_t kHeapMax = 0x70000000UL;
 #ifdef __APPLE__
 // On macOS, our program is mapped at 0x7E001000
 constexpr uintptr_t kTopDownStart = 0x7D000000UL;
@@ -46,21 +47,22 @@ constexpr uintptr_t kTwoGB = 0x7E000000UL;
 constexpr uintptr_t kTopDownStart = 0x7F000000UL; // Just below 2GB
 constexpr uintptr_t kTwoGB = 0x80000000UL;
 #endif
-constexpr std::size_t kGuestArenaSize = 512ULL * 1024ULL * 1024ULL; // 512 MiB
+constexpr std::size_t kGuestArenaSize = 64ULL * 1024ULL * 1024ULL; // 64 MiB
+constexpr std::size_t kArenaMaxObjSize = 8ULL * 1024ULL * 1024ULL; // 8 MiB
 constexpr std::size_t kVirtualAllocationGranularity = 64ULL * 1024ULL;
 
-struct ArenaRange {
+struct Arena {
+	mi_arena_id_t arenaId = nullptr;
 	void *start = nullptr;
-	std::size_t size = 0;
+	size_t size = 0;
 };
 
-// Guest arena (<2GB)
-ArenaRange g_guest;
-mi_arena_id_t g_guestArenaId = nullptr;
-thread_local mi_heap_t *g_guestHeap = nullptr;
+std::recursive_mutex g_arenasMutex;
+std::vector<Arena> g_arenas;
+std::atomic_uint32_t g_heapTag(1);
 
-bool g_initialized = false;
-std::once_flag g_initOnce;
+// Each thread gets its own set of mi_heap objects corresponding to each allocated arena
+thread_local wibo::detail::HeapInternal g_guestHeap(0);
 
 std::mutex g_mappingsMutex;
 std::map<uintptr_t, MEMORY_BASIC_INFORMATION> *g_mappings = nullptr;
@@ -386,6 +388,24 @@ bool findFreeMappingLocked(std::size_t size, uintptr_t minAddr, uintptr_t maxAdd
 		return true;
 	};
 
+	bool foundTopCandidate = false;
+	uintptr_t bestCandidate = 0;
+	auto considerGap = [&](uintptr_t gapStart, uintptr_t gapEnd) -> bool {
+		uintptr_t candidate = 0;
+		if (!tryGap(gapStart, gapEnd, candidate)) {
+			return false;
+		}
+		if (!preferTop) {
+			*outAddr = candidate;
+			return true;
+		}
+		if (!foundTopCandidate || candidate > bestCandidate) {
+			bestCandidate = candidate;
+			foundTopCandidate = true;
+		}
+		return false;
+	};
+
 	uintptr_t cursor = alignUp(searchMin, granularity);
 	for (auto &g_mapping : *g_mappings) {
 		uintptr_t mapStart = g_mapping.first;
@@ -395,7 +415,7 @@ bool findFreeMappingLocked(std::size_t size, uintptr_t minAddr, uintptr_t maxAdd
 			continue;
 		}
 		if (mapStart >= searchMax) {
-			if (tryGap(cursor, searchMax, *outAddr)) {
+			if (considerGap(cursor, searchMax)) {
 				return true;
 			}
 			break;
@@ -403,7 +423,7 @@ bool findFreeMappingLocked(std::size_t size, uintptr_t minAddr, uintptr_t maxAdd
 
 		if (mapStart > cursor) {
 			uintptr_t gapEnd = std::min(mapStart, searchMax);
-			if (tryGap(cursor, gapEnd, *outAddr)) {
+			if (considerGap(cursor, gapEnd)) {
 				return true;
 			}
 		}
@@ -418,17 +438,20 @@ bool findFreeMappingLocked(std::size_t size, uintptr_t minAddr, uintptr_t maxAdd
 	}
 
 	if (cursor < searchMax) {
-		if (tryGap(cursor, searchMax, *outAddr)) {
+		if (considerGap(cursor, searchMax)) {
 			return true;
 		}
 	}
 
+	if (foundTopCandidate) {
+		*outAddr = bestCandidate;
+		return true;
+	}
 	return false;
 }
 
-bool mapArena(std::size_t size, uintptr_t minAddr, uintptr_t maxAddr, bool preferTop, const char *name,
-			  ArenaRange &out) {
-	std::lock_guard<std::mutex> guard(g_mappingsMutex);
+bool mapArena(std::size_t size, uintptr_t minAddr, uintptr_t maxAddr, bool preferTop, const char *name, Arena &out) {
+	std::lock_guard lk(g_mappingsMutex);
 	const std::size_t ps = wibo::heap::systemPageSize();
 	size = (size + ps - 1) & ~(ps - 1);
 	uintptr_t cand = 0;
@@ -444,45 +467,216 @@ bool mapArena(std::size_t size, uintptr_t minAddr, uintptr_t maxAddr, bool prefe
 	return false;
 }
 
-void initializeImpl() {
-	if (g_initialized) {
-		return;
+bool createArenaLocked(size_t size) {
+	Arena arena;
+	if (!mapArena(size, kLowMemoryStart, kHeapMax, true, "wibo heap arena", arena)) {
+		DEBUG_LOG("heap: failed to find free mapping for arena\n");
+		return false;
 	}
+	if (!mi_manage_os_memory_ex(arena.start, arena.size,
+								/*is_committed*/ false,
+								/*is_pinned*/ false,
+								/*is_zero*/ true,
+								/*numa_node*/ -1,
+								/*exclusive*/ true, &arena.arenaId)) {
+		DEBUG_LOG("heap: failed to create mi_arena\n");
+		return false;
+	}
+	DEBUG_LOG("heap: created arena %d at %p..%p (%zu MiB)\n", arena.arenaId, arena.start,
+			  reinterpret_cast<uint8_t *>(arena.start) + arena.size, arena.size >> 20);
+	g_arenas.push_back(arena);
+	return true;
+}
 
-	// Map and register guest arena (below 2GB, exclusive)
-	ArenaRange guest;
-	if (mapArena(kGuestArenaSize, kLowMemoryStart, kHeapMax, true, "wibo guest arena", guest)) {
-		bool ok = mi_manage_os_memory_ex(guest.start, guest.size,
-										 /*is_committed*/ false,
-										 /*is_pinned*/ false,
-										 /*is_zero*/ true,
-										 /*numa_node*/ -1,
-										 /*exclusive*/ true, &g_guestArenaId);
-		if (ok) {
-			g_guest = guest;
-		} else {
-			LOG_ERR("heap: failed to register guest arena with mimalloc\n");
+mi_heap_t *heapForArena(std::vector<mi_heap_t *> &heaps, uint32_t arenaIdx, uint32_t heapTag) {
+	if (heaps.size() <= arenaIdx) {
+		heaps.resize(arenaIdx + 1, nullptr);
+	}
+	if (heaps[arenaIdx] == nullptr) {
+		mi_arena_id_t arenaId;
+		{
+			std::lock_guard lk(g_arenasMutex);
+			if (arenaIdx >= g_arenas.size()) {
+				return nullptr;
+			}
+			arenaId = g_arenas[arenaIdx].arenaId;
+		}
+		mi_heap_t *h = mi_heap_new_ex(static_cast<int>(heapTag), heapTag != 0, arenaId);
+		if (h == nullptr) {
+			return nullptr;
+		}
+		heaps[arenaIdx] = h;
+	}
+	return heaps[arenaIdx];
+}
+
+template <typename CallbackFn>
+inline auto tryWithArena(wibo::detail::HeapInternal &internal, uint32_t arenaIdx, CallbackFn &&cb)
+	-> std::invoke_result_t<CallbackFn, mi_heap_t *, uint32_t> {
+	mi_heap_t *heap = heapForArena(internal.heaps, arenaIdx, internal.heapTag);
+	if (!heap) {
+		return {};
+	}
+	return std::forward<CallbackFn>(cb)(heap, arenaIdx);
+}
+
+template <typename CallbackFn>
+inline auto tryWithAnyArena(wibo::detail::HeapInternal &internal, CallbackFn &&cb)
+	-> std::invoke_result_t<CallbackFn, mi_heap_t *, uint32_t> {
+	using R = std::invoke_result_t<CallbackFn, mi_heap_t *, uint32_t>;
+	R ret = tryWithArena(internal, internal.arenaHint, cb);
+	if (ret) {
+		return ret;
+	}
+	// Loop without locking (arenas won't be removed)
+	uint32_t numArenas = static_cast<uint32_t>(g_arenas.size());
+	for (uint32_t i = 0; i < numArenas; ++i) {
+		if (i == internal.arenaHint) {
+			continue;
+		}
+		ret = tryWithArena(internal, i, cb);
+		if (ret) {
+			internal.arenaHint = i;
+			return ret;
 		}
 	}
-	if (g_guest.size) {
-		DEBUG_LOG("heap: initialized guest arena %p..%p (%zu MiB) id=%p\n", g_guest.start,
-				  static_cast<void *>(static_cast<char *>(g_guest.start) + g_guest.size), g_guest.size >> 20,
-				  g_guestArenaId);
-	} else {
-		DEBUG_LOG("heap: guest arena initialization incomplete\n");
+	std::lock_guard lk(g_arenasMutex);
+	// Was a new arena created while we were looping?
+	for (uint32_t i = numArenas; i < g_arenas.size(); ++i) {
+		ret = tryWithArena(internal, i, cb);
+		if (ret) {
+			internal.arenaHint = i;
+			return ret;
+		}
 	}
+	DEBUG_LOG("heap: no arena available, creating new arena\n");
+	if (createArenaLocked(kGuestArenaSize)) {
+		uint32_t newArenaIdx = static_cast<uint32_t>(g_arenas.size() - 1);
+		ret = tryWithArena(internal, newArenaIdx, cb);
+		if (ret) {
+			internal.arenaHint = newArenaIdx;
+			return ret;
+		}
+	}
+	return {};
+}
 
-	g_initialized = true;
+void *doAlloc(wibo::detail::HeapInternal &internal, size_t size, bool zero) {
+	if (size >= kArenaMaxObjSize) {
+		DEBUG_LOG("heap: large malloc %zu bytes, using virtualAlloc\n", size);
+		void *addr = nullptr;
+		const auto result = wibo::heap::virtualAlloc(&addr, &size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+		if (result != wibo::heap::VmStatus::Success) {
+			return nullptr;
+		}
+		return addr;
+	}
+	return tryWithAnyArena(internal, [size, zero](mi_heap_t *heap, uint32_t) {
+		return (zero ? mi_heap_zalloc_aligned : mi_heap_malloc_aligned)(heap, size, 8);
+	});
+}
+
+void *doRealloc(wibo::detail::HeapInternal &internal, void *ptr, size_t newSize, bool zero) {
+	bool isInHeap = mi_is_in_heap_region(ptr);
+	if (newSize >= kArenaMaxObjSize || !isInHeap) {
+		DEBUG_LOG("heap: large realloc %zu bytes, using virtualAlloc\n", newSize);
+		size_t oldSize;
+		if (isInHeap) {
+			oldSize = mi_usable_size(ptr);
+		} else {
+			// Get size from virtualQuery
+			MEMORY_BASIC_INFORMATION info;
+			auto result = wibo::heap::virtualQuery(ptr, &info);
+			if (result != wibo::heap::VmStatus::Success) {
+				return nullptr;
+			}
+			oldSize = info.RegionSize;
+		}
+		void *ret = nullptr;
+		if (newSize >= kArenaMaxObjSize) {
+			auto result = wibo::heap::virtualAlloc(&ret, &newSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+			if (result != wibo::heap::VmStatus::Success) {
+				return nullptr;
+			}
+		} else {
+			ret = doAlloc(internal, newSize, zero);
+		}
+		if (!ret) {
+			return nullptr;
+		}
+		std::memcpy(ret, ptr, std::min(oldSize, newSize));
+		if (isInHeap) {
+			mi_free(ptr);
+		} else {
+			auto result = wibo::heap::virtualFree(ptr, 0, MEM_RELEASE);
+			if (result != wibo::heap::VmStatus::Success) {
+				return nullptr;
+			}
+		}
+		return ret;
+	}
+	return tryWithAnyArena(internal, [ptr, newSize, zero](mi_heap_t *heap, uint32_t) {
+		return (zero ? mi_heap_rezalloc_aligned : mi_heap_realloc_aligned)(heap, ptr, newSize, 8);
+	});
+}
+
+bool doFree(void *ptr) {
+	if (ptr == nullptr) {
+		return false;
+	}
+	if (mi_is_in_heap_region(ptr)) {
+		mi_free(ptr);
+	} else {
+		DEBUG_LOG("heap: free(%p) -> virtualFree\n", ptr);
+		auto result = wibo::heap::virtualFree(ptr, 0, MEM_RELEASE);
+		if (result != wibo::heap::VmStatus::Success) {
+			return false;
+		}
+	}
+	return true;
 }
 
 } // anonymous namespace
 
-namespace wibo::heap {
+namespace wibo {
 
-bool initialize() {
-	std::call_once(g_initOnce, initializeImpl);
-	return g_initialized;
+Heap::Heap() : threadId(getThreadId()), internal(g_heapTag++) {}
+
+Heap::~Heap() {
+	if (getThreadId() != threadId) {
+		DEBUG_LOG("heap: ~Heap() failed; heap owned by another thread\n");
+		return;
+	}
+	for (mi_heap_t *h : internal.heaps) {
+		if (h) {
+			mi_heap_destroy(h);
+		}
+	}
+	internal.heaps.clear();
 }
+
+void *Heap::malloc(size_t size, bool zero) {
+	if (getThreadId() != threadId) {
+		DEBUG_LOG("heap: malloc(%zu) failed; heap owned by another thread\n", size);
+		return nullptr;
+	}
+	return doAlloc(internal, size, zero);
+}
+
+void *Heap::realloc(void *ptr, size_t newSize, bool zero) {
+	if (getThreadId() != threadId) {
+		DEBUG_LOG("heap: realloc(%p, %zu) failed; heap owned by another thread\n", ptr, newSize);
+		return nullptr;
+	}
+	return doRealloc(internal, ptr, newSize, zero);
+}
+
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+bool Heap::free(void *ptr) { return doFree(ptr); }
+
+}; // namespace wibo
+
+namespace wibo::heap {
 
 uintptr_t systemPageSize() {
 	static uintptr_t cached = []() {
@@ -495,33 +689,24 @@ uintptr_t systemPageSize() {
 	return cached;
 }
 
-mi_heap_t *getGuestHeap() {
-	initialize();
-	if (g_guestHeap == nullptr) {
-		g_guestHeap = createGuestHeap();
-	}
-	return g_guestHeap;
-}
+void *guestMalloc(std::size_t size, bool zero) { return doAlloc(g_guestHeap, size, zero); }
 
-mi_heap_t *createGuestHeap() {
-	initialize();
-	if (g_guestArenaId != nullptr) {
-		if (mi_heap_t *h = mi_heap_new_ex(0, true, g_guestArenaId)) {
-			DEBUG_LOG("heap: created guest heap in arena %p\n", g_guestArenaId);
-			return h;
+void *guestRealloc(void *ptr, std::size_t newSize, bool zero) { return doRealloc(g_guestHeap, ptr, newSize, zero); }
+
+bool guestFree(void *ptr) { return doFree(ptr); }
+
+size_t guestSize(const void *ptr) {
+	if (mi_is_in_heap_region(ptr)) {
+		return mi_usable_size(ptr);
+	} else {
+		MEMORY_BASIC_INFORMATION info;
+		auto result = wibo::heap::virtualQuery(ptr, &info);
+		if (result != wibo::heap::VmStatus::Success) {
+			return SIZE_MAX;
 		}
+		return info.RegionSize;
 	}
-	DEBUG_LOG("heap: created guest heap without arena\n");
-	return mi_heap_new();
 }
-
-void *guestMalloc(std::size_t size) { return mi_heap_malloc(getGuestHeap(), size); }
-
-void *guestCalloc(std::size_t count, std::size_t size) { return mi_heap_calloc(getGuestHeap(), count, size); }
-
-void *guestRealloc(void *ptr, std::size_t newSize) { return mi_heap_realloc(getGuestHeap(), ptr, newSize); }
-
-void guestFree(void *ptr) { mi_free(ptr); }
 
 uintptr_t allocationGranularity() { return kVirtualAllocationGranularity; }
 
@@ -1041,8 +1226,8 @@ bool reserveGuestStack(std::size_t stackSizeBytes, void **outStackLimit, void **
 	const std::size_t ps = systemPageSize();
 	std::size_t total = ((stackSizeBytes + (ps * 2) - 1) & ~(ps - 1));
 
-	ArenaRange r;
-	if (!mapArena(total, kTopDownStart, kTwoGB, true, "wibo guest stack", r)) {
+	Arena r;
+	if (!mapArena(total, kLowMemoryStart, kTwoGB, true, "wibo guest stack", r)) {
 		DEBUG_LOG("heap: reserveGuestStack: failed to map region\n");
 		return false;
 	}
@@ -1174,8 +1359,8 @@ static size_t blockLower2GB(MEMORY_BASIC_INFORMATION mappings[MAX_NUM_MAPPINGS])
 		if (mapStart >= kTwoGB) {
 			break;
 		}
-		if (mapStart + mapEnd > kTwoGB) {
-			mapEnd = kTwoGB - mapStart;
+		if (mapEnd > kTwoGB) {
+			mapEnd = kTwoGB;
 		}
 		if (mapStart == mapEnd || mapStart > mapEnd) {
 			continue;
@@ -1190,7 +1375,6 @@ static size_t blockLower2GB(MEMORY_BASIC_INFORMATION mappings[MAX_NUM_MAPPINGS])
 					// Extend the previous mapping
 					prevMapping.RegionSize = mapEnd - prevMapStart;
 					lastMapEnd = mapEnd;
-					procLine = procLine.substr(newline + 1);
 					continue;
 				}
 			}

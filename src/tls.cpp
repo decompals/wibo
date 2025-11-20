@@ -34,7 +34,7 @@ TlsArray *allocateTlsArray(size_t capacity) {
 		return nullptr;
 	}
 	const size_t bytes = sizeof(TlsArray) + capacity * sizeof(GUEST_PTR);
-	auto *arr = static_cast<TlsArray *>(wibo::heap::guestCalloc(1, bytes));
+	auto *arr = static_cast<TlsArray *>(wibo::heap::guestMalloc(bytes, true));
 	if (!arr) {
 		return nullptr;
 	}

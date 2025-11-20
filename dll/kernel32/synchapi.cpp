@@ -994,7 +994,7 @@ BOOL WINAPI InitializeCriticalSectionEx(LPCRITICAL_SECTION lpCriticalSection, DW
 		lpCriticalSection->DebugInfo = static_cast<GUEST_PTR>(-1);
 	} else {
 		auto *debugInfo = reinterpret_cast<RTL_CRITICAL_SECTION_DEBUG *>(
-			wibo::heap::guestCalloc(1, sizeof(RTL_CRITICAL_SECTION_DEBUG)));
+			wibo::heap::guestMalloc(sizeof(RTL_CRITICAL_SECTION_DEBUG), true));
 		debugInfo->CriticalSection = toGuestPtr(lpCriticalSection);
 		debugInfo->ProcessLocksList.Blink = toGuestPtr(&debugInfo->ProcessLocksList);
 		debugInfo->ProcessLocksList.Flink = toGuestPtr(&debugInfo->ProcessLocksList);

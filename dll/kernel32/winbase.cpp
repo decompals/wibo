@@ -167,82 +167,6 @@ ATOM addAtomByString(const std::string &value) {
 	return newAtom;
 }
 
-void *doAlloc(UINT dwBytes, bool zero) {
-	if (dwBytes == 0) {
-		dwBytes = 1;
-	}
-	void *ret;
-	size_t size = static_cast<size_t>(dwBytes);
-	if (dwBytes > MI_ARENA_MAX_OBJ_SIZE) {
-		// If the size is too large, allocate memory using virtualAlloc
-		DEBUG_LOG("doAlloc(%u, %d) -> virtualAlloc\n", dwBytes, zero);
-		void *addr = nullptr;
-		const auto result = wibo::heap::virtualAlloc(&addr, &size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-		if (result != wibo::heap::VmStatus::Success) {
-			return nullptr;
-		}
-		ret = addr;
-	} else {
-		ret = mi_heap_malloc_aligned(wibo::heap::getGuestHeap(), dwBytes, 8);
-		size = mi_usable_size(ret);
-	}
-	if (ret && zero) {
-		std::memset(ret, 0, size);
-	}
-	return ret;
-}
-
-void *doRealloc(void *mem, UINT dwBytes, bool zero) {
-	if (dwBytes == 0) {
-		dwBytes = 1;
-	}
-	size_t oldSize;
-	void *ret;
-	size_t newSize = static_cast<size_t>(dwBytes);
-	mi_heap_t *heap = wibo::heap::getGuestHeap();
-	if ((mem == nullptr && dwBytes <= MI_ARENA_MAX_OBJ_SIZE) || mi_is_in_heap_region(mem)) {
-		oldSize = mi_usable_size(mem);
-		ret = mi_heap_realloc_aligned(heap, mem, dwBytes, 8);
-		newSize = mi_usable_size(ret);
-	} else {
-		DEBUG_LOG("doRealloc(%u, %d, %d) -> virtualAlloc\n", dwBytes, zero, mem);
-		MEMORY_BASIC_INFORMATION info;
-		auto result = wibo::heap::virtualQuery(mem, &info);
-		if (result != wibo::heap::VmStatus::Success) {
-			return nullptr;
-		}
-		oldSize = info.RegionSize;
-		result = wibo::heap::virtualAlloc(&ret, &newSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-		if (result != wibo::heap::VmStatus::Success) {
-			return nullptr;
-		}
-		std::memcpy(ret, mem, oldSize);
-		wibo::heap::virtualFree(mem, oldSize, MEM_RELEASE);
-	}
-	if (ret && zero && newSize > oldSize) {
-		std::memset(static_cast<char *>(ret) + oldSize, 0, newSize - oldSize);
-	}
-	return ret;
-}
-
-bool doFree(void *mem) {
-	if (mem == nullptr) {
-		return false;
-	}
-	if (mi_is_in_heap_region(mem)) {
-		mi_free(mem);
-	} else {
-		DEBUG_LOG("doFree(%p) -> virtualFree\n", mem);
-		MEMORY_BASIC_INFORMATION info;
-		auto result = wibo::heap::virtualQuery(mem, &info);
-		if (result != wibo::heap::VmStatus::Success || fromGuestPtr(info.BaseAddress) != mem) {
-			return false;
-		}
-		wibo::heap::virtualFree(mem, info.RegionSize, MEM_RELEASE);
-	}
-	return true;
-}
-
 bool tryGetCurrentDirectoryPath(std::string &outPath) {
 	std::error_code ec;
 	std::filesystem::path cwd = std::filesystem::current_path(ec);
@@ -811,17 +735,21 @@ HGLOBAL WINAPI GlobalAlloc(UINT uFlags, SIZE_T dwBytes) {
 		return NO_HANDLE;
 	}
 	bool zero = (uFlags & GMEM_ZEROINIT) != 0;
-	void *ret = doAlloc(static_cast<UINT>(dwBytes), zero);
+	void *ret = wibo::heap::guestMalloc(static_cast<UINT>(dwBytes), zero);
 	VERBOSE_LOG("-> %p\n", ret);
+	if (!ret) {
+		setLastError(ERROR_NOT_ENOUGH_MEMORY);
+		return GUEST_NULL;
+	}
 	return toGuestPtr(ret);
 }
 
 HGLOBAL WINAPI GlobalFree(HGLOBAL hMem) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("GlobalFree(%p)\n", hMem);
-	if (doFree(reinterpret_cast<void *>(hMem))) {
+	if (wibo::heap::guestFree(reinterpret_cast<void *>(hMem))) {
 		VERBOSE_LOG("-> success\n");
-		return NO_HANDLE;
+		return GUEST_NULL;
 	} else {
 		VERBOSE_LOG("-> failure\n");
 		return hMem;
@@ -833,11 +761,15 @@ HGLOBAL WINAPI GlobalReAlloc(HGLOBAL hMem, SIZE_T dwBytes, UINT uFlags) {
 	VERBOSE_LOG("GlobalReAlloc(%p, %zu, %x)\n", hMem, static_cast<size_t>(dwBytes), uFlags);
 	if (uFlags & GMEM_MODIFY) {
 		assert(0);
-		return NO_HANDLE;
+		return GUEST_NULL;
 	}
 	bool zero = (uFlags & GMEM_ZEROINIT) != 0;
-	void *ret = doRealloc(reinterpret_cast<void *>(hMem), static_cast<UINT>(dwBytes), zero);
+	void *ret = wibo::heap::guestRealloc(reinterpret_cast<void *>(hMem), static_cast<UINT>(dwBytes), zero);
 	VERBOSE_LOG("-> %p\n", ret);
+	if (!ret) {
+		setLastError(ERROR_NOT_ENOUGH_MEMORY);
+		return GUEST_NULL;
+	}
 	return toGuestPtr(ret);
 }
 
@@ -855,10 +787,10 @@ HLOCAL WINAPI LocalAlloc(UINT uFlags, SIZE_T uBytes) {
 	if ((uFlags & LMEM_MOVEABLE) != 0) {
 		VERBOSE_LOG("  ignoring LMEM_MOVEABLE\n");
 	}
-	void *result = doAlloc(static_cast<UINT>(uBytes), zero);
+	void *result = wibo::heap::guestMalloc(static_cast<UINT>(uBytes), zero);
 	if (!result) {
-		setLastError(ERROR_NOT_SUPPORTED);
-		return NO_HANDLE;
+		setLastError(ERROR_NOT_ENOUGH_MEMORY);
+		return GUEST_NULL;
 	}
 	// Legacy Windows applications (pre-NX and DEP) may expect executable memory from LocalAlloc.
 	tryMarkExecutable(result);
@@ -869,11 +801,12 @@ HLOCAL WINAPI LocalAlloc(UINT uFlags, SIZE_T uBytes) {
 HLOCAL WINAPI LocalFree(HLOCAL hMem) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("LocalFree(%p)\n", hMem);
-	if (doFree(reinterpret_cast<void *>(hMem))) {
+	if (wibo::heap::guestFree(reinterpret_cast<void *>(hMem))) {
 		VERBOSE_LOG("-> success\n");
-		return NO_HANDLE;
+		return GUEST_NULL;
 	} else {
 		VERBOSE_LOG("-> failure\n");
+		setLastError(ERROR_INVALID_HANDLE);
 		return hMem;
 	}
 }
@@ -885,10 +818,10 @@ HLOCAL WINAPI LocalReAlloc(HLOCAL hMem, SIZE_T uBytes, UINT uFlags) {
 	if ((uFlags & LMEM_MOVEABLE) != 0) {
 		VERBOSE_LOG("  ignoring LMEM_MOVEABLE\n");
 	}
-	void *result = doRealloc(reinterpret_cast<void *>(hMem), static_cast<UINT>(uBytes), zero);
+	void *result = wibo::heap::guestRealloc(reinterpret_cast<void *>(hMem), static_cast<UINT>(uBytes), zero);
 	if (!result && uBytes != 0) {
-		setLastError(ERROR_NOT_SUPPORTED);
-		return NO_HANDLE;
+		setLastError(ERROR_NOT_ENOUGH_MEMORY);
+		return GUEST_NULL;
 	}
 	// Legacy Windows applications (pre-NX and DEP) may expect executable memory from LocalReAlloc.
 	tryMarkExecutable(result);

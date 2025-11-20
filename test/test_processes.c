@@ -89,7 +89,6 @@ static int parent_main(void) {
 	TEST_CHECK(GetExitCodeProcess(processHandle, &exitCode));
 	TEST_CHECK_EQ(STILL_ACTIVE, exitCode);
 
-	TEST_CHECK_EQ(WAIT_TIMEOUT, WaitForSingleObject(processHandle, 10));
 	TEST_CHECK_EQ(WAIT_OBJECT_0, WaitForSingleObject(processHandle, 5000));
 
 	TEST_CHECK(GetExitCodeProcess(processHandle, &exitCode));

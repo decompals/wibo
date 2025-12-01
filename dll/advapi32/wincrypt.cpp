@@ -3,6 +3,7 @@
 #include "common.h"
 #include "context.h"
 #include "errors.h"
+#include "heap.h"
 #include "kernel32/internal.h"
 
 #include "md5.h"
@@ -36,14 +37,9 @@ bool computeDigest(HashObject &hash) {
 	}
 }
 
-HashObject *hashObjectFromHandle(HCRYPTHASH hHash) {
-	if (hHash == 0) {
-		return nullptr;
-	}
-	return reinterpret_cast<HashObject *>(static_cast<uintptr_t>(hHash));
-}
+HashObject *hashObjectFromHandle(HCRYPTHASH hHash) { return fromGuestPtr<HashObject>(static_cast<GUEST_PTR>(hHash)); }
 
-HCRYPTHASH hashHandleFromObject(HashObject *hash) { return static_cast<HCRYPTHASH>(reinterpret_cast<uintptr_t>(hash)); }
+HCRYPTHASH hashHandleFromObject(HashObject *hash) { return static_cast<HCRYPTHASH>(toGuestPtr(hash)); }
 
 DWORD hashSizeForAlgid(ALG_ID algid) {
 	switch (algid) {
@@ -69,7 +65,7 @@ BOOL WINAPI CryptReleaseContext(HCRYPTPROV hProv, DWORD dwFlags) {
 }
 
 BOOL WINAPI CryptAcquireContextW(HCRYPTPROV *phProv, LPCWSTR pszContainer, LPCWSTR pszProvider, DWORD dwProvType,
-								   DWORD dwFlags) {
+								 DWORD dwFlags) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: CryptAcquireContextW(%p, %p, %p, %u, %u)\n", phProv, pszContainer, pszProvider, dwProvType,
 			  dwFlags);
@@ -125,14 +121,14 @@ BOOL WINAPI CryptCreateHash(HCRYPTPROV hProv, ALG_ID Algid, HCRYPTKEY hKey, DWOR
 		kernel32::setLastError(ERROR_NOT_SUPPORTED);
 		return FALSE;
 	}
-	auto *hash = new HashObject;
+	auto hash = wibo::heap::make_guest_unique<HashObject>();
 	hash->algid = Algid;
 	if (Algid == CALG_MD5) {
 		MD5_Init(&hash->md5);
 	} else if (Algid == CALG_SHA1) {
 		sha1_init(&hash->sha1);
 	}
-	*phHash = hashHandleFromObject(hash);
+	*phHash = hashHandleFromObject(hash.release());
 	return TRUE;
 }
 
@@ -240,12 +236,12 @@ BOOL WINAPI CryptGetHashParam(HCRYPTHASH hHash, DWORD dwParam, BYTE *pbData, DWO
 BOOL WINAPI CryptDestroyHash(HCRYPTHASH hHash) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CryptDestroyHash(%p)\n", reinterpret_cast<void *>(static_cast<uintptr_t>(hHash)));
-	auto *hash = hashObjectFromHandle(hHash);
+	auto hash = wibo::heap::guest_ptr<HashObject>(hashObjectFromHandle(hHash));
 	if (!hash) {
 		kernel32::setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
-	delete hash;
+	hash.reset();
 	return TRUE;
 }
 

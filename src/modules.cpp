@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <climits>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -280,6 +281,8 @@ struct ImageTlsDirectory32 {
 	uint32_t SizeOfZeroFill;
 	uint32_t Characteristics;
 };
+
+constexpr size_t kMinTlsDirectorySize = offsetof(ImageTlsDirectory32, SizeOfZeroFill);
 
 uintptr_t resolveModuleAddress(const wibo::Executable &exec, uintptr_t address) {
 	if (address == 0) {
@@ -918,24 +921,28 @@ bool initializeModuleTls(ModuleInfo &module) {
 		return true;
 	}
 	Executable &exec = *module.executable;
-	if (exec.tlsDirectoryRVA == 0 || exec.tlsDirectorySize < sizeof(ImageTlsDirectory32)) {
+	if (exec.tlsDirectoryRVA == 0 || exec.tlsDirectorySize < kMinTlsDirectorySize) {
 		return true;
 	}
-	auto tlsDirectory = exec.fromRVA<ImageTlsDirectory32>(exec.tlsDirectoryRVA);
-	if (!tlsDirectory) {
+	auto *tlsDirectoryRaw = exec.fromRVA<uint8_t>(exec.tlsDirectoryRVA);
+	if (!tlsDirectoryRaw) {
 		return false;
 	}
+	ImageTlsDirectory32 tlsDirectory{};
+	// TLS directory may be smaller than ImageTlsDirectory32; remaining fields are zero-initialized
+	size_t copySize = std::min<size_t>(exec.tlsDirectorySize, sizeof(tlsDirectory));
+	std::memcpy(&tlsDirectory, tlsDirectoryRaw, copySize);
 
 	auto &info = module.tlsInfo;
-	info.templateSize = (tlsDirectory->EndAddressOfRawData > tlsDirectory->StartAddressOfRawData)
-							? tlsDirectory->EndAddressOfRawData - tlsDirectory->StartAddressOfRawData
+	info.templateSize = (tlsDirectory.EndAddressOfRawData > tlsDirectory.StartAddressOfRawData)
+							? tlsDirectory.EndAddressOfRawData - tlsDirectory.StartAddressOfRawData
 							: 0;
-	info.zeroFillSize = tlsDirectory->SizeOfZeroFill;
-	info.characteristics = tlsDirectory->Characteristics;
-	info.templateData = reinterpret_cast<uint8_t *>(resolveModuleAddress(exec, tlsDirectory->StartAddressOfRawData));
-	info.indexLocation = reinterpret_cast<DWORD *>(resolveModuleAddress(exec, tlsDirectory->AddressOfIndex));
+	info.zeroFillSize = tlsDirectory.SizeOfZeroFill;
+	info.characteristics = tlsDirectory.Characteristics;
+	info.templateData = reinterpret_cast<uint8_t *>(resolveModuleAddress(exec, tlsDirectory.StartAddressOfRawData));
+	info.indexLocation = reinterpret_cast<DWORD *>(resolveModuleAddress(exec, tlsDirectory.AddressOfIndex));
 	info.callbacks.clear();
-	uintptr_t callbacksArray = resolveModuleAddress(exec, tlsDirectory->AddressOfCallBacks);
+	uintptr_t callbacksArray = resolveModuleAddress(exec, tlsDirectory.AddressOfCallBacks);
 	if (callbacksArray) {
 		auto callbackPtr = reinterpret_cast<GUEST_PTR *>(callbacksArray);
 		while (callbackPtr && *callbackPtr) {

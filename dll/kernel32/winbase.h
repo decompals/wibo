@@ -57,6 +57,19 @@ struct ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION_PATH_SEGMENT {
 	ULONG Offset;
 };
 
+struct MEMORYSTATUS {
+	DWORD dwLength;
+	DWORD dwMemoryLoad;
+	SIZE_T dwTotalPhys;
+	SIZE_T dwAvailPhys;
+	SIZE_T dwTotalPageFile;
+	SIZE_T dwAvailPageFile;
+	SIZE_T dwTotalVirtual;
+	SIZE_T dwAvailVirtual;
+};
+
+using LPMEMORYSTATUS = MEMORYSTATUS *;
+
 namespace kernel32 {
 
 BOOL WINAPI IsBadReadPtr(LPCVOID lp, UINT_PTR ucb);
@@ -86,6 +99,7 @@ HGLOBAL WINAPI GlobalAlloc(UINT uFlags, SIZE_T dwBytes);
 HGLOBAL WINAPI GlobalFree(HGLOBAL hMem);
 HGLOBAL WINAPI GlobalReAlloc(HGLOBAL hMem, SIZE_T dwBytes, UINT uFlags);
 UINT WINAPI GlobalFlags(HGLOBAL hMem);
+void WINAPI GlobalMemoryStatus(LPMEMORYSTATUS lpBuffer);
 
 HLOCAL WINAPI LocalAlloc(UINT uFlags, SIZE_T uBytes);
 HLOCAL WINAPI LocalFree(HLOCAL hMem);

@@ -24,6 +24,12 @@
 #include <string>
 #include <sys/mman.h>
 #include <sys/statvfs.h>
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#include <sys/sysctl.h>
+#elif defined(__linux__)
+#include <sys/sysinfo.h>
+#endif
 #include <system_error>
 #include <unordered_map>
 #include <vector>
@@ -41,6 +47,71 @@ constexpr ATOM kMinIntegerAtom = 0x0001;
 constexpr ATOM kMaxIntegerAtom = 0xBFFF;
 constexpr ATOM kMinStringAtom = 0xC000;
 constexpr ATOM kMaxStringAtom = 0xFFFF;
+
+SIZE_T clampToSizeT(uint64_t value) {
+	constexpr uint64_t kMaxSizeT = static_cast<uint64_t>(std::numeric_limits<SIZE_T>::max());
+	return value > kMaxSizeT ? static_cast<SIZE_T>(kMaxSizeT) : static_cast<SIZE_T>(value);
+}
+
+struct MemorySnapshot {
+	uint64_t totalPhys = 0;
+	uint64_t availPhys = 0;
+	uint64_t totalPageFile = 0;
+	uint64_t availPageFile = 0;
+};
+
+bool queryHostMemory(MemorySnapshot &out) {
+#if defined(__linux__)
+	struct sysinfo info {};
+	if (sysinfo(&info) != 0) {
+		return false;
+	}
+	const uint64_t unit = info.mem_unit ? static_cast<uint64_t>(info.mem_unit) : 1;
+	out.totalPhys = static_cast<uint64_t>(info.totalram) * unit;
+	out.availPhys = static_cast<uint64_t>(info.freeram) * unit;
+	out.totalPageFile = (static_cast<uint64_t>(info.totalram) + static_cast<uint64_t>(info.totalswap)) * unit;
+	out.availPageFile = (static_cast<uint64_t>(info.freeram) + static_cast<uint64_t>(info.freeswap)) * unit;
+	if (info.bufferram > 0) {
+		uint64_t buffers = static_cast<uint64_t>(info.bufferram) * unit;
+		out.availPhys += buffers;
+		out.availPageFile += buffers;
+	}
+	return true;
+#elif defined(__APPLE__)
+	uint64_t totalPhys = 0;
+	size_t totalPhysSize = sizeof(totalPhys);
+	if (sysctlbyname("hw.memsize", &totalPhys, &totalPhysSize, nullptr, 0) != 0) {
+		return false;
+	}
+	vm_size_t pageSize = 0;
+	if (host_page_size(mach_host_self(), &pageSize) != KERN_SUCCESS || pageSize == 0) {
+		return false;
+	}
+	vm_statistics64_data_t vmstat {};
+	mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
+	if (host_statistics64(mach_host_self(), HOST_VM_INFO64, reinterpret_cast<host_info64_t>(&vmstat), &count) !=
+		KERN_SUCCESS) {
+		return false;
+	}
+	uint64_t freePages = static_cast<uint64_t>(vmstat.free_count) + static_cast<uint64_t>(vmstat.inactive_count) +
+						 static_cast<uint64_t>(vmstat.speculative_count);
+	out.totalPhys = totalPhys;
+	out.availPhys = freePages * static_cast<uint64_t>(pageSize);
+
+	struct xsw_usage swap {};
+	size_t swapSize = sizeof(swap);
+	if (sysctlbyname("vm.swapusage", &swap, &swapSize, nullptr, 0) == 0 && swapSize == sizeof(swap)) {
+		out.totalPageFile = swap.xsu_total;
+		out.availPageFile = swap.xsu_avail;
+	} else {
+		out.totalPageFile = totalPhys;
+		out.availPageFile = out.availPhys;
+	}
+	return true;
+#else
+	return false;
+#endif
+}
 
 struct AtomData {
 	uint16_t refCount = 0;
@@ -778,6 +849,54 @@ UINT WINAPI GlobalFlags(HGLOBAL hMem) {
 	VERBOSE_LOG("GlobalFlags(%p)\n", hMem);
 	(void)hMem;
 	return 0;
+}
+
+void WINAPI GlobalMemoryStatus(LPMEMORYSTATUS lpBuffer) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("GlobalMemoryStatus(%p)\n", lpBuffer);
+	if (!lpBuffer) {
+		return;
+	}
+
+	std::memset(lpBuffer, 0, sizeof(*lpBuffer));
+	lpBuffer->dwLength = sizeof(*lpBuffer);
+
+	MemorySnapshot snapshot;
+	if (!queryHostMemory(snapshot)) {
+		return;
+	}
+
+	uint64_t totalPhys = snapshot.totalPhys;
+	uint64_t availPhys = snapshot.availPhys;
+	uint64_t totalPageFile = snapshot.totalPageFile;
+	uint64_t availPageFile = snapshot.availPageFile;
+
+	constexpr uint64_t kMinAppAddr = 0x00010000ULL;
+	constexpr uint64_t kMaxAppAddr = 0x7FFEFFFFULL;
+	uint64_t totalVirtual = kMaxAppAddr - kMinAppAddr + 1;
+	uint64_t availVirtual = totalVirtual;
+
+	constexpr uint64_t kMaxLegacy = static_cast<uint64_t>(std::numeric_limits<LONG>::max());
+	totalPhys = std::min(totalPhys, kMaxLegacy);
+	availPhys = std::min(availPhys, kMaxLegacy);
+	totalVirtual = std::min(totalVirtual, kMaxLegacy);
+	availVirtual = std::min(availVirtual, kMaxLegacy);
+	availPhys = std::min(availPhys, totalPhys);
+	availPageFile = std::min(availPageFile, totalPageFile);
+	availVirtual = std::min(availVirtual, totalVirtual);
+
+	if (totalPhys > 0) {
+		uint64_t used = totalPhys > availPhys ? totalPhys - availPhys : 0;
+		uint64_t load = (used * 100) / totalPhys;
+		lpBuffer->dwMemoryLoad = static_cast<DWORD>(std::min<uint64_t>(load, 100));
+	}
+
+	lpBuffer->dwTotalPhys = clampToSizeT(totalPhys);
+	lpBuffer->dwAvailPhys = clampToSizeT(availPhys);
+	lpBuffer->dwTotalPageFile = clampToSizeT(totalPageFile);
+	lpBuffer->dwAvailPageFile = clampToSizeT(availPageFile);
+	lpBuffer->dwTotalVirtual = clampToSizeT(totalVirtual);
+	lpBuffer->dwAvailVirtual = clampToSizeT(availVirtual);
 }
 
 HLOCAL WINAPI LocalAlloc(UINT uFlags, SIZE_T uBytes) {

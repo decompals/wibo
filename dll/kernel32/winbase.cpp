@@ -17,6 +17,7 @@
 #include <cstdarg>
 #include <cstdlib>
 #include <cstring>
+#include <strings.h>
 #include <filesystem>
 #include <limits>
 #include <mimalloc.h>
@@ -1101,6 +1102,7 @@ DWORD WINAPI GetCurrentDirectoryW(DWORD nBufferLength, LPWSTR lpBuffer) {
 	if (!tryGetCurrentDirectoryPath(path)) {
 		return 0;
 	}
+	DEBUG_LOG("GetCurrentDirectoryW result: %s\n", path.c_str());
 	auto widePath = stringToWideString(path.c_str());
 	const DWORD required = static_cast<DWORD>(widePath.size());
 	if (nBufferLength == 0) {
@@ -1306,6 +1308,80 @@ BOOL WINAPI GetDiskFreeSpaceExW(LPCWSTR lpDirectoryName, PULARGE_INTEGER lpFreeB
 	std::string directoryName = wideStringToString(lpDirectoryName);
 	return GetDiskFreeSpaceExA(lpDirectoryName ? directoryName.c_str() : nullptr, lpFreeBytesAvailableToCaller,
 							   lpTotalNumberOfBytes, lpTotalNumberOfFreeBytes);
+}
+
+int WINAPI lstrcmpA(LPCSTR lpString1, LPCSTR lpString2) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("lstrcmpA(%s, %s)\n", lpString1 ? lpString1 : "(null)", lpString2 ? lpString2 : "(null)");
+	if (!lpString1 || !lpString2) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return 0;
+	}
+	return std::strcmp(lpString1, lpString2);
+}
+
+int WINAPI lstrcmpW(LPCWSTR lpString1, LPCWSTR lpString2) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("lstrcmpW\n");
+	if (!lpString1 || !lpString2) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return 0;
+	}
+	const uint16_t *s1 = reinterpret_cast<const uint16_t *>(lpString1);
+	const uint16_t *s2 = reinterpret_cast<const uint16_t *>(lpString2);
+	while (*s1 && *s2) {
+		if (*s1 != *s2)
+			return (*s1 > *s2) ? 1 : -1;
+		++s1;
+		++s2;
+	}
+	if (*s1 == *s2) return 0;
+	return (*s1 > *s2) ? 1 : -1;
+}
+
+int WINAPI lstrcmpiA(LPCSTR lpString1, LPCSTR lpString2) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("lstrcmpiA(%s, %s)\n", lpString1 ? lpString1 : "(null)", lpString2 ? lpString2 : "(null)");
+	if (!lpString1 || !lpString2) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return 0;
+	}
+	return strcasecmp(lpString1, lpString2);
+}
+
+int WINAPI lstrcmpiW(LPCWSTR lpString1, LPCWSTR lpString2) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("lstrcmpiW\n");
+	if (!lpString1 || !lpString2) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return 0;
+	}
+	const uint16_t *s1 = reinterpret_cast<const uint16_t *>(lpString1);
+	const uint16_t *s2 = reinterpret_cast<const uint16_t *>(lpString2);
+	while (*s1 && *s2) {
+		uint16_t c1 = wcharToLower(*s1);
+		uint16_t c2 = wcharToLower(*s2);
+		if (c1 != c2)
+			return (c1 > c2) ? 1 : -1;
+		++s1;
+		++s2;
+	}
+	uint16_t c1 = wcharToLower(*s1);
+	uint16_t c2 = wcharToLower(*s2);
+	if (c1 == c2) return 0;
+	return (c1 > c2) ? 1 : -1;
+}
+
+int WINAPI lstrlenA(LPCSTR lpString) {
+	HOST_CONTEXT_GUARD();
+	if (!lpString) return 0;
+	return static_cast<int>(std::strlen(lpString));
+}
+
+int WINAPI lstrlenW(LPCWSTR lpString) {
+	HOST_CONTEXT_GUARD();
+	if (!lpString) return 0;
+	return static_cast<int>(wstrlen(reinterpret_cast<const uint16_t *>(lpString)));
 }
 
 } // namespace kernel32

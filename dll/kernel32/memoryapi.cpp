@@ -3,6 +3,7 @@
 #include "common.h"
 #include "context.h"
 #include "errors.h"
+#include "files.h"
 #include "handles.h"
 #include "heap.h"
 #include "internal.h"
@@ -17,6 +18,7 @@
 #include <map>
 #include <mutex>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <utility>
 
@@ -56,6 +58,9 @@ struct ViewInfo {
 	DWORD allocationProtect = PAGE_NOACCESS;
 	DWORD type = MEM_PRIVATE;
 	bool managed = false;
+	bool trackedInode = false;
+	dev_t trackedDev = 0;
+	ino_t trackedIno = 0;
 };
 
 std::map<uintptr_t, ViewInfo> g_viewInfo;
@@ -222,6 +227,15 @@ HANDLE WINAPI CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMappi
 				return NO_HANDLE;
 			}
 			size = static_cast<uint64_t>(fileSize);
+		} else {
+			// Windows extends the file to the mapping size if it's smaller.
+			off_t fileSize = lseek(dupFd, 0, SEEK_END);
+			if (fileSize >= 0 && static_cast<uint64_t>(fileSize) < size) {
+				if (ftruncate(dupFd, static_cast<off_t>(size)) != 0) {
+					setLastErrorFromErrno();
+					return NO_HANDLE;
+				}
+			}
 		}
 		mapping->maxSize = size;
 	}
@@ -276,6 +290,10 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 	bool wantAllAccess = (dwDesiredAccess & FILE_MAP_ALL_ACCESS) == FILE_MAP_ALL_ACCESS;
 	if (wantAllAccess) {
 		wantWrite = true;
+		// FILE_MAP_ALL_ACCESS includes FILE_MAP_COPY as part of its bitmask,
+		// but on Windows WRITE takes precedence over COPY. Clear wantCopy so
+		// we use MAP_SHARED (write-through) instead of MAP_PRIVATE (COW).
+		wantCopy = false;
 	}
 	int prot = PROT_READ;
 	if (mapping->protect == PAGE_READWRITE) {
@@ -349,6 +367,17 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 
 	errno = 0;
 	void *mapBase = mmap(requestedBase, mapLength, prot, mapFlags, mmapFd, alignedOffset);
+#ifdef MAP_FIXED_NOREPLACE
+	// On Windows, MapViewOfFileEx can map over freed VirtualAlloc regions.
+	// VirtualFree(MEM_RELEASE) leaves PROT_NONE pages, so MAP_FIXED_NOREPLACE
+	// fails with EEXIST. Fall back to MAP_FIXED to match Windows behavior.
+	if (mapBase == MAP_FAILED && baseAddress && errno == EEXIST) {
+		DEBUG_LOG("mapViewOfFileInternal: MAP_FIXED_NOREPLACE failed, retrying with MAP_FIXED\n");
+		mapFlags = (mapFlags & ~MAP_FIXED_NOREPLACE) | MAP_FIXED;
+		errno = 0;
+		mapBase = mmap(requestedBase, mapLength, prot, mapFlags, mmapFd, alignedOffset);
+	}
+#endif
 	if (mapBase == MAP_FAILED) {
 		int err = errno;
 		if (baseAddress && (err == ENOMEM || err == EEXIST || err == EINVAL || err == EPERM)) {
@@ -386,7 +415,26 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 	view.allocationProtect = protect;
 	view.type = MEM_MAPPED;
 	view.managed = reservedMapping;
+	// Track inode for file-backed views so we can prevent truncation (Windows behavior)
+	DEBUG_LOG("mapViewOfFileInternal: mmapFd=%d anonymous=%d\n", mmapFd, view.owner ? view.owner->anonymous : -1);
+	if (mmapFd != -1) {
+		struct stat st {};
+		int rc = fstat(mmapFd, &st);
+		DEBUG_LOG("mapViewOfFileInternal: fstat(%d) = %d dev=%lu ino=%lu\n",
+			mmapFd, rc, rc == 0 ? (unsigned long)st.st_dev : 0, rc == 0 ? (unsigned long)st.st_ino : 0);
+		if (rc == 0) {
+			view.trackedInode = true;
+			view.trackedDev = st.st_dev;
+			view.trackedIno = st.st_ino;
+			files::trackMappedFile(st.st_dev, st.st_ino);
+		}
+	}
 	if (reservedMapping) {
+		wibo::heap::registerViewRange(mapBase, mapLength, protect, view.protect);
+	} else if (baseAddress) {
+		// Caller-specified base: register with the heap manager so VirtualAlloc
+		// won't allocate overlapping regions (matching Windows address space behavior).
+		view.managed = true;
 		wibo::heap::registerViewRange(mapBase, mapLength, protect, view.protect);
 	}
 	{
@@ -438,6 +486,9 @@ BOOL WINAPI UnmapViewOfFile(LPCVOID lpBaseAddress) {
 	void *base = reinterpret_cast<void *>(it->second.allocationBase);
 	size_t length = it->second.allocationLength;
 	bool managed = it->second.managed;
+	bool trackedInode = it->second.trackedInode;
+	dev_t trackedDev = it->second.trackedDev;
+	ino_t trackedIno = it->second.trackedIno;
 	g_viewInfo.erase(it);
 	lk.unlock();
 	if (length != 0) {
@@ -445,6 +496,9 @@ BOOL WINAPI UnmapViewOfFile(LPCVOID lpBaseAddress) {
 	}
 	if (managed) {
 		wibo::heap::releaseViewRange(base);
+	}
+	if (trackedInode) {
+		files::untrackMappedFile(trackedDev, trackedIno);
 	}
 	return TRUE;
 }
@@ -626,6 +680,36 @@ BOOL WINAPI SetProcessWorkingSetSize(HANDLE hProcess, SIZE_T dwMinimumWorkingSet
 	(void)dwMinimumWorkingSetSize;
 	(void)dwMaximumWorkingSetSize;
 	return TRUE;
+}
+
+void flushAllFileViews() {
+	std::lock_guard guard(g_viewInfoMutex);
+	for (const auto &entry : g_viewInfo) {
+		const ViewInfo &view = entry.second;
+		if (view.allocationLength == 0) {
+			continue;
+		}
+		void *base = reinterpret_cast<void *>(view.allocationBase);
+		size_t length = view.allocationLength;
+		// Check first bytes of the view for debugging
+		const unsigned char *p = static_cast<const unsigned char *>(base);
+		bool allZero = true;
+		size_t checkLen = length < 256 ? length : 256;
+		for (size_t i = 0; i < checkLen; i++) {
+			if (p[i] != 0) {
+				allZero = false;
+				break;
+			}
+		}
+		DEBUG_LOG("flushAllFileViews: syncing view at %p length %zu first256=%s first4=%02x%02x%02x%02x\n",
+			base, length, allZero ? "ALL_ZERO" : "HAS_DATA",
+			checkLen > 0 ? p[0] : 0, checkLen > 1 ? p[1] : 0,
+			checkLen > 2 ? p[2] : 0, checkLen > 3 ? p[3] : 0);
+		int rc = msync(base, length, MS_SYNC);
+		if (rc != 0) {
+			DEBUG_LOG("flushAllFileViews: msync failed errno=%d\n", errno);
+		}
+	}
 }
 
 } // namespace kernel32

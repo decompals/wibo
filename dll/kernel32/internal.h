@@ -16,6 +16,7 @@ struct FsObject : ObjectBase {
 	int fd = -1;
 	std::filesystem::path canonicalPath;
 	uint32_t shareAccess = FILE_SHARE_READ | FILE_SHARE_WRITE;
+	uint32_t accessCategory = 0; // FILE_SHARE_READ/WRITE/DELETE bits indicating what this handle does
 	bool deletePending = false;
 	bool closeOnDestroy = true;
 

@@ -189,6 +189,7 @@ add_executable(wibo
     dll/kernel32/winnt.cpp
     dll/kernel32/wow64apiset.cpp
     dll/lmgr.cpp
+    dll/mspdb.cpp
     dll/mscoree.cpp
     dll/ntdll.cpp
     dll/ole32.cpp
@@ -351,6 +352,7 @@ wibo_codegen_module(NAME version HEADERS dll/version.h)
 wibo_codegen_module(NAME rpcrt4 HEADERS dll/rpcrt4.h)
 wibo_codegen_module(NAME vcruntime HEADERS dll/vcruntime.h)
 wibo_codegen_module(NAME lmgr HEADERS dll/lmgr.h)
+wibo_codegen_module(NAME mspdb HEADERS dll/mspdb.h)
 wibo_codegen_module(NAME ole32 HEADERS dll/ole32.h)
 wibo_codegen_module(NAME user32 HEADERS dll/user32.h)
 wibo_codegen_module(NAME ntdll HEADERS dll/ntdll.h)

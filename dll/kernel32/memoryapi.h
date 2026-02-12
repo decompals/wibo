@@ -24,4 +24,7 @@ BOOL WINAPI GetProcessWorkingSetSize(HANDLE hProcess, PSIZE_T lpMinimumWorkingSe
 									   PSIZE_T lpMaximumWorkingSetSize);
 BOOL WINAPI SetProcessWorkingSetSize(HANDLE hProcess, SIZE_T dwMinimumWorkingSetSize, SIZE_T dwMaximumWorkingSetSize);
 
+// Flush all active MAP_SHARED views to disk (call before _exit to ensure data persists)
+void flushAllFileViews();
+
 } // namespace kernel32

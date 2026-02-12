@@ -13,11 +13,17 @@
 #include <optional>
 #include <string>
 #include <strings.h>
+#include <map>
+#include <sys/stat.h>
 #include <system_error>
 #include <unistd.h>
+#include <unordered_map>
 #include <utility>
 
 kernel32::FsObject::~FsObject() {
+	if (!canonicalPath.empty() && accessCategory != 0) {
+		files::unregisterOpenFile(canonicalPath, accessCategory, shareAccess);
+	}
 	int fd = std::exchange(this->fd, -1);
 	if (fd >= 0 && closeOnDestroy) {
 		close(fd);
@@ -30,6 +36,12 @@ kernel32::FsObject::~FsObject() {
 }
 
 namespace files {
+
+static std::vector<std::pair<std::string, std::string>> gPathAliases;
+
+void addPathAlias(const std::string &hostPrefix, const std::string &windowsPrefix) {
+	gPathAliases.push_back({hostPrefix, windowsPrefix});
+}
 
 static std::vector<std::string> splitList(const std::string &value, char delimiter) {
 	std::vector<std::string> entries;
@@ -89,6 +101,16 @@ std::filesystem::path pathFromWindows(const char *inStr) {
 		str.erase(0, 4);
 	}
 
+	// Check path aliases (reverse mapping: windows prefix -> host prefix)
+	for (const auto &alias : gPathAliases) {
+		std::string winPrefix = alias.second;
+		std::replace(winPrefix.begin(), winPrefix.end(), '\\', '/');
+		if (strncasecmp(str.c_str(), winPrefix.c_str(), winPrefix.size()) == 0) {
+			str = alias.first + str.substr(winPrefix.size());
+			return std::filesystem::path(str).lexically_normal();
+		}
+	}
+
 	// Remove the drive letter
 	if (str.rfind("z:/", 0) == 0 || str.rfind("Z:/", 0) == 0 || str.rfind("c:/", 0) == 0 || str.rfind("C:/", 0) == 0) {
 		str.erase(0, 2);
@@ -133,6 +155,15 @@ std::filesystem::path pathFromWindows(const char *inStr) {
 
 std::string pathToWindows(const std::filesystem::path &path) {
 	std::string str = path.lexically_normal();
+
+	// Check path aliases before default Z: mapping
+	for (const auto &alias : gPathAliases) {
+		if (str.rfind(alias.first, 0) == 0) {
+			str = alias.second + str.substr(alias.first.size());
+			std::replace(str.begin(), str.end(), '/', '\\');
+			return str;
+		}
+	}
 
 	if (path.is_absolute()) {
 		str.insert(0, "Z:");
@@ -421,4 +452,97 @@ std::string windowsPathListToHost(const std::string &value) {
 	}
 	return result;
 }
+static std::mutex gShareMutex;
+static std::unordered_map<std::string, std::vector<std::pair<uint32_t, uint32_t>>> gShareMap;
+
+bool checkShareViolation(const std::filesystem::path &path, uint32_t accessCategory, uint32_t shareMode) {
+	if (accessCategory == 0) {
+		return false;
+	}
+	std::string key = path.string();
+	std::lock_guard lk(gShareMutex);
+	auto it = gShareMap.find(key);
+	if (it == gShareMap.end()) {
+		return false;
+	}
+	for (const auto &[existAccess, existShare] : it->second) {
+		// Existing handle does something the new opener doesn't allow
+		if ((existAccess & ~shareMode) != 0) {
+			return true;
+		}
+		// New opener wants to do something the existing handle doesn't allow
+		if ((accessCategory & ~existShare) != 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void registerOpenFile(const std::filesystem::path &path, uint32_t accessCategory, uint32_t shareMode) {
+	if (accessCategory == 0) {
+		return;
+	}
+	std::string key = path.string();
+	std::lock_guard lk(gShareMutex);
+	gShareMap[key].emplace_back(accessCategory, shareMode);
+}
+
+void unregisterOpenFile(const std::filesystem::path &path, uint32_t accessCategory, uint32_t shareMode) {
+	std::string key = path.string();
+	std::lock_guard lk(gShareMutex);
+	auto it = gShareMap.find(key);
+	if (it == gShareMap.end()) {
+		return;
+	}
+	auto &vec = it->second;
+	for (auto jt = vec.begin(); jt != vec.end(); ++jt) {
+		if (jt->first == accessCategory && jt->second == shareMode) {
+			vec.erase(jt);
+			break;
+		}
+	}
+	if (vec.empty()) {
+		gShareMap.erase(it);
+	}
+}
+
+static std::mutex gMappedFileMutex;
+static std::map<std::pair<dev_t, ino_t>, int> gMappedFileCount;
+
+void trackMappedFile(dev_t dev, ino_t ino) {
+	std::lock_guard lk(gMappedFileMutex);
+	int count = ++gMappedFileCount[{dev, ino}];
+	DEBUG_LOG("trackMappedFile: dev=%lu ino=%lu count=%d\n",
+		(unsigned long)dev, (unsigned long)ino, count);
+}
+
+void untrackMappedFile(dev_t dev, ino_t ino) {
+	std::lock_guard lk(gMappedFileMutex);
+	auto it = gMappedFileCount.find({dev, ino});
+	if (it != gMappedFileCount.end()) {
+		if (--it->second <= 0) {
+			DEBUG_LOG("untrackMappedFile: dev=%lu ino=%lu (removed)\n",
+				(unsigned long)dev, (unsigned long)ino);
+			gMappedFileCount.erase(it);
+		} else {
+			DEBUG_LOG("untrackMappedFile: dev=%lu ino=%lu count=%d\n",
+				(unsigned long)dev, (unsigned long)ino, it->second);
+		}
+	}
+}
+
+bool isFileMapped(int fd) {
+	struct stat st {};
+	if (fstat(fd, &st) != 0) {
+		DEBUG_LOG("isFileMapped: fstat failed for fd=%d\n", fd);
+		return false;
+	}
+	std::lock_guard lk(gMappedFileMutex);
+	bool mapped = gMappedFileCount.count({st.st_dev, st.st_ino}) > 0;
+	DEBUG_LOG("isFileMapped: fd=%d dev=%lu ino=%lu -> %s\n",
+		fd, (unsigned long)st.st_dev, (unsigned long)st.st_ino,
+		mapped ? "YES (skip truncation)" : "no");
+	return mapped;
+}
+
 } // namespace files

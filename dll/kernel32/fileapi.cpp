@@ -928,7 +928,22 @@ HANDLE WINAPI CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShar
 		return INVALID_HANDLE_VALUE;
 	}
 
-	// TODO: verify share mode against existing opens
+	// Compute access category for share violation checks
+	uint32_t accessCategory = 0;
+	if (dwDesiredAccess & (GENERIC_READ | FILE_READ_DATA | FILE_EXECUTE))
+		accessCategory |= FILE_SHARE_READ;
+	if (dwDesiredAccess & (GENERIC_WRITE | FILE_WRITE_DATA | FILE_APPEND_DATA))
+		accessCategory |= FILE_SHARE_WRITE;
+	if (dwDesiredAccess & DELETE)
+		accessCategory |= FILE_SHARE_DELETE;
+
+	std::filesystem::path checkPath = files::canonicalPath(hostPath);
+	DEBUG_LOG("  share check: path=%s accessCat=%u shareMode=%u\n", checkPath.c_str(), accessCategory, dwShareMode);
+	if (files::checkShareViolation(checkPath, accessCategory, dwShareMode)) {
+		setLastError(ERROR_SHARING_VIOLATION);
+		DEBUG_LOG("-> ERROR_SHARING_VIOLATION\n");
+		return INVALID_HANDLE_VALUE;
+	}
 
 	bool allowCreate = false;
 	bool truncateExisting = false;
@@ -1036,9 +1051,9 @@ HANDLE WINAPI CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShar
 	if (dwCreationDisposition == CREATE_NEW) {
 		openFlags |= O_EXCL;
 	}
-	if (truncateExisting && !isDirectory) {
-		openFlags |= O_TRUNC;
-	}
+	// Don't use O_TRUNC directly — we need to check for active memory mappings first
+	// (Windows prevents truncation of files with active mapped sections)
+	bool deferredTruncate = truncateExisting && !isDirectory;
 
 	if (isDirectory) {
 		openFlags |= O_RDONLY | O_DIRECTORY;
@@ -1065,6 +1080,19 @@ HANDLE WINAPI CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShar
 		return INVALID_HANDLE_VALUE;
 	}
 
+	// Apply deferred truncation — skip if the file has active memory mappings (Windows behavior)
+	if (deferredTruncate) {
+		if (files::isFileMapped(fd)) {
+			DEBUG_LOG("  skipping truncation: file has active memory mapping\n");
+		} else {
+			if (ftruncate(fd, 0) != 0) {
+				setLastErrorFromErrno();
+				close(fd);
+				return INVALID_HANDLE_VALUE;
+			}
+		}
+	}
+
 	struct stat st{};
 	if (fstat(fd, &st) == 0 && S_ISDIR(st.st_mode)) {
 		isDirectory = true;
@@ -1084,7 +1112,12 @@ HANDLE WINAPI CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShar
 	}
 	fsObject->canonicalPath = std::move(canonicalPath);
 	fsObject->shareAccess = shareMask;
+	fsObject->accessCategory = accessCategory;
 	fsObject->deletePending = deleteOnClose;
+	if (accessCategory != 0 && !fsObject->canonicalPath.empty()) {
+		DEBUG_LOG("  share register: path=%s accessCat=%u share=%u\n", fsObject->canonicalPath.c_str(), accessCategory, shareMask);
+		files::registerOpenFile(fsObject->canonicalPath, accessCategory, shareMask);
+	}
 
 	uint32_t handleFlags = 0;
 	if (lpSecurityAttributes && lpSecurityAttributes->bInheritHandle) {
@@ -1604,12 +1637,13 @@ DWORD WINAPI GetFullPathNameW(LPCWSTR lpFileName, DWORD nBufferLength, LPWSTR lp
 	}
 
 	std::string narrow = wideStringToString(lpFileName);
+	DEBUG_LOG("GetFullPathNameW input: %s\n", narrow.c_str());
 	FullPathInfo info;
 	if (!computeFullPath(narrow, info)) {
 		return 0;
 	}
 
-	DEBUG_LOG(" -> %s\n", info.path.c_str());
+	DEBUG_LOG("GetFullPathNameW result: %s\n", info.path.c_str());
 
 	auto widePath = stringToWideString(info.path.c_str());
 	const size_t wideLen = widePath.size();
@@ -1834,6 +1868,41 @@ HANDLE WINAPI FindFirstFileExA(LPCSTR lpFileName, FINDEX_INFO_LEVELS fInfoLevelI
 
 	auto *findData = static_cast<LPWIN32_FIND_DATAA>(lpFindFileData);
 	return findFirstFileCommon(std::string(lpFileName), findData);
+}
+
+HANDLE WINAPI FindFirstFileExW(LPCWSTR lpFileName, FINDEX_INFO_LEVELS fInfoLevelId, LPVOID lpFindFileData,
+							   FINDEX_SEARCH_OPS fSearchOp, LPVOID lpSearchFilter, DWORD dwAdditionalFlags) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("FindFirstFileExW(%p, %d, %p, %d, %p, 0x%x)\n", lpFileName, fInfoLevelId,
+			  lpFindFileData, fSearchOp, lpSearchFilter, dwAdditionalFlags);
+	if (!lpFindFileData) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return INVALID_HANDLE_VALUE;
+	}
+	if (!lpFileName) {
+		setLastError(ERROR_PATH_NOT_FOUND);
+		return INVALID_HANDLE_VALUE;
+	}
+	if (fInfoLevelId != FindExInfoStandard) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return INVALID_HANDLE_VALUE;
+	}
+	if (fSearchOp != FindExSearchNameMatch) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return INVALID_HANDLE_VALUE;
+	}
+	if (lpSearchFilter) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return INVALID_HANDLE_VALUE;
+	}
+	if (dwAdditionalFlags != 0) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return INVALID_HANDLE_VALUE;
+	}
+
+	std::string narrowName = wideStringToString(lpFileName);
+	auto *findData = static_cast<LPWIN32_FIND_DATAW>(lpFindFileData);
+	return findFirstFileCommon(narrowName, findData);
 }
 
 BOOL WINAPI FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileData) {

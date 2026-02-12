@@ -19,6 +19,7 @@ struct IOResult {
 };
 
 void init();
+void addPathAlias(const std::string &hostPrefix, const std::string &windowsPrefix);
 std::filesystem::path pathFromWindows(const char *inStr);
 std::string pathToWindows(const std::filesystem::path &path);
 IOResult read(FileObject *file, void *buffer, size_t bytesToRead, const std::optional<off_t> &offset,
@@ -32,6 +33,16 @@ std::optional<std::filesystem::path> findCaseInsensitiveFile(const std::filesyst
 std::filesystem::path canonicalPath(const std::filesystem::path &path);
 std::string hostPathListToWindows(const std::string &value);
 std::string windowsPathListToHost(const std::string &value);
+
+// Share violation tracking
+bool checkShareViolation(const std::filesystem::path &path, uint32_t accessCategory, uint32_t shareMode);
+void registerOpenFile(const std::filesystem::path &path, uint32_t accessCategory, uint32_t shareMode);
+void unregisterOpenFile(const std::filesystem::path &path, uint32_t accessCategory, uint32_t shareMode);
+
+// Memory-mapped file tracking (prevents truncation of mapped files, matching Windows behavior)
+void trackMappedFile(dev_t dev, ino_t ino);
+void untrackMappedFile(dev_t dev, ino_t ino);
+bool isFileMapped(int fd);
 
 } // namespace files
 

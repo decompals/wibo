@@ -12,11 +12,14 @@
 #include "version_info.h"
 
 #include <cstdarg>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <memory>
+
+#include "kernel32/memoryapi.h"
 
 char **wibo::argv;
 int wibo::argc;
@@ -260,6 +263,33 @@ int main(int argc, char **argv) {
 				optionDebug = true;
 				continue;
 			}
+			if (strncmp(arg, "--path-alias=", 13) == 0) {
+				std::string mapping = arg + 13;
+				auto eqPos = mapping.find('=');
+				if (eqPos == std::string::npos) {
+					fprintf(stderr, "Error: --path-alias requires format 'host_path=windows_path'\n");
+					printHelp(argv[0], true);
+					return 1;
+				}
+				files::addPathAlias(mapping.substr(0, eqPos), mapping.substr(eqPos + 1));
+				continue;
+			}
+			if (strcmp(arg, "--path-alias") == 0) {
+				if (i + 1 >= argc) {
+					fprintf(stderr, "Error: '%s' requires a mapping argument.\n", arg);
+					printHelp(argv[0], true);
+					return 1;
+				}
+				std::string mapping = argv[++i];
+				auto eqPos = mapping.find('=');
+				if (eqPos == std::string::npos) {
+					fprintf(stderr, "Error: --path-alias requires format 'host_path=windows_path'\n");
+					printHelp(argv[0], true);
+					return 1;
+				}
+				files::addPathAlias(mapping.substr(0, eqPos), mapping.substr(eqPos + 1));
+				continue;
+			}
 			if (strncmp(arg, "--chdir=", 8) == 0) {
 				chdirPath = arg + 8;
 				continue;
@@ -472,6 +502,21 @@ int main(int argc, char **argv) {
 
 	// Reset last error
 	kernel32::setLastError(0);
+
+	// Install crash handlers so memory-mapped file data gets flushed on SIGSEGV
+	{
+		struct sigaction sa = {};
+		sa.sa_sigaction = [](int sig, siginfo_t *info, void *) {
+			kernel32::flushAllFileViews();
+			fprintf(stderr, "\nwibo: caught signal %d (%s) at address %p\n", sig,
+					sig == SIGSEGV ? "SIGSEGV" : sig == SIGTRAP ? "SIGTRAP" : "unknown",
+					info ? info->si_addr : nullptr);
+			_exit(128 + sig);
+		};
+		sa.sa_flags = SA_SIGINFO;
+		sigaction(SIGSEGV, &sa, nullptr);
+		sigaction(SIGTRAP, &sa, nullptr);
+	}
 
 	// Invoke the damn thing
 	call_EntryProc(entryPoint);

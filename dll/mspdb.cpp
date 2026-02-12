@@ -5,7 +5,6 @@
 #include "kernel32/memoryapi.h"
 #include "modules.h"
 
-#include <cassert>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -42,15 +41,26 @@ static FakeVtObj g_obj_dbg;
 static FakeVtObj g_obj_namemap;
 static FakeVtObj g_obj_stream;
 
+// Vtable sizes: must cover all slots the linker may call.
+// Source: microsoft-pdb/langapi/include/pdb.h
+static constexpr int kPdbVtableSlots = 64;     // PDB interface (32 defined + headroom)
+static constexpr int kDbiVtableSlots = 64;     // DBI interface (57 defined + headroom)
+static constexpr int kModVtableSlots = 64;     // Mod interface
+static constexpr int kTpiVtableSlots = 32;     // TPI interface (23 defined)
+static constexpr int kGsiVtableSlots = 16;     // GSI interface (11 defined)
+static constexpr int kDbgVtableSlots = 16;     // Dbg interface
+static constexpr int kNameMapVtableSlots = 20; // NameMap interface (15 defined)
+static constexpr int kStreamVtableSlots = 12;  // Stream interface (9 defined)
+
 // Vtables: arrays of 32-bit x86 function pointers
-static uint32_t g_vt_pdb[64];
-static uint32_t g_vt_dbi[64];
-static uint32_t g_vt_mod[64];
-static uint32_t g_vt_tpi[32];
-static uint32_t g_vt_gsi[16];
-static uint32_t g_vt_dbg[16];
-static uint32_t g_vt_namemap[20];
-static uint32_t g_vt_stream[12];
+static uint32_t g_vt_pdb[kPdbVtableSlots];
+static uint32_t g_vt_dbi[kDbiVtableSlots];
+static uint32_t g_vt_mod[kModVtableSlots];
+static uint32_t g_vt_tpi[kTpiVtableSlots];
+static uint32_t g_vt_gsi[kGsiVtableSlots];
+static uint32_t g_vt_dbg[kDbgVtableSlots];
+static uint32_t g_vt_namemap[kNameMapVtableSlots];
+static uint32_t g_vt_stream[kStreamVtableSlots];
 
 // --- x86 machine code generation ---
 
@@ -59,7 +69,10 @@ static size_t g_code_pos;
 static constexpr size_t CODE_PAGE_SIZE = 16384;
 
 static uint8_t *codeAlloc(size_t n) {
-	assert(g_code_page && g_code_pos + n <= CODE_PAGE_SIZE);
+	if (!g_code_page || g_code_pos + n > CODE_PAGE_SIZE) {
+		DEBUG_LOG("mspdb: codeAlloc(%zu) failed: page=%p pos=%zu\n", n, g_code_page, g_code_pos);
+		abort();
+	}
 	uint8_t *p = g_code_page + g_code_pos;
 	g_code_pos += n;
 	return p;
@@ -203,8 +216,14 @@ static void initVtables() {
 		g_code_page = (uint8_t *)mmap(nullptr, CODE_PAGE_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC,
 									  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 	}
-	assert(g_code_page != MAP_FAILED);
-	assert((uintptr_t)g_code_page < 0xFFFFFFFFULL); // must be 32-bit addressable
+	if (g_code_page == MAP_FAILED) {
+		DEBUG_LOG("mspdb: mmap for code page failed\n");
+		abort();
+	}
+	if ((uintptr_t)g_code_page >= 0xFFFFFFFFULL) {
+		DEBUG_LOG("mspdb: code page at %p not 32-bit addressable\n", g_code_page);
+		abort();
+	}
 	g_code_pos = 0;
 
 	DEBUG_LOG("mspdb: code page at %p, objects: PDB=%p DBI=%p Mod=%p TPI=%p GSI=%p\n", g_code_page, &g_obj_pdb,
@@ -220,9 +239,9 @@ static void initVtables() {
 	uint32_t pNM = addr32(&g_obj_namemap);
 	uint32_t pStr = addr32(&g_obj_stream);
 
-	// --- PDB vtable (from microsoft-pdb PDB interface) ---
+	// --- PDB vtable (microsoft-pdb/langapi/include/pdb.h, slots 0-31) ---
 	// Fill with traps first
-	for (int i = 0; i < 64; i++)
+	for (int i = 0; i < kPdbVtableSlots; i++)
 		g_vt_pdb[i] = genTrap((uint8_t)i);
 	//  0: QueryInterfaceVersion() -> INTV
 	g_vt_pdb[0] = genRet(PDB_INTV, 0);
@@ -290,8 +309,8 @@ static void initVtables() {
 	// 31: ResetGUID(pb, cb) -> BOOL
 	g_vt_pdb[31] = genRet(1, 2);
 
-	// --- DBI vtable ---
-	for (int i = 0; i < 64; i++)
+	// --- DBI vtable (microsoft-pdb DBI interface, slots 0-63) ---
+	for (int i = 0; i < kDbiVtableSlots; i++)
 		g_vt_dbi[i] = genTrap((uint8_t)i);
 	//  0: QueryImplementationVersion() -> IMPV
 	g_vt_dbi[0] = genRet(PDB_IMPV, 0);
@@ -422,8 +441,8 @@ static void initVtables() {
 	// 63: QueryImodFromAddrEx(8 args) -> BOOL
 	g_vt_dbi[63] = genRet(0, 8);
 
-	// --- Mod vtable ---
-	for (int i = 0; i < 64; i++)
+	// --- Mod vtable (microsoft-pdb Mod interface, slots 0-49) ---
+	for (int i = 0; i < kModVtableSlots; i++)
 		g_vt_mod[i] = genTrap((uint8_t)i);
 	//  0: QueryInterfaceVersion() -> INTV
 	g_vt_mod[0] = genRet(PDB_INTV, 0);
@@ -505,8 +524,8 @@ static void initVtables() {
 	for (int i = 38; i <= 49; i++)
 		g_vt_mod[i] = genRet(0, 3); // safe default: return FALSE, pop 3 args
 
-	// --- TPI vtable ---
-	for (int i = 0; i < 32; i++)
+	// --- TPI vtable (microsoft-pdb TPI interface, slots 0-22) ---
+	for (int i = 0; i < kTpiVtableSlots; i++)
 		g_vt_tpi[i] = genTrap((uint8_t)i);
 	//  0: QueryInterfaceVersion() -> INTV
 	g_vt_tpi[0] = genRet(PDB_INTV, 0);
@@ -555,8 +574,8 @@ static void initVtables() {
 	// 22: QueryModSrcLineForUDTDefn(4 args) -> BOOL
 	g_vt_tpi[22] = genRet(0, 4);
 
-	// --- GSI vtable ---
-	for (int i = 0; i < 16; i++)
+	// --- GSI vtable (microsoft-pdb GSI interface, slots 0-10) ---
+	for (int i = 0; i < kGsiVtableSlots; i++)
 		g_vt_gsi[i] = genTrap((uint8_t)i);
 	//  0: QueryInterfaceVersion() -> INTV
 	g_vt_gsi[0] = genRet(PDB_INTV, 0);
@@ -581,8 +600,8 @@ static void initVtables() {
 	// 10: getEnumByAddr(ppEnum) -> BOOL
 	g_vt_gsi[10] = genRet(0, 1);
 
-	// --- Dbg vtable ---
-	for (int i = 0; i < 16; i++)
+	// --- Dbg vtable (microsoft-pdb Dbg interface, slots 0-10) ---
+	for (int i = 0; i < kDbgVtableSlots; i++)
 		g_vt_dbg[i] = genTrap((uint8_t)i);
 	//  0: Close() -> BOOL
 	g_vt_dbg[0] = genRet(1, 0);
@@ -607,8 +626,8 @@ static void initVtables() {
 	// 10: QueryElementSize() -> long
 	g_vt_dbg[10] = genRet(0, 0);
 
-	// --- NameMap vtable ---
-	for (int i = 0; i < 20; i++)
+	// --- NameMap vtable (microsoft-pdb NameMap interface, slots 0-14) ---
+	for (int i = 0; i < kNameMapVtableSlots; i++)
 		g_vt_namemap[i] = genTrap((uint8_t)i);
 	//  0: close() -> BOOL
 	g_vt_namemap[0] = genRet(1, 0);
@@ -641,8 +660,8 @@ static void initVtables() {
 	// 14: getNameW2(ni, pwsz) -> BOOL
 	g_vt_namemap[14] = genRet(0, 2);
 
-	// --- Stream vtable ---
-	for (int i = 0; i < 12; i++)
+	// --- Stream vtable (microsoft-pdb Stream interface, slots 0-8) ---
+	for (int i = 0; i < kStreamVtableSlots; i++)
 		g_vt_stream[i] = genTrap((uint8_t)i);
 	//  0: QueryCb() -> long
 	g_vt_stream[0] = genRet(0, 0);
@@ -676,33 +695,31 @@ static void initVtables() {
 	DEBUG_LOG("mspdb: fake vtables initialized, code used %zu/%zu bytes\n", g_code_pos, CODE_PAGE_SIZE);
 }
 
-// Legacy sentinel values for C-style export stubs
+// Legacy sentinel value for PDBOpenStreamEx C-style export
 static int g_fakeStream_legacy = 0;
-static int g_fakeNameMap_legacy = 0;
+
+static int openPDB(LONG *pec, void **ppPDB) {
+	initVtables();
+	if (pec)
+		*(uint32_t *)pec = 0; // EC_OK
+	if (ppPDB)
+		*(uint32_t *)ppPDB = addr32(&g_obj_pdb);
+	return 1; // TRUE
+}
 
 namespace mspdb {
 
 int CDECL PDB_Open2W(LPCWSTR wszPDB, LPCSTR szMode, LONG *pec, LPWSTR wszError, UINT cchErrMax, void **ppPDB) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("mspdb::PDB_Open2W(mode=%s)\n", szMode ? szMode : "(null)");
-	initVtables();
-	if (pec)
-		*(uint32_t *)pec = 0; // EC_OK
-	if (ppPDB)
-		*(uint32_t *)ppPDB = addr32(&g_obj_pdb);
-	return 1; // TRUE - PDB open succeeded
+	return openPDB(pec, ppPDB);
 }
 
 int CDECL PDB_Open3W(LPCWSTR wszPDB, LPCSTR szMode, DWORD dwSig, void *pcsig70, DWORD dwAge, LONG *pec,
 					  LPWSTR wszError, UINT cchErrMax, void **ppPDB) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("mspdb::PDB_Open3W(mode=%s)\n", szMode ? szMode : "(null)");
-	initVtables();
-	if (pec)
-		*(uint32_t *)pec = 0; // EC_OK
-	if (ppPDB)
-		*(uint32_t *)ppPDB = addr32(&g_obj_pdb);
-	return 1; // TRUE - PDB open succeeded
+	return openPDB(pec, ppPDB);
 }
 
 int CDECL PDB_OpenValidate5(LPCWSTR wszPDB, LPCWSTR wszSearchPath, void *pvClient, void *pfnQueryCallback,
@@ -710,12 +727,7 @@ int CDECL PDB_OpenValidate5(LPCWSTR wszPDB, LPCWSTR wszSearchPath, void *pvClien
 							void **ppPDB) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("mspdb::PDB_OpenValidate5()\n");
-	initVtables();
-	if (pec)
-		*(uint32_t *)pec = 0; // EC_OK
-	if (ppPDB)
-		*(uint32_t *)ppPDB = addr32(&g_obj_pdb);
-	return 1; // TRUE
+	return openPDB(pec, ppPDB);
 }
 
 int CDECL PDBExportValidateInterface(DWORD intv) {
@@ -741,12 +753,7 @@ LPCSTR CDECL SzCanonFilename(LPCSTR szFilename) {
 int CDECL PDBOpen2W_C(LPCWSTR wszPDB, LPCSTR szMode, LONG *pec, LPWSTR wszError, UINT cchErrMax, void **ppPDB) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("mspdb::PDBOpen2W_C(mode=%s)\n", szMode ? szMode : "(null)");
-	initVtables();
-	if (pec)
-		*(uint32_t *)pec = 0; // EC_OK
-	if (ppPDB)
-		*(uint32_t *)ppPDB = addr32(&g_obj_pdb);
-	return 1; // TRUE
+	return openPDB(pec, ppPDB);
 }
 
 int CDECL PDBOpenStreamEx(void *pPDB, LPCSTR szStream, DWORD dwFlags, void **ppStream) {
@@ -831,47 +838,22 @@ int CDECL StreamWrite(void *pStream, LONG off, void *pvData, LONG cbData) {
 #include "mspdb_trampolines.h"
 
 static void *resolveByName(const char *name) {
-	// Decorated C++ names (imported by link.exe main module)
+	// Decorated C++ names (not covered by mspdbThunkByName)
 	if (strcmp(name, "?Open2W@PDB@@SAHPBGPBDPAJPAGIPAPAU1@@Z") == 0)
 		return (void *)thunk_mspdb_PDB_Open2W;
 	if (strcmp(name, "?Open3W@PDB@@SAHPBGPBDKPBU_GUID@@KPAJPAGIPAPAU1@@Z") == 0)
 		return (void *)thunk_mspdb_PDB_Open3W;
 	if (strcmp(name, "?OpenValidate5@PDB@@SAHPBG0PAXP6AP6AHXZ1W4POVC@@@ZPAJPAGIPAPAU1@@Z") == 0)
 		return (void *)thunk_mspdb_PDB_OpenValidate5;
-	if (strcmp(name, "PDBExportValidateInterface") == 0)
-		return (void *)thunk_mspdb_PDBExportValidateInterface;
-	if (strcmp(name, "SigForPbCb") == 0)
-		return (void *)thunk_mspdb_SigForPbCb;
-	if (strcmp(name, "SzCanonFilename") == 0)
-		return (void *)thunk_mspdb_SzCanonFilename;
-
-	// C-style exports (imported by linker supplementary module)
-	if (strcmp(name, "PDBOpen2W") == 0)
-		return (void *)thunk_mspdb_PDBOpen2W_C;
-	if (strcmp(name, "PDBOpenStreamEx") == 0)
-		return (void *)thunk_mspdb_PDBOpenStreamEx;
-	if (strcmp(name, "PDBCommit") == 0)
-		return (void *)thunk_mspdb_PDBCommit;
-	if (strcmp(name, "PDBClose") == 0)
-		return (void *)thunk_mspdb_PDBClose;
 	if (strcmp(name, "?open@NameMap@@SAHPAUPDB@@HPAPAU1@@Z") == 0)
 		return (void *)thunk_mspdb_NameMap_open;
-	if (strcmp(name, "StreamAppend") == 0)
-		return (void *)thunk_mspdb_StreamAppend;
-	if (strcmp(name, "StreamQueryCb") == 0)
-		return (void *)thunk_mspdb_StreamQueryCb;
-	if (strcmp(name, "StreamRead") == 0)
-		return (void *)thunk_mspdb_StreamRead;
-	if (strcmp(name, "StreamRelease") == 0)
-		return (void *)thunk_mspdb_StreamRelease;
-	if (strcmp(name, "StreamReplace") == 0)
-		return (void *)thunk_mspdb_StreamReplace;
-	if (strcmp(name, "StreamTruncate") == 0)
-		return (void *)thunk_mspdb_StreamTruncate;
-	if (strcmp(name, "StreamWrite") == 0)
-		return (void *)thunk_mspdb_StreamWrite;
 
-	return nullptr;
+	// Export name alias (DLL exports "PDBOpen2W", C function is PDBOpen2W_C)
+	if (strcmp(name, "PDBOpen2W") == 0)
+		return (void *)thunk_mspdb_PDBOpen2W_C;
+
+	// C-style names: delegate to auto-generated lookup
+	return mspdbThunkByName(name);
 }
 
 extern const wibo::ModuleStub lib_mspdb = {

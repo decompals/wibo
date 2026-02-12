@@ -503,14 +503,16 @@ int main(int argc, char **argv) {
 	// Reset last error
 	kernel32::setLastError(0);
 
-	// Install crash handlers so memory-mapped file data gets flushed on SIGSEGV
+	// Install crash handlers so memory-mapped file data gets flushed on SIGSEGV.
+	// Uses write() instead of fprintf() for async-signal safety.
 	{
 		struct sigaction sa = {};
-		sa.sa_sigaction = [](int sig, siginfo_t *info, void *) {
+		sa.sa_sigaction = [](int sig, siginfo_t *, void *) {
 			kernel32::flushAllFileViews();
-			fprintf(stderr, "\nwibo: caught signal %d (%s) at address %p\n", sig,
-					sig == SIGSEGV ? "SIGSEGV" : sig == SIGTRAP ? "SIGTRAP" : "unknown",
-					info ? info->si_addr : nullptr);
+			const char *msg = sig == SIGSEGV  ? "\nwibo: caught SIGSEGV\n"
+							  : sig == SIGTRAP ? "\nwibo: caught SIGTRAP\n"
+											   : "\nwibo: caught signal\n";
+			write(STDERR_FILENO, msg, strlen(msg));
 			_exit(128 + sig);
 		};
 		sa.sa_flags = SA_SIGINFO;

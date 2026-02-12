@@ -31,15 +31,15 @@ struct FakeVtObj {
 	uint32_t vptr;
 };
 
-// Fake objects (must be at 32-bit addresses - wibo is loaded at 0x70000000)
-static FakeVtObj g_obj_pdb;
-static FakeVtObj g_obj_dbi;
-static FakeVtObj g_obj_mod;
-static FakeVtObj g_obj_tpi;
-static FakeVtObj g_obj_gsi;
-static FakeVtObj g_obj_dbg;
-static FakeVtObj g_obj_namemap;
-static FakeVtObj g_obj_stream;
+// Fake objects - allocated from MAP_32BIT code page (must be <4GB for guest pointers)
+static FakeVtObj *g_obj_pdb;
+static FakeVtObj *g_obj_dbi;
+static FakeVtObj *g_obj_mod;
+static FakeVtObj *g_obj_tpi;
+static FakeVtObj *g_obj_gsi;
+static FakeVtObj *g_obj_dbg;
+static FakeVtObj *g_obj_namemap;
+static FakeVtObj *g_obj_stream;
 
 // Vtable sizes: must cover all slots the linker may call.
 // Source: microsoft-pdb/langapi/include/pdb.h
@@ -52,15 +52,18 @@ static constexpr int kDbgVtableSlots = 16;     // Dbg interface
 static constexpr int kNameMapVtableSlots = 20; // NameMap interface (15 defined)
 static constexpr int kStreamVtableSlots = 12;  // Stream interface (9 defined)
 
-// Vtables: arrays of 32-bit x86 function pointers
-static uint32_t g_vt_pdb[kPdbVtableSlots];
-static uint32_t g_vt_dbi[kDbiVtableSlots];
-static uint32_t g_vt_mod[kModVtableSlots];
-static uint32_t g_vt_tpi[kTpiVtableSlots];
-static uint32_t g_vt_gsi[kGsiVtableSlots];
-static uint32_t g_vt_dbg[kDbgVtableSlots];
-static uint32_t g_vt_namemap[kNameMapVtableSlots];
-static uint32_t g_vt_stream[kStreamVtableSlots];
+// Vtables: arrays of 32-bit x86 function pointers - allocated from MAP_32BIT code page
+static uint32_t *g_vt_pdb;
+static uint32_t *g_vt_dbi;
+static uint32_t *g_vt_mod;
+static uint32_t *g_vt_tpi;
+static uint32_t *g_vt_gsi;
+static uint32_t *g_vt_dbg;
+static uint32_t *g_vt_namemap;
+static uint32_t *g_vt_stream;
+
+// Legacy sentinel value for PDBOpenStreamEx C-style export - allocated from MAP_32BIT code page
+static uint32_t *g_fakeStream_legacy;
 
 // --- x86 machine code generation ---
 
@@ -226,18 +229,42 @@ static void initVtables() {
 	}
 	g_code_pos = 0;
 
-	DEBUG_LOG("mspdb: code page at %p, objects: PDB=%p DBI=%p Mod=%p TPI=%p GSI=%p\n", g_code_page, &g_obj_pdb,
-			  &g_obj_dbi, &g_obj_mod, &g_obj_tpi, &g_obj_gsi);
+	// Allocate fake objects from MAP_32BIT page (must be <4GB for guest pointers)
+	g_obj_pdb = (FakeVtObj *)codeAlloc(sizeof(FakeVtObj));
+	g_obj_dbi = (FakeVtObj *)codeAlloc(sizeof(FakeVtObj));
+	g_obj_mod = (FakeVtObj *)codeAlloc(sizeof(FakeVtObj));
+	g_obj_tpi = (FakeVtObj *)codeAlloc(sizeof(FakeVtObj));
+	g_obj_gsi = (FakeVtObj *)codeAlloc(sizeof(FakeVtObj));
+	g_obj_dbg = (FakeVtObj *)codeAlloc(sizeof(FakeVtObj));
+	g_obj_namemap = (FakeVtObj *)codeAlloc(sizeof(FakeVtObj));
+	g_obj_stream = (FakeVtObj *)codeAlloc(sizeof(FakeVtObj));
+
+	// Allocate vtable arrays from MAP_32BIT page
+	g_vt_pdb = (uint32_t *)codeAlloc(kPdbVtableSlots * sizeof(uint32_t));
+	g_vt_dbi = (uint32_t *)codeAlloc(kDbiVtableSlots * sizeof(uint32_t));
+	g_vt_mod = (uint32_t *)codeAlloc(kModVtableSlots * sizeof(uint32_t));
+	g_vt_tpi = (uint32_t *)codeAlloc(kTpiVtableSlots * sizeof(uint32_t));
+	g_vt_gsi = (uint32_t *)codeAlloc(kGsiVtableSlots * sizeof(uint32_t));
+	g_vt_dbg = (uint32_t *)codeAlloc(kDbgVtableSlots * sizeof(uint32_t));
+	g_vt_namemap = (uint32_t *)codeAlloc(kNameMapVtableSlots * sizeof(uint32_t));
+	g_vt_stream = (uint32_t *)codeAlloc(kStreamVtableSlots * sizeof(uint32_t));
+
+	// Allocate legacy stream sentinel
+	g_fakeStream_legacy = (uint32_t *)codeAlloc(sizeof(uint32_t));
+	*g_fakeStream_legacy = 0;
+
+	DEBUG_LOG("mspdb: code page at %p, objects: PDB=%p DBI=%p Mod=%p TPI=%p GSI=%p\n", g_code_page, g_obj_pdb,
+			  g_obj_dbi, g_obj_mod, g_obj_tpi, g_obj_gsi);
 
 	// Shorthand addresses for fake sub-objects
-	uint32_t pPDB = addr32(&g_obj_pdb);
-	uint32_t pDBI = addr32(&g_obj_dbi);
-	uint32_t pMod = addr32(&g_obj_mod);
-	uint32_t pTPI = addr32(&g_obj_tpi);
-	uint32_t pGSI = addr32(&g_obj_gsi);
-	uint32_t pDbg = addr32(&g_obj_dbg);
-	uint32_t pNM = addr32(&g_obj_namemap);
-	uint32_t pStr = addr32(&g_obj_stream);
+	uint32_t pPDB = addr32(g_obj_pdb);
+	uint32_t pDBI = addr32(g_obj_dbi);
+	uint32_t pMod = addr32(g_obj_mod);
+	uint32_t pTPI = addr32(g_obj_tpi);
+	uint32_t pGSI = addr32(g_obj_gsi);
+	uint32_t pDbg = addr32(g_obj_dbg);
+	uint32_t pNM = addr32(g_obj_namemap);
+	uint32_t pStr = addr32(g_obj_stream);
 
 	// --- PDB vtable (microsoft-pdb/langapi/include/pdb.h, slots 0-31) ---
 	// Fill with traps first
@@ -683,27 +710,24 @@ static void initVtables() {
 	g_vt_stream[8] = genRet(1, 1);
 
 	// --- Wire up vtable pointers ---
-	g_obj_pdb.vptr = addr32(g_vt_pdb);
-	g_obj_dbi.vptr = addr32(g_vt_dbi);
-	g_obj_mod.vptr = addr32(g_vt_mod);
-	g_obj_tpi.vptr = addr32(g_vt_tpi);
-	g_obj_gsi.vptr = addr32(g_vt_gsi);
-	g_obj_dbg.vptr = addr32(g_vt_dbg);
-	g_obj_namemap.vptr = addr32(g_vt_namemap);
-	g_obj_stream.vptr = addr32(g_vt_stream);
+	g_obj_pdb->vptr = addr32(g_vt_pdb);
+	g_obj_dbi->vptr = addr32(g_vt_dbi);
+	g_obj_mod->vptr = addr32(g_vt_mod);
+	g_obj_tpi->vptr = addr32(g_vt_tpi);
+	g_obj_gsi->vptr = addr32(g_vt_gsi);
+	g_obj_dbg->vptr = addr32(g_vt_dbg);
+	g_obj_namemap->vptr = addr32(g_vt_namemap);
+	g_obj_stream->vptr = addr32(g_vt_stream);
 
 	DEBUG_LOG("mspdb: fake vtables initialized, code used %zu/%zu bytes\n", g_code_pos, CODE_PAGE_SIZE);
 }
-
-// Legacy sentinel value for PDBOpenStreamEx C-style export
-static int g_fakeStream_legacy = 0;
 
 static int openPDB(LONG *pec, void **ppPDB) {
 	initVtables();
 	if (pec)
 		*(uint32_t *)pec = 0; // EC_OK
 	if (ppPDB)
-		*(uint32_t *)ppPDB = addr32(&g_obj_pdb);
+		*(uint32_t *)ppPDB = addr32(g_obj_pdb);
 	return 1; // TRUE
 }
 
@@ -759,8 +783,9 @@ int CDECL PDBOpen2W_C(LPCWSTR wszPDB, LPCSTR szMode, LONG *pec, LPWSTR wszError,
 int CDECL PDBOpenStreamEx(void *pPDB, LPCSTR szStream, DWORD dwFlags, void **ppStream) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("mspdb::PDBOpenStreamEx(stream=%s)\n", szStream ? szStream : "(null)");
+	initVtables();
 	if (ppStream)
-		*ppStream = &g_fakeStream_legacy;
+		*(uint32_t *)ppStream = addr32(g_fakeStream_legacy);
 	return 1; // TRUE
 }
 
@@ -783,7 +808,7 @@ int CDECL NameMap_open(void *pPDB, int fWrite, void **ppNameMap) {
 	DEBUG_LOG("mspdb::NameMap_open(fWrite=%d)\n", fWrite);
 	initVtables();
 	if (ppNameMap)
-		*(uint32_t *)ppNameMap = addr32(&g_obj_namemap);
+		*(uint32_t *)ppNameMap = addr32(g_obj_namemap);
 	return 1; // TRUE
 }
 

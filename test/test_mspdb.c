@@ -58,15 +58,60 @@ int main(void) {
     TEST_CHECK_EQ(0, ec);
     TEST_CHECK_MSG(ppPDB != NULL, "PDBOpen2W did not return a PDB handle");
 
-    /* 5. PDBCommit returns 1 */
+    /* 5. Vtable dispatch: the PDB handle is a COM-style object whose first
+     *    dword is a vtable pointer. This tests the full chain that breaks on
+     *    64-bit if objects aren't in 32-bit addressable memory:
+     *    object ptr -> vptr -> stub code -> return value */
+    {
+        /* __thiscall: this in ECX, no stack args for slot 0 */
+        typedef int (__attribute__((thiscall)) *QueryInterfaceVersion_fn)(void *thisPtr);
+        typedef int (__attribute__((thiscall)) *QueryAge_fn)(void *thisPtr);
+        /* __thiscall: this in ECX, 2 stack args for OpenDBI (slot 7) */
+        typedef int (__attribute__((thiscall)) *OpenDBI_fn)(void *thisPtr,
+            const char *szTarget, const char *szMode, void **ppdbi);
+
+        /* Read vtable pointer from the PDB object */
+        DWORD *vtable = *(DWORD **)ppPDB;
+        TEST_CHECK_MSG(vtable != NULL, "PDB object vtable pointer is NULL");
+
+        /* Slot 0: QueryInterfaceVersion() -> 20091201 */
+        QueryInterfaceVersion_fn queryIV =
+            (QueryInterfaceVersion_fn)(uintptr_t)vtable[0];
+        int intv = queryIV(ppPDB);
+        TEST_CHECK_EQ(20091201, intv);
+
+        /* Slot 5: QueryAge() -> 1 */
+        QueryAge_fn queryAge = (QueryAge_fn)(uintptr_t)vtable[5];
+        int age = queryAge(ppPDB);
+        TEST_CHECK_EQ(1, age);
+
+        /* Slot 7: OpenDBI(szTarget, szMode, DBI**) -> 1, writes DBI ptr */
+        void *pDBI = NULL;
+        OpenDBI_fn openDBI = (OpenDBI_fn)(uintptr_t)vtable[7];
+        int dbiOk = openDBI(ppPDB, "target", "r", &pDBI);
+        TEST_CHECK_EQ(1, dbiOk);
+        TEST_CHECK_MSG(pDBI != NULL, "OpenDBI did not return a DBI handle");
+
+        /* DBI object should also have a valid vtable - test dispatch */
+        DWORD *dbiVtable = *(DWORD **)pDBI;
+        TEST_CHECK_MSG(dbiVtable != NULL, "DBI object vtable pointer is NULL");
+
+        /* DBI slot 0: QueryImplementationVersion() -> 20091201 */
+        QueryInterfaceVersion_fn dbiQueryIV =
+            (QueryInterfaceVersion_fn)(uintptr_t)dbiVtable[0];
+        int dbiImpv = dbiQueryIV(pDBI);
+        TEST_CHECK_EQ(20091201, dbiImpv);
+    }
+
+    /* 6. PDBCommit returns 1 */
     int committed = commit_fn(ppPDB);
     TEST_CHECK_EQ(1, committed);
 
-    /* 6. PDBClose returns 1 */
+    /* 7. PDBClose returns 1 */
     int closed = close_fn(ppPDB);
     TEST_CHECK_EQ(1, closed);
 
-    /* 7. Stream functions */
+    /* 8. Stream functions */
     void *fakeStream = (void *)(uintptr_t)0x12345678;
     LONG cb = querycb_fn(fakeStream);
     TEST_CHECK_EQ(0, cb);

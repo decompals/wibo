@@ -32,7 +32,9 @@ extern const wibo::ModuleStub lib_bcrypt;
 extern const wibo::ModuleStub lib_kernel32;
 extern const wibo::ModuleStub lib_lmgr;
 extern const wibo::ModuleStub lib_mscoree;
+#if WIBO_HAS_MSPDB
 extern const wibo::ModuleStub lib_mspdb;
+#endif
 #if WIBO_HAS_MSVCRT
 extern const wibo::ModuleStub lib_msvcrt;
 #endif
@@ -188,8 +190,11 @@ LockedRegistry registry() {
 	if (!reg.initialized) {
 		reg.initialized = true;
 		const wibo::ModuleStub *builtins[] = {
-			&lib_advapi32, &lib_bcrypt, &lib_kernel32, &lib_lmgr,	   &lib_mscoree, &lib_mspdb,
+			&lib_advapi32, &lib_bcrypt, &lib_kernel32, &lib_lmgr,	   &lib_mscoree,
 			&lib_ntdll,	   &lib_ole32,  &lib_rpcrt4,   &lib_user32,   &lib_vcruntime, &lib_version, &lib_ws2,
+#if WIBO_HAS_MSPDB
+			&lib_mspdb,
+#endif
 #if WIBO_HAS_MSVCRT
 			&lib_msvcrt,
 #endif

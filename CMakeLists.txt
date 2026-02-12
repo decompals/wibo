@@ -189,7 +189,6 @@ add_executable(wibo
     dll/kernel32/winnt.cpp
     dll/kernel32/wow64apiset.cpp
     dll/lmgr.cpp
-    dll/mspdb.cpp
     dll/mscoree.cpp
     dll/ntdll.cpp
     dll/ole32.cpp
@@ -219,6 +218,27 @@ else()
     target_compile_definitions(wibo PRIVATE WIBO_HAS_MSVCRT=1)
     target_sources(wibo PRIVATE dll/msvcrt.cpp)
     embed_binary(dll/msvcrt.cpp "${MSVCRT_DLL}")
+endif()
+
+find_program(WIBO_MINGW_CXX i686-w64-mingw32-g++)
+if (WIBO_MINGW_CXX)
+    set(MSPDB_DLL ${CMAKE_CURRENT_BINARY_DIR}/vendor/mspdb80.dll)
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/vendor)
+    add_custom_command(OUTPUT ${MSPDB_DLL}
+        COMMAND ${WIBO_MINGW_CXX} -shared -O2 -Wall -static
+                -fno-exceptions -fno-rtti
+                -o ${MSPDB_DLL}
+                ${CMAKE_CURRENT_SOURCE_DIR}/dll/mspdb/mspdb_dll.cpp
+                ${CMAKE_CURRENT_SOURCE_DIR}/dll/mspdb/mspdb.def
+        DEPENDS dll/mspdb/mspdb_dll.cpp dll/mspdb/mspdb.def)
+    add_custom_target(mspdb_dll DEPENDS ${MSPDB_DLL})
+    add_dependencies(wibo mspdb_dll)
+    target_compile_definitions(wibo PRIVATE WIBO_HAS_MSPDB=1)
+    target_sources(wibo PRIVATE dll/mspdb_embed.cpp)
+    embed_binary(dll/mspdb_embed.cpp "${MSPDB_DLL}")
+else()
+    message(WARNING "i686-w64-mingw32-g++ not found; mspdb DLL will not be built")
+    target_compile_definitions(wibo PRIVATE WIBO_HAS_MSPDB=0)
 endif()
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -352,7 +372,6 @@ wibo_codegen_module(NAME version HEADERS dll/version.h)
 wibo_codegen_module(NAME rpcrt4 HEADERS dll/rpcrt4.h)
 wibo_codegen_module(NAME vcruntime HEADERS dll/vcruntime.h)
 wibo_codegen_module(NAME lmgr HEADERS dll/lmgr.h)
-wibo_codegen_module(NAME mspdb HEADERS dll/mspdb.h)
 wibo_codegen_module(NAME ole32 HEADERS dll/ole32.h)
 wibo_codegen_module(NAME user32 HEADERS dll/user32.h)
 wibo_codegen_module(NAME ntdll HEADERS dll/ntdll.h)

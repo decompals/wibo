@@ -928,23 +928,6 @@ HANDLE WINAPI CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShar
 		return INVALID_HANDLE_VALUE;
 	}
 
-	// Compute access category for share violation checks
-	uint32_t accessCategory = 0;
-	if (dwDesiredAccess & (GENERIC_READ | FILE_READ_DATA | FILE_EXECUTE))
-		accessCategory |= FILE_SHARE_READ;
-	if (dwDesiredAccess & (GENERIC_WRITE | FILE_WRITE_DATA | FILE_APPEND_DATA))
-		accessCategory |= FILE_SHARE_WRITE;
-	if (dwDesiredAccess & DELETE)
-		accessCategory |= FILE_SHARE_DELETE;
-
-	std::filesystem::path checkPath = files::canonicalPath(hostPath);
-	DEBUG_LOG("  share check: path=%s accessCat=%u shareMode=%u\n", checkPath.c_str(), accessCategory, dwShareMode);
-	if (files::checkShareViolation(checkPath, accessCategory, dwShareMode)) {
-		setLastError(ERROR_SHARING_VIOLATION);
-		DEBUG_LOG("-> ERROR_SHARING_VIOLATION\n");
-		return INVALID_HANDLE_VALUE;
-	}
-
 	bool allowCreate = false;
 	bool truncateExisting = false;
 	bool existedBefore = pathExists;
@@ -1112,12 +1095,7 @@ HANDLE WINAPI CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShar
 	}
 	fsObject->canonicalPath = std::move(canonicalPath);
 	fsObject->shareAccess = shareMask;
-	fsObject->accessCategory = accessCategory;
 	fsObject->deletePending = deleteOnClose;
-	if (accessCategory != 0 && !fsObject->canonicalPath.empty()) {
-		DEBUG_LOG("  share register: path=%s accessCat=%u share=%u\n", fsObject->canonicalPath.c_str(), accessCategory, shareMask);
-		files::registerOpenFile(fsObject->canonicalPath, accessCategory, shareMask);
-	}
 
 	uint32_t handleFlags = 0;
 	if (lpSecurityAttributes && lpSecurityAttributes->bInheritHandle) {
@@ -1637,13 +1615,10 @@ DWORD WINAPI GetFullPathNameW(LPCWSTR lpFileName, DWORD nBufferLength, LPWSTR lp
 	}
 
 	std::string narrow = wideStringToString(lpFileName);
-	DEBUG_LOG("GetFullPathNameW input: %s\n", narrow.c_str());
 	FullPathInfo info;
 	if (!computeFullPath(narrow, info)) {
 		return 0;
 	}
-
-	DEBUG_LOG("GetFullPathNameW result: %s\n", info.path.c_str());
 
 	auto widePath = stringToWideString(info.path.c_str());
 	const size_t wideLen = widePath.size();
@@ -1884,18 +1859,22 @@ HANDLE WINAPI FindFirstFileExW(LPCWSTR lpFileName, FINDEX_INFO_LEVELS fInfoLevel
 		return INVALID_HANDLE_VALUE;
 	}
 	if (fInfoLevelId != FindExInfoStandard) {
+		DEBUG_LOG(" -> ERROR_INVALID_PARAMETER (fInfoLevelId=%d)\n", fInfoLevelId);
 		setLastError(ERROR_INVALID_PARAMETER);
 		return INVALID_HANDLE_VALUE;
 	}
 	if (fSearchOp != FindExSearchNameMatch) {
+		DEBUG_LOG(" -> ERROR_INVALID_PARAMETER (fSearchOp=%d)\n", fSearchOp);
 		setLastError(ERROR_INVALID_PARAMETER);
 		return INVALID_HANDLE_VALUE;
 	}
 	if (lpSearchFilter) {
+		DEBUG_LOG(" -> ERROR_INVALID_PARAMETER (lpSearchFilter=%p)\n", lpSearchFilter);
 		setLastError(ERROR_INVALID_PARAMETER);
 		return INVALID_HANDLE_VALUE;
 	}
 	if (dwAdditionalFlags != 0) {
+		DEBUG_LOG(" -> ERROR_INVALID_PARAMETER (dwAdditionalFlags=0x%x)\n", dwAdditionalFlags);
 		setLastError(ERROR_INVALID_PARAMETER);
 		return INVALID_HANDLE_VALUE;
 	}

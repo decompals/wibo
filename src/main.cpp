@@ -263,33 +263,6 @@ int main(int argc, char **argv) {
 				optionDebug = true;
 				continue;
 			}
-			if (strncmp(arg, "--path-alias=", 13) == 0) {
-				std::string mapping = arg + 13;
-				auto eqPos = mapping.find('=');
-				if (eqPos == std::string::npos) {
-					fprintf(stderr, "Error: --path-alias requires format 'host_path=windows_path'\n");
-					printHelp(argv[0], true);
-					return 1;
-				}
-				files::addPathAlias(mapping.substr(0, eqPos), mapping.substr(eqPos + 1));
-				continue;
-			}
-			if (strcmp(arg, "--path-alias") == 0) {
-				if (i + 1 >= argc) {
-					fprintf(stderr, "Error: '%s' requires a mapping argument.\n", arg);
-					printHelp(argv[0], true);
-					return 1;
-				}
-				std::string mapping = argv[++i];
-				auto eqPos = mapping.find('=');
-				if (eqPos == std::string::npos) {
-					fprintf(stderr, "Error: --path-alias requires format 'host_path=windows_path'\n");
-					printHelp(argv[0], true);
-					return 1;
-				}
-				files::addPathAlias(mapping.substr(0, eqPos), mapping.substr(eqPos + 1));
-				continue;
-			}
 			if (strncmp(arg, "--chdir=", 8) == 0) {
 				chdirPath = arg + 8;
 				continue;

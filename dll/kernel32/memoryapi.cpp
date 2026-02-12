@@ -348,11 +348,7 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 			return nullptr;
 		}
 		requestedBase = reinterpret_cast<void *>(mapBaseAddr);
-#ifdef MAP_FIXED_NOREPLACE
-		mapFlags |= MAP_FIXED_NOREPLACE;
-#else
 		mapFlags |= MAP_FIXED;
-#endif
 	} else {
 		void *candidate = nullptr;
 		wibo::heap::VmStatus reserveStatus = wibo::heap::reserveViewRange(mapLength, 0, 0, &candidate);
@@ -367,17 +363,6 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 
 	errno = 0;
 	void *mapBase = mmap(requestedBase, mapLength, prot, mapFlags, mmapFd, alignedOffset);
-#ifdef MAP_FIXED_NOREPLACE
-	// On Windows, MapViewOfFileEx can map over freed VirtualAlloc regions.
-	// VirtualFree(MEM_RELEASE) leaves PROT_NONE pages, so MAP_FIXED_NOREPLACE
-	// fails with EEXIST. Fall back to MAP_FIXED to match Windows behavior.
-	if (mapBase == MAP_FAILED && baseAddress && errno == EEXIST) {
-		DEBUG_LOG("mapViewOfFileInternal: MAP_FIXED_NOREPLACE failed, retrying with MAP_FIXED\n");
-		mapFlags = (mapFlags & ~MAP_FIXED_NOREPLACE) | MAP_FIXED;
-		errno = 0;
-		mapBase = mmap(requestedBase, mapLength, prot, mapFlags, mmapFd, alignedOffset);
-	}
-#endif
 	if (mapBase == MAP_FAILED) {
 		int err = errno;
 		if (baseAddress && (err == ENOMEM || err == EEXIST || err == EINVAL || err == EPERM)) {
@@ -432,8 +417,6 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 	if (reservedMapping) {
 		wibo::heap::registerViewRange(mapBase, mapLength, protect, view.protect);
 	} else if (baseAddress) {
-		// Caller-specified base: register with the heap manager so VirtualAlloc
-		// won't allocate overlapping regions (matching Windows address space behavior).
 		view.managed = true;
 		wibo::heap::registerViewRange(mapBase, mapLength, protect, view.protect);
 	}

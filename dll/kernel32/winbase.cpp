@@ -337,10 +337,36 @@ bool resolveDiskFreeSpaceStat(const char *rootPathName, struct statvfs &outBuf, 
 	}
 }
 
-constexpr DWORD kComputerNameLength = 8;
-constexpr DWORD kComputerNameRequiredSize = kComputerNameLength + 1;
-constexpr const char kComputerNameAnsi[] = "COMPNAME";
-const uint16_t kComputerNameWide[] = {u'C', u'O', u'M', u'P', u'N', u'A', u'M', u'E', 0};
+static const char* getComputerNameAnsi() {
+	static const char* name = nullptr;
+	if (!name) {
+		const char* env = getenv("WIBO_COMPUTER_NAME");
+		if (env && env[0]) {
+			name = strdup(env);
+		} else {
+			name = "COMPNAME";
+		}
+	}
+	return name;
+}
+
+static DWORD getComputerNameLength() {
+	return static_cast<DWORD>(std::strlen(getComputerNameAnsi()));
+}
+
+static const uint16_t* getComputerNameWide() {
+	static uint16_t* wideName = nullptr;
+	if (!wideName) {
+		const char* ansi = getComputerNameAnsi();
+		size_t len = std::strlen(ansi);
+		wideName = new uint16_t[len + 1];
+		for (size_t i = 0; i < len; i++) {
+			wideName[i] = static_cast<uint16_t>(ansi[i]);
+		}
+		wideName[len] = 0;
+	}
+	return wideName;
+}
 
 struct DllRedirectionEntry {
 	std::string nameLower;
@@ -765,14 +791,16 @@ BOOL WINAPI GetComputerNameA(LPSTR lpBuffer, LPDWORD nSize) {
 		return FALSE;
 	}
 
-	if (*nSize < kComputerNameRequiredSize) {
-		*nSize = kComputerNameRequiredSize;
+	DWORD nameLen = getComputerNameLength();
+	DWORD requiredSize = nameLen + 1;
+	if (*nSize < requiredSize) {
+		*nSize = requiredSize;
 		setLastError(ERROR_BUFFER_OVERFLOW);
 		return FALSE;
 	}
 
-	std::strcpy(lpBuffer, kComputerNameAnsi);
-	*nSize = kComputerNameLength;
+	std::strcpy(lpBuffer, getComputerNameAnsi());
+	*nSize = nameLen;
 	return TRUE;
 }
 
@@ -787,14 +815,16 @@ BOOL WINAPI GetComputerNameW(LPWSTR lpBuffer, LPDWORD nSize) {
 		return FALSE;
 	}
 
-	if (*nSize < kComputerNameRequiredSize) {
-		*nSize = kComputerNameRequiredSize;
+	DWORD nameLen = getComputerNameLength();
+	DWORD requiredSize = nameLen + 1;
+	if (*nSize < requiredSize) {
+		*nSize = requiredSize;
 		setLastError(ERROR_BUFFER_OVERFLOW);
 		return FALSE;
 	}
 
-	wstrncpy(lpBuffer, kComputerNameWide, static_cast<size_t>(kComputerNameRequiredSize));
-	*nSize = kComputerNameLength;
+	wstrncpy(lpBuffer, getComputerNameWide(), static_cast<size_t>(requiredSize));
+	*nSize = nameLen;
 	return TRUE;
 }
 

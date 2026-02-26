@@ -6,6 +6,8 @@
 // No virtual destructors (MSVC: 1 slot, GCC: 2 slots - would shift all indices).
 
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #define DLLEXPORT extern "C" __declspec(dllexport)
@@ -552,12 +554,31 @@ DLLEXPORT int __cdecl PDB_OpenValidate5(const wchar_t *, const wchar_t *, void *
 	return openPDB(pec, ppPDB);
 }
 
+DLLEXPORT int __cdecl PDBOpenEx2W(const wchar_t *, const char *, int32_t *pec, wchar_t *, unsigned int, void **ppPDB) {
+	return openPDB(pec, ppPDB);
+}
+
 DLLEXPORT int __cdecl PDBExportValidateInterface(uint32_t) {
 	return 1;
 }
 
 // CRC-32 with reflected polynomial 0xEDB88320 (ISO 3309).
 // Used by the linker to hash string literal content for ??_C@_ symbol names.
+// Also used by c1xx.dll for anonymous namespace hash generation.
+
+static FILE *getSigLogFile() {
+	static FILE *logFile = nullptr;
+	static bool tried = false;
+	if (!tried) {
+		tried = true;
+		const char *path = getenv("WIBO_SIGFORPBCB_LOG");
+		if (path && path[0]) {
+			logFile = fopen(path, "a");
+		}
+	}
+	return logFile;
+}
+
 DLLEXPORT uint32_t __cdecl SigForPbCb(const unsigned char *pb, uint32_t cb, uint32_t dwInitial) {
 	uint32_t crc = dwInitial;
 	for (uint32_t i = 0; i < cb; i++) {
@@ -572,6 +593,29 @@ DLLEXPORT uint32_t __cdecl SigForPbCb(const unsigned char *pb, uint32_t cb, uint
 		}
 		crc = (crc >> 8) ^ entry;
 	}
+
+	FILE *logFile = getSigLogFile();
+	if (logFile) {
+		// Log: init hash data_hex_or_string -> result
+		fprintf(logFile, "0x%08x 0x%08x %u ", dwInitial, crc, cb);
+		if (cb <= 260) {
+			bool printable = true;
+			for (uint32_t i = 0; i < cb; i++) {
+				if (pb[i] < 0x20 || pb[i] > 0x7e) { printable = false; break; }
+			}
+			if (printable && cb > 0) {
+				fprintf(logFile, "\"%.*s\"", (int)cb, pb);
+			} else {
+				for (uint32_t i = 0; i < cb && i < 64; i++) fprintf(logFile, "%02x", pb[i]);
+				if (cb > 64) fprintf(logFile, "...");
+			}
+		} else {
+			fprintf(logFile, "(%u bytes)", cb);
+		}
+		fprintf(logFile, "\n");
+		fflush(logFile);
+	}
+
 	return crc;
 }
 

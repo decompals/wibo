@@ -1615,10 +1615,12 @@ DWORD WINAPI GetFullPathNameW(LPCWSTR lpFileName, DWORD nBufferLength, LPWSTR lp
 	}
 
 	std::string narrow = wideStringToString(lpFileName);
+	DEBUG_LOG("GetFullPathNameW input: %s\n", narrow.c_str());
 	FullPathInfo info;
 	if (!computeFullPath(narrow, info)) {
 		return 0;
 	}
+	DEBUG_LOG("GetFullPathNameW -> %s\n", info.path.c_str());
 
 	auto widePath = stringToWideString(info.path.c_str());
 	const size_t wideLen = widePath.size();
@@ -1682,6 +1684,7 @@ DWORD WINAPI GetShortPathNameW(LPCWSTR lpszLongPath, LPWSTR lpszShortPath, DWORD
 	DEBUG_LOG("GetShortPathNameW(%s)\n", longPath.c_str());
 	std::filesystem::path absPath = std::filesystem::absolute(files::pathFromWindows(longPath.c_str()));
 	std::string absStr = files::pathToWindows(absPath);
+	DEBUG_LOG("GetShortPathNameW -> %s\n", absStr.c_str());
 	auto absStrW = stringToWideString(absStr.c_str());
 	size_t len = wstrlen(absStrW.data());
 	DWORD required = static_cast<DWORD>(len + 1);

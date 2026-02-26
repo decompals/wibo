@@ -556,8 +556,23 @@ DLLEXPORT int __cdecl PDBExportValidateInterface(uint32_t) {
 	return 1;
 }
 
-DLLEXPORT uint32_t __cdecl SigForPbCb(void *, uint32_t) {
-	return 0;
+// CRC-32 with reflected polynomial 0xEDB88320 (ISO 3309).
+// Used by the linker to hash string literal content for ??_C@_ symbol names.
+DLLEXPORT uint32_t __cdecl SigForPbCb(const unsigned char *pb, uint32_t cb, uint32_t dwInitial) {
+	uint32_t crc = dwInitial;
+	for (uint32_t i = 0; i < cb; i++) {
+		uint32_t index = (crc ^ pb[i]) & 0xff;
+		uint32_t entry = index;
+		for (int j = 0; j < 8; j++) {
+			if (entry & 1) {
+				entry = (entry >> 1) ^ 0xEDB88320;
+			} else {
+				entry >>= 1;
+			}
+		}
+		crc = (crc >> 8) ^ entry;
+	}
+	return crc;
 }
 
 DLLEXPORT const char * __cdecl SzCanonFilename(const char *sz) {

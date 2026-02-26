@@ -285,6 +285,11 @@ int main(int argc, char **argv) {
 				printHelp(argv[0], true);
 				return 1;
 			}
+			if (strchr(arg, '=') && arg[0] != '-' && arg[0] != '/' && arg[0] != '.') {
+				// Looks like an environment variable
+				putenv(strdup(arg));
+				continue;
+			}
 		}
 
 		programIndex = i;
@@ -335,8 +340,12 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-	// Determine the guest program name
+	// Build guest arguments
 	auto guestArgs = wibo::splitCommandLine(cmdLine.c_str());
+	DEBUG_LOG("Split command line into %zu args:\n", guestArgs.size());
+	for (size_t i = 0; i < guestArgs.size(); i++) {
+		DEBUG_LOG("  arg[%zu]: %s\n", i, guestArgs[i].c_str());
+	}
 	std::string programName;
 	if (programIndex != -1) {
 		programName = argv[programIndex];
@@ -378,7 +387,9 @@ int main(int argc, char **argv) {
 
 	// Build a command line
 	if (cmdLine.empty()) {
+		DEBUG_LOG("Reconstructing command line from %zu args\n", guestArgs.size());
 		for (size_t i = 0; i < guestArgs.size(); ++i) {
+			DEBUG_LOG("  arg[%zu]: %s\n", i, guestArgs[i].c_str());
 			if (i != 0) {
 				cmdLine += ' ';
 			}
@@ -400,17 +411,20 @@ int main(int argc, char **argv) {
 					if (c == '\0' || c == '"')
 						cmdLine += '\\';
 				}
-				backslashes = 0;
 
 				if (c == '\0')
 					break;
-				if (c == '\"')
+				if (c == '"')
 					cmdLine += '\\';
 				cmdLine += c;
+				backslashes = 0;
 			}
 			if (needQuotes)
 				cmdLine += '"';
 		}
+	} else {
+		// Use verbatim
+		DEBUG_LOG("Using exact command line: %s\n", cmdLine.c_str());
 	}
 	if (cmdLine.empty() || cmdLine.back() != '\0') {
 		cmdLine.push_back('\0');

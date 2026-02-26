@@ -1320,6 +1320,39 @@ BOOL WINAPI InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpCon
 	}
 }
 
+BOOL WINAPI InitOnceExecuteOnce(PINIT_ONCE InitOnce, PINIT_ONCE_FN InitFn, PVOID Parameter, LPVOID *Context) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("InitOnceExecuteOnce(%p, %p, %p, %p)\n", InitOnce, InitFn, Parameter, Context);
+	if (!InitOnce || !InitFn) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+
+	BOOL pending = FALSE;
+	GUEST_PTR context = GUEST_NULL;
+	if (!InitOnceBeginInitialize(InitOnce, 0, &pending, &context)) {
+		return FALSE;
+	}
+
+	if (pending) {
+		LPVOID ctx = nullptr;
+		if (!InitFn(InitOnce, Parameter, &ctx)) {
+			InitOnceComplete(InitOnce, INIT_ONCE_INIT_FAILED, nullptr);
+			return FALSE;
+		}
+		InitOnceComplete(InitOnce, 0, ctx);
+		if (Context) {
+			*Context = ctx;
+		}
+	} else {
+		if (Context) {
+			*Context = fromGuestPtr<void>(context);
+		}
+	}
+
+	return TRUE;
+}
+
 void WINAPI AcquireSRWLockShared(PSRWLOCK SRWLock) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("AcquireSRWLockShared(%p)\n", SRWLock);

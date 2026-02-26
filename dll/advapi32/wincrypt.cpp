@@ -245,4 +245,25 @@ BOOL WINAPI CryptDestroyHash(HCRYPTHASH hHash) {
 	return TRUE;
 }
 
+BOOLEAN WINAPI SystemFunction036(PVOID RandomBuffer, ULONG RandomBufferLength) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("SystemFunction036(%p, %u)\n", RandomBuffer, RandomBufferLength);
+	if (RandomBuffer && RandomBufferLength > 0) {
+#ifdef __APPLE__
+		arc4random_buf(RandomBuffer, RandomBufferLength);
+#else
+		ssize_t ret = getrandom(RandomBuffer, RandomBufferLength, 0);
+		if (ret < 0 || static_cast<ULONG>(ret) != RandomBufferLength) {
+			// fallback to /dev/urandom
+			FILE *f = fopen("/dev/urandom", "rb");
+			if (f) {
+				fread(RandomBuffer, 1, RandomBufferLength, f);
+				fclose(f);
+			}
+		}
+#endif
+	}
+	return TRUE;
+}
+
 } // namespace advapi32

@@ -24,4 +24,6 @@ BOOL WINAPI GetProcessWorkingSetSize(HANDLE hProcess, PSIZE_T lpMinimumWorkingSe
 									   PSIZE_T lpMaximumWorkingSetSize);
 BOOL WINAPI SetProcessWorkingSetSize(HANDLE hProcess, SIZE_T dwMinimumWorkingSetSize, SIZE_T dwMaximumWorkingSetSize);
 
+void flushAllFileViews();
+
 } // namespace kernel32

@@ -63,6 +63,8 @@ using INIT_ONCE = RTL_RUN_ONCE;
 using PINIT_ONCE = INIT_ONCE *;
 using LPINIT_ONCE = INIT_ONCE *;
 
+typedef BOOL(WINAPI *PINIT_ONCE_FN)(PINIT_ONCE, PVOID, PVOID *);
+
 constexpr INIT_ONCE INIT_ONCE_STATIC_INIT{GUEST_NULL};
 
 union RTL_SRWLOCK {
@@ -103,6 +105,7 @@ void WINAPI LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 BOOL WINAPI TryEnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 BOOL WINAPI InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBOOL fPending, GUEST_PTR *lpContext);
 BOOL WINAPI InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpContext);
+BOOL WINAPI InitOnceExecuteOnce(PINIT_ONCE InitOnce, PINIT_ONCE_FN InitFn, PVOID Parameter, LPVOID *Context);
 void WINAPI AcquireSRWLockShared(PSRWLOCK SRWLock);
 void WINAPI ReleaseSRWLockShared(PSRWLOCK SRWLock);
 void WINAPI AcquireSRWLockExclusive(PSRWLOCK SRWLock);

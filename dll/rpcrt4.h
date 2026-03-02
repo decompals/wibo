@@ -33,7 +33,7 @@ RPC_STATUS WINAPI RpcBindingSetAuthInfoExW(RPC_BINDING_HANDLE binding, RPC_WSTR 
 										   RPC_SECURITY_QOS *securityQos);
 RPC_STATUS WINAPI RpcBindingFree(GUEST_PTR *binding);
 RPC_STATUS WINAPI RpcStringFreeW(GUEST_PTR *string);
-#ifndef __x86_64__ // TODO
+#ifndef __x86_64__ // TODO: varargs trampoline not supported on 64-bit
 CLIENT_CALL_RETURN CDECL_NO_CONV NdrClientCall2(PMIDL_STUB_DESC stubDescriptor, PFORMAT_STRING format, ...);
 #endif
 VOID WINAPI NdrServerCall2(PRPC_MESSAGE message);

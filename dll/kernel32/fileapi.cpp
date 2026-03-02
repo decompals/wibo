@@ -928,8 +928,6 @@ HANDLE WINAPI CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShar
 		return INVALID_HANDLE_VALUE;
 	}
 
-	// TODO: verify share mode against existing opens
-
 	bool allowCreate = false;
 	bool truncateExisting = false;
 	bool existedBefore = pathExists;
@@ -1036,9 +1034,9 @@ HANDLE WINAPI CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShar
 	if (dwCreationDisposition == CREATE_NEW) {
 		openFlags |= O_EXCL;
 	}
-	if (truncateExisting && !isDirectory) {
-		openFlags |= O_TRUNC;
-	}
+	// Don't use O_TRUNC directly — we need to check for active memory mappings first
+	// (Windows prevents truncation of files with active mapped sections)
+	bool deferredTruncate = truncateExisting && !isDirectory;
 
 	if (isDirectory) {
 		openFlags |= O_RDONLY | O_DIRECTORY;
@@ -1063,6 +1061,19 @@ HANDLE WINAPI CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShar
 		setLastErrorFromErrno();
 		DEBUG_LOG("-> errno: %d\n", errno);
 		return INVALID_HANDLE_VALUE;
+	}
+
+	// Apply deferred truncation — skip if the file has active memory mappings (Windows behavior)
+	if (deferredTruncate) {
+		if (files::isFileMapped(fd)) {
+			DEBUG_LOG("  skipping truncation: file has active memory mapping\n");
+		} else {
+			if (ftruncate(fd, 0) != 0) {
+				setLastErrorFromErrno();
+				close(fd);
+				return INVALID_HANDLE_VALUE;
+			}
+		}
 	}
 
 	struct stat st{};
@@ -1604,12 +1615,12 @@ DWORD WINAPI GetFullPathNameW(LPCWSTR lpFileName, DWORD nBufferLength, LPWSTR lp
 	}
 
 	std::string narrow = wideStringToString(lpFileName);
+	DEBUG_LOG("GetFullPathNameW input: %s\n", narrow.c_str());
 	FullPathInfo info;
 	if (!computeFullPath(narrow, info)) {
 		return 0;
 	}
-
-	DEBUG_LOG(" -> %s\n", info.path.c_str());
+	DEBUG_LOG("GetFullPathNameW -> %s\n", info.path.c_str());
 
 	auto widePath = stringToWideString(info.path.c_str());
 	const size_t wideLen = widePath.size();
@@ -1673,6 +1684,7 @@ DWORD WINAPI GetShortPathNameW(LPCWSTR lpszLongPath, LPWSTR lpszShortPath, DWORD
 	DEBUG_LOG("GetShortPathNameW(%s)\n", longPath.c_str());
 	std::filesystem::path absPath = std::filesystem::absolute(files::pathFromWindows(longPath.c_str()));
 	std::string absStr = files::pathToWindows(absPath);
+	DEBUG_LOG("GetShortPathNameW -> %s\n", absStr.c_str());
 	auto absStrW = stringToWideString(absStr.c_str());
 	size_t len = wstrlen(absStrW.data());
 	DWORD required = static_cast<DWORD>(len + 1);
@@ -1834,6 +1846,45 @@ HANDLE WINAPI FindFirstFileExA(LPCSTR lpFileName, FINDEX_INFO_LEVELS fInfoLevelI
 
 	auto *findData = static_cast<LPWIN32_FIND_DATAA>(lpFindFileData);
 	return findFirstFileCommon(std::string(lpFileName), findData);
+}
+
+HANDLE WINAPI FindFirstFileExW(LPCWSTR lpFileName, FINDEX_INFO_LEVELS fInfoLevelId, LPVOID lpFindFileData,
+							   FINDEX_SEARCH_OPS fSearchOp, LPVOID lpSearchFilter, DWORD dwAdditionalFlags) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("FindFirstFileExW(%p, %d, %p, %d, %p, 0x%x)\n", lpFileName, fInfoLevelId,
+			  lpFindFileData, fSearchOp, lpSearchFilter, dwAdditionalFlags);
+	if (!lpFindFileData) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return INVALID_HANDLE_VALUE;
+	}
+	if (!lpFileName) {
+		setLastError(ERROR_PATH_NOT_FOUND);
+		return INVALID_HANDLE_VALUE;
+	}
+	if (fInfoLevelId != FindExInfoStandard) {
+		DEBUG_LOG(" -> ERROR_INVALID_PARAMETER (fInfoLevelId=%d)\n", fInfoLevelId);
+		setLastError(ERROR_INVALID_PARAMETER);
+		return INVALID_HANDLE_VALUE;
+	}
+	if (fSearchOp != FindExSearchNameMatch) {
+		DEBUG_LOG(" -> ERROR_INVALID_PARAMETER (fSearchOp=%d)\n", fSearchOp);
+		setLastError(ERROR_INVALID_PARAMETER);
+		return INVALID_HANDLE_VALUE;
+	}
+	if (lpSearchFilter) {
+		DEBUG_LOG(" -> ERROR_INVALID_PARAMETER (lpSearchFilter=%p)\n", lpSearchFilter);
+		setLastError(ERROR_INVALID_PARAMETER);
+		return INVALID_HANDLE_VALUE;
+	}
+	if (dwAdditionalFlags != 0) {
+		DEBUG_LOG(" -> ERROR_INVALID_PARAMETER (dwAdditionalFlags=0x%x)\n", dwAdditionalFlags);
+		setLastError(ERROR_INVALID_PARAMETER);
+		return INVALID_HANDLE_VALUE;
+	}
+
+	std::string narrowName = wideStringToString(lpFileName);
+	auto *findData = static_cast<LPWIN32_FIND_DATAW>(lpFindFileData);
+	return findFirstFileCommon(narrowName, findData);
 }
 
 BOOL WINAPI FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileData) {

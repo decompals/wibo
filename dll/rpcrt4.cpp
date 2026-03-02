@@ -17,7 +17,9 @@ namespace {
 constexpr RPC_STATUS RPC_S_OK = 0;
 constexpr RPC_STATUS RPC_S_INVALID_STRING_BINDING = 1700;
 constexpr RPC_STATUS RPC_S_INVALID_BINDING = 1702;
+#ifndef __x86_64__
 constexpr RPC_STATUS RPC_S_SERVER_UNAVAILABLE = 1722;
+#endif
 constexpr RPC_STATUS RPC_S_INVALID_ARG = 87;
 constexpr RPC_STATUS RPC_S_OUT_OF_MEMORY = 14;
 
@@ -227,6 +229,7 @@ RPC_STATUS WINAPI RpcStringFreeW(GUEST_PTR *string) {
 	return RPC_S_OK;
 }
 
+#ifndef __x86_64__
 CLIENT_CALL_RETURN CDECL_NO_CONV NdrClientCall2(PMIDL_STUB_DESC stubDescriptor, PFORMAT_STRING format, ...) {
 	DEBUG_LOG("STUB: NdrClientCall2 stubDescriptor=%p format=%p\n", stubDescriptor, format);
 	CLIENT_CALL_RETURN result = {};
@@ -234,6 +237,7 @@ CLIENT_CALL_RETURN CDECL_NO_CONV NdrClientCall2(PMIDL_STUB_DESC stubDescriptor, 
 	DEBUG_LOG("NdrClientCall2 returning RPC_S_SERVER_UNAVAILABLE\n");
 	return result;
 }
+#endif
 
 VOID WINAPI NdrServerCall2(PRPC_MESSAGE message) {
 	HOST_CONTEXT_GUARD();

@@ -1,0 +1,20 @@
+LIBRARY mspdb80
+EXPORTS
+    ?Open2W@PDB@@SAHPBGPBDPAJPAGIPAPAU1@@Z = PDB_Open2W
+    ?Open3W@PDB@@SAHPBGPBDKPBU_GUID@@KPAJPAGIPAPAU1@@Z = PDB_Open3W
+    ?OpenValidate5@PDB@@SAHPBG0PAXP6AP6AHXZ1W4POVC@@@ZPAJPAGIPAPAU1@@Z = PDB_OpenValidate5
+    ?open@NameMap@@SAHPAUPDB@@HPAPAU1@@Z = NameMap_open
+    PDBOpen2W = PDB_Open2W_C
+    PDBExportValidateInterface
+    PDBCommit
+    PDBClose
+    PDBOpenStreamEx
+    SigForPbCb
+    SzCanonFilename
+    StreamAppend
+    StreamQueryCb
+    StreamRead
+    StreamRelease
+    StreamReplace
+    StreamTruncate
+    StreamWrite

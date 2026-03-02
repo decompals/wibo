@@ -54,6 +54,7 @@ NTSTATUS WINAPI RtlGetVersion(PRTL_OSVERSIONINFOW lpVersionInformation);
 NTSTATUS WINAPI NtQueryInformationProcess(HANDLE ProcessHandle, PROCESSINFOCLASS ProcessInformationClass,
 										  PVOID ProcessInformation, ULONG ProcessInformationLength,
 										  PULONG ReturnLength);
+DWORD WINAPI RtlComputeCrc32(DWORD dwInitial, const BYTE *pData, int iLen);
 NTSTATUS WINAPI LdrAddRefDll(ULONG Flags, HMODULE Module);
 
 } // namespace ntdll

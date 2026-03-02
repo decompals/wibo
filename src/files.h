@@ -33,6 +33,11 @@ std::filesystem::path canonicalPath(const std::filesystem::path &path);
 std::string hostPathListToWindows(const std::string &value);
 std::string windowsPathListToHost(const std::string &value);
 
+// Memory-mapped file tracking (prevents truncation of mapped files, matching Windows behavior)
+void trackMappedFile(dev_t dev, ino_t ino);
+void untrackMappedFile(dev_t dev, ino_t ino);
+bool isFileMapped(int fd);
+
 } // namespace files
 
 inline bool endsWith(const std::string &str, const std::string &suffix) {

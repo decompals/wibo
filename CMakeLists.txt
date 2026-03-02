@@ -220,6 +220,27 @@ else()
     embed_binary(dll/msvcrt.cpp "${MSVCRT_DLL}")
 endif()
 
+find_program(WIBO_MINGW_CXX i686-w64-mingw32-g++)
+if (WIBO_MINGW_CXX)
+    set(MSPDB_DLL ${CMAKE_CURRENT_BINARY_DIR}/vendor/mspdb80.dll)
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/vendor)
+    add_custom_command(OUTPUT ${MSPDB_DLL}
+        COMMAND ${WIBO_MINGW_CXX} -shared -O2 -Wall -static
+                -fno-exceptions -fno-rtti
+                -o ${MSPDB_DLL}
+                ${CMAKE_CURRENT_SOURCE_DIR}/dll/mspdb/mspdb_dll.cpp
+                ${CMAKE_CURRENT_SOURCE_DIR}/dll/mspdb/mspdb.def
+        DEPENDS dll/mspdb/mspdb_dll.cpp dll/mspdb/mspdb.def)
+    add_custom_target(mspdb_dll DEPENDS ${MSPDB_DLL})
+    add_dependencies(wibo mspdb_dll)
+    target_compile_definitions(wibo PRIVATE WIBO_HAS_MSPDB=1)
+    target_sources(wibo PRIVATE dll/mspdb_embed.cpp)
+    embed_binary(dll/mspdb_embed.cpp "${MSPDB_DLL}")
+else()
+    message(WARNING "i686-w64-mingw32-g++ not found; mspdb DLL will not be built")
+    target_compile_definitions(wibo PRIVATE WIBO_HAS_MSPDB=0)
+endif()
+
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_sources(wibo PRIVATE
         src/async_io_epoll.cpp
@@ -478,6 +499,7 @@ if (WIBO_ENABLE_FIXTURE_TESTS)
         wibo_add_fixture_bin(NAME test_srw_lock SOURCES test/test_srw_lock.c)
         wibo_add_fixture_bin(NAME test_init_once SOURCES test/test_init_once.c)
         wibo_add_fixture_bin(NAME test_wait_on_address SOURCES test/test_wait_on_address.c COMPILE_OPTIONS -lsynchronization)
+        wibo_add_fixture_bin(NAME test_mspdb SOURCES test/test_mspdb.c)
 
         # DLLs for fixture tests
         wibo_add_fixture_dll(NAME external_exports SOURCES test/external_exports.c)

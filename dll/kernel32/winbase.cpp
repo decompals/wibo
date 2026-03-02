@@ -17,6 +17,7 @@
 #include <cstdarg>
 #include <cstdlib>
 #include <cstring>
+#include <strings.h>
 #include <filesystem>
 #include <limits>
 #include <mimalloc.h>
@@ -336,10 +337,36 @@ bool resolveDiskFreeSpaceStat(const char *rootPathName, struct statvfs &outBuf, 
 	}
 }
 
-constexpr DWORD kComputerNameLength = 8;
-constexpr DWORD kComputerNameRequiredSize = kComputerNameLength + 1;
-constexpr const char kComputerNameAnsi[] = "COMPNAME";
-const uint16_t kComputerNameWide[] = {u'C', u'O', u'M', u'P', u'N', u'A', u'M', u'E', 0};
+static const char* getComputerNameAnsi() {
+	static const char* name = nullptr;
+	if (!name) {
+		const char* env = getenv("WIBO_COMPUTER_NAME");
+		if (env && env[0]) {
+			name = strdup(env);
+		} else {
+			name = "COMPNAME";
+		}
+	}
+	return name;
+}
+
+static DWORD getComputerNameLength() {
+	return static_cast<DWORD>(std::strlen(getComputerNameAnsi()));
+}
+
+static const uint16_t* getComputerNameWide() {
+	static uint16_t* wideName = nullptr;
+	if (!wideName) {
+		const char* ansi = getComputerNameAnsi();
+		size_t len = std::strlen(ansi);
+		wideName = new uint16_t[len + 1];
+		for (size_t i = 0; i < len; i++) {
+			wideName[i] = static_cast<uint16_t>(ansi[i]);
+		}
+		wideName[len] = 0;
+	}
+	return wideName;
+}
 
 struct DllRedirectionEntry {
 	std::string nameLower;
@@ -764,14 +791,16 @@ BOOL WINAPI GetComputerNameA(LPSTR lpBuffer, LPDWORD nSize) {
 		return FALSE;
 	}
 
-	if (*nSize < kComputerNameRequiredSize) {
-		*nSize = kComputerNameRequiredSize;
+	DWORD nameLen = getComputerNameLength();
+	DWORD requiredSize = nameLen + 1;
+	if (*nSize < requiredSize) {
+		*nSize = requiredSize;
 		setLastError(ERROR_BUFFER_OVERFLOW);
 		return FALSE;
 	}
 
-	std::strcpy(lpBuffer, kComputerNameAnsi);
-	*nSize = kComputerNameLength;
+	std::strcpy(lpBuffer, getComputerNameAnsi());
+	*nSize = nameLen;
 	return TRUE;
 }
 
@@ -786,14 +815,16 @@ BOOL WINAPI GetComputerNameW(LPWSTR lpBuffer, LPDWORD nSize) {
 		return FALSE;
 	}
 
-	if (*nSize < kComputerNameRequiredSize) {
-		*nSize = kComputerNameRequiredSize;
+	DWORD nameLen = getComputerNameLength();
+	DWORD requiredSize = nameLen + 1;
+	if (*nSize < requiredSize) {
+		*nSize = requiredSize;
 		setLastError(ERROR_BUFFER_OVERFLOW);
 		return FALSE;
 	}
 
-	wstrncpy(lpBuffer, kComputerNameWide, static_cast<size_t>(kComputerNameRequiredSize));
-	*nSize = kComputerNameLength;
+	wstrncpy(lpBuffer, getComputerNameWide(), static_cast<size_t>(requiredSize));
+	*nSize = nameLen;
 	return TRUE;
 }
 
@@ -1101,6 +1132,7 @@ DWORD WINAPI GetCurrentDirectoryW(DWORD nBufferLength, LPWSTR lpBuffer) {
 	if (!tryGetCurrentDirectoryPath(path)) {
 		return 0;
 	}
+	DEBUG_LOG("GetCurrentDirectoryW result: %s\n", path.c_str());
 	auto widePath = stringToWideString(path.c_str());
 	const DWORD required = static_cast<DWORD>(widePath.size());
 	if (nBufferLength == 0) {
@@ -1306,6 +1338,80 @@ BOOL WINAPI GetDiskFreeSpaceExW(LPCWSTR lpDirectoryName, PULARGE_INTEGER lpFreeB
 	std::string directoryName = wideStringToString(lpDirectoryName);
 	return GetDiskFreeSpaceExA(lpDirectoryName ? directoryName.c_str() : nullptr, lpFreeBytesAvailableToCaller,
 							   lpTotalNumberOfBytes, lpTotalNumberOfFreeBytes);
+}
+
+int WINAPI lstrcmpA(LPCSTR lpString1, LPCSTR lpString2) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("lstrcmpA(%s, %s)\n", lpString1 ? lpString1 : "(null)", lpString2 ? lpString2 : "(null)");
+	if (!lpString1 || !lpString2) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return 0;
+	}
+	return std::strcmp(lpString1, lpString2);
+}
+
+int WINAPI lstrcmpW(LPCWSTR lpString1, LPCWSTR lpString2) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("lstrcmpW\n");
+	if (!lpString1 || !lpString2) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return 0;
+	}
+	const uint16_t *s1 = reinterpret_cast<const uint16_t *>(lpString1);
+	const uint16_t *s2 = reinterpret_cast<const uint16_t *>(lpString2);
+	while (*s1 && *s2) {
+		if (*s1 != *s2)
+			return (*s1 > *s2) ? 1 : -1;
+		++s1;
+		++s2;
+	}
+	if (*s1 == *s2) return 0;
+	return (*s1 > *s2) ? 1 : -1;
+}
+
+int WINAPI lstrcmpiA(LPCSTR lpString1, LPCSTR lpString2) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("lstrcmpiA(%s, %s)\n", lpString1 ? lpString1 : "(null)", lpString2 ? lpString2 : "(null)");
+	if (!lpString1 || !lpString2) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return 0;
+	}
+	return strcasecmp(lpString1, lpString2);
+}
+
+int WINAPI lstrcmpiW(LPCWSTR lpString1, LPCWSTR lpString2) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("lstrcmpiW\n");
+	if (!lpString1 || !lpString2) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return 0;
+	}
+	const uint16_t *s1 = reinterpret_cast<const uint16_t *>(lpString1);
+	const uint16_t *s2 = reinterpret_cast<const uint16_t *>(lpString2);
+	while (*s1 && *s2) {
+		uint16_t c1 = wcharToLower(*s1);
+		uint16_t c2 = wcharToLower(*s2);
+		if (c1 != c2)
+			return (c1 > c2) ? 1 : -1;
+		++s1;
+		++s2;
+	}
+	uint16_t c1 = wcharToLower(*s1);
+	uint16_t c2 = wcharToLower(*s2);
+	if (c1 == c2) return 0;
+	return (c1 > c2) ? 1 : -1;
+}
+
+int WINAPI lstrlenA(LPCSTR lpString) {
+	HOST_CONTEXT_GUARD();
+	if (!lpString) return 0;
+	return static_cast<int>(std::strlen(lpString));
+}
+
+int WINAPI lstrlenW(LPCWSTR lpString) {
+	HOST_CONTEXT_GUARD();
+	if (!lpString) return 0;
+	return static_cast<int>(wstrlen(reinterpret_cast<const uint16_t *>(lpString)));
 }
 
 } // namespace kernel32

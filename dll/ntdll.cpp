@@ -829,6 +829,18 @@ NTSTATUS WINAPI NtQueryInformationProcess(HANDLE ProcessHandle, PROCESSINFOCLASS
 	}
 }
 
+DWORD WINAPI RtlComputeCrc32(DWORD dwInitial, const BYTE *pData, int iLen) {
+	// Standard CRC32 (ISO 3309 / ITU-T V.42)
+	DWORD crc = dwInitial ^ 0xFFFFFFFF;
+	for (int i = 0; i < iLen; i++) {
+		crc ^= pData[i];
+		for (int j = 0; j < 8; j++) {
+			crc = (crc >> 1) ^ (0xEDB88320 & -(crc & 1));
+		}
+	}
+	return crc ^ 0xFFFFFFFF;
+}
+
 NTSTATUS WINAPI LdrAddRefDll(ULONG Flags, HMODULE Module) {
 	DEBUG_LOG("STUB: LdrAddRefDll(%x, %p)\n", Flags, Module);
 	(void)Flags;

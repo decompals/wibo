@@ -13,6 +13,8 @@
 #include <optional>
 #include <string>
 #include <strings.h>
+#include <map>
+#include <sys/stat.h>
 #include <system_error>
 #include <unistd.h>
 #include <utility>
@@ -79,8 +81,137 @@ static HANDLE stdinHandle;
 static HANDLE stdoutHandle;
 static HANDLE stderrHandle;
 
+static std::string getDriveMapping(char drive) {
+	char envVar[] = "WIBO_DRIVE_X";
+	envVar[11] = toupper(drive);
+	const char *val = getenv(envVar);
+	return val ? val : "";
+}
+
+struct PathMapEntry {
+	std::string winPath;  // Normalized Windows-style prefix (forward slashes, no trailing slash)
+	std::string hostPath; // Host filesystem path
+};
+
+// Parse WIBO_PATH_MAP once and cache the result.
+// Format: "winPath=hostPath;winPath2=hostPath2;..."
+static const std::vector<PathMapEntry> &getPathMap() {
+	static std::vector<PathMapEntry> entries;
+	static bool parsed = false;
+	if (!parsed) {
+		parsed = true;
+		const char *envVal = getenv("WIBO_PATH_MAP");
+		if (envVal) {
+			std::string mapStr = envVal;
+			size_t start = 0;
+			while (start < mapStr.size()) {
+				size_t end = mapStr.find(';', start);
+				std::string entry = mapStr.substr(start, (end == std::string::npos) ? std::string::npos : end - start);
+				size_t sep = entry.find('=');
+				if (sep != std::string::npos) {
+					std::string winPart = entry.substr(0, sep);
+					std::string hostPart = entry.substr(sep + 1);
+					std::replace(winPart.begin(), winPart.end(), '\\', '/');
+					while (winPart.size() > 1 && winPart.back() == '/')
+						winPart.pop_back();
+					entries.push_back({std::move(winPart), std::move(hostPart)});
+				}
+				if (end == std::string::npos)
+					break;
+				start = end + 1;
+			}
+		}
+	}
+	return entries;
+}
+
+static std::filesystem::path resolveCaseInsensitive(const std::filesystem::path &path) {
+	std::filesystem::path norm = path.lexically_normal();
+	if (std::filesystem::exists(norm)) {
+		return norm;
+	}
+
+	std::filesystem::path newPath = ".";
+	if (norm.is_absolute()) {
+		newPath = norm.root_path();
+	}
+
+	bool followingExisting = true;
+	auto it = norm.begin();
+	if (norm.is_absolute()) {
+		++it;
+	}
+
+	for (; it != norm.end(); ++it) {
+		const auto &component = *it;
+		std::filesystem::path nextPath = newPath / component;
+		if (followingExisting && !std::filesystem::exists(nextPath) &&
+			(component != ".." && component != "." && component != "")) {
+			followingExisting = false;
+			std::error_code ec;
+			std::filesystem::directory_iterator iter{newPath, ec};
+			if (!ec) {
+				for (std::filesystem::path entry : iter) {
+					if (strcasecmp(entry.filename().c_str(), component.string().c_str()) == 0) {
+						followingExisting = true;
+						nextPath = entry;
+						break;
+					}
+				}
+			}
+		}
+		newPath = nextPath;
+	}
+
+	if (followingExisting) {
+		DEBUG_LOG("Resolved case-insensitive path: %s -> %s\n", path.c_str(), newPath.c_str());
+		return newPath;
+	}
+	return norm;
+}
+
+static std::filesystem::path applyPathMap(const std::string &inStr) {
+	std::string str = inStr;
+	std::replace(str.begin(), str.end(), '\\', '/');
+
+	const auto &entries = getPathMap();
+	if (entries.empty())
+		return {};
+
+	std::string strLower = str;
+	toLowerInPlace(strLower);
+
+	for (const auto &e : entries) {
+		std::string winLower = e.winPath;
+		toLowerInPlace(winLower);
+
+		if (strLower.rfind(winLower, 0) == 0 &&
+			(strLower.size() == winLower.size() || strLower[winLower.size()] == '/')) {
+			std::string rest = str.substr(e.winPath.size());
+			std::filesystem::path hostBase(e.hostPath);
+			std::filesystem::path result;
+			if (rest.empty() || (rest.size() == 1 && rest[0] == '/')) {
+				result = hostBase;
+			} else {
+				if (rest[0] == '/')
+					rest.erase(0, 1);
+				result = hostBase / rest;
+			}
+			return resolveCaseInsensitive(result);
+		}
+	}
+	DEBUG_LOG("applyPathMap: %s -> (no match)\n", str.c_str());
+	return {};
+}
+
 std::filesystem::path pathFromWindows(const char *inStr) {
-	// Convert to forward slashes
+	// Try path map first
+	std::filesystem::path mapped = applyPathMap(inStr);
+	if (!mapped.empty()) {
+		return mapped;
+	}
+
+	// Normalize to forward slashes
 	std::string str = inStr;
 	std::replace(str.begin(), str.end(), '\\', '/');
 
@@ -89,50 +220,59 @@ std::filesystem::path pathFromWindows(const char *inStr) {
 		str.erase(0, 4);
 	}
 
-	// Remove the drive letter
-	if (str.rfind("z:/", 0) == 0 || str.rfind("Z:/", 0) == 0 || str.rfind("c:/", 0) == 0 || str.rfind("C:/", 0) == 0) {
-		str.erase(0, 2);
-	}
-
-	// Return as-is if it exists, else traverse the filesystem looking for
-	// a path that matches case insensitively
-	std::filesystem::path path = std::filesystem::path(str).lexically_normal();
-	if (std::filesystem::exists(path)) {
-		return path;
-	}
-
-	std::filesystem::path newPath = ".";
-	bool followingExisting = true;
-	for (const auto &component : path) {
-		std::filesystem::path newPath2 = newPath / component;
-		if (followingExisting && !std::filesystem::exists(newPath2) &&
-			(component != ".." && component != "." && component != "")) {
-			followingExisting = false;
-			std::error_code ec;
-			std::filesystem::directory_iterator iter{newPath, ec};
-			if (!ec) {
-				for (std::filesystem::path entry : iter) {
-					if (strcasecmp(entry.filename().c_str(), component.c_str()) == 0) {
-						followingExisting = true;
-						newPath2 = entry;
-						break;
-					}
-				}
-			}
+	// Handle drive letter mapping
+	if (str.size() >= 2 && str[1] == ':') {
+		std::string mapping = getDriveMapping(str[0]);
+		if (!mapping.empty()) {
+			std::string rest = (str.size() >= 3 && str[2] == '/') ? str.substr(3) : str.substr(2);
+			std::filesystem::path p = std::filesystem::path(mapping) / rest;
+			return resolveCaseInsensitive(p);
 		}
-		newPath = newPath2;
-	}
-	if (followingExisting) {
-		DEBUG_LOG("Resolved case-insensitive path: %s\n", newPath.c_str());
-	} else {
-		DEBUG_LOG("Failed to resolve path: %s\n", newPath.c_str());
+		// Fallback: strip drive letter
+		if (str.size() >= 3 && str[2] == '/') {
+			str.erase(0, 2);
+		}
 	}
 
-	return newPath;
+	return resolveCaseInsensitive(str);
 }
 
 std::string pathToWindows(const std::filesystem::path &path) {
-	std::string str = path.lexically_normal();
+	std::string hostStr = std::filesystem::absolute(path).lexically_normal().string();
+
+	// Try path map first (most specific first)
+	const auto &entries = getPathMap();
+	for (const auto &e : entries) {
+		std::string hostPart = std::filesystem::absolute(e.hostPath).lexically_normal().string();
+		if (hostStr.rfind(hostPart, 0) == 0) {
+			std::string rest = hostStr.substr(hostPart.size());
+			if (!rest.empty() && (rest[0] == '/' || rest[0] == '\\'))
+				rest.erase(0, 1);
+			std::string result = e.winPath;
+			if (!result.empty() && result.back() != '\\' && result.back() != '/' && !rest.empty())
+				result += '\\';
+			result += rest;
+			std::replace(result.begin(), result.end(), '/', '\\');
+			return result;
+		}
+	}
+
+	std::string str = path.lexically_normal().string();
+
+	// Check for mapped drives
+	for (char d = 'A'; d <= 'Z'; ++d) {
+		std::string mapping = getDriveMapping(d);
+		if (mapping.empty())
+			continue;
+		std::string mappingNorm = std::filesystem::path(mapping).lexically_normal().string();
+		if (str.rfind(mappingNorm, 0) == 0) {
+			std::string drivePrefix = "X:";
+			drivePrefix[0] = d;
+			str.replace(0, mappingNorm.size(), drivePrefix);
+			std::replace(str.begin(), str.end(), '/', '\\');
+			return str;
+		}
+	}
 
 	if (path.is_absolute()) {
 		str.insert(0, "Z:");
@@ -421,4 +561,43 @@ std::string windowsPathListToHost(const std::string &value) {
 	}
 	return result;
 }
+static std::mutex gMappedFileMutex;
+static std::map<std::pair<dev_t, ino_t>, int> gMappedFileCount;
+
+void trackMappedFile(dev_t dev, ino_t ino) {
+	std::lock_guard lk(gMappedFileMutex);
+	int count = ++gMappedFileCount[{dev, ino}];
+	DEBUG_LOG("trackMappedFile: dev=%lu ino=%lu count=%d\n",
+		(unsigned long)dev, (unsigned long)ino, count);
+}
+
+void untrackMappedFile(dev_t dev, ino_t ino) {
+	std::lock_guard lk(gMappedFileMutex);
+	auto it = gMappedFileCount.find({dev, ino});
+	if (it != gMappedFileCount.end()) {
+		if (--it->second <= 0) {
+			DEBUG_LOG("untrackMappedFile: dev=%lu ino=%lu (removed)\n",
+				(unsigned long)dev, (unsigned long)ino);
+			gMappedFileCount.erase(it);
+		} else {
+			DEBUG_LOG("untrackMappedFile: dev=%lu ino=%lu count=%d\n",
+				(unsigned long)dev, (unsigned long)ino, it->second);
+		}
+	}
+}
+
+bool isFileMapped(int fd) {
+	struct stat st {};
+	if (fstat(fd, &st) != 0) {
+		DEBUG_LOG("isFileMapped: fstat failed for fd=%d\n", fd);
+		return false;
+	}
+	std::lock_guard lk(gMappedFileMutex);
+	bool mapped = gMappedFileCount.count({st.st_dev, st.st_ino}) > 0;
+	DEBUG_LOG("isFileMapped: fd=%d dev=%lu ino=%lu -> %s\n",
+		fd, (unsigned long)st.st_dev, (unsigned long)st.st_ino,
+		mapped ? "YES (skip truncation)" : "no");
+	return mapped;
+}
+
 } // namespace files

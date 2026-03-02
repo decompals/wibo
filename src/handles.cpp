@@ -7,8 +7,8 @@
 namespace {
 
 constexpr uint32_t kHandleAlignShift = 2;
-// Max index that still yields HANDLE < 0x10000 with (index + 1) << 2
-constexpr uint32_t kCompatMaxIndex = (0xFFFFu >> kHandleAlignShift) - 1;
+// Max index that still yields HANDLE < 0x8000 with (index + 1) << 2
+constexpr uint32_t kCompatMaxIndex = (0x7FFFu >> kHandleAlignShift) - 1;
 // Delay reuse of small handles to avoid accidental stale aliasing
 constexpr uint32_t kQuarantineLen = 64;
 

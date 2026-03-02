@@ -185,9 +185,9 @@ struct HandleMeta {
 	uint16_t generation;
 };
 
-// We have to stay under a HANDLE value of 0xFFFF for legacy applications,
+// We have to stay under a HANDLE value of 0x7FFF for legacy applications,
 // and handles values are aligned to 4.
-constexpr DWORD MAX_HANDLES = 0x4000;
+constexpr DWORD MAX_HANDLES = 0x2000;
 
 class Handles {
   public:

@@ -35,6 +35,21 @@ extern const wibo::ModuleStub lib_mscoree;
 #if WIBO_HAS_MSVCRT
 extern const wibo::ModuleStub lib_msvcrt;
 #endif
+#if WIBO_HAS_MSVCR71
+extern const wibo::ModuleStub lib_msvcr71;
+#endif
+#if WIBO_HAS_MSVCR90
+extern const wibo::ModuleStub lib_msvcr90;
+#endif
+#if WIBO_HAS_MSVCR100
+extern const wibo::ModuleStub lib_msvcr100;
+#endif
+#if WIBO_HAS_MSVCR120
+extern const wibo::ModuleStub lib_msvcr120;
+#endif
+#if WIBO_HAS_UCRTBASE
+extern const wibo::ModuleStub lib_ucrtbase;
+#endif
 extern const wibo::ModuleStub lib_ntdll;
 extern const wibo::ModuleStub lib_rpcrt4;
 extern const wibo::ModuleStub lib_ole32;
@@ -191,6 +206,21 @@ LockedRegistry registry() {
 			&lib_ole32,	   &lib_rpcrt4, &lib_user32,   &lib_vcruntime, &lib_version, &lib_ws2,
 #if WIBO_HAS_MSVCRT
 			&lib_msvcrt,
+#endif
+#if WIBO_HAS_MSVCR71
+			&lib_msvcr71,
+#endif
+#if WIBO_HAS_MSVCR90
+			&lib_msvcr90,
+#endif
+#if WIBO_HAS_MSVCR100
+			&lib_msvcr100,
+#endif
+#if WIBO_HAS_MSVCR120
+			&lib_msvcr120,
+#endif
+#if WIBO_HAS_UCRTBASE
+			&lib_ucrtbase,
 #endif
 			nullptr,
 		};

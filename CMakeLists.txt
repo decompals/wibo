@@ -52,6 +52,7 @@ endif()
 
 option(WIBO_ENABLE_FIXTURE_TESTS "Enable Win32 fixture tests (requires i686-w64-mingw32)" ON)
 option(WIBO_ENABLE_LIBURING "Enable liburing for asynchronous I/O" OFF)
+option(WIBO_ENABLE_WINE_DLLS "Download Wine CRT DLLs from encounter/winedll by default" ON)
 set(WIBO_ENABLE_LTO "AUTO" CACHE STRING "Enable link-time optimization (LTO)")
 set_property(CACHE WIBO_ENABLE_LTO PROPERTY STRINGS "AUTO" "ON" "OFF")
 
@@ -139,20 +140,47 @@ if (WIBO_ENABLE_LIBURING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_include_directories(liburing PRIVATE ${liburing_SOURCE_DIR})
 endif()
 
-if (NOT DEFINED MSVCRT_DLL)
-    set(MSVCRT_DLL ${CMAKE_CURRENT_BINARY_DIR}/vendor/msvcrt.dll)
-    file(DOWNLOAD
-        https://github.com/encounter/winedll/releases/download/2025-11-08/msvcrt.dll
-        ${MSVCRT_DLL}
-        EXPECTED_HASH SHA256=4a29890d7ee8722415b7b185321476db2cd20dbe964124189b85893f0d301e29
-    )
-endif()
+set(WIBO_WINEDLL_RELEASE_TAG "2026-03-04")
+
+function(configure_wine_dll VAR FILENAME SHA256)
+    if (NOT DEFINED ${VAR})
+        if (WIBO_ENABLE_WINE_DLLS)
+            file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/vendor)
+            set(${VAR} ${CMAKE_CURRENT_BINARY_DIR}/vendor/${FILENAME})
+            file(DOWNLOAD
+                https://github.com/encounter/winedll/releases/download/${WIBO_WINEDLL_RELEASE_TAG}/${FILENAME}
+                ${${VAR}}
+                EXPECTED_HASH SHA256=${SHA256}
+            )
+        else()
+            set(${VAR} "")
+        endif()
+    endif()
+    set(${VAR} "${${VAR}}" PARENT_SCOPE)
+endfunction()
+
+configure_wine_dll(MSVCRT_DLL msvcrt.dll 1d44b9d04133629fa76057b7235ba4fb288204c0da447e4e1624d66251cd611d)
+configure_wine_dll(MSVCR71_DLL msvcr71.dll da554a689d54b3047f163aca817bf934ca292458d1158b0dcbeeafb531512f13)
+configure_wine_dll(MSVCR90_DLL msvcr90.dll 01524a7a8b8982ab20f7296630f1f504e317b776c019897634e20d4216890c1b)
+configure_wine_dll(MSVCR100_DLL msvcr100.dll 559adc19f18c241cfdbd79c241c1247d1457478230f64159d63535aed730d0c4)
+configure_wine_dll(MSVCR120_DLL msvcr120.dll 38e47d62582a7bcf7e90b75dbe0c4219e2dde11e228865ff2c1a4defd737c113)
+configure_wine_dll(UCRTBASE_DLL ucrtbase.dll 7321cfb3df9846d11ab7533d0d2ef8aa9e61a6a81a68e48362739fd675e14c5b)
 
 function(embed_binary SRC FILE)
     set_source_files_properties(${SRC} PROPERTIES
         OBJECT_DEPENDS "${FILE}"
         COMPILE_DEFINITIONS "EMBED_PATH=\"${FILE}\""
     )
+endfunction()
+
+function(add_embedded_wine_dll TARGET SRC FLAG FILE)
+    if ("${FILE}" STREQUAL "")
+        target_compile_definitions(${TARGET} PRIVATE ${FLAG}=0)
+    else()
+        target_compile_definitions(${TARGET} PRIVATE ${FLAG}=1)
+        target_sources(${TARGET} PRIVATE ${SRC})
+        embed_binary(${SRC} "${FILE}")
+    endif()
 endfunction()
 
 add_executable(wibo
@@ -212,13 +240,12 @@ add_executable(wibo
     src/strutil.cpp
     src/tls.cpp
 )
-if ("${MSVCRT_DLL}" STREQUAL "")
-    target_compile_definitions(wibo PRIVATE WIBO_HAS_MSVCRT=0)
-else()
-    target_compile_definitions(wibo PRIVATE WIBO_HAS_MSVCRT=1)
-    target_sources(wibo PRIVATE dll/msvcrt.cpp)
-    embed_binary(dll/msvcrt.cpp "${MSVCRT_DLL}")
-endif()
+add_embedded_wine_dll(wibo dll/msvcrt.cpp WIBO_HAS_MSVCRT "${MSVCRT_DLL}")
+add_embedded_wine_dll(wibo dll/msvcr71.cpp WIBO_HAS_MSVCR71 "${MSVCR71_DLL}")
+add_embedded_wine_dll(wibo dll/msvcr90.cpp WIBO_HAS_MSVCR90 "${MSVCR90_DLL}")
+add_embedded_wine_dll(wibo dll/msvcr100.cpp WIBO_HAS_MSVCR100 "${MSVCR100_DLL}")
+add_embedded_wine_dll(wibo dll/msvcr120.cpp WIBO_HAS_MSVCR120 "${MSVCR120_DLL}")
+add_embedded_wine_dll(wibo dll/ucrtbase.cpp WIBO_HAS_UCRTBASE "${UCRTBASE_DLL}")
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_sources(wibo PRIVATE

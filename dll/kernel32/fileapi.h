@@ -1,7 +1,7 @@
 #pragma once
 
-#include "types.h"
 #include "minwinbase.h"
+#include "types.h"
 
 struct BY_HANDLE_FILE_INFORMATION {
 	DWORD dwFileAttributes;
@@ -65,50 +65,51 @@ DWORD WINAPI GetTempPathA(DWORD nBufferLength, LPSTR lpBuffer);
 HANDLE WINAPI FindFirstFileA(LPCSTR lpFileName, LPWIN32_FIND_DATAA lpFindFileData);
 HANDLE WINAPI FindFirstFileW(LPCWSTR lpFileName, LPWIN32_FIND_DATAW lpFindFileData);
 HANDLE WINAPI FindFirstFileExA(LPCSTR lpFileName, FINDEX_INFO_LEVELS fInfoLevelId, LPVOID lpFindFileData,
-								 FINDEX_SEARCH_OPS fSearchOp, LPVOID lpSearchFilter, DWORD dwAdditionalFlags);
+							   FINDEX_SEARCH_OPS fSearchOp, LPVOID lpSearchFilter, DWORD dwAdditionalFlags);
 BOOL WINAPI FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileData);
 BOOL WINAPI FindNextFileW(HANDLE hFindFile, LPWIN32_FIND_DATAW lpFindFileData);
 BOOL WINAPI FindClose(HANDLE hFindFile);
 DWORD WINAPI GetFileAttributesA(LPCSTR lpFileName);
 DWORD WINAPI GetFileAttributesW(LPCWSTR lpFileName);
+BOOL WINAPI GetFileAttributesExA(LPCSTR lpFileName, GET_FILEEX_INFO_LEVELS fInfoLevelId, LPVOID lpFileInformation);
+BOOL WINAPI GetFileAttributesExW(LPCWSTR lpFileName, GET_FILEEX_INFO_LEVELS fInfoLevelId, LPVOID lpFileInformation);
 UINT WINAPI GetDriveTypeA(LPCSTR lpRootPathName);
 UINT WINAPI GetDriveTypeW(LPCWSTR lpRootPathName);
 BOOL WINAPI WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten,
-						LPOVERLAPPED lpOverlapped);
+					  LPOVERLAPPED lpOverlapped);
 BOOL WINAPI ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead,
-					   LPOVERLAPPED lpOverlapped);
+					 LPOVERLAPPED lpOverlapped);
 BOOL WINAPI FlushFileBuffers(HANDLE hFile);
 HANDLE WINAPI CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
-							LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition,
-							DWORD dwFlagsAndAttributes, HANDLE hTemplateFile);
+						  LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition,
+						  DWORD dwFlagsAndAttributes, HANDLE hTemplateFile);
 HANDLE WINAPI CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
-							LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition,
-							DWORD dwFlagsAndAttributes, HANDLE hTemplateFile);
+						  LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition,
+						  DWORD dwFlagsAndAttributes, HANDLE hTemplateFile);
 BOOL WINAPI DeleteFileA(LPCSTR lpFileName);
 BOOL WINAPI DeleteFileW(LPCWSTR lpFileName);
 BOOL WINAPI MoveFileA(LPCSTR lpExistingFileName, LPCSTR lpNewFileName);
 BOOL WINAPI MoveFileW(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName);
 DWORD WINAPI SetFilePointer(HANDLE hFile, LONG lDistanceToMove, PLONG lpDistanceToMoveHigh, DWORD dwMoveMethod);
 BOOL WINAPI SetFilePointerEx(HANDLE hFile, LARGE_INTEGER liDistanceToMove, PLARGE_INTEGER lpNewFilePointer,
-							   DWORD dwMoveMethod);
+							 DWORD dwMoveMethod);
 BOOL WINAPI SetEndOfFile(HANDLE hFile);
 BOOL WINAPI CreateDirectoryA(LPCSTR lpPathName, LPSECURITY_ATTRIBUTES lpSecurityAttributes);
 BOOL WINAPI RemoveDirectoryA(LPCSTR lpPathName);
 BOOL WINAPI SetFileAttributesA(LPCSTR lpFileName, DWORD dwFileAttributes);
 DWORD WINAPI GetFileSize(HANDLE hFile, LPDWORD lpFileSizeHigh);
 BOOL WINAPI GetFileTime(HANDLE hFile, LPFILETIME lpCreationTime, LPFILETIME lpLastAccessTime,
-						  LPFILETIME lpLastWriteTime);
+						LPFILETIME lpLastWriteTime);
 BOOL WINAPI SetFileTime(HANDLE hFile, const FILETIME *lpCreationTime, const FILETIME *lpLastAccessTime,
-						  const FILETIME *lpLastWriteTime);
+						const FILETIME *lpLastWriteTime);
 BOOL WINAPI GetFileInformationByHandle(HANDLE hFile, LPBY_HANDLE_FILE_INFORMATION lpFileInformation);
 DWORD WINAPI GetFileType(HANDLE hFile);
 LONG WINAPI CompareFileTime(const FILETIME *lpFileTime1, const FILETIME *lpFileTime2);
 BOOL WINAPI GetVolumeInformationA(LPCSTR lpRootPathName, LPSTR lpVolumeNameBuffer, DWORD nVolumeNameSize,
-									LPDWORD lpVolumeSerialNumber, LPDWORD lpMaximumComponentLength,
-									LPDWORD lpFileSystemFlags, LPSTR lpFileSystemNameBuffer, DWORD nFileSystemNameSize);
+								  LPDWORD lpVolumeSerialNumber, LPDWORD lpMaximumComponentLength,
+								  LPDWORD lpFileSystemFlags, LPSTR lpFileSystemNameBuffer, DWORD nFileSystemNameSize);
 BOOL WINAPI GetVolumeInformationW(LPCWSTR lpRootPathName, LPWSTR lpVolumeNameBuffer, DWORD nVolumeNameSize,
-									LPDWORD lpVolumeSerialNumber, LPDWORD lpMaximumComponentLength,
-									LPDWORD lpFileSystemFlags, LPWSTR lpFileSystemNameBuffer,
-									DWORD nFileSystemNameSize);
+								  LPDWORD lpVolumeSerialNumber, LPDWORD lpMaximumComponentLength,
+								  LPDWORD lpFileSystemFlags, LPWSTR lpFileSystemNameBuffer, DWORD nFileSystemNameSize);
 
 } // namespace kernel32

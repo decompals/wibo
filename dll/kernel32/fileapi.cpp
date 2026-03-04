@@ -282,6 +282,16 @@ DWORD buildFileAttributes(const struct stat &st, bool isDirectory) {
 	return attributes;
 }
 
+void populateAttributeDataFromStat(const struct stat &st, bool isDirectory, WIN32_FILE_ATTRIBUTE_DATA &out) {
+	out.dwFileAttributes = buildFileAttributes(st, isDirectory);
+	toFileTime(changeTimespec(st), out.ftCreationTime);
+	toFileTime(accessTimespec(st), out.ftLastAccessTime);
+	toFileTime(modifyTimespec(st), out.ftLastWriteTime);
+	uint64_t fileSize = (isDirectory || !S_ISREG(st.st_mode)) ? 0ULL : static_cast<uint64_t>(st.st_size);
+	out.nFileSizeHigh = static_cast<DWORD>(fileSize >> 32);
+	out.nFileSizeLow = static_cast<DWORD>(fileSize & 0xFFFFFFFFULL);
+}
+
 template <typename FindData> void populateFromStat(const FindSearchEntry &entry, const struct stat &st, FindData &out) {
 	out.dwFileAttributes = buildFileAttributes(st, entry.isDirectory);
 	uint64_t fileSize = (entry.isDirectory || !S_ISREG(st.st_mode)) ? 0ULL : static_cast<uint64_t>(st.st_size);
@@ -596,6 +606,55 @@ DWORD WINAPI GetFileAttributesW(LPCWSTR lpFileName) {
 	}
 	std::string str = wideStringToString(lpFileName);
 	return GetFileAttributesA(str.c_str());
+}
+
+BOOL WINAPI GetFileAttributesExA(LPCSTR lpFileName, GET_FILEEX_INFO_LEVELS fInfoLevelId, LPVOID lpFileInformation) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("GetFileAttributesExA(%s, %u, %p)\n", lpFileName ? lpFileName : "(null)",
+			  static_cast<unsigned>(fInfoLevelId), lpFileInformation);
+	if (!lpFileName) {
+		setLastError(ERROR_PATH_NOT_FOUND);
+		return FALSE;
+	}
+	if (fInfoLevelId != GetFileExInfoStandard || !lpFileInformation) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+
+	std::filesystem::path hostPath = files::pathFromWindows(lpFileName);
+	std::string hostPathStr = hostPath.string();
+
+	if (endsWith(hostPathStr, "/license.dat")) {
+		auto *attributeData = static_cast<LPWIN32_FILE_ATTRIBUTE_DATA>(lpFileInformation);
+		std::memset(attributeData, 0, sizeof(*attributeData));
+		attributeData->dwFileAttributes = FILE_ATTRIBUTE_NORMAL;
+		attributeData->ftCreationTime = kDefaultFindFileTime;
+		attributeData->ftLastAccessTime = kDefaultFindFileTime;
+		attributeData->ftLastWriteTime = kDefaultFindFileTime;
+		return TRUE;
+	}
+
+	struct stat st{};
+	if (stat(hostPathStr.c_str(), &st) != 0) {
+		setLastErrorFromErrno();
+		return FALSE;
+	}
+
+	auto *attributeData = static_cast<LPWIN32_FILE_ATTRIBUTE_DATA>(lpFileInformation);
+	bool isDirectory = S_ISDIR(st.st_mode);
+	populateAttributeDataFromStat(st, isDirectory, *attributeData);
+	return TRUE;
+}
+
+BOOL WINAPI GetFileAttributesExW(LPCWSTR lpFileName, GET_FILEEX_INFO_LEVELS fInfoLevelId, LPVOID lpFileInformation) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("GetFileAttributesExW(%p, %u, %p)\n", lpFileName, static_cast<unsigned>(fInfoLevelId), lpFileInformation);
+	if (!lpFileName) {
+		setLastError(ERROR_PATH_NOT_FOUND);
+		return FALSE;
+	}
+	std::string fileName = wideStringToString(lpFileName);
+	return GetFileAttributesExA(fileName.c_str(), fInfoLevelId, lpFileInformation);
 }
 
 UINT WINAPI GetDriveTypeA(LPCSTR lpRootPathName) {

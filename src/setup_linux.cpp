@@ -17,7 +17,7 @@
 namespace {
 
 std::mutex g_tebSetupMutex;
-int g_threadAreaEntry = -2;
+int g_threadAreaEntry = -1;
 #ifdef __x86_64__
 uint16_t g_codeSelector = 0;
 uint16_t g_dataSelector = 0;

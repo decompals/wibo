@@ -7,6 +7,10 @@
 #include <cstring>
 #include <mutex>
 
+#include <cerrno>
+#include <csignal>
+#include <ucontext.h>
+
 #include <asm/ldt.h>
 #include <sys/syscall.h>
 
@@ -159,6 +163,38 @@ void freeLdtEntryLocked(int entryNumber) {
 }
 
 #ifdef __x86_64__
+// SIGSYS handler for probing set_thread_area availability.
+// If seccomp blocks the syscall, the kernel delivers SIGSYS instead of
+// returning an error. This handler makes it look like the syscall returned
+// -ENOSYS so the caller can fall back to LDT gracefully.
+// NOTE: This handler only works when the syscall is issued from 64-bit mode
+// (via the C-level syscall() wrapper). It must NOT be used to guard the
+// assembly setThreadArea64 path, which runs in 32-bit compatibility mode
+// and would receive a 32-bit signal frame.
+static void sigsysHandler(int /*sig*/, siginfo_t * /*info*/, void *ctx) {
+	auto *uc = static_cast<ucontext_t *>(ctx);
+	uc->uc_mcontext.gregs[REG_RAX] = -ENOSYS;
+}
+
+// Probe whether set_thread_area is permitted by issuing the syscall from
+// 64-bit mode. On success, the GDT entry is allocated (or reused) and the
+// descriptor is written. On SIGSYS (seccomp kill), the handler above turns
+// it into a -ENOSYS return. Returns the syscall result (0 on success).
+static int probeSetThreadArea(struct user_desc *desc) {
+	struct sigaction sa = {}, oldSa;
+	sa.sa_sigaction = sigsysHandler;
+	sa.sa_flags = SA_SIGINFO;
+	sigemptyset(&sa.sa_mask);
+	sigaction(SIGSYS, &sa, &oldSa);
+
+	// Use the i386 syscall number (243) via the 64-bit syscall instruction.
+	// The kernel's compat syscall table handles this correctly.
+	int ret = static_cast<int>(syscall(243, desc));
+
+	sigaction(SIGSYS, &oldSa, nullptr);
+	return ret;
+}
+
 bool segmentSetupLocked(TEB *teb) {
 	// Create code LDT entry
 	if (g_codeSelector == 0) {
@@ -230,18 +266,40 @@ bool tebThreadSetup(TEB *teb) {
 	installSelectors(teb);
 
 	if (g_threadAreaEntry != -2) {
-		int ret = setThreadArea64(g_threadAreaEntry, teb);
-		if (ret >= 0) {
-			if (g_threadAreaEntry != ret) {
-				g_threadAreaEntry = ret;
-				DEBUG_LOG("setup_linux: allocated thread-local GDT entry=%d base=%p\n", g_threadAreaEntry, teb);
+		if (g_threadAreaEntry == -1) {
+			// First thread: probe from 64-bit mode to avoid SIGSYS death
+			// if seccomp blocks set_thread_area.
+			struct user_desc desc; // NOLINT(cppcoreguidelines-pro-type-member-init)
+			std::memset(&desc, 0, sizeof(desc));
+			desc.entry_number = static_cast<unsigned int>(-1);
+			desc.base_addr = toGuestPtr(teb);
+			desc.limit = 0xFFFF;
+			desc.seg_32bit = 1;
+			desc.useable = 1;
+
+			int ret = probeSetThreadArea(&desc);
+			if (ret == 0) {
+				g_threadAreaEntry = static_cast<int>(desc.entry_number);
+				DEBUG_LOG("setup_linux: allocated thread-local GDT entry=%d base=%p\n",
+						  g_threadAreaEntry, teb);
+				teb->CurrentFsSelector = createGdtSelector(g_threadAreaEntry);
 			} else {
-				DEBUG_LOG("setup_linux: reused thread-local GDT entry=%d base=%p\n", g_threadAreaEntry, teb);
+				DEBUG_LOG("setup_linux: set_thread_area blocked or failed, falling back to LDT\n");
+				g_threadAreaEntry = -2;
 			}
-			teb->CurrentFsSelector = createGdtSelector(ret);
 		} else {
-			DEBUG_LOG("setup_linux: set_thread_area failed (%s), falling back to LDT\n", strerror(errno));
-			g_threadAreaEntry = -2; // Don't bother trying again
+			// Subsequent threads: entry is known and syscall is permitted,
+			// safe to use the assembly path which sets the base from 32-bit mode.
+			int ret = setThreadArea64(g_threadAreaEntry, teb);
+			if (ret >= 0) {
+				DEBUG_LOG("setup_linux: reused thread-local GDT entry=%d base=%p\n",
+						  g_threadAreaEntry, teb);
+				teb->CurrentFsSelector = createGdtSelector(ret);
+			} else {
+				DEBUG_LOG("setup_linux: set_thread_area failed (%s), falling back to LDT\n",
+						  strerror(errno));
+				g_threadAreaEntry = -2;
+			}
 		}
 	}
 	if (teb->CurrentFsSelector == 0) {

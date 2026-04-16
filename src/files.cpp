@@ -79,6 +79,41 @@ static HANDLE stdinHandle;
 static HANDLE stdoutHandle;
 static HANDLE stderrHandle;
 
+// Strip the Windows trailing-dot "no extension" convention from each path
+// component. Windows treats "foo." and "foo" as the same filename — the
+// trailing dot means "no extension" — and many NT-era tools rely on that
+// equivalence (notably NMAKE's @<< temp response files like "nm12345."
+// and older makefile directives like "!INCLUDE .\sources."). Linux
+// filesystems rarely carry a literal trailing-dot name, so normalize
+// before our lookup / case-insensitive fallback runs.
+static std::string stripTrailingDots(const std::string &s) {
+	std::string out;
+	out.reserve(s.size());
+	size_t i = 0;
+	while (i < s.size()) {
+		size_t start = i;
+		while (i < s.size() && s[i] != '/') {
+			i++;
+		}
+		size_t end = i;
+		size_t len = end - start;
+		// Leave "." and ".." untouched.
+		bool isDotDir = (len == 1 && s[start] == '.') ||
+						(len == 2 && s[start] == '.' && s[start + 1] == '.');
+		if (!isDotDir) {
+			while (end > start && s[end - 1] == '.') {
+				end--;
+			}
+		}
+		out.append(s, start, end - start);
+		if (i < s.size()) {
+			out.push_back('/');
+			i++;
+		}
+	}
+	return out;
+}
+
 std::filesystem::path pathFromWindows(const char *inStr) {
 	// Convert to forward slashes
 	std::string str = inStr;
@@ -93,6 +128,9 @@ std::filesystem::path pathFromWindows(const char *inStr) {
 	if (str.rfind("z:/", 0) == 0 || str.rfind("Z:/", 0) == 0 || str.rfind("c:/", 0) == 0 || str.rfind("C:/", 0) == 0) {
 		str.erase(0, 2);
 	}
+
+	// Apply Windows trailing-dot normalization per path component.
+	str = stripTrailingDots(str);
 
 	// Return as-is if it exists, else traverse the filesystem looking for
 	// a path that matches case insensitively

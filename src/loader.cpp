@@ -678,7 +678,11 @@ bool wibo::Executable::resolveImports() {
 	while (dir->name) {
 		char *dllName = fromRVA<char>(dir->name);
 		DEBUG_LOG("DLL Name: %s\n", dllName);
-		uint32_t *lookupTable = fromRVA<uint32_t>(dir->importLookupTable);
+
+		// Older PEs (NT 3.5-era) omit the ILT and only ship the IAT, which
+		// on disk holds the hint/name RVAs that later get overwritten.
+		uint32_t iltRVA = dir->importLookupTable ? dir->importLookupTable : dir->importAddressTable;
+		uint32_t *lookupTable = fromRVA<uint32_t>(iltRVA);
 		uint32_t *addressTable = fromRVA<uint32_t>(dir->importAddressTable);
 
 		ModuleInfo *module = loadModule(dllName);

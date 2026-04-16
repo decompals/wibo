@@ -11,5 +11,9 @@ HKL WINAPI GetKeyboardLayout(DWORD idThread);
 HWINSTA WINAPI GetProcessWindowStation();
 BOOL WINAPI GetUserObjectInformationA(HANDLE hObj, int nIndex, PVOID pvInfo, DWORD nLength, LPDWORD lpnLengthNeeded);
 HWND WINAPI GetActiveWindow();
+BOOL WINAPI CharToOemA(LPCSTR lpszSrc, LPSTR lpszDst);
+BOOL WINAPI CharToOemBuffA(LPCSTR lpszSrc, LPSTR lpszDst, DWORD cchDstLength);
+BOOL WINAPI OemToCharA(LPCSTR lpszSrc, LPSTR lpszDst);
+BOOL WINAPI OemToCharBuffA(LPCSTR lpszSrc, LPSTR lpszDst, DWORD cchDstLength);
 
 } // namespace user32

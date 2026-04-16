@@ -97,6 +97,24 @@ UINT WINAPI GetACP() {
 	return 28591; // Latin1 (ISO/IEC 8859-1)
 }
 
+UINT WINAPI GetOEMCP() {
+	HOST_CONTEXT_GUARD();
+	// IBM PC US (codepage 437) is the canonical OEM codepage for NT-era
+	// tools built on English locales; matches what Wine and NT return by
+	// default when no locale override is present.
+	DEBUG_LOG("GetOEMCP() -> %u\n", 437);
+	return 437;
+}
+
+BOOL WINAPI SetFileApisToOEM() {
+	// Switches kernel32 Ansi<->Oem conversion for file-path APIs. Since
+	// our codepages are effectively 1:1 mappings for ASCII, there's
+	// nothing to configure; returning success is safe.
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("SetFileApisToOEM() -> TRUE (no-op)\n");
+	return TRUE;
+}
+
 LANGID WINAPI GetSystemDefaultLangID() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: GetSystemDefaultLangID()\n");

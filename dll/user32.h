@@ -11,5 +11,6 @@ HKL WINAPI GetKeyboardLayout(DWORD idThread);
 HWINSTA WINAPI GetProcessWindowStation();
 BOOL WINAPI GetUserObjectInformationA(HANDLE hObj, int nIndex, PVOID pvInfo, DWORD nLength, LPDWORD lpnLengthNeeded);
 HWND WINAPI GetActiveWindow();
+LONG WINAPI SendMessageA(HWND hWnd, UINT Msg, LONG wParam, LONG lParam);
 
 } // namespace user32

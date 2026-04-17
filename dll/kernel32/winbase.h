@@ -81,8 +81,12 @@ ATOM WINAPI AddAtomW(LPCWSTR lpString);
 UINT WINAPI GetAtomNameA(ATOM nAtom, LPSTR lpBuffer, int nSize);
 UINT WINAPI GetAtomNameW(ATOM nAtom, LPWSTR lpBuffer, int nSize);
 UINT WINAPI SetHandleCount(UINT uNumber);
-// DWORD WINAPI FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId, DWORD dwLanguageId, LPSTR lpBuffer,
-// 							DWORD nSize, va_list *Arguments);
+// Arguments is LPVOID here instead of va_list* to avoid leaking GCC's
+// internal __va_list_tag through the trampoline code generator. The
+// Win32 ABI passes a pointer to the caller's va_list / argument array
+// anyway, so a typed pointer is enough.
+DWORD WINAPI FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId, DWORD dwLanguageId, LPSTR lpBuffer,
+							DWORD nSize, LPVOID Arguments);
 PVOID WINAPI EncodePointer(PVOID Ptr);
 PVOID WINAPI DecodePointer(PVOID Ptr);
 BOOL WINAPI SetDllDirectoryA(LPCSTR lpPathName);

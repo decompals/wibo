@@ -175,6 +175,20 @@ HWND WINAPI GetActiveWindow() {
 	return NO_HANDLE;
 }
 
+LONG WINAPI SendMessageA(HWND hWnd, UINT Msg, LONG wParam, LONG lParam) {
+	// No-op stub. Real Windows returns 0 with ERROR_INVALID_WINDOW_HANDLE
+	// when called with a NULL/invalid HWND. NT-era command-line tools (MC,
+	// RC) link against user32 and keep a vestigial SendMessage call for
+	// posting progress/errors to an IDE workbench HWND that's NULL in
+	// standalone runs. We don't host any windows so every call here is
+	// the NULL-HWND path.
+	DEBUG_LOG("STUB: SendMessageA(hwnd=%p, msg=0x%x, w=0x%lx, l=0x%lx) -> 0\n", hWnd, Msg,
+			  static_cast<unsigned long>(wParam), static_cast<unsigned long>(lParam));
+	(void)hWnd; (void)Msg; (void)wParam; (void)lParam;
+	kernel32::setLastError(ERROR_INVALID_WINDOW_HANDLE);
+	return 0;
+}
+
 } // namespace user32
 
 #include "user32_trampolines.h"

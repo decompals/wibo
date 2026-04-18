@@ -631,7 +631,7 @@ static bool loadMessageTemplateFromModule(HMODULE hModule, DWORD dwMessageId, st
 // not set, or from a DWORD_PTR array otherwise. For the stubbed arg
 // model here we accept a simple pointer-to-pointer array which covers
 // RC / LINK / NMAKE usage.
-static std::string applyMessageInserts(const std::string &tpl, const DWORD_PTR *args, DWORD argCount,
+static std::string applyMessageInserts(const std::string &tpl, const uint32_t *args, DWORD argCount,
 									   bool ignoreInserts) {
 	std::string out;
 	out.reserve(tpl.size());
@@ -642,14 +642,12 @@ static std::string applyMessageInserts(const std::string &tpl, const DWORD_PTR *
 			i++;
 			continue;
 		}
-		// Past '%'. Parse an integer 1..99.
 		i++;
 		if (i >= tpl.size()) { out.push_back('%'); break; }
 		if (!std::isdigit(static_cast<unsigned char>(tpl[i]))) {
-			// Escape forms: %%, %n (newline), %r, %b (space), %0 (terminator).
 			char esc = tpl[i++];
 			switch (esc) {
-			case '0': return out;  // %0 ends the message
+			case '0': return out;
 			case 'n': out.push_back('\n'); break;
 			case 'r': out.push_back('\r'); break;
 			case 'b': out.push_back(' '); break;
@@ -665,27 +663,36 @@ static std::string applyMessageInserts(const std::string &tpl, const DWORD_PTR *
 		while (i < tpl.size() && std::isdigit(static_cast<unsigned char>(tpl[i])) && n < 100) {
 			n = n * 10 + (tpl[i++] - '0');
 		}
-		// Skip a trailing "!<format>!" section (MC format spec). We don't
-		// apply it — just treat the argument as a string pointer or number.
+		// Parse a trailing "!<format>!" section (MC format spec).
+		std::string fmtSpec;
 		if (i < tpl.size() && tpl[i] == '!') {
 			i++;
+			size_t fmtStart = i;
 			while (i < tpl.size() && tpl[i] != '!') i++;
-			if (i < tpl.size()) i++;  // consume closing '!'
+			fmtSpec = tpl.substr(fmtStart, i - fmtStart);
+			if (i < tpl.size()) i++;
 		}
 		if (n >= 1 && n <= argCount && args) {
-			auto arg = args[n - 1];
-			// Heuristic: treat pointer-looking values as C strings, else %d.
-			// This covers the common RC / LINK use (pass string pointer).
-			char tmp[32];
-			const char *s = reinterpret_cast<const char *>(arg);
-			if (arg > 0x10000 && s) {
-				out.append(s);
+			auto arg = static_cast<uintptr_t>(args[n - 1]);
+			if (fmtSpec == "ws" || fmtSpec == "ls") {
+				const auto *ws = reinterpret_cast<const uint16_t *>(arg);
+				if (ws && arg > 0x10000) {
+					while (*ws) {
+						out.push_back(static_cast<char>(*ws > 0x7f ? '?' : *ws));
+						ws++;
+					}
+				}
 			} else {
-				int written = std::snprintf(tmp, sizeof(tmp), "%ld", static_cast<long>(arg));
-				if (written > 0) out.append(tmp, written);
+				char tmp[32];
+				const char *s = reinterpret_cast<const char *>(arg);
+				if (arg > 0x10000 && s) {
+					out.append(s);
+				} else {
+					int written = std::snprintf(tmp, sizeof(tmp), "%u", static_cast<unsigned>(args[n - 1]));
+					if (written > 0) out.append(tmp, written);
+				}
 			}
 		} else {
-			// Argument missing; emit "%N" verbatim so callers can tell.
 			char tmp[8];
 			int written = std::snprintf(tmp, sizeof(tmp), "%%%u", n);
 			if (written > 0) out.append(tmp, written);
@@ -736,15 +743,17 @@ DWORD WINAPI FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId, 
 	if (dwFlags & kIgnoreInserts) {
 		formatted = std::move(tpl);
 	} else {
-		// Caller may pass a pointer array (ARGUMENT_ARRAY) or a va_list.
-		// We treat both as a flat array of DWORD_PTR — good enough for
-		// the tool users (RC, LINK, NMAKE) that only substitute strings.
-		const DWORD_PTR *args = nullptr;
-		DWORD argCount = 99;  // we have no reliable count; let inserts self-terminate
+		// The guest is 32-bit: arguments are 4-byte values.
+		// FORMAT_MESSAGE_ARGUMENT_ARRAY: Arguments is a uint32_t[] directly.
+		// Otherwise: Arguments is a va_list* (pointer to a char* on i386).
+		// Dereference once to get the actual argument array pointer.
+		const uint32_t *args = nullptr;
+		DWORD argCount = 99;
 		if (dwFlags & kArgumentArray) {
-			args = reinterpret_cast<const DWORD_PTR *>(Arguments);
+			args = reinterpret_cast<const uint32_t *>(Arguments);
 		} else if (Arguments) {
-			args = reinterpret_cast<const DWORD_PTR *>(Arguments);
+			uint32_t vaListPtr = *reinterpret_cast<const uint32_t *>(Arguments);
+			args = reinterpret_cast<const uint32_t *>(static_cast<uintptr_t>(vaListPtr));
 		}
 		formatted = applyMessageInserts(tpl, args, argCount, false);
 	}

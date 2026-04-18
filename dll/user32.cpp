@@ -8,6 +8,7 @@
 #include "resources.h"
 
 #include <cstring>
+#include <cwctype>
 
 namespace user32 {
 
@@ -175,6 +176,20 @@ HWND WINAPI GetActiveWindow() {
 	return NO_HANDLE;
 }
 
+DWORD WINAPI CharUpperBuffW(LPWSTR lpsz, DWORD cchLength) {
+	DEBUG_LOG("CharUpperBuffW(%p, %lu)\n", lpsz, static_cast<unsigned long>(cchLength));
+	if (!lpsz) return 0;
+	for (DWORD i = 0; i < cchLength; i++)
+		lpsz[i] = static_cast<WCHAR>(std::towupper(lpsz[i]));
+	return cchLength;
+}
+
+LPSTR WINAPI CharNextA(LPCSTR lpsz) {
+	DEBUG_LOG("CharNextA(%p)\n", lpsz);
+	if (!lpsz || !*lpsz) return const_cast<LPSTR>(lpsz);
+	return const_cast<LPSTR>(lpsz + 1);
+}
+
 LONG WINAPI SendMessageA(HWND hWnd, UINT Msg, LONG wParam, LONG lParam) {
 	// No-op stub. Real Windows returns 0 with ERROR_INVALID_WINDOW_HANDLE
 	// when called with a NULL/invalid HWND. NT-era command-line tools (MC,
@@ -183,6 +198,14 @@ LONG WINAPI SendMessageA(HWND hWnd, UINT Msg, LONG wParam, LONG lParam) {
 	// standalone runs. We don't host any windows so every call here is
 	// the NULL-HWND path.
 	DEBUG_LOG("STUB: SendMessageA(hwnd=%p, msg=0x%x, w=0x%lx, l=0x%lx) -> 0\n", hWnd, Msg,
+			  static_cast<unsigned long>(wParam), static_cast<unsigned long>(lParam));
+	(void)hWnd; (void)Msg; (void)wParam; (void)lParam;
+	kernel32::setLastError(ERROR_INVALID_WINDOW_HANDLE);
+	return 0;
+}
+
+LONG WINAPI SendMessageW(HWND hWnd, UINT Msg, LONG wParam, LONG lParam) {
+	DEBUG_LOG("STUB: SendMessageW(hwnd=%p, msg=0x%x, w=0x%lx, l=0x%lx) -> 0\n", hWnd, Msg,
 			  static_cast<unsigned long>(wParam), static_cast<unsigned long>(lParam));
 	(void)hWnd; (void)Msg; (void)wParam; (void)lParam;
 	kernel32::setLastError(ERROR_INVALID_WINDOW_HANDLE);

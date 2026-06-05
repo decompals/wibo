@@ -221,6 +221,7 @@ add_executable(wibo
     dll/ntdll.cpp
     dll/ole32.cpp
     dll/rpcrt4.cpp
+    dll/shlwapi.cpp
     dll/user32.cpp
     dll/vcruntime.cpp
     dll/version.cpp
@@ -376,6 +377,8 @@ wibo_codegen_module(NAME entry HEADERS src/entry.h)
 wibo_codegen_module(NAME mscoree HEADERS dll/mscoree.h)
 wibo_codegen_module(NAME version HEADERS dll/version.h)
 wibo_codegen_module(NAME rpcrt4 HEADERS dll/rpcrt4.h)
+wibo_codegen_module(NAME shlwapi HEADERS dll/shlwapi.h)
+wibo_codegen_module(NAME ws2 HEADERS dll/ws2.h)
 wibo_codegen_module(NAME vcruntime HEADERS dll/vcruntime.h)
 wibo_codegen_module(NAME lmgr HEADERS dll/lmgr.h)
 wibo_codegen_module(NAME ole32 HEADERS dll/ole32.h)
@@ -475,6 +478,7 @@ if (WIBO_ENABLE_FIXTURE_TESTS)
         wibo_add_fixture_bin(NAME test_dll_attach_failure SOURCES test/test_dll_attach_failure.c)
         wibo_add_fixture_bin(NAME test_thread_notifications SOURCES test/test_thread_notifications.c)
         wibo_add_fixture_bin(NAME test_bcrypt SOURCES test/test_bcrypt.c COMPILE_OPTIONS -lbcrypt)
+        wibo_add_fixture_bin(NAME test_shlwapi SOURCES test/test_shlwapi.c COMPILE_OPTIONS -lshlwapi)
         wibo_add_fixture_bin(NAME test_resources SOURCES test/test_resources.c ${WIBO_TEST_BIN_DIR}/test_resources_res.o COMPILE_OPTIONS -lversion)
         wibo_add_fixture_bin(NAME test_threading SOURCES test/test_threading.c)
         wibo_add_fixture_bin(NAME test_tls SOURCES test/test_tls.c)

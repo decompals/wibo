@@ -47,7 +47,7 @@ int WINAPI WSAStartup(WORD wVersionRequired, WSADATA *lpWSAData) {
 	std::strncpy(lpWSAData->szDescription, "wibo fake Winsock", sizeof(lpWSAData->szDescription) - 1);
 	std::strncpy(lpWSAData->szSystemStatus, "Running", sizeof(lpWSAData->szSystemStatus) - 1);
 	lpWSAData->iMaxSockets = 0x7fff;
-	lpWSAData->iMaxUdpDg = 65467;
+	lpWSAData->iMaxUdpDg = 65467; // 65535 - max IPv4 header (60) - UDP header (8)
 
 	++g_startupCount;
 	setLastError(0);

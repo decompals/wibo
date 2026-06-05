@@ -38,7 +38,7 @@ class Executable {
 
 	bool loadPE(FILE *file, bool exec);
 	bool loadPE(std::span<const uint8_t> image, bool exec);
-	bool resolveImports();
+	bool resolveImports(bool staticAttach = false);
 	bool findResource(const ResourceIdentifier &type, const ResourceIdentifier &name, std::optional<uint16_t> language,
 					  ResourceLocation &out) const;
 
@@ -127,6 +127,7 @@ bool initializeModuleTls(ModuleInfo &module);
 void releaseModuleTls(ModuleInfo &module);
 
 ModuleInfo *loadModule(const char *name);
+ModuleInfo *loadModuleForImport(const char *name, bool staticAttach);
 void freeModule(ModuleInfo *info);
 void *resolveFuncByName(ModuleInfo *info, const char *funcName);
 void *resolveFuncByOrdinal(ModuleInfo *info, uint16_t ordinal);

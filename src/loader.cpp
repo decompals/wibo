@@ -620,7 +620,7 @@ bool wibo::Executable::loadPE(std::span<const uint8_t> image, bool exec) {
 	return loadPEFromSource(*this, PeInputView(image), exec);
 }
 
-bool wibo::Executable::resolveImports() {
+bool wibo::Executable::resolveImports(bool staticAttach) {
 	auto finalizeSections = [this]() -> bool {
 		if (!execMapped || sectionsProtected) {
 			return true;
@@ -681,7 +681,7 @@ bool wibo::Executable::resolveImports() {
 		uint32_t *lookupTable = fromRVA<uint32_t>(dir->importLookupTable);
 		uint32_t *addressTable = fromRVA<uint32_t>(dir->importAddressTable);
 
-		ModuleInfo *module = loadModule(dllName);
+		ModuleInfo *module = loadModuleForImport(dllName, staticAttach);
 		if (!module && kernel32::getLastError() != ERROR_MOD_NOT_FOUND) {
 			DEBUG_LOG("Failed to load import module %s\n", dllName);
 			// lastError is set by loadModule

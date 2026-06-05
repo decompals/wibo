@@ -6,11 +6,36 @@
 #include "handles.h"
 #include "strutil.h"
 
+#include <unistd.h>
+
+namespace {
+
+Pin<kernel32::FileObject> getValidFileHandle(HANDLE handle) {
+	auto file = wibo::handles().getAs<kernel32::FileObject>(handle);
+	if (!file || !file->valid()) {
+		return {};
+	}
+	return file;
+}
+
+bool isConsoleFileHandle(HANDLE handle) {
+	auto file = getValidFileHandle(handle);
+	// Console probe APIs must fail for redirected pipes/files.  Old Cygwin
+	// uses these failures to choose its POSIX pipe/file fhandlers for stdio.
+	return file && isatty(file->fd);
+}
+
+} // namespace
+
 namespace kernel32 {
 
 BOOL WINAPI GetConsoleMode(HANDLE hConsoleHandle, LPDWORD lpMode) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("STUB: GetConsoleMode(%p)\n", hConsoleHandle);
+	DEBUG_LOG("GetConsoleMode(%p, %p)\n", hConsoleHandle, lpMode);
+	if (!isConsoleFileHandle(hConsoleHandle)) {
+		setLastError(ERROR_INVALID_HANDLE);
+		return FALSE;
+	}
 	if (lpMode) {
 		*lpMode = 0;
 	}
@@ -19,9 +44,12 @@ BOOL WINAPI GetConsoleMode(HANDLE hConsoleHandle, LPDWORD lpMode) {
 
 BOOL WINAPI SetConsoleMode(HANDLE hConsoleHandle, DWORD dwMode) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("STUB: SetConsoleMode(%p, 0x%x)\n", hConsoleHandle, dwMode);
-	(void)hConsoleHandle;
+	DEBUG_LOG("SetConsoleMode(%p, 0x%x)\n", hConsoleHandle, dwMode);
 	(void)dwMode;
+	if (!isConsoleFileHandle(hConsoleHandle)) {
+		setLastError(ERROR_INVALID_HANDLE);
+		return FALSE;
+	}
 	return TRUE;
 }
 
@@ -47,8 +75,11 @@ BOOL WINAPI SetConsoleCtrlHandler(PHANDLER_ROUTINE HandlerRoutine, BOOL Add) {
 
 BOOL WINAPI GetConsoleScreenBufferInfo(HANDLE hConsoleOutput, CONSOLE_SCREEN_BUFFER_INFO *lpConsoleScreenBufferInfo) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("STUB: GetConsoleScreenBufferInfo(%p, %p)\n", hConsoleOutput, lpConsoleScreenBufferInfo);
-	(void)hConsoleOutput;
+	DEBUG_LOG("GetConsoleScreenBufferInfo(%p, %p)\n", hConsoleOutput, lpConsoleScreenBufferInfo);
+	if (!isConsoleFileHandle(hConsoleOutput)) {
+		setLastError(ERROR_INVALID_HANDLE);
+		return FALSE;
+	}
 	if (!lpConsoleScreenBufferInfo) {
 		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
@@ -58,6 +89,28 @@ BOOL WINAPI GetConsoleScreenBufferInfo(HANDLE hConsoleOutput, CONSOLE_SCREEN_BUF
 	lpConsoleScreenBufferInfo->wAttributes = 0;
 	lpConsoleScreenBufferInfo->srWindow = {0, 0, 79, 24};
 	lpConsoleScreenBufferInfo->dwMaximumWindowSize = {80, 25};
+	return TRUE;
+}
+
+BOOL WINAPI SetConsoleCursorPosition(HANDLE hConsoleOutput, COORD dwCursorPosition) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("SetConsoleCursorPosition(%p, {%d, %d})\n", hConsoleOutput, dwCursorPosition.X, dwCursorPosition.Y);
+	auto file = wibo::handles().getAs<FileObject>(hConsoleOutput);
+	if (!file || !file->valid()) {
+		setLastError(ERROR_INVALID_HANDLE);
+		return FALSE;
+	}
+	if (dwCursorPosition.X == 0 && dwCursorPosition.Y > 0) {
+		// Old Cygwin console output advances lines by moving the cursor
+		// instead of writing newline bytes. Preserve that when the console
+		// handle is really backed by a host stream or redirected file.
+		const char newline = '\n';
+		auto io = files::write(file.get(), &newline, sizeof(newline), std::nullopt, true);
+		if (io.unixError != 0) {
+			setLastError(wibo::winErrorFromErrno(io.unixError));
+			return FALSE;
+		}
+	}
 	return TRUE;
 }
 
@@ -76,6 +129,10 @@ BOOL WINAPI WriteConsoleW(HANDLE hConsoleOutput, LPCWSTR lpBuffer, DWORD nNumber
 	}
 
 	auto file = wibo::handles().getAs<FileObject>(hConsoleOutput);
+	if (!file || !file->valid()) {
+		setLastError(ERROR_INVALID_HANDLE);
+		return FALSE;
+	}
 	if (file->fd == STDOUT_FILENO || file->fd == STDERR_FILENO) {
 		auto str = wideStringToString(lpBuffer, static_cast<int>(nNumberOfCharsToWrite));
 		auto io = files::write(file.get(), str.c_str(), str.size(), std::nullopt, true);
@@ -91,6 +148,21 @@ BOOL WINAPI WriteConsoleW(HANDLE hConsoleOutput, LPCWSTR lpBuffer, DWORD nNumber
 
 	setLastError(ERROR_INVALID_HANDLE);
 	return FALSE;
+}
+
+BOOL WINAPI GetNumberOfConsoleInputEvents(HANDLE hConsoleInput, LPDWORD lpNumberOfEvents) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("GetNumberOfConsoleInputEvents(%p, %p)\n", hConsoleInput, lpNumberOfEvents);
+	if (!isConsoleFileHandle(hConsoleInput)) {
+		setLastError(ERROR_INVALID_HANDLE);
+		return FALSE;
+	}
+	if (!lpNumberOfEvents) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+	*lpNumberOfEvents = 0;
+	return TRUE;
 }
 
 DWORD WINAPI GetConsoleTitleA(LPSTR lpConsoleTitle, DWORD nSize) {

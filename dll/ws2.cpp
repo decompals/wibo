@@ -21,6 +21,14 @@ void setLastError(int error) { g_lastError = error; }
 
 WORD makeVersion(BYTE major, BYTE minor) { return static_cast<WORD>(major | (minor << 8)); }
 
+bool requireStarted() {
+	if (g_startupCount > 0) {
+		return true;
+	}
+	setLastError(WSANOTINITIALISED);
+	return false;
+}
+
 } // namespace
 
 namespace ws2 {
@@ -68,6 +76,9 @@ int WINAPI WSAGetLastError() {
 int WINAPI gethostname(LPSTR name, int namelen) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("gethostname(%p, %d)\n", name, namelen);
+	if (!requireStarted()) {
+		return SOCKET_ERROR;
+	}
 	if (!name || namelen <= 0) {
 		setLastError(WSAEFAULT);
 		return SOCKET_ERROR;
@@ -92,6 +103,9 @@ int WINAPI gethostname(LPSTR name, int namelen) {
 GUEST_PTR WINAPI gethostbyname(LPCSTR name) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("gethostbyname(%s)\n", name ? name : "(null)");
+	if (!requireStarted()) {
+		return GUEST_NULL;
+	}
 	setLastError(WSAHOST_NOT_FOUND);
 	return GUEST_NULL;
 }
@@ -99,6 +113,9 @@ GUEST_PTR WINAPI gethostbyname(LPCSTR name) {
 int WINAPI select(int nfds, LPVOID readfds, LPVOID writefds, LPVOID exceptfds, const void *timeout) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("select(%d, %p, %p, %p, %p)\n", nfds, readfds, writefds, exceptfds, timeout);
+	if (!requireStarted()) {
+		return SOCKET_ERROR;
+	}
 	(void)nfds;
 	(void)readfds;
 	(void)writefds;
@@ -113,6 +130,8 @@ int WINAPI select(int nfds, LPVOID readfds, LPVOID writefds, LPVOID exceptfds, c
 #include "ws2_trampolines.h"
 
 static void *resolveByOrdinal(uint16_t ordinal) {
+	// GHS 5.3.22 imports WS2_32.dll with the legacy winsock ordinal table.
+	// Keep these mappings tied to observed call sites rather than modern WS2_32 export ordinals.
 	switch (ordinal) {
 	case 18:
 		return (void *)thunk_ws2_select;

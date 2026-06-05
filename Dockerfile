@@ -19,7 +19,7 @@ RUN apk add --no-cache \
     ninja \
     python3
 
-FROM dependencies as build
+FROM dependencies AS build
 
 # Copy source files
 WORKDIR /wibo

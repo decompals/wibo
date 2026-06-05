@@ -1,5 +1,5 @@
 # Build stage
-FROM ubuntu:24.04 AS build
+FROM ubuntu:24.04 AS dependencies
 
 # Install dependencies
 ENV DEBIAN_FRONTEND=noninteractive
@@ -29,6 +29,8 @@ RUN apt-get update \
         unzip \
         wget \
     && rm -rf /var/lib/apt/lists/*
+
+FROM dependencies AS build
 
 # Copy source files
 WORKDIR /wibo

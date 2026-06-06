@@ -10,11 +10,19 @@
 
 #include <algorithm>
 #include <cassert>
+#include <climits>
 #include <cstring>
 #include <optional>
 #include <string>
 
 namespace {
+
+constexpr DWORD GET_MODULE_HANDLE_EX_FLAG_PIN = 0x00000001;
+constexpr DWORD GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT = 0x00000002;
+constexpr DWORD GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS = 0x00000004;
+constexpr DWORD GET_MODULE_HANDLE_EX_VALID_FLAGS = GET_MODULE_HANDLE_EX_FLAG_PIN |
+												   GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT |
+												   GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS;
 
 HRSRC findResourceInternal(HMODULE hModule, const wibo::ResourceIdentifier &type, const wibo::ResourceIdentifier &name,
 						   std::optional<uint16_t> language) {
@@ -72,6 +80,43 @@ HMODULE WINAPI GetModuleHandleW(LPCWSTR lpModuleName) {
 		return GetModuleHandleA(lpModuleNameA.c_str());
 	}
 	return GetModuleHandleA(nullptr);
+}
+
+BOOL WINAPI GetModuleHandleExW(DWORD dwFlags, LPCWSTR lpModuleName, HMODULE *phModule) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("GetModuleHandleExW(%x, %p, %p)\n", dwFlags, lpModuleName, phModule);
+	if (!phModule) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+	*phModule = NO_HANDLE;
+	if ((dwFlags & ~GET_MODULE_HANDLE_EX_VALID_FLAGS) != 0 ||
+		((dwFlags & GET_MODULE_HANDLE_EX_FLAG_PIN) && (dwFlags & GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT))) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+
+	wibo::ModuleInfo *module = nullptr;
+	if (dwFlags & GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS) {
+		module = wibo::moduleInfoFromAddress(const_cast<void *>(reinterpret_cast<const void *>(lpModuleName)));
+	} else if (lpModuleName) {
+		const auto lpModuleNameA = wideStringToString(lpModuleName);
+		module = wibo::findLoadedModule(lpModuleNameA.c_str());
+	} else {
+		module = wibo::findLoadedModule(nullptr);
+	}
+
+	if (!module) {
+		setLastError(ERROR_MOD_NOT_FOUND);
+		return FALSE;
+	}
+	if (dwFlags & GET_MODULE_HANDLE_EX_FLAG_PIN) {
+		module->refCount = UINT_MAX;
+	} else if (!(dwFlags & GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT) && module->refCount != UINT_MAX) {
+		module->refCount++;
+	}
+	*phModule = module->handle;
+	return TRUE;
 }
 
 DWORD WINAPI GetModuleFileNameA(HMODULE hModule, LPSTR lpFilename, DWORD nSize) {

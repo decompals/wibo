@@ -366,16 +366,25 @@ void ensureDefaultActivationContext() {
 	std::call_once(initFlag, [] {
 		ActivationContext *ctx = currentActivationContext();
 		auto addDll = [ctx](const std::string &name) {
+			std::string lowerName = stringToLower(name);
+			for (const auto &entry : ctx->dllRedirections) {
+				if (entry.nameLower == lowerName) {
+					return;
+				}
+			}
+
 			DllRedirectionEntry entry;
-			entry.nameLower = stringToLower(name);
+			entry.nameLower = std::move(lowerName);
 			entry.dllData = wibo::heap::make_guest_unique<ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION>();
-			entry.dllData->Size = sizeof(entry.dllData);
+			entry.dllData->Size = sizeof(ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION);
 			entry.dllData->Flags = ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION_PATH_OMITS_ASSEMBLY_ROOT;
 			entry.dllData->TotalPathLength = 0;
 			entry.dllData->PathSegmentCount = 0;
 			entry.dllData->PathSegmentOffset = 0;
 			ctx->dllRedirections.emplace_back(std::move(entry));
 		};
+		addDll("msvcr80.dll");
+		addDll("msvcp80.dll");
 		for (const auto &[key, module] : wibo::allLoadedModules()) {
 			if (!module->moduleStub) {
 				addDll(module->normalizedName);

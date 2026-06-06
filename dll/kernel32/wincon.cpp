@@ -133,21 +133,21 @@ BOOL WINAPI WriteConsoleW(HANDLE hConsoleOutput, LPCWSTR lpBuffer, DWORD nNumber
 		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
 	}
-	if (file->fd == STDOUT_FILENO || file->fd == STDERR_FILENO) {
-		auto str = wideStringToString(lpBuffer, static_cast<int>(nNumberOfCharsToWrite));
-		auto io = files::write(file.get(), str.c_str(), str.size(), std::nullopt, true);
-		if (lpNumberOfCharsWritten) {
-			*lpNumberOfCharsWritten = io.bytesTransferred;
-		}
-		if (io.unixError != 0) {
-			setLastError(wibo::winErrorFromErrno(io.unixError));
-			return FALSE;
-		}
-		return TRUE;
+	if (!isatty(file->fd)) {
+		setLastError(ERROR_INVALID_HANDLE);
+		return FALSE;
 	}
 
-	setLastError(ERROR_INVALID_HANDLE);
-	return FALSE;
+	auto str = wideStringToString(lpBuffer, static_cast<int>(nNumberOfCharsToWrite));
+	auto io = files::write(file.get(), str.c_str(), str.size(), std::nullopt, true);
+	if (io.unixError != 0) {
+		setLastError(wibo::winErrorFromErrno(io.unixError));
+		return FALSE;
+	}
+	if (lpNumberOfCharsWritten) {
+		*lpNumberOfCharsWritten = nNumberOfCharsToWrite;
+	}
+	return TRUE;
 }
 
 BOOL WINAPI GetNumberOfConsoleInputEvents(HANDLE hConsoleInput, LPDWORD lpNumberOfEvents) {

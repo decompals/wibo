@@ -539,11 +539,35 @@ std::optional<DWORD> stdHandleForConsoleDevice(const std::string &name, DWORD de
 	return std::nullopt;
 }
 
+bool isConsoleOutputDevice(const std::string &name, DWORD desiredAccess) {
+	std::string lowered = stringToLower(name);
+	return lowered == "conout$" || (lowered == "con" && (desiredAccess & GENERIC_WRITE) != 0);
+}
+
+bool tryOpenHostConsoleOutput(DWORD desiredAccess, HANDLE &outHandle) {
+	int fd = open("/dev/tty", O_WRONLY | O_CLOEXEC);
+	if (fd < 0) {
+		return false;
+	}
+
+	auto fileObj = make_pin<FileObject>(fd);
+	fileObj->appendOnly = true;
+	uint32_t grantedAccess = FILE_GENERIC_WRITE;
+	if ((desiredAccess & GENERIC_READ) != 0) {
+		grantedAccess |= FILE_GENERIC_READ;
+	}
+	outHandle = wibo::handles().alloc(std::move(fileObj), grantedAccess, 0);
+	return true;
+}
+
 bool tryOpenConsoleDevice(DWORD dwDesiredAccess, DWORD dwShareMode, DWORD dwCreationDisposition,
 						  DWORD dwFlagsAndAttributes, HANDLE &outHandle, const std::string &originalName) {
 	(void)dwShareMode;
 	(void)dwCreationDisposition;
 	(void)dwFlagsAndAttributes;
+	if (isConsoleOutputDevice(originalName, dwDesiredAccess) && tryOpenHostConsoleOutput(dwDesiredAccess, outHandle)) {
+		return true;
+	}
 	auto stdHandleKind = stdHandleForConsoleDevice(originalName, dwDesiredAccess);
 	if (!stdHandleKind) {
 		return false;

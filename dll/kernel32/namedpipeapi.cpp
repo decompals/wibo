@@ -380,8 +380,9 @@ BOOL WINAPI CreatePipe(PHANDLE hReadPipe, PHANDLE hWritePipe, LPSECURITY_ATTRIBU
 	readObj->shareAccess = FILE_SHARE_READ | FILE_SHARE_WRITE;
 	auto writeObj = make_pin<FileObject>(pipeFds[1]);
 	writeObj->shareAccess = FILE_SHARE_READ | FILE_SHARE_WRITE;
-	*hReadPipe = wibo::handles().alloc(std::move(readObj), FILE_GENERIC_READ, 0);
-	*hWritePipe = wibo::handles().alloc(std::move(writeObj), FILE_GENERIC_WRITE, 0);
+	uint32_t handleFlags = inheritHandles ? HANDLE_FLAG_INHERIT : 0;
+	*hReadPipe = wibo::handles().alloc(std::move(readObj), FILE_GENERIC_READ, handleFlags);
+	*hWritePipe = wibo::handles().alloc(std::move(writeObj), FILE_GENERIC_WRITE, handleFlags);
 	return TRUE;
 }
 

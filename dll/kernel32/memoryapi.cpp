@@ -9,14 +9,22 @@
 #include "strutil.h"
 #include "types.h"
 
+#include <atomic>
 #include <cerrno>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <iterator>
 #include <limits>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <sys/mman.h>
+#include <sys/stat.h>
+#ifdef __linux__
+#include <sys/uio.h>
+#endif
 #include <unistd.h>
 #include <utility>
 
@@ -24,6 +32,7 @@ namespace {
 
 constexpr size_t kVirtualAllocationGranularity = 64 * 1024;
 constexpr uintptr_t kProcessAddressLimit = 0x80000000;
+constexpr uintptr_t kInheritedForkAutoViewMin = 0x50000000;
 
 struct MappingObject : ObjectBase {
 	static constexpr ObjectType kType = ObjectType::Mapping;
@@ -32,14 +41,19 @@ struct MappingObject : ObjectBase {
 	int fd = -1;
 	size_t maxSize = 0;
 	DWORD protect = 0;
+	std::string inheritName;
 	bool anonymous = false;
 	bool closed = false;
+	bool unlinkOnDestroy = false;
 
 	explicit MappingObject() : ObjectBase(kType) {}
 	~MappingObject() override;
 };
 
 MappingObject::~MappingObject() {
+	if (unlinkOnDestroy && !inheritName.empty()) {
+		shm_unlink(inheritName.c_str());
+	}
 	if (fd != -1) {
 		close(fd);
 		fd = -1;
@@ -58,8 +72,17 @@ struct ViewInfo {
 	bool managed = false;
 };
 
+struct NamedMappingInfo {
+	std::string shmName;
+	uint64_t size = 0;
+	DWORD protect = PAGE_NOACCESS;
+};
+
 std::map<uintptr_t, ViewInfo> g_viewInfo;
 std::mutex g_viewInfoMutex;
+std::map<HANDLE, NamedMappingInfo> g_namedMappings;
+std::mutex g_namedMappingsMutex;
+std::atomic<unsigned> g_anonymousMappingCounter{0};
 
 uintptr_t alignDown(uintptr_t value, size_t alignment) {
 	const uintptr_t mask = static_cast<uintptr_t>(alignment) - 1;
@@ -139,6 +162,174 @@ DWORD desiredAccessToProtect(DWORD desiredAccess, DWORD mappingProtect) {
 	return protect;
 }
 
+std::string posixObjectPrefix() {
+	std::string result = "/wibo_";
+	result += wibo::instanceId.empty() ? "default" : wibo::instanceId;
+	result.push_back('_');
+	return result;
+}
+
+std::string shmNameFromMappingName(const char *name) {
+	std::string result = posixObjectPrefix();
+	for (const char *p = name; p && *p; ++p) {
+		unsigned char c = static_cast<unsigned char>(*p);
+		if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+			result.push_back(static_cast<char>(c));
+		} else {
+			result.push_back('_');
+		}
+		if (result.size() >= 230) {
+			break;
+		}
+	}
+	return result;
+}
+
+std::string anonymousMappingName() {
+	char buffer[128];
+	snprintf(buffer, sizeof(buffer), "anon_%d_%u", static_cast<int>(getpid()),
+			 g_anonymousMappingCounter.fetch_add(1, std::memory_order_relaxed));
+	return posixObjectPrefix() + buffer;
+}
+
+int createAnonymousMappingFd(std::string &shmName, uint64_t size) {
+	for (int attempts = 0; attempts < 64; ++attempts) {
+		shmName = anonymousMappingName();
+		int fd = shm_open(shmName.c_str(), O_RDWR | O_CREAT | O_EXCL, 0600);
+		if (fd >= 0) {
+			if (ftruncate(fd, static_cast<off_t>(size)) == 0) {
+				return fd;
+			}
+			int savedErrno = errno;
+			close(fd);
+			shm_unlink(shmName.c_str());
+			errno = savedErrno;
+			return -1;
+		}
+		if (errno != EEXIST) {
+			return -1;
+		}
+	}
+	errno = EEXIST;
+	return -1;
+}
+
+int createNamedMappingFd(const std::string &shmName, uint64_t size) {
+	int fd = shm_open(shmName.c_str(), O_RDWR | O_CREAT | O_EXCL, 0600);
+	if (fd < 0 && errno == EEXIST) {
+		return shm_open(shmName.c_str(), O_RDWR, 0600);
+	}
+	if (fd < 0) {
+		return -1;
+	}
+	if (ftruncate(fd, static_cast<off_t>(size)) != 0) {
+		int savedErrno = errno;
+		close(fd);
+		shm_unlink(shmName.c_str());
+		errno = savedErrno;
+		return -1;
+	}
+	return fd;
+}
+
+std::optional<NamedMappingInfo> inheritedMappingInfoForHandle(HANDLE handle) {
+	const char *env = getenv("WIBO_INHERITED_MAPPINGS");
+	if (!env || *env == '\0') {
+		return std::nullopt;
+	}
+
+	std::string input(env);
+	size_t pos = 0;
+	while (pos < input.size()) {
+		size_t next = input.find(',', pos);
+		std::string entry = input.substr(pos, next == std::string::npos ? std::string::npos : next - pos);
+		size_t first = entry.find(':');
+		size_t second = first == std::string::npos ? std::string::npos : entry.find(':', first + 1);
+		size_t third = second == std::string::npos ? std::string::npos : entry.find(':', second + 1);
+		if (first != std::string::npos && second != std::string::npos && third != std::string::npos) {
+			HANDLE entryHandle = static_cast<HANDLE>(strtol(entry.substr(0, first).c_str(), nullptr, 16));
+			if (entryHandle == handle) {
+				NamedMappingInfo info{};
+				info.protect =
+					static_cast<DWORD>(strtoul(entry.substr(first + 1, second - first - 1).c_str(), nullptr, 16));
+				info.size = strtoull(entry.substr(second + 1, third - second - 1).c_str(), nullptr, 16);
+				info.shmName = entry.substr(third + 1);
+				return info;
+			}
+		}
+		if (next == std::string::npos) {
+			break;
+		}
+		pos = next + 1;
+	}
+	return std::nullopt;
+}
+
+Pin<MappingObject> reopenInheritedMapping(HANDLE handle) {
+	auto info = inheritedMappingInfoForHandle(handle);
+	if (!info) {
+		return {};
+	}
+	int fd = shm_open(info->shmName.c_str(), O_RDWR, 0600);
+	if (fd < 0) {
+		kernel32::setLastErrorFromErrno();
+		return {};
+	}
+	auto mapping = make_pin<MappingObject>();
+	mapping->anonymous = false;
+	mapping->fd = fd;
+	mapping->maxSize = info->size;
+	mapping->protect = info->protect;
+	mapping->inheritName = info->shmName;
+	auto mappingForReturn = mapping.clone();
+	if (!wibo::handles().get(handle)) {
+		wibo::handles().allocAt(handle, std::move(mapping), 0, HANDLE_FLAG_INHERIT);
+	}
+	{
+		std::lock_guard guard(g_namedMappingsMutex);
+		g_namedMappings[handle] = *info;
+	}
+	DEBUG_LOG("reopened inherited mapping %p -> %s\n", handle, info->shmName.c_str());
+	return mappingForReturn;
+}
+
+uintptr_t autoViewMinAddress() {
+	const char *moduleBases = getenv("WIBO_INHERITED_MODULE_BASES");
+	if (moduleBases && *moduleBases) {
+		return kInheritedForkAutoViewMin;
+	}
+	return 0;
+}
+
+std::optional<pid_t> inheritedProcessPidForHandle(HANDLE handle) {
+	const char *env = getenv("WIBO_INHERITED_PROCESSES");
+	if (!env || *env == '\0') {
+		return std::nullopt;
+	}
+
+	std::string input(env);
+	size_t pos = 0;
+	while (pos < input.size()) {
+		size_t next = input.find(',', pos);
+		std::string entry = input.substr(pos, next == std::string::npos ? std::string::npos : next - pos);
+		size_t split = entry.find(':');
+		if (split != std::string::npos) {
+			HANDLE entryHandle = static_cast<HANDLE>(strtol(entry.substr(0, split).c_str(), nullptr, 16));
+			if (entryHandle == handle) {
+				long parsed = strtol(entry.substr(split + 1).c_str(), nullptr, 16);
+				if (parsed > 0) {
+					return static_cast<pid_t>(parsed);
+				}
+			}
+		}
+		if (next == std::string::npos) {
+			break;
+		}
+		pos = next + 1;
+	}
+	return std::nullopt;
+}
+
 bool mappedViewRegionForAddress(uintptr_t request, uintptr_t pageBase, MEMORY_BASIC_INFORMATION &info) {
 	std::lock_guard guard(g_viewInfoMutex);
 	if (g_viewInfo.empty()) {
@@ -184,7 +375,6 @@ HANDLE WINAPI CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMappi
 	DEBUG_LOG("CreateFileMappingA(%p, %p, %u, %u, %u, %s)\n", hFile, lpFileMappingAttributes, flProtect,
 			  dwMaximumSizeHigh, dwMaximumSizeLow, lpName ? lpName : "(null)");
 	(void)lpFileMappingAttributes;
-	(void)lpName;
 
 	uint64_t size = (static_cast<uint64_t>(dwMaximumSizeHigh) << 32) | dwMaximumSizeLow;
 	if (flProtect != PAGE_READONLY && flProtect != PAGE_READWRITE && flProtect != PAGE_WRITECOPY) {
@@ -197,11 +387,27 @@ HANDLE WINAPI CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMappi
 	mapping->protect = flProtect;
 
 	if (hFile == INVALID_HANDLE_VALUE) {
-		mapping->anonymous = true;
-		mapping->fd = -1;
 		if (size == 0) {
 			setLastError(ERROR_INVALID_PARAMETER);
 			return NO_HANDLE;
+		}
+		std::string shmName;
+		{
+			int fd = -1;
+			if (lpName) {
+				shmName = shmNameFromMappingName(lpName);
+				fd = createNamedMappingFd(shmName, size);
+			} else {
+				fd = createAnonymousMappingFd(shmName, size);
+			}
+			if (fd < 0) {
+				setLastErrorFromErrno();
+				return NO_HANDLE;
+			}
+			mapping->anonymous = false;
+			mapping->fd = fd;
+			mapping->inheritName = std::move(shmName);
+			mapping->unlinkOnDestroy = lpName == nullptr;
 		}
 		mapping->maxSize = size;
 	} else {
@@ -226,7 +432,13 @@ HANDLE WINAPI CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMappi
 		mapping->maxSize = size;
 	}
 
-	return wibo::handles().alloc(std::move(mapping), 0, 0);
+	std::string shmName = hFile == INVALID_HANDLE_VALUE ? mapping->inheritName : std::string{};
+	HANDLE handle = wibo::handles().alloc(std::move(mapping), 0, 0);
+	if (!shmName.empty()) {
+		std::lock_guard guard(g_namedMappingsMutex);
+		g_namedMappings[handle] = NamedMappingInfo{.shmName = std::move(shmName), .size = size, .protect = flProtect};
+	}
+	return handle;
 }
 
 HANDLE WINAPI CreateFileMappingW(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMappingAttributes, DWORD flProtect,
@@ -337,7 +549,8 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 #endif
 	} else {
 		void *candidate = nullptr;
-		wibo::heap::VmStatus reserveStatus = wibo::heap::reserveViewRange(mapLength, 0, 0, &candidate);
+		wibo::heap::VmStatus reserveStatus =
+			wibo::heap::reserveViewRange(mapLength, autoViewMinAddress(), 0, &candidate);
 		if (reserveStatus != wibo::heap::VmStatus::Success) {
 			setLastError(wibo::heap::win32ErrorFromVmStatus(reserveStatus));
 			return nullptr;
@@ -404,8 +617,11 @@ LPVOID WINAPI MapViewOfFile(HANDLE hFileMappingObject, DWORD dwDesiredAccess, DW
 
 	auto mapping = wibo::handles().getAs<MappingObject>(hFileMappingObject);
 	if (!mapping) {
-		setLastError(ERROR_INVALID_HANDLE);
-		return nullptr;
+		mapping = reopenInheritedMapping(hFileMappingObject);
+		if (!mapping) {
+			setLastError(ERROR_INVALID_HANDLE);
+			return nullptr;
+		}
 	}
 	uint64_t offset = (static_cast<uint64_t>(dwFileOffsetHigh) << 32) | dwFileOffsetLow;
 	return mapViewOfFileInternal(std::move(mapping), dwDesiredAccess, offset, dwNumberOfBytesToMap, nullptr);
@@ -419,11 +635,36 @@ LPVOID WINAPI MapViewOfFileEx(HANDLE hFileMappingObject, DWORD dwDesiredAccess, 
 
 	auto mapping = wibo::handles().getAs<MappingObject>(hFileMappingObject);
 	if (!mapping) {
-		setLastError(ERROR_INVALID_HANDLE);
-		return nullptr;
+		mapping = reopenInheritedMapping(hFileMappingObject);
+		if (!mapping) {
+			setLastError(ERROR_INVALID_HANDLE);
+			return nullptr;
+		}
 	}
 	uint64_t offset = (static_cast<uint64_t>(dwFileOffsetHigh) << 32) | dwFileOffsetLow;
 	return mapViewOfFileInternal(std::move(mapping), dwDesiredAccess, offset, dwNumberOfBytesToMap, lpBaseAddress);
+}
+
+std::string buildInheritedMappingEnv() {
+	std::lock_guard guard(g_namedMappingsMutex);
+	if (g_namedMappings.empty()) {
+		return {};
+	}
+
+	std::string result = "WIBO_INHERITED_MAPPINGS=";
+	bool first = true;
+	for (const auto &[handle, info] : g_namedMappings) {
+		char header[64];
+		snprintf(header, sizeof(header), "%x:%x:%llx:", static_cast<unsigned>(handle),
+				 static_cast<unsigned>(info.protect), static_cast<unsigned long long>(info.size));
+		if (!first) {
+			result.push_back(',');
+		}
+		first = false;
+		result += header;
+		result += info.shmName;
+	}
+	return result;
 }
 
 BOOL WINAPI UnmapViewOfFile(LPCVOID lpBaseAddress) {
@@ -603,6 +844,106 @@ SIZE_T WINAPI VirtualQuery(LPCVOID lpAddress, PMEMORY_BASIC_INFORMATION lpBuffer
 	setLastError(wibo::heap::win32ErrorFromVmStatus(status));
 	DEBUG_LOG("-> VirtualQuery failed (status=%u)\n", static_cast<unsigned>(status));
 	return 0;
+}
+
+BOOL WINAPI ReadProcessMemory(HANDLE hProcess, LPCVOID lpBaseAddress, LPVOID lpBuffer, SIZE_T nSize,
+							  SIZE_T *lpNumberOfBytesRead) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("ReadProcessMemory(%p, %p, %p, %zu, %p)\n", hProcess, lpBaseAddress, lpBuffer, nSize,
+			  lpNumberOfBytesRead);
+	if (lpNumberOfBytesRead) {
+		*lpNumberOfBytesRead = 0;
+	}
+	if (!lpBuffer && nSize != 0) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+
+	if (isPseudoCurrentProcessHandle(hProcess)) {
+		if (nSize != 0) {
+			std::memcpy(lpBuffer, lpBaseAddress, nSize);
+		}
+		if (lpNumberOfBytesRead) {
+			*lpNumberOfBytesRead = nSize;
+		}
+		return TRUE;
+	}
+
+	auto process = wibo::handles().getAs<ProcessObject>(hProcess);
+	pid_t remotePid = process ? process->pid : -1;
+	if (remotePid < 0) {
+		if (auto inheritedPid = inheritedProcessPidForHandle(hProcess)) {
+			remotePid = *inheritedPid;
+		}
+	}
+	if (remotePid < 0) {
+		setLastError(ERROR_INVALID_HANDLE);
+		return FALSE;
+	}
+
+#ifdef __linux__
+	iovec local{lpBuffer, nSize};
+	iovec remote{const_cast<void *>(lpBaseAddress), nSize};
+	ssize_t read = process_vm_readv(remotePid, &local, 1, &remote, 1, 0);
+	if (read < 0) {
+		setLastError(wibo::winErrorFromErrno(errno));
+		return FALSE;
+	}
+	if (lpNumberOfBytesRead) {
+		*lpNumberOfBytesRead = static_cast<SIZE_T>(read);
+	}
+	return static_cast<SIZE_T>(read) == nSize;
+#else
+	setLastError(ERROR_INVALID_FUNCTION);
+	return FALSE;
+#endif
+}
+
+BOOL WINAPI WriteProcessMemory(HANDLE hProcess, LPVOID lpBaseAddress, LPCVOID lpBuffer, SIZE_T nSize,
+							   SIZE_T *lpNumberOfBytesWritten) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("WriteProcessMemory(%p, %p, %p, %zu, %p)\n", hProcess, lpBaseAddress, lpBuffer, nSize,
+			  lpNumberOfBytesWritten);
+	if (lpNumberOfBytesWritten) {
+		*lpNumberOfBytesWritten = 0;
+	}
+	if (!lpBuffer && nSize != 0) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+
+	if (isPseudoCurrentProcessHandle(hProcess)) {
+		if (nSize != 0) {
+			std::memcpy(lpBaseAddress, lpBuffer, nSize);
+		}
+		if (lpNumberOfBytesWritten) {
+			*lpNumberOfBytesWritten = nSize;
+		}
+		return TRUE;
+	}
+
+	auto process = wibo::handles().getAs<ProcessObject>(hProcess);
+	if (!process || process->pid < 0) {
+		setLastError(ERROR_INVALID_HANDLE);
+		return FALSE;
+	}
+
+#ifdef __linux__
+	iovec local{const_cast<void *>(lpBuffer), nSize};
+	iovec remote{lpBaseAddress, nSize};
+	ssize_t written = process_vm_writev(process->pid, &local, 1, &remote, 1, 0);
+	if (written < 0) {
+		setLastError(wibo::winErrorFromErrno(errno));
+		return FALSE;
+	}
+	if (lpNumberOfBytesWritten) {
+		*lpNumberOfBytesWritten = static_cast<SIZE_T>(written);
+	}
+	return static_cast<SIZE_T>(written) == nSize;
+#else
+	setLastError(ERROR_INVALID_FUNCTION);
+	return FALSE;
+#endif
 }
 
 BOOL WINAPI GetProcessWorkingSetSize(HANDLE hProcess, PSIZE_T lpMinimumWorkingSetSize,

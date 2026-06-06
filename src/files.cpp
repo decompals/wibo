@@ -9,6 +9,8 @@
 #include <csignal>
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
+#include <fcntl.h>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -78,6 +80,142 @@ static std::string toHostPathEntry(const std::string &entry) {
 static HANDLE stdinHandle;
 static HANDLE stdoutHandle;
 static HANDLE stderrHandle;
+
+static std::string instancePathComponent() {
+	return wibo::instanceId.empty() ? std::string("default") : wibo::instanceId;
+}
+
+std::filesystem::path hostTempDirectory() {
+	const char *tmpDirEnv = std::getenv("TMPDIR");
+	if (tmpDirEnv && *tmpDirEnv) {
+		return tmpDirEnv;
+	}
+	std::error_code ec;
+	auto path = std::filesystem::temp_directory_path(ec);
+	return ec ? std::filesystem::path("/tmp") : path;
+}
+
+std::filesystem::path inheritedFileRegistryPath(pid_t pid) {
+	return hostTempDirectory() /
+		   ("wibo_handles_" + instancePathComponent() + "_" + std::to_string(static_cast<long long>(pid)));
+}
+
+static void materializeInheritedFileHandles() {
+	const char *env = std::getenv("WIBO_INHERITED_FILES");
+	if (!env || *env == '\0') {
+		return;
+	}
+
+	std::string input(env);
+	size_t pos = 0;
+	while (pos < input.size()) {
+		size_t next = input.find(',', pos);
+		std::string entry = input.substr(pos, next == std::string::npos ? std::string::npos : next - pos);
+
+		unsigned handleValue = 0;
+		unsigned fdValue = 0;
+		unsigned access = 0;
+		unsigned flags = 0;
+		unsigned appendOnly = 0;
+		if (sscanf(entry.c_str(), "%x:%x:%x:%x:%x", &handleValue, &fdValue, &access, &flags, &appendOnly) == 5) {
+			HANDLE handle = static_cast<HANDLE>(handleValue);
+			int fd = static_cast<int>(fdValue);
+			if (fd >= 0 && fcntl(fd, F_GETFD) >= 0 && !wibo::handles().get(handle)) {
+				auto file = make_pin<FileObject>(fd);
+				file->shareAccess = FILE_SHARE_READ | FILE_SHARE_WRITE;
+				file->appendOnly = appendOnly != 0;
+				wibo::handles().allocAt(handle, std::move(file), access, flags);
+			}
+		}
+
+		if (next == std::string::npos) {
+			break;
+		}
+		pos = next + 1;
+	}
+}
+
+bool materializeInheritedFileHandle(HANDLE handle) {
+	if (wibo::handles().get(handle)) {
+		return true;
+	}
+
+	std::filesystem::path registryPath = inheritedFileRegistryPath(getpid());
+	FILE *f = fopen(registryPath.c_str(), "r");
+	if (!f) {
+		return false;
+	}
+
+	bool found = false;
+	char line[256];
+	while (fgets(line, sizeof(line), f)) {
+		unsigned handleValue = 0;
+		long long sourcePid = 0;
+		unsigned sourceFd = 0;
+		unsigned access = 0;
+		unsigned flags = 0;
+		unsigned appendOnly = 0;
+		if (sscanf(line, "%x:%lld:%x:%x:%x:%x", &handleValue, &sourcePid, &sourceFd, &access, &flags, &appendOnly) !=
+			6) {
+			continue;
+		}
+		if (static_cast<HANDLE>(handleValue) != handle) {
+			continue;
+		}
+
+		std::filesystem::path procFd =
+			std::filesystem::path("/proc") / std::to_string(sourcePid) / "fd" / std::to_string(sourceFd);
+		int openFlags = O_RDONLY;
+		bool canRead = (access & FILE_GENERIC_READ) != 0;
+		bool canWrite = (access & FILE_GENERIC_WRITE) != 0;
+		if (canRead && canWrite) {
+			openFlags = O_RDWR;
+		} else if (canWrite) {
+			openFlags = O_WRONLY;
+		}
+		int fd = open(procFd.c_str(), openFlags);
+		if (fd < 0 && openFlags == O_RDWR) {
+			fd = open(procFd.c_str(), O_WRONLY);
+			if (fd < 0) {
+				fd = open(procFd.c_str(), O_RDONLY);
+			}
+		}
+		if (fd < 0) {
+			break;
+		}
+
+		auto file = make_pin<FileObject>(fd);
+		file->shareAccess = FILE_SHARE_READ | FILE_SHARE_WRITE;
+		file->appendOnly = appendOnly != 0;
+		found = wibo::handles().allocAt(handle, std::move(file), access, flags);
+		if (!found) {
+			close(fd);
+		}
+		break;
+	}
+	fclose(f);
+	return found;
+}
+
+bool hasInheritedFileHandleRecord(HANDLE handle) {
+	std::filesystem::path registryPath = inheritedFileRegistryPath(getpid());
+	FILE *f = fopen(registryPath.c_str(), "r");
+	if (!f) {
+		return false;
+	}
+
+	bool found = false;
+	char line[256];
+	while (fgets(line, sizeof(line), f)) {
+		unsigned handleValue = 0;
+		if (sscanf(line, "%x:", &handleValue) == 1 && static_cast<HANDLE>(handleValue) == handle) {
+			found = true;
+			break;
+		}
+	}
+	fclose(f);
+	return found;
+}
 
 std::filesystem::path pathFromWindows(const char *inStr) {
 	// Convert to forward slashes
@@ -348,6 +486,7 @@ void init() {
 	stderrObject->closeOnDestroy = false;
 	stderrObject->appendOnly = true;
 	stderrHandle = handles.alloc(std::move(stderrObject), FILE_GENERIC_WRITE, 0);
+	materializeInheritedFileHandles();
 }
 
 std::optional<std::filesystem::path> findCaseInsensitiveFile(const std::filesystem::path &directory,

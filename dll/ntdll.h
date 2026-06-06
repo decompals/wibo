@@ -121,6 +121,8 @@ NTSTATUS WINAPI NtCreateFile(PHANDLE FileHandle, DWORD DesiredAccess, POBJECT_AT
 NTSTATUS WINAPI NtQueryObject(HANDLE Handle, OBJECT_INFORMATION_CLASS ObjectInformationClass, PVOID ObjectInformation,
 							  ULONG ObjectInformationLength, PULONG ReturnLength);
 NTSTATUS WINAPI NtQuerySystemTime(PLARGE_INTEGER SystemTime);
+NTSTATUS WINAPI NtQuerySystemInformation(ULONG SystemInformationClass, PVOID SystemInformation,
+										 ULONG SystemInformationLength, PULONG ReturnLength);
 BOOLEAN WINAPI RtlTimeToSecondsSince1970(PLARGE_INTEGER Time, PULONG ElapsedSeconds);
 VOID WINAPI RtlInitializeBitMap(PRTL_BITMAP BitMapHeader, PULONG BitMapBuffer, ULONG SizeOfBitMap);
 VOID WINAPI RtlSetBits(PRTL_BITMAP BitMapHeader, ULONG StartingIndex, ULONG NumberToSet);

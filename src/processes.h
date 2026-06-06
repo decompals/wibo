@@ -50,7 +50,8 @@ ProcessManager &processes();
 
 std::optional<std::filesystem::path> resolveExecutable(const std::string &command, bool searchPath);
 int spawnWithCommandLine(const std::string &applicationName, const std::string &commandLine,
-						 Pin<kernel32::ProcessObject> &pinOut);
+						 Pin<kernel32::ProcessObject> &pinOut, const std::vector<std::string> &extraEnv = {},
+						 const std::string &workingDirectory = {});
 int spawnWithArgv(const std::string &applicationName, const std::vector<std::string> &argv,
 				  Pin<kernel32::ProcessObject> &pinOut);
 std::vector<std::string> splitCommandLine(const char *commandLine);

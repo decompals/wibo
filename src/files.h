@@ -27,6 +27,10 @@ IOResult write(FileObject *file, const void *buffer, size_t bytesToWrite, const 
 			   bool updateFilePointer);
 HANDLE getStdHandle(DWORD nStdHandle);
 BOOL setStdHandle(DWORD nStdHandle, HANDLE hHandle);
+std::filesystem::path hostTempDirectory();
+std::filesystem::path inheritedFileRegistryPath(pid_t pid);
+bool materializeInheritedFileHandle(HANDLE handle);
+bool hasInheritedFileHandleRecord(HANDLE handle);
 std::optional<std::filesystem::path> findCaseInsensitiveFile(const std::filesystem::path &directory,
 															 const std::string &filename);
 std::filesystem::path canonicalPath(const std::filesystem::path &path);

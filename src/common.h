@@ -29,6 +29,7 @@ namespace wibo {
 extern char **argv;
 extern int argc;
 extern std::filesystem::path guestExecutablePath;
+extern std::string instanceId;
 extern std::string executableName;
 extern std::string commandLine;
 extern std::vector<uint16_t> commandLineW;

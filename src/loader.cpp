@@ -429,7 +429,9 @@ bool loadPEFromSource(wibo::Executable &executable, const PeInputView &source, b
 
 	executable.imageSize = header32.sizeOfImage;
 	DWORD initialProtect = exec ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE;
-	void *preferredBase = reinterpret_cast<void *>(static_cast<uintptr_t>(header32.imageBase));
+	void *preferredBase = executable.requestedImageBase
+							  ? executable.requestedImageBase
+							  : reinterpret_cast<void *>(static_cast<uintptr_t>(header32.imageBase));
 	void *allocatedBase = preferredBase;
 	std::size_t allocationSize = static_cast<std::size_t>(header32.sizeOfImage);
 	wibo::heap::VmStatus allocStatus =

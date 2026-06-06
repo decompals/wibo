@@ -197,6 +197,7 @@ class Handles {
 
 	void clear();
 	HANDLE alloc(Pin<> obj, uint32_t grantedAccess, uint32_t flags);
+	bool allocAt(HANDLE h, Pin<> obj, uint32_t grantedAccess, uint32_t flags);
 	bool release(HANDLE h);
 	Pin<> get(HANDLE h, HandleMeta *metaOut = nullptr);
 	template <ObjectBaseType T> Pin<T> getAs(HANDLE h, HandleMeta *metaOut = nullptr) {

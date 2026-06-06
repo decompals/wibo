@@ -151,6 +151,21 @@ static std::vector<std::filesystem::path> buildSearchDirectories() {
 	return dirs;
 }
 
+static bool envHasPrefix(const char *env, const char *prefix) {
+	return std::strncmp(env, prefix, std::strlen(prefix)) == 0;
+}
+
+static bool shouldForwardEnv(const char *env) {
+	static constexpr const char *kChildEnv[] = {
+		"WIBO_DEBUG_INDENT=",			"WIBO_STARTUP_RESERVED2=", "WIBO_INHERITED_FILES=",
+		"WIBO_INHERITED_MAPPINGS=",		"WIBO_INHERITED_EVENTS=",  "WIBO_INHERITED_PROCESSES=",
+		"WIBO_INHERITED_MODULE_BASES=", "WIBO_PARENT_PID=",
+	};
+
+	return std::none_of(std::begin(kChildEnv), std::end(kChildEnv),
+						[env](const char *prefix) { return envHasPrefix(env, prefix); });
+}
+
 std::optional<std::filesystem::path> resolveExecutable(const std::string &command, bool searchPath) {
 	if (command.empty()) {
 		return std::nullopt;
@@ -210,10 +225,15 @@ std::optional<std::filesystem::path> resolveExecutable(const std::string &comman
 	return std::nullopt;
 }
 
-static int spawnInternal(const std::vector<std::string> &args, Pin<kernel32::ProcessObject> &pinOut) {
+static int spawnInternal(const std::vector<std::string> &args, Pin<kernel32::ProcessObject> &pinOut,
+						 const std::vector<std::string> &extraEnv = {}, const std::string &workingDirectory = {}) {
 	std::vector<char *> argv;
-	argv.reserve(args.size() + 2);
+	argv.reserve(args.size() + (workingDirectory.empty() ? 2 : 4));
 	argv.push_back(const_cast<char *>("wibo"));
+	if (!workingDirectory.empty()) {
+		argv.push_back(const_cast<char *>("-C"));
+		argv.push_back(const_cast<char *>(workingDirectory.c_str()));
+	}
 	for (auto &arg : args) {
 		argv.push_back(const_cast<char *>(arg.c_str()));
 	}
@@ -235,10 +255,17 @@ static int spawnInternal(const std::vector<std::string> &args, Pin<kernel32::Pro
 	std::vector<std::string> ownedEnv;
 	ownedEnv.reserve(256);
 	for (char **e = environ; *e; ++e) {
-		if (std::strncmp(*e, "WIBO_DEBUG_INDENT=", 18) != 0)
+		if (shouldForwardEnv(*e)) {
 			ownedEnv.emplace_back(*e);
+		}
 	}
 	ownedEnv.emplace_back("WIBO_DEBUG_INDENT=" + std::to_string(wibo::debugIndent + 1));
+	if (wibo::debugEnabled) {
+		ownedEnv.emplace_back("WIBO_DEBUG=1");
+	}
+	for (const auto &env : extraEnv) {
+		ownedEnv.push_back(env);
+	}
 
 	std::vector<char *> envp;
 	envp.reserve(ownedEnv.size() + 1);
@@ -264,7 +291,8 @@ static int spawnInternal(const std::vector<std::string> &args, Pin<kernel32::Pro
 }
 
 int spawnWithCommandLine(const std::string &applicationName, const std::string &commandLine,
-						 Pin<kernel32::ProcessObject> &pinOut) {
+						 Pin<kernel32::ProcessObject> &pinOut, const std::vector<std::string> &extraEnv,
+						 const std::string &workingDirectory) {
 	if (applicationName.empty() && commandLine.empty()) {
 		return ENOENT;
 	}
@@ -279,7 +307,7 @@ int spawnWithCommandLine(const std::string &applicationName, const std::string &
 		args.push_back(applicationName);
 	}
 
-	return spawnInternal(args, pinOut);
+	return spawnInternal(args, pinOut, extraEnv, workingDirectory);
 }
 
 int spawnWithArgv(const std::string &applicationName, const std::vector<std::string> &argv,

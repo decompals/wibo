@@ -117,6 +117,8 @@ BOOL WINAPI SetCommTimeouts(HANDLE hFile, LPVOID lpCommTimeouts);
 BOOL WINAPI TransmitCommChar(HANDLE hFile, char cChar);
 BOOL WINAPI WaitCommEvent(HANDLE hFile, LPDWORD lpEvtMask, LPOVERLAPPED lpOverlapped);
 LONG WINAPI CompareFileTime(const FILETIME *lpFileTime1, const FILETIME *lpFileTime2);
+VOID WINAPI SetFileApisToANSI();
+VOID WINAPI SetFileApisToOEM();
 BOOL WINAPI GetVolumeInformationA(LPCSTR lpRootPathName, LPSTR lpVolumeNameBuffer, DWORD nVolumeNameSize,
 								  LPDWORD lpVolumeSerialNumber, LPDWORD lpMaximumComponentLength,
 								  LPDWORD lpFileSystemFlags, LPSTR lpFileSystemNameBuffer, DWORD nFileSystemNameSize);

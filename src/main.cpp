@@ -21,6 +21,7 @@
 char **wibo::argv;
 int wibo::argc;
 std::filesystem::path wibo::guestExecutablePath;
+std::string wibo::instanceId;
 std::string wibo::commandLine;
 std::vector<uint16_t> wibo::commandLineW;
 wibo::ModuleInfo *wibo::mainModule = nullptr;
@@ -97,6 +98,39 @@ void wibo::uninstallTebForCurrentThread() {
 static std::string getExeName(const char *argv0) {
 	std::filesystem::path exePath(argv0 ? argv0 : "wibo");
 	return exePath.filename().string();
+}
+
+static std::string sanitizeInstanceId(const char *value) {
+	std::string result;
+	for (const char *p = value; p && *p; ++p) {
+		unsigned char ch = static_cast<unsigned char>(*p);
+		if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' ||
+			ch == '-') {
+			result.push_back(static_cast<char>(ch));
+		} else {
+			result.push_back('_');
+		}
+		if (result.size() >= 64) {
+			break;
+		}
+	}
+	return result;
+}
+
+static void initializeInstanceId() {
+	const char *existing = getenv("WIBO_INSTANCE_ID");
+	wibo::instanceId = sanitizeInstanceId(existing);
+	if (!wibo::instanceId.empty()) {
+		return;
+	}
+
+	struct timespec ts{};
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	char buffer[80];
+	snprintf(buffer, sizeof(buffer), "%x_%llx_%llx", static_cast<unsigned>(getpid()),
+			 static_cast<unsigned long long>(ts.tv_sec), static_cast<unsigned long long>(ts.tv_nsec));
+	wibo::instanceId = buffer;
+	setenv("WIBO_INSTANCE_ID", wibo::instanceId.c_str(), 1);
 }
 
 static void printHelp(const char *argv0, bool error) {
@@ -313,6 +347,9 @@ int main(int argc, char **argv) {
 	if (const char *debugIndentEnv = getenv("WIBO_DEBUG_INDENT")) {
 		wibo::debugIndent = std::stoul(debugIndentEnv);
 	}
+
+	initializeInstanceId();
+	DEBUG_LOG("Instance id: %s\n", wibo::instanceId.c_str());
 
 	files::init();
 

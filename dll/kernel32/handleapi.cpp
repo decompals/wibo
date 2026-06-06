@@ -2,9 +2,12 @@
 
 #include "context.h"
 #include "errors.h"
+#include "files.h"
 #include "handles.h"
 #include "internal.h"
 
+#include <cstdio>
+#include <fcntl.h>
 #include <pthread.h>
 #include <unistd.h>
 
@@ -23,15 +26,21 @@ BOOL WINAPI DuplicateHandle(HANDLE hSourceProcessHandle, HANDLE hSourceHandle, H
 		return FALSE;
 	}
 
-	auto validateProcessHandle = [&](HANDLE handle) -> bool {
+	auto validateSourceProcessHandle = [&](HANDLE handle) -> bool {
 		if (isPseudoCurrentProcessHandle(handle)) {
 			return true;
 		}
 		auto proc = wibo::handles().getAs<ProcessObject>(handle);
 		return proc && proc->pid == getpid();
 	};
+	auto validateTargetProcessHandle = [&](HANDLE handle) -> bool {
+		if (isPseudoCurrentProcessHandle(handle)) {
+			return true;
+		}
+		return static_cast<bool>(wibo::handles().getAs<ProcessObject>(handle));
+	};
 
-	if (!validateProcessHandle(hSourceProcessHandle) || !validateProcessHandle(hTargetProcessHandle)) {
+	if (!validateSourceProcessHandle(hSourceProcessHandle) || !validateTargetProcessHandle(hTargetProcessHandle)) {
 		DEBUG_LOG("DuplicateHandle: unsupported process handle combination (source=%p target=%p)\n",
 				  hSourceProcessHandle, hTargetProcessHandle);
 		setLastError(ERROR_INVALID_HANDLE);
@@ -53,6 +62,42 @@ BOOL WINAPI DuplicateHandle(HANDLE hSourceProcessHandle, HANDLE hSourceHandle, H
 		return TRUE;
 	}
 
+	if (!handles.get(hSourceHandle)) {
+		files::materializeInheritedFileHandle(hSourceHandle);
+	}
+
+	auto sourceFile = handles.getAs<FileObject>(hSourceHandle);
+	auto targetProcess = wibo::handles().getAs<ProcessObject>(hTargetProcessHandle);
+	if (!sourceFile && targetProcess && targetProcess->pid != getpid() &&
+		files::hasInheritedFileHandleRecord(hSourceHandle)) {
+		*lpTargetHandle = hSourceHandle;
+		DEBUG_LOG("DuplicateHandle: treating recorded remote file handle %p as already duplicated\n", hSourceHandle);
+		return TRUE;
+	}
+	if (sourceFile && targetProcess && targetProcess->pid != getpid()) {
+		HandleMeta meta{};
+		sourceFile = handles.getAs<FileObject>(hSourceHandle, &meta);
+		std::string registryPath = files::inheritedFileRegistryPath(targetProcess->pid).string();
+		FILE *f = fopen(registryPath.c_str(), "a");
+		if (!f) {
+			setLastError(ERROR_ACCESS_DENIED);
+			return FALSE;
+		}
+		fprintf(f, "%x:%lld:%x:%x:%x:%x\n", static_cast<unsigned>(hSourceHandle), static_cast<long long>(getpid()),
+				sourceFile->fd, meta.grantedAccess, meta.flags, sourceFile->appendOnly ? 1 : 0);
+		fclose(f);
+		*lpTargetHandle = hSourceHandle;
+		DEBUG_LOG("DuplicateHandle: registered remote file handle %p for pid %d\n", hSourceHandle, targetProcess->pid);
+		if ((dwOptions & DUPLICATE_CLOSE_SOURCE) != 0) {
+			handles.release(hSourceHandle);
+		}
+		return TRUE;
+	}
+
+	if (!isPseudoCurrentProcessHandle(hTargetProcessHandle)) {
+		DEBUG_LOG("DuplicateHandle: duplicating %p for remote process %p using local handle table\n", hSourceHandle,
+				  hTargetProcessHandle);
+	}
 	if (!handles.duplicateTo(hSourceHandle, handles, *lpTargetHandle, dwDesiredAccess, bInheritHandle, dwOptions)) {
 		DEBUG_LOG("-> ERROR_INVALID_HANDLE\n");
 		setLastError(ERROR_INVALID_HANDLE);

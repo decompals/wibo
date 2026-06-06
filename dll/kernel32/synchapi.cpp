@@ -14,16 +14,24 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <pthread.h>
+#include <semaphore.h>
 #include <string>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
@@ -50,6 +58,17 @@ struct AddressWaitQueue {
 std::mutex g_waitAddressMutex;
 std::unordered_map<void *, std::weak_ptr<AddressWaitQueue>> g_waitAddressQueues;
 
+struct InheritedEventInfo {
+	std::string semName;
+	std::string stateName;
+	bool manualReset = false;
+};
+
+std::mutex g_inheritedEventMutex;
+std::unordered_map<HANDLE, InheritedEventInfo> g_inheritedEvents;
+std::unordered_map<HANDLE, sem_t *> g_openInheritedEvents;
+std::unordered_map<std::string, uint32_t *> g_manualEventStates;
+
 constexpr size_t sizeToIndex(size_t size) {
 	size_t index = __builtin_ctz(size);
 	return index >= kSupportedAddressSizes ? -1 : index;
@@ -66,6 +85,226 @@ std::shared_ptr<AddressWaitQueue> getWaitQueue(void *address) {
 	return queue;
 }
 
+std::string posixObjectPrefix() {
+	std::string result = "/wibo_";
+	result += wibo::instanceId.empty() ? "default" : wibo::instanceId;
+	result.push_back('_');
+	return result;
+}
+
+std::string inheritedEventName(HANDLE handle) {
+	char buffer[64];
+	snprintf(buffer, sizeof(buffer), "evt_%d_%x", static_cast<int>(getpid()), static_cast<unsigned>(handle));
+	return posixObjectPrefix() + buffer;
+}
+
+std::string inheritedEventStateName(HANDLE handle) {
+	char buffer[64];
+	snprintf(buffer, sizeof(buffer), "evtst_%d_%x", static_cast<int>(getpid()), static_cast<unsigned>(handle));
+	return posixObjectPrefix() + buffer;
+}
+
+std::optional<InheritedEventInfo> inheritedEventInfoForHandleLocked(HANDLE handle) {
+	auto infoIt = g_inheritedEvents.find(handle);
+	if (infoIt != g_inheritedEvents.end()) {
+		return infoIt->second;
+	}
+
+	const char *env = getenv("WIBO_INHERITED_EVENTS");
+	if (!env || *env == '\0') {
+		return std::nullopt;
+	}
+	std::string input(env);
+	size_t pos = 0;
+	while (pos < input.size()) {
+		size_t next = input.find(',', pos);
+		std::string entry = input.substr(pos, next == std::string::npos ? std::string::npos : next - pos);
+		size_t first = entry.find(':');
+		size_t second = first == std::string::npos ? std::string::npos : entry.find(':', first + 1);
+		size_t third = second == std::string::npos ? std::string::npos : entry.find(':', second + 1);
+		if (first != std::string::npos && second != std::string::npos) {
+			HANDLE entryHandle = static_cast<HANDLE>(strtol(entry.substr(0, first).c_str(), nullptr, 16));
+			if (entryHandle == handle) {
+				InheritedEventInfo parsed{};
+				parsed.manualReset = strtoul(entry.substr(first + 1, second - first - 1).c_str(), nullptr, 16) != 0;
+				if (third == std::string::npos) {
+					parsed.semName = entry.substr(second + 1);
+				} else {
+					parsed.semName = entry.substr(second + 1, third - second - 1);
+					parsed.stateName = entry.substr(third + 1);
+				}
+				g_inheritedEvents[handle] = parsed;
+				return parsed;
+			}
+		}
+		if (next == std::string::npos) {
+			break;
+		}
+		pos = next + 1;
+	}
+	return std::nullopt;
+}
+
+std::optional<InheritedEventInfo> inheritedEventInfoForHandle(HANDLE handle) {
+	std::lock_guard lock(g_inheritedEventMutex);
+	return inheritedEventInfoForHandleLocked(handle);
+}
+
+uint32_t *manualEventStateForNameLocked(const std::string &name) {
+	if (name.empty()) {
+		return nullptr;
+	}
+	auto existing = g_manualEventStates.find(name);
+	if (existing != g_manualEventStates.end()) {
+		return existing->second;
+	}
+	int fd = shm_open(name.c_str(), O_RDWR, 0600);
+	if (fd < 0) {
+		return nullptr;
+	}
+	void *mapped = mmap(nullptr, sizeof(uint32_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	close(fd);
+	if (mapped == MAP_FAILED) {
+		return nullptr;
+	}
+	auto *state = static_cast<uint32_t *>(mapped);
+	g_manualEventStates[name] = state;
+	return state;
+}
+
+uint32_t *manualEventStateForInfo(const InheritedEventInfo &info) {
+	std::lock_guard lock(g_inheritedEventMutex);
+	return manualEventStateForNameLocked(info.stateName);
+}
+
+void setManualEventState(const InheritedEventInfo &info, bool signaled) {
+	if (uint32_t *state = manualEventStateForInfo(info)) {
+		__atomic_store_n(state, signaled ? 1U : 0U, __ATOMIC_RELEASE);
+	}
+}
+
+bool isManualEventSignaled(const InheritedEventInfo &info) {
+	uint32_t *state = manualEventStateForInfo(info);
+	return state && __atomic_load_n(state, __ATOMIC_ACQUIRE) != 0;
+}
+
+sem_t *openInheritedEvent(HANDLE handle) {
+	std::lock_guard lock(g_inheritedEventMutex);
+	auto info = inheritedEventInfoForHandleLocked(handle);
+	if (!info || info->manualReset) {
+		return nullptr;
+	}
+	auto openIt = g_openInheritedEvents.find(handle);
+	if (openIt != g_openInheritedEvents.end()) {
+		return openIt->second;
+	}
+
+	sem_t *sem = sem_open(info->semName.c_str(), 0);
+	if (sem == SEM_FAILED) {
+		return nullptr;
+	}
+	g_openInheritedEvents[handle] = sem;
+	return sem;
+}
+
+bool hasInheritedEvent(HANDLE handle) { return static_cast<bool>(inheritedEventInfoForHandle(handle)); }
+
+void drainSemaphore(sem_t *sem) {
+	if (!sem) {
+		return;
+	}
+	while (sem_trywait(sem) == 0) {
+	}
+}
+
+DWORD waitInheritedManualEvent(const InheritedEventInfo &info, DWORD dwMilliseconds) {
+	auto start = std::chrono::steady_clock::now();
+	while (true) {
+		if (isManualEventSignaled(info)) {
+			return WAIT_OBJECT_0;
+		}
+		if (dwMilliseconds == 0) {
+			return WAIT_TIMEOUT;
+		}
+		if (dwMilliseconds != INFINITE &&
+			std::chrono::steady_clock::now() - start >= std::chrono::milliseconds(dwMilliseconds)) {
+			return WAIT_TIMEOUT;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+}
+
+DWORD waitInheritedEvent(HANDLE handle, DWORD dwMilliseconds) {
+	auto info = inheritedEventInfoForHandle(handle);
+	if (!info) {
+		return WAIT_FAILED;
+	}
+	if (info->manualReset) {
+		return waitInheritedManualEvent(*info, dwMilliseconds);
+	}
+
+	sem_t *sem = openInheritedEvent(handle);
+	if (!sem) {
+		return WAIT_FAILED;
+	}
+	if (dwMilliseconds == 0) {
+		return sem_trywait(sem) == 0 ? WAIT_OBJECT_0 : WAIT_TIMEOUT;
+	}
+	if (dwMilliseconds == INFINITE) {
+		while (sem_wait(sem) != 0) {
+			if (errno != EINTR) {
+				return WAIT_FAILED;
+			}
+		}
+		return WAIT_OBJECT_0;
+	}
+
+	timespec deadline{};
+	if (clock_gettime(CLOCK_REALTIME, &deadline) != 0) {
+		return WAIT_FAILED;
+	}
+	deadline.tv_sec += dwMilliseconds / 1000;
+	deadline.tv_nsec += static_cast<long>(dwMilliseconds % 1000) * 1000000L;
+	if (deadline.tv_nsec >= 1000000000L) {
+		deadline.tv_sec += 1;
+		deadline.tv_nsec -= 1000000000L;
+	}
+	while (sem_timedwait(sem, &deadline) != 0) {
+		if (errno == EINTR) {
+			continue;
+		}
+		return errno == ETIMEDOUT ? WAIT_TIMEOUT : WAIT_FAILED;
+	}
+	return WAIT_OBJECT_0;
+}
+
+bool createManualEventState(const std::string &name, bool initialState) {
+	int fd = shm_open(name.c_str(), O_RDWR | O_CREAT | O_EXCL, 0600);
+	if (fd < 0 && errno == EEXIST) {
+		shm_unlink(name.c_str());
+		fd = shm_open(name.c_str(), O_RDWR | O_CREAT | O_EXCL, 0600);
+	}
+	if (fd < 0) {
+		return false;
+	}
+	if (ftruncate(fd, sizeof(uint32_t)) != 0) {
+		close(fd);
+		shm_unlink(name.c_str());
+		return false;
+	}
+	void *mapped = mmap(nullptr, sizeof(uint32_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	close(fd);
+	if (mapped == MAP_FAILED) {
+		shm_unlink(name.c_str());
+		return false;
+	}
+	auto *state = static_cast<uint32_t *>(mapped);
+	*state = initialState ? 1U : 0U;
+	std::lock_guard lock(g_inheritedEventMutex);
+	g_manualEventStates[name] = state;
+	return true;
+}
+
 std::shared_ptr<AddressWaitQueue> tryGetWaitQueue(void *address) {
 	std::lock_guard lk(g_waitAddressMutex);
 	auto it = g_waitAddressQueues.find(address);
@@ -78,6 +317,38 @@ std::shared_ptr<AddressWaitQueue> tryGetWaitQueue(void *address) {
 		return nullptr;
 	}
 	return queue;
+}
+
+DWORD processExitCodeFromSiginfo(const siginfo_t &si) {
+	switch (si.si_code) {
+	case CLD_EXITED:
+		return static_cast<DWORD>(si.si_status);
+	case CLD_KILLED:
+	case CLD_DUMPED:
+		return 0xC0000000u | static_cast<DWORD>(si.si_status);
+	default:
+		return 0;
+	}
+}
+
+void refreshProcessSignaled(kernel32::ProcessObject *process) {
+#ifdef __linux__
+	if (!process || process->signaled || process->pidfd < 0) {
+		return;
+	}
+	siginfo_t si{};
+	if (waitid(P_PIDFD, process->pidfd, &si, WEXITED | WNOHANG | WNOWAIT) != 0 || si.si_pid == 0) {
+		return;
+	}
+	process->signaled = true;
+	if (!process->forcedExitCode) {
+		process->exitCode = processExitCodeFromSiginfo(si);
+	}
+	process->cv.notify_all();
+	process->notifyWaiters(false);
+#else
+	(void)process;
+#endif
 }
 
 void cleanupWaitQueue(void *address, const std::shared_ptr<AddressWaitQueue> &queue) {
@@ -590,6 +861,26 @@ HANDLE WINAPI CreateEventW(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManual
 		return NO_HANDLE;
 	}
 	HANDLE h = wibo::handles().alloc(std::move(ev), grantedAccess, handleFlags);
+	if ((handleFlags & HANDLE_FLAG_INHERIT) != 0) {
+		std::string semName = inheritedEventName(h);
+		std::string stateName = bManualReset ? inheritedEventStateName(h) : std::string{};
+		sem_t *sem = sem_open(semName.c_str(), O_CREAT | O_EXCL, 0600, bInitialState ? 1U : 0U);
+		if (sem == SEM_FAILED && errno == EEXIST) {
+			sem_unlink(semName.c_str());
+			sem = sem_open(semName.c_str(), O_CREAT | O_EXCL, 0600, bInitialState ? 1U : 0U);
+		}
+		if (sem != SEM_FAILED) {
+			if (bManualReset && !createManualEventState(stateName, bInitialState != FALSE)) {
+				DEBUG_LOG("CreateEventW: shm state %s failed: %d\n", stateName.c_str(), errno);
+			}
+			std::lock_guard lock(g_inheritedEventMutex);
+			g_inheritedEvents[h] =
+				InheritedEventInfo{.semName = semName, .stateName = stateName, .manualReset = bManualReset != FALSE};
+			g_openInheritedEvents[h] = sem;
+		} else {
+			DEBUG_LOG("CreateEventW: sem_open(%s) failed: %d\n", semName.c_str(), errno);
+		}
+	}
 	DEBUG_LOG("-> %p (created=%d)\n", h, created ? 1 : 0);
 	setLastError(created ? ERROR_SUCCESS : ERROR_ALREADY_EXISTS);
 	return h;
@@ -603,6 +894,29 @@ HANDLE WINAPI CreateEventA(LPSECURITY_ATTRIBUTES lpEventAttributes, BOOL bManual
 	makeWideNameFromAnsi(lpName, wideName);
 	return CreateEventW(lpEventAttributes, bManualReset, bInitialState,
 						lpName ? reinterpret_cast<LPCWSTR>(wideName.data()) : nullptr);
+}
+
+std::string buildInheritedEventEnv() {
+	std::lock_guard lock(g_inheritedEventMutex);
+	if (g_inheritedEvents.empty()) {
+		return {};
+	}
+
+	std::string result = "WIBO_INHERITED_EVENTS=";
+	bool first = true;
+	for (const auto &[handle, info] : g_inheritedEvents) {
+		char header[32];
+		snprintf(header, sizeof(header), "%x:%x:", static_cast<unsigned>(handle), info.manualReset ? 1U : 0U);
+		if (!first) {
+			result.push_back(',');
+		}
+		first = false;
+		result += header;
+		result += info.semName;
+		result.push_back(':');
+		result += info.stateName;
+	}
+	return result;
 }
 
 HANDLE WINAPI CreateSemaphoreW(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LONG lInitialCount, LONG lMaximumCount,
@@ -687,9 +1001,24 @@ BOOL WINAPI SetEvent(HANDLE hEvent) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SetEvent(%p)\n", hEvent);
 	auto ev = wibo::handles().getAs<EventObject>(hEvent);
+	auto inheritedInfo = inheritedEventInfoForHandle(hEvent);
 	if (!ev) {
+		if (inheritedInfo && inheritedInfo->manualReset) {
+			setManualEventState(*inheritedInfo, true);
+			return TRUE;
+		}
+		if (sem_t *sem = openInheritedEvent(hEvent)) {
+			DEBUG_LOG("SetEvent: signaling inherited event handle %p\n", hEvent);
+			sem_post(sem);
+			return TRUE;
+		}
 		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
+	}
+	if (inheritedInfo && inheritedInfo->manualReset) {
+		setManualEventState(*inheritedInfo, true);
+	} else if (sem_t *sem = openInheritedEvent(hEvent)) {
+		sem_post(sem);
 	}
 	ev->set();
 	return TRUE;
@@ -699,9 +1028,23 @@ BOOL WINAPI ResetEvent(HANDLE hEvent) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("ResetEvent(%p)\n", hEvent);
 	auto ev = wibo::handles().getAs<EventObject>(hEvent);
+	auto inheritedInfo = inheritedEventInfoForHandle(hEvent);
 	if (!ev) {
-		setLastError(ERROR_INVALID_HANDLE);
-		return FALSE;
+		if (!inheritedInfo) {
+			setLastError(ERROR_INVALID_HANDLE);
+			return FALSE;
+		}
+		if (inheritedInfo->manualReset) {
+			setManualEventState(*inheritedInfo, false);
+		} else {
+			drainSemaphore(openInheritedEvent(hEvent));
+		}
+		return TRUE;
+	}
+	if (inheritedInfo && inheritedInfo->manualReset) {
+		setManualEventState(*inheritedInfo, false);
+	} else {
+		drainSemaphore(openInheritedEvent(hEvent));
 	}
 	ev->reset();
 	return TRUE;
@@ -713,9 +1056,21 @@ DWORD WINAPI WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds) {
 	HandleMeta meta{};
 	Pin<> obj = wibo::handles().get(hHandle, &meta);
 	if (!obj) {
+		DWORD inheritedWait = waitInheritedEvent(hHandle, dwMilliseconds);
+		if (inheritedWait != WAIT_FAILED) {
+			DEBUG_LOG("WaitForSingleObject: inherited event handle %p -> %u\n", hHandle, inheritedWait);
+			return inheritedWait;
+		}
 		setLastError(ERROR_INVALID_HANDLE);
 		DEBUG_LOG("-> ERROR_INVALID_HANDLE\n");
 		return WAIT_FAILED;
+	}
+	if (detail::typeMatches<EventObject>(obj.get())) {
+		DWORD inheritedWait = waitInheritedEvent(hHandle, dwMilliseconds);
+		if (inheritedWait != WAIT_FAILED) {
+			DEBUG_LOG("WaitForSingleObject: inherited event handle %p -> %u\n", hHandle, inheritedWait);
+			return inheritedWait;
+		}
 	}
 #ifdef CHECK_ACCESS
 	if ((meta.grantedAccess & SYNCHRONIZE) == 0) {
@@ -800,6 +1155,7 @@ DWORD WINAPI WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds) {
 	case ObjectType::Process: {
 		auto po = std::move(obj).downcast<ProcessObject>();
 		std::unique_lock lk(po->m);
+		refreshProcessSignaled(po.get());
 		if (!po->signaled && !po->waitable) {
 			// Windows actually allows you to wait on your own process, but why bother?
 			return WAIT_TIMEOUT;
@@ -827,14 +1183,48 @@ DWORD WINAPI WaitForMultipleObjects(DWORD nCount, const HANDLE *lpHandles, BOOL 
 	}
 
 	std::vector<Pin<WaitableObject>> objects(nCount);
+	bool hasInheritedEventWait = false;
 	for (DWORD i = 0; i < nCount; ++i) {
 		HandleMeta meta{};
 		auto obj = wibo::handles().getAs<WaitableObject>(lpHandles[i], &meta);
 		if (!obj) {
-			setLastError(ERROR_INVALID_HANDLE);
-			return WAIT_FAILED;
+			if (!hasInheritedEvent(lpHandles[i])) {
+				setLastError(ERROR_INVALID_HANDLE);
+				return WAIT_FAILED;
+			}
+			hasInheritedEventWait = true;
+			continue;
 		}
+		hasInheritedEventWait = hasInheritedEventWait || hasInheritedEvent(lpHandles[i]);
 		objects[i] = std::move(obj);
+	}
+
+	if (!bWaitAll && hasInheritedEventWait) {
+		DEBUG_LOG("WaitForMultipleObjects: polling inherited event set\n");
+		auto start = std::chrono::steady_clock::now();
+		while (true) {
+			for (DWORD i = 0; i < nCount; ++i) {
+				DWORD result = WaitForSingleObject(lpHandles[i], 0);
+				if (result == WAIT_OBJECT_0 || result == WAIT_ABANDONED) {
+					return result + i;
+				}
+				if (result == WAIT_FAILED) {
+					return WAIT_FAILED;
+				}
+			}
+			if (dwMilliseconds == 0) {
+				return WAIT_TIMEOUT;
+			}
+			if (dwMilliseconds != INFINITE &&
+				std::chrono::steady_clock::now() - start >= std::chrono::milliseconds(dwMilliseconds)) {
+				return WAIT_TIMEOUT;
+			}
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
+	}
+	if (hasInheritedEventWait) {
+		setLastError(ERROR_INVALID_HANDLE);
+		return WAIT_FAILED;
 	}
 
 	WaitBlock block(bWaitAll, nCount);

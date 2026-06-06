@@ -544,8 +544,14 @@ bool isConsoleOutputDevice(const std::string &name, DWORD desiredAccess) {
 	return lowered == "conout$" || (lowered == "con" && (desiredAccess & GENERIC_WRITE) != 0);
 }
 
+bool wantsGenericRead(DWORD desiredAccess) { return (desiredAccess & GENERIC_READ) != 0; }
+
+bool wantsGenericWrite(DWORD desiredAccess) { return (desiredAccess & GENERIC_WRITE) != 0; }
+
 bool tryOpenHostConsoleOutput(DWORD desiredAccess, HANDLE &outHandle) {
-	int fd = open("/dev/tty", O_WRONLY | O_CLOEXEC);
+	bool canRead = wantsGenericRead(desiredAccess);
+	int flags = canRead ? O_RDWR : O_WRONLY;
+	int fd = open("/dev/tty", flags | O_CLOEXEC);
 	if (fd < 0) {
 		return false;
 	}
@@ -553,8 +559,25 @@ bool tryOpenHostConsoleOutput(DWORD desiredAccess, HANDLE &outHandle) {
 	auto fileObj = make_pin<FileObject>(fd);
 	fileObj->appendOnly = true;
 	uint32_t grantedAccess = FILE_GENERIC_WRITE;
-	if ((desiredAccess & GENERIC_READ) != 0) {
+	if (canRead) {
 		grantedAccess |= FILE_GENERIC_READ;
+	}
+	outHandle = wibo::handles().alloc(std::move(fileObj), grantedAccess, 0);
+	return true;
+}
+
+bool tryOpenHostConsoleInput(DWORD desiredAccess, HANDLE &outHandle) {
+	bool canWrite = wantsGenericWrite(desiredAccess);
+	int flags = canWrite ? O_RDWR : O_RDONLY;
+	int fd = open("/dev/tty", flags | O_CLOEXEC);
+	if (fd < 0) {
+		return false;
+	}
+
+	auto fileObj = make_pin<FileObject>(fd);
+	uint32_t grantedAccess = FILE_GENERIC_READ;
+	if (canWrite) {
+		grantedAccess |= FILE_GENERIC_WRITE;
 	}
 	outHandle = wibo::handles().alloc(std::move(fileObj), grantedAccess, 0);
 	return true;
@@ -565,6 +588,10 @@ bool tryOpenConsoleDevice(DWORD dwDesiredAccess, DWORD dwShareMode, DWORD dwCrea
 	(void)dwShareMode;
 	(void)dwCreationDisposition;
 	(void)dwFlagsAndAttributes;
+	std::string lowered = stringToLower(originalName);
+	if (lowered == "conin$" && tryOpenHostConsoleInput(dwDesiredAccess, outHandle)) {
+		return true;
+	}
 	if (isConsoleOutputDevice(originalName, dwDesiredAccess) && tryOpenHostConsoleOutput(dwDesiredAccess, outHandle)) {
 		return true;
 	}
@@ -774,6 +801,16 @@ LONG WINAPI CompareFileTime(const FILETIME *lpFileTime1, const FILETIME *lpFileT
 	return 0;
 }
 
+VOID WINAPI SetFileApisToANSI() {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("SetFileApisToANSI()\n");
+}
+
+VOID WINAPI SetFileApisToOEM() {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("SetFileApisToOEM()\n");
+}
+
 BOOL WINAPI WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten,
 					  LPOVERLAPPED lpOverlapped) {
 	HOST_CONTEXT_GUARD();
@@ -782,6 +819,10 @@ BOOL WINAPI WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrit
 
 	HandleMeta meta{};
 	auto file = wibo::handles().getAs<FileObject>(hFile, &meta);
+	if (!file) {
+		files::materializeInheritedFileHandle(hFile);
+		file = wibo::handles().getAs<FileObject>(hFile, &meta);
+	}
 	if (!file || !file->valid()) {
 		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
@@ -877,6 +918,10 @@ BOOL WINAPI ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, 
 
 	HandleMeta meta{};
 	auto file = wibo::handles().getAs<FileObject>(hFile, &meta);
+	if (!file) {
+		files::materializeInheritedFileHandle(hFile);
+		file = wibo::handles().getAs<FileObject>(hFile, &meta);
+	}
 	if (!file || !file->valid()) {
 		setLastError(ERROR_INVALID_HANDLE);
 		return FALSE;
@@ -955,6 +1000,32 @@ BOOL WINAPI ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, 
 
 	DEBUG_LOG("-> %u bytes read, error %d\n", io.bytesTransferred, io.unixError == 0 ? 0 : getLastError());
 	return io.unixError == 0;
+}
+
+std::string buildInheritedFileEnv() {
+	std::string result = "WIBO_INHERITED_FILES=";
+	bool any = false;
+	for (uint32_t i = 0; i < MAX_HANDLES; ++i) {
+		HANDLE handle = static_cast<HANDLE>((i + 1) << 2);
+		HandleMeta meta{};
+		auto file = wibo::handles().getAs<FileObject>(handle, &meta);
+		if (!file || !file->valid() || (meta.flags & HANDLE_FLAG_INHERIT) == 0) {
+			continue;
+		}
+		int fdFlags = fcntl(file->fd, F_GETFD);
+		if (fdFlags >= 0) {
+			fcntl(file->fd, F_SETFD, fdFlags & ~FD_CLOEXEC);
+		}
+		if (any) {
+			result.push_back(',');
+		}
+		char entry[128];
+		snprintf(entry, sizeof(entry), "%x:%x:%x:%x:%x", static_cast<unsigned>(handle), file->fd, meta.grantedAccess,
+				 meta.flags, file->appendOnly ? 1 : 0);
+		result += entry;
+		any = true;
+	}
+	return any ? result : std::string();
 }
 
 HANDLE WINAPI CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,

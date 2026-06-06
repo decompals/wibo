@@ -45,6 +45,7 @@ class Executable {
 	template <typename T> T *fromRVA(uint32_t rva) const { return (T *)(rva + (uint8_t *)imageBase); }
 
 	void *imageBase = nullptr;
+	void *requestedImageBase = nullptr;
 	size_t imageSize = 0;
 	void *entryPoint = nullptr;
 	void *rsrcBase = nullptr;
@@ -138,6 +139,7 @@ ModuleInfo *registerProcessModule(std::unique_ptr<Executable> executable, std::f
 								  std::string originalName);
 Executable *executableFromModule(HMODULE module);
 ModuleInfo *moduleInfoFromAddress(void *addr);
+std::string buildInheritedModuleBaseEnv();
 
 /**
  * HMODULE will be `nullptr` or `mainModule->imageBase` if it's the main module,

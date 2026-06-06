@@ -83,6 +83,46 @@ HANDLE Handles::alloc(Pin<> obj, uint32_t grantedAccess, uint32_t flags) {
 	return h;
 }
 
+bool Handles::allocAt(HANDLE h, Pin<> obj, uint32_t grantedAccess, uint32_t flags) {
+	if (h == NO_HANDLE || isPseudo(h) || !obj) {
+		return false;
+	}
+
+	std::unique_lock lk(m);
+	const auto idx = indexOf(h);
+	if (idx >= MAX_HANDLES) {
+		return false;
+	}
+	if (idx >= mSlots.size()) {
+		mSlots.resize(idx + 1);
+	}
+
+	auto &e = mSlots[idx];
+	if (e.obj) {
+		return false;
+	}
+
+	auto removeIndex = [idx](auto &container) {
+		container.erase(std::remove(container.begin(), container.end(), idx), container.end());
+	};
+	removeIndex(mFreeBelow);
+	removeIndex(mFreeAbove);
+	removeIndex(mQuarantine);
+
+	e.obj = obj.release();
+	e.meta.grantedAccess = grantedAccess;
+	e.meta.flags = flags;
+	e.meta.typeCache = e.obj->type;
+	if (e.meta.generation == 0) {
+		e.meta.generation = 1;
+	}
+	e.obj->handleCount.fetch_add(1, std::memory_order_relaxed);
+	if (idx >= nextIndex) {
+		nextIndex = idx + 1;
+	}
+	return true;
+}
+
 Pin<> Handles::get(HANDLE h, HandleMeta *metaOut) {
 	if (h == NO_HANDLE || isPseudo(h)) {
 		return {}; // pseudo-handles have no entries

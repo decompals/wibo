@@ -68,6 +68,7 @@ namespace kernel32 {
 
 HANDLE WINAPI GetCurrentProcess();
 DWORD WINAPI GetCurrentProcessId();
+HANDLE WINAPI OpenProcess(DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwProcessId);
 DWORD WINAPI GetCurrentThreadId();
 HANDLE WINAPI GetCurrentThread();
 BOOL WINAPI IsProcessorFeaturePresent(DWORD ProcessorFeature);

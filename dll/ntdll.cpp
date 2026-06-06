@@ -36,6 +36,43 @@ struct PROCESS_BASIC_INFORMATION {
 	ULONG_PTR InheritedFromUniqueProcessId;
 };
 
+struct SYSTEM_PROCESS_INFORMATION {
+	ULONG NextEntryOffset;
+	ULONG NumberOfThreads;
+	LARGE_INTEGER WorkingSetPrivateSize;
+	ULONG HardFaultCount;
+	ULONG NumberOfThreadsHighWatermark;
+	ULONGLONG CycleTime;
+	LARGE_INTEGER CreateTime;
+	LARGE_INTEGER UserTime;
+	LARGE_INTEGER KernelTime;
+	UNICODE_STRING ImageName;
+	LONG BasePriority;
+	HANDLE UniqueProcessId;
+	HANDLE InheritedFromUniqueProcessId;
+	ULONG HandleCount;
+	ULONG SessionId;
+	ULONG_PTR UniqueProcessKey;
+	SIZE_T PeakVirtualSize;
+	SIZE_T VirtualSize;
+	ULONG PageFaultCount;
+	SIZE_T PeakWorkingSetSize;
+	SIZE_T WorkingSetSize;
+	SIZE_T QuotaPeakPagedPoolUsage;
+	SIZE_T QuotaPagedPoolUsage;
+	SIZE_T QuotaPeakNonPagedPoolUsage;
+	SIZE_T QuotaNonPagedPoolUsage;
+	SIZE_T PagefileUsage;
+	SIZE_T PeakPagefileUsage;
+	SIZE_T PrivatePageCount;
+	LARGE_INTEGER ReadOperationCount;
+	LARGE_INTEGER WriteOperationCount;
+	LARGE_INTEGER OtherOperationCount;
+	LARGE_INTEGER ReadTransferCount;
+	LARGE_INTEGER WriteTransferCount;
+	LARGE_INTEGER OtherTransferCount;
+};
+
 struct ProcessHandleDetails {
 	pid_t pid = -1;
 	DWORD exitCode = STILL_ACTIVE;
@@ -44,6 +81,7 @@ struct ProcessHandleDetails {
 };
 
 constexpr LONG kDefaultBasePriority = 8;
+constexpr ULONG kSystemProcessInformation = 5;
 
 struct RTL_OSVERSIONINFOEXW : RTL_OSVERSIONINFOW {
 	WORD wServicePackMajor;
@@ -919,6 +957,39 @@ NTSTATUS WINAPI NtQuerySystemTime(PLARGE_INTEGER SystemTime) {
 	return STATUS_SUCCESS;
 }
 
+NTSTATUS WINAPI NtQuerySystemInformation(ULONG SystemInformationClass, PVOID SystemInformation,
+										 ULONG SystemInformationLength, PULONG ReturnLength) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("NtQuerySystemInformation(%u, %p, %u, %p) ", SystemInformationClass, SystemInformation,
+			  SystemInformationLength, ReturnLength);
+	constexpr ULONG kProcessInfoSize = sizeof(SYSTEM_PROCESS_INFORMATION);
+	if (ReturnLength) {
+		*ReturnLength = SystemInformationClass == kSystemProcessInformation ? kProcessInfoSize : 0;
+	}
+
+	if (SystemInformationClass == kSystemProcessInformation) {
+		if (!SystemInformation) {
+			DEBUG_LOG("-> 0x%x\n", STATUS_ACCESS_VIOLATION);
+			return STATUS_ACCESS_VIOLATION;
+		}
+		if (SystemInformationLength < kProcessInfoSize) {
+			DEBUG_LOG("-> 0x%x\n", STATUS_INFO_LENGTH_MISMATCH);
+			return STATUS_INFO_LENGTH_MISMATCH;
+		}
+
+		auto *info = reinterpret_cast<SYSTEM_PROCESS_INFORMATION *>(SystemInformation);
+		std::memset(info, 0, kProcessInfoSize);
+		info->BasePriority = kDefaultBasePriority;
+		info->UniqueProcessId = static_cast<HANDLE>(getpid());
+		info->InheritedFromUniqueProcessId = static_cast<HANDLE>(getppid());
+		DEBUG_LOG("-> 0x%x\n", STATUS_SUCCESS);
+		return STATUS_SUCCESS;
+	}
+
+	DEBUG_LOG("-> 0x%x\n", STATUS_INVALID_INFO_CLASS);
+	return STATUS_INVALID_INFO_CLASS;
+}
+
 BOOLEAN WINAPI RtlTimeToSecondsSince1970(PLARGE_INTEGER Time, PULONG ElapsedSeconds) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("RtlTimeToSecondsSince1970(%p, %p) ", Time, ElapsedSeconds);
@@ -1148,7 +1219,7 @@ ULONG WINAPI RtlIsDosDeviceName_U(PWSTR DeviceName) {
 		return 0;
 	}
 	ULONG result =
-		static_cast<ULONG>((componentLength * sizeof(WCHAR)) << 16) | static_cast<ULONG>(start * sizeof(WCHAR));
+		static_cast<ULONG>((start * sizeof(WCHAR)) << 16) | static_cast<ULONG>(componentLength * sizeof(WCHAR));
 	DEBUG_LOG("-> 0x%x\n", result);
 	return result;
 }

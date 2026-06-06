@@ -307,6 +307,29 @@ std::string normalizedBaseKey(const ParsedModuleName &parsed) {
 	return normalizeAlias(base);
 }
 
+std::optional<uintptr_t> inheritedModuleBaseForName(const std::string &normalizedName) {
+	const char *env = getenv("WIBO_INHERITED_MODULE_BASES");
+	if (!env || *env == '\0') {
+		return std::nullopt;
+	}
+
+	std::string input(env);
+	size_t pos = 0;
+	while (pos < input.size()) {
+		size_t next = input.find(',', pos);
+		std::string entry = input.substr(pos, next == std::string::npos ? std::string::npos : next - pos);
+		size_t split = entry.find(':');
+		if (split != std::string::npos && entry.substr(0, split) == normalizedName) {
+			return static_cast<uintptr_t>(strtoull(entry.substr(split + 1).c_str(), nullptr, 16));
+		}
+		if (next == std::string::npos) {
+			break;
+		}
+		pos = next + 1;
+	}
+	return std::nullopt;
+}
+
 std::string_view resolveApiSetAlias(std::string_view requested) {
 	const auto parsed = parseModuleName(requested);
 	std::string normalized = normalizedBaseKey(parsed);
@@ -1206,6 +1229,10 @@ static ModuleInfo *loadModuleInternal(const std::string &dllName, bool staticAtt
 		}
 
 		auto executable = std::make_unique<Executable>();
+		if (auto inheritedBase = inheritedModuleBaseForName(normalizedBaseKey(parsed))) {
+			executable->requestedImageBase = reinterpret_cast<void *>(*inheritedBase);
+			DEBUG_LOG("  inherited module base hint for %s -> %p\n", parsed.base.c_str(), executable->requestedImageBase);
+		}
 		if (!executable->loadPE(file, true)) {
 			DEBUG_LOG("  loadPE failed for %s\n", path.c_str());
 			fclose(file);
@@ -1495,6 +1522,33 @@ Executable *executableFromModule(HMODULE module) {
 		info->executable = std::move(executable);
 	}
 	return info->executable.get();
+}
+
+std::string buildInheritedModuleBaseEnv() {
+	auto reg = registry();
+	std::string result = "WIBO_INHERITED_MODULE_BASES=";
+	std::unordered_set<std::string> seen;
+	bool first = true;
+
+	for (const auto &[_, module] : reg->modulesByKey) {
+		if (!module || !module->executable || module->resolvedPath.empty() || module->normalizedName.empty()) {
+			continue;
+		}
+		if (!seen.insert(module->normalizedName).second) {
+			continue;
+		}
+		if (!first) {
+			result.push_back(',');
+		}
+		first = false;
+		result += module->normalizedName;
+		result.push_back(':');
+		char buffer[32];
+		snprintf(buffer, sizeof(buffer), "%zx", reinterpret_cast<size_t>(module->executable->imageBase));
+		result += buffer;
+	}
+
+	return first ? std::string{} : result;
 }
 
 std::unordered_map<std::string, ModulePtr> allLoadedModules() {

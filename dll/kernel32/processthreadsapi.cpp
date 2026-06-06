@@ -5,9 +5,11 @@
 #include "errors.h"
 #include "files.h"
 #include "handles.h"
+#include "heap.h"
 #include "internal.h"
 #include "kernel32.h"
 #include "kernel32_trampolines.h"
+#include "memoryapi.h"
 #include "modules.h"
 #include "processes.h"
 #include "strutil.h"
@@ -21,16 +23,26 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <filesystem>
 #include <functional>
 #include <limits>
 #include <mutex>
 #include <pthread.h>
 #include <string>
 #include <sys/resource.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 #include <sys/syscall.h>
 #include <sys/time.h>
 #include <unistd.h>
 #include <vector>
+
+namespace kernel32 {
+std::string buildInheritedFileEnv();
+std::string buildInheritedMappingEnv();
+std::string buildInheritedEventEnv();
+} // namespace kernel32
 
 namespace {
 
@@ -45,6 +57,7 @@ const FILETIME kDefaultThreadFileTime = {static_cast<DWORD>(UNIX_TIME_ZERO & 0xF
 constexpr DWORD STARTF_USESHOWWINDOW = 0x00000001;
 constexpr DWORD STARTF_USESTDHANDLES = 0x00000100;
 constexpr WORD SW_SHOWNORMAL = 1;
+constexpr char kStartupReserved2Env[] = "WIBO_STARTUP_RESERVED2";
 
 FILETIME fileTimeFromTimeval(const struct timeval &value) {
 	uint64_t total = 0;
@@ -75,6 +88,118 @@ DWORD_PTR computeSystemAffinityMask() {
 	return (static_cast<DWORD_PTR>(1) << usable) - 1;
 }
 
+std::optional<pid_t> inheritedParentPid() {
+	const char *parentPid = getenv("WIBO_PARENT_PID");
+	if (!parentPid) {
+		return std::nullopt;
+	}
+	char *end = nullptr;
+	long parsed = strtol(parentPid, &end, 10);
+	if (!end || *end != '\0' || parsed <= 0 || parsed > std::numeric_limits<pid_t>::max()) {
+		return std::nullopt;
+	}
+	return static_cast<pid_t>(parsed);
+}
+
+char hexDigit(unsigned value) { return static_cast<char>(value < 10 ? '0' + value : 'a' + (value - 10)); }
+
+int hexValue(char c) {
+	if (c >= '0' && c <= '9') {
+		return c - '0';
+	}
+	if (c >= 'a' && c <= 'f') {
+		return c - 'a' + 10;
+	}
+	if (c >= 'A' && c <= 'F') {
+		return c - 'A' + 10;
+	}
+	return -1;
+}
+
+std::string encodeStartupReserved2(LPSTARTUPINFOA startupInfo) {
+	if (!startupInfo || !startupInfo->cbReserved2 || startupInfo->lpReserved2 == GUEST_NULL) {
+		return {};
+	}
+
+	const auto *bytes = fromGuestPtr<const unsigned char>(startupInfo->lpReserved2);
+	std::string encoded;
+	encoded.reserve(sizeof(kStartupReserved2Env) + static_cast<size_t>(startupInfo->cbReserved2) * 2);
+	encoded += kStartupReserved2Env;
+	encoded += '=';
+	for (size_t i = 0; i < startupInfo->cbReserved2; ++i) {
+		encoded += hexDigit(bytes[i] >> 4);
+		encoded += hexDigit(bytes[i] & 0xf);
+	}
+	return encoded;
+}
+
+std::string buildInheritedProcessEnv() {
+	std::string result = "WIBO_INHERITED_PROCESSES=";
+	bool any = false;
+	for (uint32_t i = 0; i < MAX_HANDLES; ++i) {
+		HANDLE handle = static_cast<HANDLE>((i + 1) << 2);
+		HandleMeta meta{};
+		auto process = wibo::handles().getAs<ProcessObject>(handle, &meta);
+		if (!process || (meta.flags & HANDLE_FLAG_INHERIT) == 0) {
+			continue;
+		}
+		if (any) {
+			result.push_back(',');
+		}
+		char entry[64];
+		snprintf(entry, sizeof(entry), "%x:%x", static_cast<unsigned>(handle), static_cast<unsigned>(process->pid));
+		result += entry;
+		any = true;
+	}
+	return any ? result : std::string();
+}
+
+std::vector<unsigned char> decodeStartupReserved2() {
+	const char *encoded = getenv(kStartupReserved2Env);
+	if (!encoded) {
+		return {};
+	}
+
+	size_t len = strlen(encoded);
+	if ((len % 2) != 0) {
+		return {};
+	}
+
+	std::vector<unsigned char> bytes;
+	bytes.reserve(len / 2);
+	for (size_t i = 0; i < len; i += 2) {
+		int high = hexValue(encoded[i]);
+		int low = hexValue(encoded[i + 1]);
+		if (high < 0 || low < 0) {
+			return {};
+		}
+		bytes.push_back(static_cast<unsigned char>((high << 4) | low));
+	}
+	return bytes;
+}
+
+GUEST_PTR inheritedStartupReserved2(WORD *sizeOut) {
+	static std::vector<unsigned char> bytes = decodeStartupReserved2();
+	static GUEST_PTR guestBuffer = GUEST_NULL;
+
+	size_t size = std::min<size_t>(bytes.size(), std::numeric_limits<WORD>::max());
+	if (sizeOut) {
+		*sizeOut = static_cast<WORD>(size);
+	}
+	if (size == 0) {
+		return GUEST_NULL;
+	}
+	if (guestBuffer == GUEST_NULL) {
+		void *buffer = wibo::heap::guestMalloc(size, true);
+		if (!buffer) {
+			return GUEST_NULL;
+		}
+		std::memcpy(buffer, bytes.data(), size);
+		guestBuffer = toGuestPtr(buffer);
+	}
+	return guestBuffer;
+}
+
 template <typename StartupInfo> void populateStartupInfo(StartupInfo *info) {
 	if (!info) {
 		return;
@@ -83,8 +208,7 @@ template <typename StartupInfo> void populateStartupInfo(StartupInfo *info) {
 	info->cb = sizeof(StartupInfo);
 	info->dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
 	info->wShowWindow = SW_SHOWNORMAL;
-	info->cbReserved2 = 0;
-	info->lpReserved2 = GUEST_NULL;
+	info->lpReserved2 = inheritedStartupReserved2(&info->cbReserved2);
 	info->hStdInput = files::getStdHandle(STD_INPUT_HANDLE);
 	info->hStdOutput = files::getStdHandle(STD_OUTPUT_HANDLE);
 	info->hStdError = files::getStdHandle(STD_ERROR_HANDLE);
@@ -211,6 +335,26 @@ DWORD WINAPI GetCurrentProcessId() {
 	DWORD pid = static_cast<DWORD>(getpid());
 	DEBUG_LOG("GetCurrentProcessId() -> %u\n", pid);
 	return pid;
+}
+
+HANDLE WINAPI OpenProcess(DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwProcessId) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("OpenProcess(0x%x, %d, %u) ", dwDesiredAccess, bInheritHandle, dwProcessId);
+
+	bool isCurrentProcess = dwProcessId == static_cast<DWORD>(getpid());
+	auto parentPid = inheritedParentPid();
+	bool isInheritedParent = parentPid && dwProcessId == static_cast<DWORD>(*parentPid);
+	if (!isCurrentProcess && !isInheritedParent) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		DEBUG_LOG("-> 0\n");
+		return 0;
+	}
+
+	auto process = make_pin<ProcessObject>(isInheritedParent ? *parentPid : getpid(), -1, false);
+	DWORD flags = bInheritHandle ? HANDLE_FLAG_INHERIT : 0;
+	HANDLE handle = wibo::handles().alloc(std::move(process), dwDesiredAccess, flags);
+	DEBUG_LOG("-> %p\n", handle);
+	return handle;
 }
 
 DWORD WINAPI GetCurrentThreadId() {
@@ -683,6 +827,12 @@ BOOL WINAPI CreateProcessA(LPCSTR lpApplicationName, LPSTR lpCommandLine, LPSECU
 			  lpCommandLine ? lpCommandLine : "<null>", lpProcessAttributes, lpThreadAttributes, bInheritHandles,
 			  dwCreationFlags, lpEnvironment, lpCurrentDirectory ? lpCurrentDirectory : "<none>", lpStartupInfo,
 			  lpProcessInformation);
+	if (lpStartupInfo) {
+		DEBUG_LOG("  startup: cb=%u flags=0x%x cbReserved2=%u lpReserved2=%p stdin=%p stdout=%p stderr=%p\n",
+				  lpStartupInfo->cb, lpStartupInfo->dwFlags, lpStartupInfo->cbReserved2,
+				  fromGuestPtr(lpStartupInfo->lpReserved2), lpStartupInfo->hStdInput, lpStartupInfo->hStdOutput,
+				  lpStartupInfo->hStdError);
+	}
 
 	bool useSearchPath = lpApplicationName == nullptr;
 	std::string application;
@@ -704,8 +854,58 @@ BOOL WINAPI CreateProcessA(LPCSTR lpApplicationName, LPSTR lpCommandLine, LPSECU
 		return FALSE;
 	}
 
+	bool sameImageChild = false;
+	if (!wibo::guestExecutablePath.empty()) {
+		sameImageChild = files::canonicalPath(wibo::guestExecutablePath) == files::canonicalPath(*resolved);
+	}
+
+	std::vector<std::string> extraEnv;
+	std::string startupReserved2 = sameImageChild ? encodeStartupReserved2(lpStartupInfo) : std::string{};
+	if (!startupReserved2.empty()) {
+		extraEnv.push_back(startupReserved2);
+		extraEnv.push_back("WIBO_PARENT_PID=" + std::to_string(getpid()));
+	}
+	if (!startupReserved2.empty() || bInheritHandles) {
+		std::string fileEnv = buildInheritedFileEnv();
+		if (!fileEnv.empty()) {
+			extraEnv.push_back(fileEnv);
+		}
+		std::string mappingEnv = buildInheritedMappingEnv();
+		if (!mappingEnv.empty()) {
+			extraEnv.push_back(mappingEnv);
+		}
+		std::string eventEnv = buildInheritedEventEnv();
+		if (!eventEnv.empty()) {
+			extraEnv.push_back(eventEnv);
+		}
+		std::string processEnv = buildInheritedProcessEnv();
+		if (!processEnv.empty()) {
+			extraEnv.push_back(processEnv);
+		}
+		std::string moduleEnv = wibo::buildInheritedModuleBaseEnv();
+		if (!moduleEnv.empty()) {
+			extraEnv.push_back(moduleEnv);
+		}
+	}
+	if (!startupReserved2.empty()) {
+#ifdef __linux__
+		prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY);
+#endif
+	}
+
+	std::string workingDirectory;
+	if (lpCurrentDirectory) {
+		workingDirectory = files::pathFromWindows(lpCurrentDirectory).string();
+	} else {
+		std::error_code ec;
+		auto cwd = std::filesystem::current_path(ec);
+		if (!ec) {
+			workingDirectory = cwd.string();
+		}
+	}
+
 	Pin<ProcessObject> obj;
-	int spawnResult = wibo::spawnWithCommandLine(*resolved, commandLine, obj);
+	int spawnResult = wibo::spawnWithCommandLine(*resolved, commandLine, obj, extraEnv, workingDirectory);
 	if (spawnResult != 0) {
 		setLastError((spawnResult == ENOENT) ? ERROR_FILE_NOT_FOUND : ERROR_ACCESS_DENIED);
 		return FALSE;

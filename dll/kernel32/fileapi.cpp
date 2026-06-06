@@ -1803,6 +1803,9 @@ DWORD WINAPI GetTempPathA(DWORD nBufferLength, LPSTR lpBuffer) {
 	} else {
 		pathStr = "Z:\\tmp\\";
 	}
+	if (!pathStr.empty() && pathStr.back() != '\\') {
+		pathStr.push_back('\\');
+	}
 	size_t len = pathStr.length();
 	if (len + 1 > nBufferLength) {
 		setLastError(ERROR_INSUFFICIENT_BUFFER);

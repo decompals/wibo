@@ -1397,8 +1397,8 @@ void freeModule(ModuleInfo *info) {
 	}
 }
 
-void *resolveFuncByName(ModuleInfo *info, const char *funcName) {
-	if (!info) {
+void *findExportByName(ModuleInfo *info, const char *funcName) {
+	if (!info || !funcName) {
 		return nullptr;
 	}
 	if (info->moduleStub && info->moduleStub->byName) {
@@ -1410,15 +1410,12 @@ void *resolveFuncByName(ModuleInfo *info, const char *funcName) {
 	ensureExportsInitialized(*info);
 	auto it = info->exportNameToOrdinal.find(funcName);
 	if (it != info->exportNameToOrdinal.end()) {
-		return resolveFuncByOrdinal(info, it->second);
-	}
-	if (info->moduleStub) {
-		return reinterpret_cast<void *>(resolveMissingFuncName(info->originalName.c_str(), funcName));
+		return findExportByOrdinal(info, it->second);
 	}
 	return nullptr;
 }
 
-void *resolveFuncByOrdinal(ModuleInfo *info, uint16_t ordinal) {
+void *findExportByOrdinal(ModuleInfo *info, uint16_t ordinal) {
 	if (!info) {
 		return nullptr;
 	}
@@ -1438,7 +1435,27 @@ void *resolveFuncByOrdinal(ModuleInfo *info, uint16_t ordinal) {
 			}
 		}
 	}
-	if (info->moduleStub) {
+	return nullptr;
+}
+
+void *resolveFuncByName(ModuleInfo *info, const char *funcName) {
+	void *func = findExportByName(info, funcName);
+	if (func) {
+		return func;
+	}
+	if (info && info->moduleStub) {
+		const char *safeFunc = funcName ? funcName : "";
+		return reinterpret_cast<void *>(resolveMissingFuncName(info->originalName.c_str(), safeFunc));
+	}
+	return nullptr;
+}
+
+void *resolveFuncByOrdinal(ModuleInfo *info, uint16_t ordinal) {
+	void *func = findExportByOrdinal(info, ordinal);
+	if (func) {
+		return func;
+	}
+	if (info && info->moduleStub) {
 		return reinterpret_cast<void *>(resolveMissingFuncOrdinal(info->originalName.c_str(), ordinal));
 	}
 	return nullptr;

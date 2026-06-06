@@ -283,10 +283,10 @@ FARPROC WINAPI GetProcAddress(HMODULE hModule, LPCSTR lpProcName) {
 	const auto proc = reinterpret_cast<uintptr_t>(lpProcName);
 	if (proc & ~0xFFFFu) {
 		DEBUG_LOG("GetProcAddress(%s, %s) ", info->normalizedName.c_str(), lpProcName);
-		result = wibo::resolveFuncByName(info, lpProcName);
+		result = wibo::findExportByName(info, lpProcName);
 	} else {
 		DEBUG_LOG("GetProcAddress(%s, %u) ", info->normalizedName.c_str(), proc);
-		result = wibo::resolveFuncByOrdinal(info, static_cast<uint16_t>(proc));
+		result = wibo::findExportByOrdinal(info, static_cast<uint16_t>(proc));
 	}
 	DEBUG_LOG("-> %p\n", result);
 	if (!result) {

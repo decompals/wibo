@@ -386,6 +386,30 @@ void ensureDefaultActivationContext() {
 
 namespace kernel32 {
 
+LPSTR WINAPI lstrcpynA(LPSTR lpString1, LPCSTR lpString2, int iMaxLength) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("lstrcpynA(%p, %p, %d)\n", lpString1, lpString2, iMaxLength);
+
+	UINT count = static_cast<UINT>(iMaxLength);
+	if (!lpString1) {
+		return nullptr;
+	}
+	if (!lpString2 && count > 1) {
+		return nullptr;
+	}
+
+	LPSTR destination = lpString1;
+	LPCSTR source = lpString2;
+	while (count > 1 && *source) {
+		count--;
+		*destination++ = *source++;
+	}
+	if (count) {
+		*destination = '\0';
+	}
+	return lpString1;
+}
+
 ATOM WINAPI AddAtomA(LPCSTR lpString) {
 	HOST_CONTEXT_GUARD();
 	ATOM atom = 0;

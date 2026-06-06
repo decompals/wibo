@@ -17,6 +17,7 @@
 #include <map>
 #include <mutex>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <utility>
 
@@ -174,6 +175,49 @@ bool mappedViewRegionForAddress(uintptr_t request, uintptr_t pageBase, MEMORY_BA
 	return false;
 }
 
+bool protectAllowsFileGrowth(DWORD protect) { return protect == PAGE_READWRITE || protect == PAGE_EXECUTE_READWRITE; }
+
+bool fileSizeFromFd(int fd, uint64_t &size) {
+	struct stat st{};
+	if (fstat(fd, &st) != 0) {
+		kernel32::setLastErrorFromErrno();
+		return false;
+	}
+	if (st.st_size < 0) {
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
+		return false;
+	}
+	size = static_cast<uint64_t>(st.st_size);
+	return true;
+}
+
+DWORD fileGrowthErrorFromErrno(int err) {
+	switch (err) {
+	case ENOSPC:
+#ifdef EDQUOT
+	case EDQUOT:
+#endif
+#ifdef EFBIG
+	case EFBIG:
+#endif
+		return ERROR_DISK_FULL;
+	default:
+		return wibo::winErrorFromErrno(err);
+	}
+}
+
+bool growFileForMapping(int fd, uint64_t size) {
+	if (size > static_cast<uint64_t>(std::numeric_limits<off_t>::max())) {
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
+		return false;
+	}
+	if (ftruncate(fd, static_cast<off_t>(size)) != 0) {
+		kernel32::setLastError(fileGrowthErrorFromErrno(errno));
+		return false;
+	}
+	return true;
+}
+
 } // namespace
 
 namespace kernel32 {
@@ -216,12 +260,26 @@ HANDLE WINAPI CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMappi
 			return NO_HANDLE;
 		}
 		mapping->fd = dupFd;
+		uint64_t fileSize = 0;
+		if (!fileSizeFromFd(dupFd, fileSize)) {
+			return NO_HANDLE;
+		}
 		if (size == 0) {
-			off_t fileSize = lseek(dupFd, 0, SEEK_END);
-			if (fileSize < 0) {
+			if (fileSize == 0) {
+				setLastError(ERROR_FILE_INVALID);
 				return NO_HANDLE;
 			}
-			size = static_cast<uint64_t>(fileSize);
+			size = fileSize;
+		} else if (size > fileSize && protectAllowsFileGrowth(flProtect)) {
+			if (!growFileForMapping(dupFd, size)) {
+				return NO_HANDLE;
+			}
+			DEBUG_LOG("CreateFileMappingA: grew backing file from %llu to %llu bytes\n",
+					  static_cast<unsigned long long>(fileSize), static_cast<unsigned long long>(size));
+		}
+		if (size > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+			setLastError(ERROR_INVALID_PARAMETER);
+			return NO_HANDLE;
 		}
 		mapping->maxSize = size;
 	}

@@ -78,53 +78,64 @@ uintptr_t alignUp(uintptr_t value, size_t alignment) {
 	return (value + mask) & ~mask;
 }
 
+struct FileMapAccess {
+	bool read = false;
+	bool write = false;
+	bool execute = false;
+	bool copy = false;
+};
+
+FileMapAccess fileMapAccessFromDesiredAccess(DWORD desiredAccess) {
+	// FILE_MAP_ALL_ACCESS includes FILE_MAP_COPY's bit, but maps as a writable shared view.
+	const bool allAccess = (desiredAccess & FILE_MAP_ALL_ACCESS) == FILE_MAP_ALL_ACCESS;
+	FileMapAccess access{};
+	access.read = allAccess || (desiredAccess & (FILE_MAP_READ | FILE_MAP_WRITE | FILE_MAP_COPY)) != 0;
+	access.write = allAccess || (desiredAccess & FILE_MAP_WRITE) != 0;
+	access.execute = (desiredAccess & FILE_MAP_EXECUTE) != 0;
+	access.copy = !allAccess && (desiredAccess & FILE_MAP_COPY) != 0;
+	if (access.copy) {
+		access.write = true;
+	}
+	return access;
+}
+
 DWORD desiredAccessToProtect(DWORD desiredAccess, DWORD mappingProtect) {
-	DWORD access = desiredAccess;
-	if ((access & FILE_MAP_ALL_ACCESS) == FILE_MAP_ALL_ACCESS) {
-		access |= FILE_MAP_READ | FILE_MAP_WRITE;
-	}
-	bool wantExecute = (access & FILE_MAP_EXECUTE) != 0;
-	bool wantWrite = (access & FILE_MAP_WRITE) != 0;
-	bool wantCopy = (access & FILE_MAP_COPY) != 0;
-	bool wantRead = (access & (FILE_MAP_READ | FILE_MAP_WRITE | FILE_MAP_COPY)) != 0;
-	if (wantCopy) {
-		wantWrite = true;
-	}
+	FileMapAccess access = fileMapAccessFromDesiredAccess(desiredAccess);
 	const bool supportsWrite = mappingProtect == PAGE_READWRITE || mappingProtect == PAGE_EXECUTE_READWRITE ||
 							   mappingProtect == PAGE_WRITECOPY || mappingProtect == PAGE_EXECUTE_WRITECOPY;
 	const bool supportsCopy = mappingProtect == PAGE_WRITECOPY || mappingProtect == PAGE_EXECUTE_WRITECOPY;
 
-	if (wantCopy && !supportsCopy) {
-		wantCopy = false;
+	if (access.copy && !supportsCopy) {
+		access.copy = false;
 	}
-	if (wantWrite && !supportsWrite) {
+	if (access.write && !supportsWrite) {
 		if (supportsCopy) {
-			wantCopy = true;
-			wantWrite = false;
+			access.copy = true;
+			access.write = false;
 		} else {
-			wantWrite = false;
+			access.write = false;
 		}
 	}
-	if (!wantRead && (mappingProtect == PAGE_READONLY || mappingProtect == PAGE_EXECUTE_READ ||
-					  mappingProtect == PAGE_WRITECOPY || mappingProtect == PAGE_EXECUTE_WRITECOPY)) {
-		wantRead = true;
+	if (!access.read && (mappingProtect == PAGE_READONLY || mappingProtect == PAGE_EXECUTE_READ ||
+						 mappingProtect == PAGE_WRITECOPY || mappingProtect == PAGE_EXECUTE_WRITECOPY)) {
+		access.read = true;
 	}
 
 	DWORD protect = PAGE_NOACCESS;
-	if (wantCopy && supportsCopy) {
-		protect = wantExecute ? PAGE_EXECUTE_WRITECOPY : PAGE_WRITECOPY;
-	} else if (wantExecute) {
-		if (wantWrite) {
+	if (access.copy && supportsCopy) {
+		protect = access.execute ? PAGE_EXECUTE_WRITECOPY : PAGE_WRITECOPY;
+	} else if (access.execute) {
+		if (access.write) {
 			protect = PAGE_EXECUTE_READWRITE;
-		} else if (wantRead) {
+		} else if (access.read) {
 			protect = PAGE_EXECUTE_READ;
 		} else {
 			protect = PAGE_EXECUTE;
 		}
 	} else {
-		if (wantWrite) {
+		if (access.write) {
 			protect = PAGE_READWRITE;
-		} else if (wantRead) {
+		} else if (access.read) {
 			protect = PAGE_READONLY;
 		}
 	}
@@ -328,32 +339,26 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 		return nullptr;
 	}
 
-	bool wantWrite = (dwDesiredAccess & FILE_MAP_WRITE) != 0;
-	bool wantExecute = (dwDesiredAccess & FILE_MAP_EXECUTE) != 0;
-	bool wantCopy = (dwDesiredAccess & FILE_MAP_COPY) != 0;
-	bool wantAllAccess = (dwDesiredAccess & FILE_MAP_ALL_ACCESS) == FILE_MAP_ALL_ACCESS;
-	if (wantAllAccess) {
-		wantWrite = true;
-	}
+	FileMapAccess access = fileMapAccessFromDesiredAccess(dwDesiredAccess);
 	int prot = PROT_READ;
 	if (mapping->protect == PAGE_READWRITE) {
-		if (wantWrite || wantCopy) {
+		if (access.write || access.copy) {
 			prot |= PROT_WRITE;
 		}
 	} else {
-		if (wantWrite && !wantCopy) {
+		if (access.write && !access.copy) {
 			setLastError(ERROR_ACCESS_DENIED);
 			return nullptr;
 		}
-		if (wantCopy) {
+		if (access.copy) {
 			prot |= PROT_WRITE;
 		}
 	}
-	if (wantExecute) {
+	if (access.execute) {
 		prot |= PROT_EXEC;
 	}
 
-	int flags = (mapping->anonymous ? MAP_ANONYMOUS : 0) | (wantCopy ? MAP_PRIVATE : MAP_SHARED);
+	int flags = (mapping->anonymous ? MAP_ANONYMOUS : 0) | (access.copy ? MAP_PRIVATE : MAP_SHARED);
 	const size_t pageSize = wibo::heap::systemPageSize();
 	off_t alignedOffset = mapping->anonymous ? 0 : static_cast<off_t>(offset & ~static_cast<uint64_t>(pageSize - 1));
 	size_t offsetDelta = static_cast<size_t>(offset - static_cast<uint64_t>(alignedOffset));

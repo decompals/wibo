@@ -6,6 +6,7 @@
 #include "context.h"
 #include "errors.h"
 #include "files.h"
+#include "handleapi.h"
 #include "handles.h"
 #include "internal.h"
 #include "namedpipeapi.h"
@@ -1755,33 +1756,60 @@ UINT WINAPI GetTempFileNameA(LPCSTR lpPathName, LPCSTR lpPrefixString, UINT uUni
 		setLastError(ERROR_BUFFER_OVERFLOW);
 		return 0;
 	}
-	char uniqueStr[20];
-	std::filesystem::path path;
+
+	auto makeTempFileName = [&](UINT unique) {
+		char filename[12];
+		snprintf(filename, sizeof(filename), "%.3s%04X.TMP", lpPrefixString, unique & 0xFFFF);
+
+		std::string path = lpPathName;
+		if (!path.empty() && path.back() != '\\' && path.back() != '/') {
+			path.push_back('\\');
+		}
+		path += filename;
+		return path;
+	};
 
 	if (uUnique == 0) {
 		std::random_device rd;
 		random_shorts_engine rse(rd());
-		while (true) {
-			uUnique = rse();
+		UINT startUnique = rse();
+		if (startUnique == 0) {
+			startUnique = 1;
+		}
+		bool created = false;
+		for (UINT attempt = 0; attempt < 0xFFFF; ++attempt) {
+			uUnique = (startUnique + attempt) & 0xFFFF;
 			if (uUnique == 0) {
 				continue;
 			}
-			snprintf(uniqueStr, sizeof(uniqueStr), "%.3s%X.TMP", lpPrefixString, uUnique);
-			path = files::pathFromWindows(lpPathName) / uniqueStr;
-			int fd = open(path.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0644);
-			if (fd >= 0) {
-				close(fd);
+			std::string path = makeTempFileName(uUnique);
+			HANDLE handle = CreateFileA(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+										FILE_ATTRIBUTE_TEMPORARY, NO_HANDLE);
+			if (handle != INVALID_HANDLE_VALUE) {
+				CloseHandle(handle);
+				strncpy(lpTempFileName, path.c_str(), MAX_PATH);
+				lpTempFileName[MAX_PATH - 1] = '\0';
+				DEBUG_LOG(" -> %s\n", lpTempFileName);
+				created = true;
 				break;
 			}
+			DWORD error = getLastError();
+			if (error != ERROR_FILE_EXISTS && error != ERROR_ALREADY_EXISTS) {
+				DEBUG_LOG(" -> error %u\n", error);
+				return 0;
+			}
+		}
+		if (!created) {
+			setLastError(ERROR_FILE_EXISTS);
+			DEBUG_LOG(" -> ERROR_FILE_EXISTS\n");
+			return 0;
 		}
 	} else {
-		snprintf(uniqueStr, sizeof(uniqueStr), "%.3s%X.TMP", lpPrefixString, uUnique & 0xFFFF);
-		path = files::pathFromWindows(lpPathName) / uniqueStr;
+		std::string path = makeTempFileName(uUnique);
+		strncpy(lpTempFileName, path.c_str(), MAX_PATH);
+		lpTempFileName[MAX_PATH - 1] = '\0';
+		DEBUG_LOG(" -> %s\n", lpTempFileName);
 	}
-	std::string str = files::pathToWindows(path);
-	DEBUG_LOG(" -> %s\n", str.c_str());
-	strncpy(lpTempFileName, str.c_str(), MAX_PATH);
-	lpTempFileName[MAX_PATH - 1] = '\0';
 	return uUnique;
 }
 

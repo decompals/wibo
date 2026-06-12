@@ -435,6 +435,14 @@ int WINAPI LCMapStringW(LCID Locale, DWORD dwMapFlags, LPCWCH lpSrcStr, int cchS
 	return static_cast<int>(srcLen);
 }
 
+int WINAPI LCMapStringEx(LPCWSTR lpLocaleName, DWORD dwMapFlags, LPCWCH lpSrcStr, int cchSrc, LPWSTR lpDestStr,
+						 int cchDest, void *lpVersionInformation, void *lpReserved, void *sortHandle) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("LCMapStringEx(%p, 0x%x, %p, %d, %p, %d)\n", lpLocaleName, dwMapFlags, lpSrcStr, cchSrc, lpDestStr, cchDest);
+	(void)lpLocaleName; (void)lpVersionInformation; (void)lpReserved; (void)sortHandle;
+	return LCMapStringW(0x0409, dwMapFlags, lpSrcStr, cchSrc, lpDestStr, cchDest);
+}
+
 int WINAPI LCMapStringA(LCID Locale, DWORD dwMapFlags, LPCCH lpSrcStr, int cchSrc, LPSTR lpDestStr, int cchDest) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("LCMapStringA(%u, 0x%x, %p, %d, %p, %d)\n", Locale, dwMapFlags, lpSrcStr, cchSrc, lpDestStr, cchDest);

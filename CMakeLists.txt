@@ -210,6 +210,7 @@ add_executable(wibo
     dll/kernel32/stringapiset.cpp
     dll/kernel32/synchapi.cpp
     dll/kernel32/sysinfoapi.cpp
+    dll/kernel32/msvc_compat_stubs.cpp
     dll/kernel32/timezoneapi.cpp
     dll/kernel32/winbase.cpp
     dll/kernel32/wincon.cpp
@@ -402,6 +403,7 @@ wibo_codegen_module(NAME kernel32 HEADERS
     dll/kernel32/stringapiset.h
     dll/kernel32/synchapi.h
     dll/kernel32/sysinfoapi.h
+    dll/kernel32/msvc_compat_stubs.h
     dll/kernel32/timezoneapi.h
     dll/kernel32/winbase.h
     dll/kernel32/wincon.h

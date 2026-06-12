@@ -455,18 +455,29 @@ inline void setOwningThread(LPCRITICAL_SECTION crit, DWORD threadId) {
 }
 
 void waitForCriticalSection(LPCRITICAL_SECTION cs) {
-	auto *sequence = reinterpret_cast<LONG volatile *>(&cs->LockSemaphore);
-	LONG observed = __atomic_load_n(sequence, __ATOMIC_ACQUIRE);
-	while (owningThreadId(cs) != 0) {
-		kernel32::WaitOnAddress(sequence, &observed, sizeof(observed), INFINITE);
-		observed = __atomic_load_n(sequence, __ATOMIC_ACQUIRE);
+	// Ticket handoff: Windows hands a contended section to exactly one
+	// waiter per Leave through a counted semaphore (LockSemaphore). Model the
+	// semaphore as a ticket count on the LockSemaphore word: Leave posts one
+	// ticket, each blocked Enter consumes one. The woken waiter owns the
+	// section by construction (no claim race on OwningThread).
+	auto *tickets = reinterpret_cast<LONG volatile *>(&cs->LockSemaphore);
+	for (;;) {
+		LONG available = __atomic_load_n(tickets, __ATOMIC_ACQUIRE);
+		if (available > 0) {
+			if (__atomic_compare_exchange_n(tickets, &available, available - 1, false, __ATOMIC_ACQ_REL,
+											__ATOMIC_ACQUIRE)) {
+				return;
+			}
+			continue;
+		}
+		kernel32::WaitOnAddress(tickets, &available, sizeof(available), INFINITE);
 	}
 }
 
 void signalCriticalSection(LPCRITICAL_SECTION cs) {
-	auto *sequence = reinterpret_cast<LONG *>(&cs->LockSemaphore);
-	kernel32::InterlockedIncrement(const_cast<LONG volatile *>(sequence));
-	kernel32::WakeByAddressSingle(sequence);
+	auto *tickets = reinterpret_cast<LONG *>(&cs->LockSemaphore);
+	kernel32::InterlockedIncrement(const_cast<LONG volatile *>(tickets));
+	kernel32::WakeByAddressSingle(tickets);
 }
 
 inline bool trySpinAcquireCriticalSection(LPCRITICAL_SECTION cs, DWORD threadId) {
@@ -1086,7 +1097,7 @@ void WINAPI EnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
 			lpCriticalSection->RecursionCount++;
 			return;
 		}
-		waitForCriticalSection(lpCriticalSection);
+		waitForCriticalSection(lpCriticalSection); // ticket handoff: we own the section now
 	}
 	setOwningThread(lpCriticalSection, threadId);
 	lpCriticalSection->RecursionCount = 1;
@@ -1100,16 +1111,13 @@ void WINAPI LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
 		return;
 	}
 
-	const DWORD threadId = GetCurrentThreadId();
-	if (owningThreadId(lpCriticalSection) != threadId || lpCriticalSection->RecursionCount <= 0) {
-		DEBUG_LOG("LeaveCriticalSection: thread %u does not own %p (owner=%u, recursion=%ld)\n", threadId,
-				  lpCriticalSection, owningThreadId(lpCriticalSection),
-				  static_cast<long>(lpCriticalSection->RecursionCount));
-		return;
-	}
-
+	// Windows LeaveCriticalSection performs NO
+	// caller/ownership validation; it unconditionally decrements
+	// RecursionCount/LockCount and releases one waiter. Guest patterns that
+	// rely on that (cross-thread leave, reinitialized sections) must behave
+	// identically here.
 	auto *lockCount = const_cast<LONG volatile *>(&lpCriticalSection->LockCount);
-	if (--lpCriticalSection->RecursionCount > 0) {
+	if (--lpCriticalSection->RecursionCount != 0) {
 		kernel32::InterlockedDecrement(lockCount);
 		return;
 	}

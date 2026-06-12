@@ -74,6 +74,39 @@ HMODULE WINAPI GetModuleHandleW(LPCWSTR lpModuleName) {
 	return GetModuleHandleA(nullptr);
 }
 
+static BOOL getModuleHandleExImpl(DWORD dwFlags, const void *nameOrAddr, bool wide, HMODULE *phModule) {
+	constexpr DWORD GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS = 0x00000004;
+	wibo::ModuleInfo *info = nullptr;
+	if (dwFlags & GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS) {
+		info = wibo::moduleInfoFromAddress(const_cast<void *>(nameOrAddr));
+	} else if (nameOrAddr) {
+		std::string name = wide ? wideStringToString(static_cast<LPCWSTR>(nameOrAddr))
+								: std::string(static_cast<LPCSTR>(nameOrAddr));
+		info = wibo::findLoadedModule(name.c_str());
+	} else {
+		info = wibo::mainModule;
+	}
+	if (!info) {
+		if (phModule) *phModule = NO_HANDLE;
+		kernel32::setLastError(ERROR_MOD_NOT_FOUND);
+		return FALSE;
+	}
+	if (phModule) *phModule = info->handle;
+	return TRUE;
+}
+
+BOOL WINAPI GetModuleHandleExA(DWORD dwFlags, LPCSTR lpModuleName, HMODULE *phModule) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("GetModuleHandleExA(0x%x, %p, %p)\n", dwFlags, (const void *)lpModuleName, (void *)phModule);
+	return getModuleHandleExImpl(dwFlags, lpModuleName, false, phModule);
+}
+
+BOOL WINAPI GetModuleHandleExW(DWORD dwFlags, LPCWSTR lpModuleName, HMODULE *phModule) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("GetModuleHandleExW(0x%x, %p, %p)\n", dwFlags, (const void *)lpModuleName, (void *)phModule);
+	return getModuleHandleExImpl(dwFlags, lpModuleName, true, phModule);
+}
+
 DWORD WINAPI GetModuleFileNameA(HMODULE hModule, LPSTR lpFilename, DWORD nSize) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetModuleFileNameA(%p, %p, %u)\n", hModule, lpFilename, nSize);

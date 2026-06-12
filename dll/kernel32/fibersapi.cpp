@@ -5,11 +5,21 @@
 #include "errors.h"
 #include "internal.h"
 
+#include <mutex>
+
 namespace {
 
+// FLS without fibers is THREAD-local storage on
+// Windows (every thread is exactly one fiber); only the index allocation map
+// is process-wide. The previous process-global value array made all threads
+// share one cell per index, which clobbers msvcr120's per-thread data (_ptd) --
+// including the _beginthreadex entry/argument that _threadstartex re-reads
+// through FlsGetValue -- so concurrently-starting threads could duplicate or
+// swap their start arguments.
 constexpr DWORD kMaxFlsValues = 0x100;
+std::mutex g_flsMutex;
 bool g_flsValuesUsed[kMaxFlsValues] = {false};
-LPVOID g_flsValues[kMaxFlsValues] = {nullptr};
+thread_local LPVOID t_flsValues[kMaxFlsValues] = {nullptr};
 
 } // namespace
 
@@ -19,10 +29,11 @@ DWORD WINAPI FlsAlloc(PFLS_CALLBACK_FUNCTION lpCallback) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FlsAlloc(%p)", lpCallback);
 	// If the function succeeds, the return value is an FLS index initialized to zero.
+	std::lock_guard lk(g_flsMutex);
 	for (DWORD i = 0; i < kMaxFlsValues; i++) {
 		if (g_flsValuesUsed[i] == false) {
 			g_flsValuesUsed[i] = true;
-			g_flsValues[i] = nullptr;
+			t_flsValues[i] = nullptr;
 			DEBUG_LOG(" -> %d\n", i);
 			return i;
 		}
@@ -35,6 +46,7 @@ DWORD WINAPI FlsAlloc(PFLS_CALLBACK_FUNCTION lpCallback) {
 BOOL WINAPI FlsFree(DWORD dwFlsIndex) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FlsFree(%u)\n", dwFlsIndex);
+	std::lock_guard lk(g_flsMutex);
 	if (dwFlsIndex < kMaxFlsValues && g_flsValuesUsed[dwFlsIndex]) {
 		g_flsValuesUsed[dwFlsIndex] = false;
 		return TRUE;
@@ -49,7 +61,7 @@ PVOID WINAPI FlsGetValue(DWORD dwFlsIndex) {
 	VERBOSE_LOG("FlsGetValue(%u)\n", dwFlsIndex);
 	PVOID result = nullptr;
 	if (dwFlsIndex < kMaxFlsValues && g_flsValuesUsed[dwFlsIndex]) {
-		result = g_flsValues[dwFlsIndex];
+		result = t_flsValues[dwFlsIndex];
 		// See https://learn.microsoft.com/en-us/windows/win32/api/fibersapi/nf-fibersapi-flsgetvalue
 		setLastError(ERROR_SUCCESS);
 	} else {
@@ -63,7 +75,7 @@ BOOL WINAPI FlsSetValue(DWORD dwFlsIndex, PVOID lpFlsData) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("FlsSetValue(%u, %p)\n", dwFlsIndex, lpFlsData);
 	if (dwFlsIndex < kMaxFlsValues && g_flsValuesUsed[dwFlsIndex]) {
-		g_flsValues[dwFlsIndex] = lpFlsData;
+		t_flsValues[dwFlsIndex] = lpFlsData;
 		return TRUE;
 	} else {
 		setLastError(ERROR_INVALID_PARAMETER);

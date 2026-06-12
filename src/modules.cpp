@@ -1089,6 +1089,15 @@ void releaseModuleTls(ModuleInfo &module) {
 
 void notifyDllThreadAttach() {
 	auto reg = registry();
+	// msvc-compat: static TLS must exist for EVERY module that has it, even ones
+	// that disabled thread-library-calls (that flag suppresses DllMain calls,
+	// not static __declspec(thread) TLS allocation).
+	for (auto &pair : reg->modulesByKey) {
+		wibo::ModuleInfo *m = pair.second.get();
+		if (m && m->tlsInfo.hasTls) {
+			allocateModuleTlsForThread(*m, currentThreadTeb);
+		}
+	}
 	std::vector<wibo::ModuleInfo *> targets;
 	targets.reserve(reg->modulesByKey.size());
 	for (auto &pair : reg->modulesByKey) {

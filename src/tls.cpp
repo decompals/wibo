@@ -248,8 +248,11 @@ void initializeTib(TEB *tib) {
 			setExpansionArray(tib, arr);
 		}
 	}
-	if (g_moduleArrayCapacity > 0) {
-		if (!ensureModuleArrayCapacityLocked(g_moduleArrayCapacity)) {
+	if (g_moduleArrayCapacity > 0 && !getModuleArray(tib)) { // msvc-compat: per-new-tib module array
+		if (auto *arr = allocateTlsArray(g_moduleArrayCapacity)) {
+			g_moduleArrays[tib] = arr;
+			tib->ThreadLocalStoragePointer = toGuestPtr(arr->slots);
+		} else {
 			DEBUG_LOG("initializeTib: failed to allocate module TLS array for %p\n", tib);
 		}
 	}

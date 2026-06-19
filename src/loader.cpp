@@ -549,8 +549,15 @@ bool loadPEFromSource(wibo::Executable &executable, const PeInputView &source, b
 
 	if (exec && executable.relocationDelta != 0) {
 		if (executable.relocationDirectoryRVA == 0 || executable.relocationDirectorySize == 0) {
-			DEBUG_LOG("Relocation required but no relocation directory present\n");
-			return false;
+			bool hasCodeSection = false; // msvc-compat: tolerate resource-only DLLs
+			for (const auto &sec : executable.sections) {
+				if (sec.characteristics & 0x20000000u /*IMAGE_SCN_MEM_EXECUTE*/) { hasCodeSection = true; break; }
+			}
+			if (hasCodeSection) {
+				DEBUG_LOG("Relocation required but no relocation directory present\n");
+				return false;
+			}
+			DEBUG_LOG("Relocation required but absent; resource-only image, continuing\n");
 		}
 
 		uint8_t *relocCursor = executable.fromRVA<uint8_t>(executable.relocationDirectoryRVA);

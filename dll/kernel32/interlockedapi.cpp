@@ -4,6 +4,7 @@
 #include "context.h"
 
 #include <cstring>
+#include <mutex>
 
 namespace kernel32 {
 
@@ -46,6 +47,50 @@ void WINAPI InitializeSListHead(PSLIST_HEADER ListHead) {
 		return;
 	}
 	std::memset(ListHead, 0, sizeof(*ListHead));
+}
+
+// These are "Interlocked" ops on a shared list; mspdbcore's worker-thread pool
+// pushes/pops the same SLIST concurrently, so they MUST be atomic. A global
+// mutex serializes all SLIST operations (correct, if not strictly lock-free).
+static std::mutex g_slistMutex;
+
+PSLIST_ENTRY WINAPI InterlockedPushEntrySList(PSLIST_HEADER ListHead, PSLIST_ENTRY ListEntry) {
+	HOST_CONTEXT_GUARD();
+	if (!ListHead || !ListEntry) return nullptr;
+	std::lock_guard<std::mutex> lk(g_slistMutex);
+	GUEST_PTR prevHead = ListHead->Head;
+	ListEntry->Next = prevHead;
+	ListHead->Head = toGuestPtr(ListEntry);
+	ListHead->Depth++;
+	return fromGuestPtr<SLIST_ENTRY>(prevHead);
+}
+
+PSLIST_ENTRY WINAPI InterlockedPopEntrySList(PSLIST_HEADER ListHead) {
+	HOST_CONTEXT_GUARD();
+	if (!ListHead) return nullptr;
+	std::lock_guard<std::mutex> lk(g_slistMutex);
+	if (!ListHead->Head) return nullptr;
+	PSLIST_ENTRY entry = fromGuestPtr<SLIST_ENTRY>(ListHead->Head);
+	ListHead->Head = entry->Next;
+	if (ListHead->Depth) ListHead->Depth--;
+	return entry;
+}
+
+PSLIST_ENTRY WINAPI InterlockedFlushSList(PSLIST_HEADER ListHead) {
+	HOST_CONTEXT_GUARD();
+	if (!ListHead) return nullptr;
+	std::lock_guard<std::mutex> lk(g_slistMutex);
+	PSLIST_ENTRY first = fromGuestPtr<SLIST_ENTRY>(ListHead->Head);
+	ListHead->Head = GUEST_NULL;
+	ListHead->Depth = 0;
+	return first;
+}
+
+USHORT WINAPI QueryDepthSList(PSLIST_HEADER ListHead) {
+	HOST_CONTEXT_GUARD();
+	if (!ListHead) return 0;
+	std::lock_guard<std::mutex> lk(g_slistMutex);
+	return ListHead->Depth;
 }
 
 } // namespace kernel32

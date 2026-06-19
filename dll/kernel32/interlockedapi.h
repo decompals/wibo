@@ -23,5 +23,9 @@ LONG WINAPI InterlockedDecrement(LONG volatile *Addend);
 LONG WINAPI InterlockedExchange(LONG volatile *Target, LONG Value);
 LONG WINAPI InterlockedCompareExchange(LONG volatile *Destination, LONG Exchange, LONG Comperand);
 void WINAPI InitializeSListHead(PSLIST_HEADER ListHead);
+PSLIST_ENTRY WINAPI InterlockedPushEntrySList(PSLIST_HEADER ListHead, PSLIST_ENTRY ListEntry);
+PSLIST_ENTRY WINAPI InterlockedPopEntrySList(PSLIST_HEADER ListHead);
+PSLIST_ENTRY WINAPI InterlockedFlushSList(PSLIST_HEADER ListHead);
+USHORT WINAPI QueryDepthSList(PSLIST_HEADER ListHead);
 
 } // namespace kernel32

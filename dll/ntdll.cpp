@@ -55,8 +55,8 @@ struct RTL_OSVERSIONINFOEXW : RTL_OSVERSIONINFOW {
 using PRTL_OSVERSIONINFOEXW = RTL_OSVERSIONINFOEXW *;
 
 constexpr ULONG kOsMajorVersion = 6;
-constexpr ULONG kOsMinorVersion = 2;
-constexpr ULONG kOsBuildNumber = 0;
+constexpr ULONG kOsMinorVersion = 1; // msvc-compat: Win7 (6.1) -> VS2013 c1 uses direct source-open path
+constexpr ULONG kOsBuildNumber = 7601; // Windows 7 SP1
 constexpr ULONG kOsPlatformId = 2;			// VER_PLATFORM_WIN32_NT
 constexpr BYTE kProductTypeWorkstation = 1; // VER_NT_WORKSTATION
 

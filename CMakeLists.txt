@@ -210,6 +210,7 @@ add_executable(wibo
     dll/kernel32/stringapiset.cpp
     dll/kernel32/synchapi.cpp
     dll/kernel32/sysinfoapi.cpp
+    dll/kernel32/msvc_compat_stubs.cpp
     dll/kernel32/timezoneapi.cpp
     dll/kernel32/winbase.cpp
     dll/kernel32/wincon.cpp
@@ -219,6 +220,7 @@ add_executable(wibo
     dll/lmgr.cpp
     dll/mscoree.cpp
     dll/ntdll.cpp
+    dll/msvc_compat_ntdll.cpp
     dll/ole32.cpp
     dll/rpcrt4.cpp
     dll/shlwapi.cpp
@@ -383,7 +385,7 @@ wibo_codegen_module(NAME vcruntime HEADERS dll/vcruntime.h)
 wibo_codegen_module(NAME lmgr HEADERS dll/lmgr.h)
 wibo_codegen_module(NAME ole32 HEADERS dll/ole32.h)
 wibo_codegen_module(NAME user32 HEADERS dll/user32.h)
-wibo_codegen_module(NAME ntdll HEADERS dll/ntdll.h)
+wibo_codegen_module(NAME ntdll HEADERS dll/ntdll.h dll/msvc_compat_ntdll.h)
 wibo_codegen_module(NAME kernel32 HEADERS
     dll/kernel32/debugapi.h
     dll/kernel32/errhandlingapi.h
@@ -402,6 +404,7 @@ wibo_codegen_module(NAME kernel32 HEADERS
     dll/kernel32/stringapiset.h
     dll/kernel32/synchapi.h
     dll/kernel32/sysinfoapi.h
+    dll/kernel32/msvc_compat_stubs.h
     dll/kernel32/timezoneapi.h
     dll/kernel32/winbase.h
     dll/kernel32/wincon.h

@@ -9,6 +9,7 @@ RUN apk add --no-cache \
     clang-dev \
     cmake \
     coreutils \
+    gcc \
     git \
     linux-headers \
     lld \
@@ -16,6 +17,7 @@ RUN apk add --no-cache \
     make \
     mingw-w64-binutils \
     mingw-w64-gcc \
+    musl-dev \
     ninja \
     python3
 

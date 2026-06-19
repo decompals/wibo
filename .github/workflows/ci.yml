@@ -120,6 +120,7 @@ jobs:
             BUILD_TYPE=${{ matrix.build_type }}
             WIBO_VERSION=${{ steps.version.outputs.wibo_version }}
           target: export
+          platforms: ${{ matrix.platform || 'linux/amd64' }}
           outputs: |
             type=local,dest=dist
 

@@ -4,11 +4,14 @@
 #include "types.h"
 
 #include <array>
+#include <cerrno>
 #include <cstring>
 #include <mutex>
 
 #include <asm/ldt.h>
 #include <sys/syscall.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 namespace {
 
@@ -210,6 +213,43 @@ bool segmentSetupLocked(TEB *teb) {
 extern "C" void installSelectors(TEB *teb);
 extern "C" int setThreadArea64(int entryNumber, TEB *teb);
 
+namespace {
+
+// setThreadArea64 issues set_thread_area through `int 0x80`. Some seccomp
+// sandboxes block that compat path: AWS Lambda, for instance, kills the process
+// with SIGSYS when it runs. We can't just call it and recover, because the
+// filter may use a non-catchable KILL action rather than SECCOMP_RET_TRAP. So
+// probe it once in a forked child — if the child is killed by the filter (or the
+// syscall otherwise fails), treat set_thread_area as unavailable and let
+// tebThreadSetup fall back to modify_ldt. Callers hold g_tebSetupMutex and the
+// result is cached, so this forks at most once, during startup.
+bool setThreadAreaAvailable(TEB *teb) {
+	static int cached = -1;
+	if (cached >= 0) {
+		return cached != 0;
+	}
+	pid_t pid = fork();
+	if (pid == 0) {
+		_exit(setThreadArea64(g_threadAreaEntry, teb) >= 0 ? 0 : 1);
+	}
+	if (pid < 0) {
+		cached = 1; // can't probe; assume available and keep the existing behaviour
+		return true;
+	}
+	int status = 0;
+	pid_t w;
+	do {
+		w = waitpid(pid, &status, 0);
+	} while (w < 0 && errno == EINTR);
+	cached = (w == pid && WIFEXITED(status) && WEXITSTATUS(status) == 0) ? 1 : 0;
+	if (!cached) {
+		DEBUG_LOG("setup_linux: set_thread_area blocked by seccomp, using LDT\n");
+	}
+	return cached != 0;
+}
+
+} // namespace
+
 bool tebThreadSetup(TEB *teb) {
 	std::lock_guard guard(g_tebSetupMutex);
 
@@ -229,7 +269,7 @@ bool tebThreadSetup(TEB *teb) {
 	// Install ds/es selectors
 	installSelectors(teb);
 
-	if (g_threadAreaEntry != -2) {
+	if (g_threadAreaEntry != -2 && setThreadAreaAvailable(teb)) {
 		int ret = setThreadArea64(g_threadAreaEntry, teb);
 		if (ret >= 0) {
 			if (g_threadAreaEntry != ret) {

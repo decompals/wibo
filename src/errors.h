@@ -7,6 +7,9 @@
 #define ERROR_PATH_NOT_FOUND 3
 #define ERROR_ACCESS_DENIED 5
 #define ERROR_INVALID_HANDLE 6
+// user32-domain error (0x578): the target HWND doesn't exist, is destroyed,
+// or belongs to another thread/process.
+#define ERROR_INVALID_WINDOW_HANDLE 1400
 #define ERROR_NOT_ENOUGH_MEMORY 8
 #define ERROR_NO_MORE_FILES 18
 #define ERROR_NO_MORE_ITEMS 259

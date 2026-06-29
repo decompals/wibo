@@ -8,6 +8,7 @@
 #include "internal.h"
 #include "mimalloc/types.h"
 #include "modules.h"
+#include "resources.h"
 #include "strutil.h"
 #include "types.h"
 
@@ -590,49 +591,240 @@ UINT WINAPI SetHandleCount(UINT uNumber) {
 	return 0x3FFE;
 }
 
-DWORD WINAPI FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId, DWORD dwLanguageId, LPSTR lpBuffer,
-							DWORD nSize, va_list *Arguments) {
-	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("FormatMessageA(%u, %p, %u, %u, %p, %u, %p)\n", dwFlags, lpSource, dwMessageId, dwLanguageId, lpBuffer,
-			  nSize, Arguments);
+// MESSAGETABLE resource layout (RT_MESSAGETABLE = 11). Produced by MC.EXE,
+// embedded into the PE by RC.EXE. See WinNT.h / MSDN "Message Resources".
+constexpr WORD kRtMessageTable = 11;
+constexpr WORD kMessageResourceUnicode = 0x0001;
 
-	if (dwFlags & 0x00000100) {
-		// FORMAT_MESSAGE_ALLOCATE_BUFFER
-	} else if (dwFlags & 0x00002000) {
-		// FORMAT_MESSAGE_ARGUMENT_ARRAY
-	} else if (dwFlags & 0x00000800) {
-		// FORMAT_MESSAGE_FROM_HMODULE
-	} else if (dwFlags & 0x00000400) {
-		// FORMAT_MESSAGE_FROM_STRING
-	} else if (dwFlags & 0x00001000) {
-		// FORMAT_MESSAGE_FROM_SYSTEM
-		std::string message = std::system_category().message(static_cast<int>(dwMessageId));
-		size_t length = message.length();
-		if (!lpBuffer || nSize == 0) {
-			setLastError(ERROR_INSUFFICIENT_BUFFER);
-			return 0;
+struct MessageResourceBlock {
+	DWORD LowId;
+	DWORD HighId;
+	DWORD OffsetToEntries;
+};
+struct MessageResourceData {
+	DWORD NumberOfBlocks;
+	MessageResourceBlock Blocks[1];  // Blocks[NumberOfBlocks]
+};
+struct MessageResourceEntry {
+	WORD Length;   // total size incl. this header
+	WORD Flags;    // bit 0 set => UTF-16 text
+	BYTE Text[1];  // Length-4 bytes, null-terminated
+};
+
+// Locate and copy out the message string for dwMessageId in hModule's
+// RT_MESSAGETABLE resource. Writes the resulting narrow-ANSI template
+// into outTemplate. Returns false if the id isn't present.
+static bool loadMessageTemplateFromModule(HMODULE hModule, DWORD dwMessageId, std::string &outTemplate) {
+	auto *exe = wibo::executableFromModule(hModule);
+	DEBUG_LOG("  MESSAGETABLE lookup: hMod=%p exe=%p id=%u\n", hModule, exe, dwMessageId);
+	if (!exe) return false;
+	auto typeId = wibo::ResourceIdentifier::fromID(kRtMessageTable);
+	auto nameId = wibo::ResourceIdentifier::fromID(1);
+	wibo::ResourceLocation loc;
+	if (!exe->findResource(typeId, nameId, std::nullopt, loc)) {
+		DEBUG_LOG("  MESSAGETABLE lookup: findResource failed for type=%u name=1\n", kRtMessageTable);
+		return false;
+	}
+	DEBUG_LOG("  MESSAGETABLE lookup: resource size=%zu at %p\n", loc.size, loc.data);
+	if (loc.size < sizeof(MessageResourceData)) return false;
+	const auto *data = reinterpret_cast<const MessageResourceData *>(loc.data);
+	DEBUG_LOG("  MESSAGETABLE lookup: NumberOfBlocks=%u\n", data->NumberOfBlocks);
+	const auto *blocks = data->Blocks;
+	for (DWORD bi = 0; bi < data->NumberOfBlocks; bi++) {
+		const auto &blk = blocks[bi];
+		DEBUG_LOG("    block %u: LowId=%u HighId=%u Offset=0x%x\n", bi, blk.LowId, blk.HighId, blk.OffsetToEntries);
+		if (dwMessageId < blk.LowId || dwMessageId > blk.HighId) continue;
+		auto index = dwMessageId - blk.LowId;
+		const auto *entry =
+			reinterpret_cast<const MessageResourceEntry *>(static_cast<const uint8_t *>(loc.data) + blk.OffsetToEntries);
+		for (DWORD ei = 0; ei < index; ei++) {
+			entry = reinterpret_cast<const MessageResourceEntry *>(
+				reinterpret_cast<const uint8_t *>(entry) + entry->Length);
 		}
-		std::strncpy(lpBuffer, message.c_str(), static_cast<size_t>(nSize));
-		if (static_cast<size_t>(nSize) <= length) {
-			if (static_cast<size_t>(nSize) > 0) {
-				lpBuffer[nSize - 1] = '\0';
+		const size_t textBytes = entry->Length > offsetof(MessageResourceEntry, Text)
+									 ? entry->Length - offsetof(MessageResourceEntry, Text)
+									 : 0;
+		if (entry->Flags & kMessageResourceUnicode) {
+			int wideLen = static_cast<int>(textBytes / sizeof(uint16_t));
+			outTemplate = wideStringToString(reinterpret_cast<const uint16_t *>(entry->Text), wideLen);
+		} else {
+			outTemplate.assign(reinterpret_cast<const char *>(entry->Text), textBytes);
+		}
+		// MC emits trailing \r\n\0 (or \0). Trim any trailing NULs.
+		while (!outTemplate.empty() && outTemplate.back() == '\0') outTemplate.pop_back();
+		DEBUG_LOG("  MESSAGETABLE lookup: found template len=%zu\n", outTemplate.size());
+		return true;
+	}
+	return false;
+}
+
+// Substitute %1..%99 in a message template with the caller-supplied
+// arguments. If ignoreInserts is true, inserts pass through verbatim.
+// Arguments come from a va_list when FORMAT_MESSAGE_ARGUMENT_ARRAY is
+// not set, or from a DWORD_PTR array otherwise. For the stubbed arg
+// model here we accept a simple pointer-to-pointer array which covers
+// RC / LINK / NMAKE usage.
+static std::string applyMessageInserts(const std::string &tpl, const uint32_t *args, DWORD argCount,
+									   bool ignoreInserts) {
+	std::string out;
+	out.reserve(tpl.size());
+	for (size_t i = 0; i < tpl.size(); ) {
+		char c = tpl[i];
+		if (c != '%' || ignoreInserts) {
+			out.push_back(c);
+			i++;
+			continue;
+		}
+		i++;
+		if (i >= tpl.size()) { out.push_back('%'); break; }
+		if (!std::isdigit(static_cast<unsigned char>(tpl[i]))) {
+			char esc = tpl[i++];
+			switch (esc) {
+			case '0': return out;
+			case 'n': out.push_back('\n'); break;
+			case 'r': out.push_back('\r'); break;
+			case 'b': out.push_back(' '); break;
+			case '.': out.push_back('.'); break;
+			case '!': out.push_back('!'); break;
+			case 't': out.push_back('\t'); break;
+			case '%':
+			default:  out.push_back('%'); out.push_back(esc); break;
 			}
-			setLastError(ERROR_INSUFFICIENT_BUFFER);
-			return 0;
+			continue;
 		}
-		lpBuffer[length] = '\0';
-		return static_cast<DWORD>(length);
-	} else if (dwFlags & 0x00000200) {
-		// FORMAT_MESSAGE_IGNORE_INSERTS
-	} else {
-		// unhandled?
+		unsigned int n = 0;
+		while (i < tpl.size() && std::isdigit(static_cast<unsigned char>(tpl[i])) && n < 100) {
+			n = n * 10 + (tpl[i++] - '0');
+		}
+		// Parse a trailing "!<format>!" section (MC format spec).
+		std::string fmtSpec;
+		if (i < tpl.size() && tpl[i] == '!') {
+			i++;
+			size_t fmtStart = i;
+			while (i < tpl.size() && tpl[i] != '!') i++;
+			fmtSpec = tpl.substr(fmtStart, i - fmtStart);
+			if (i < tpl.size()) i++;
+		}
+		if (n >= 1 && n <= argCount && args) {
+			auto arg = static_cast<uintptr_t>(args[n - 1]);
+			if (fmtSpec == "ws" || fmtSpec == "ls") {
+				const auto *ws = reinterpret_cast<const uint16_t *>(arg);
+				if (ws && arg > 0x10000) {
+					while (*ws) {
+						out.push_back(static_cast<char>(*ws > 0x7f ? '?' : *ws));
+						ws++;
+					}
+				}
+			} else {
+				char tmp[32];
+				const char *s = reinterpret_cast<const char *>(arg);
+				if (arg > 0x10000 && s) {
+					out.append(s);
+				} else {
+					int written = std::snprintf(tmp, sizeof(tmp), "%u", static_cast<unsigned>(args[n - 1]));
+					if (written > 0) out.append(tmp, written);
+				}
+			}
+		} else {
+			char tmp[8];
+			int written = std::snprintf(tmp, sizeof(tmp), "%%%u", n);
+			if (written > 0) out.append(tmp, written);
+		}
+	}
+	return out;
+}
+
+DWORD WINAPI FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId, DWORD dwLanguageId, LPSTR lpBuffer,
+							DWORD nSize, LPVOID Arguments) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("FormatMessageA(0x%x, %p, %u, %u, %p, %u, %p)\n", dwFlags, lpSource, dwMessageId, dwLanguageId, lpBuffer,
+			  nSize, Arguments);
+	(void)dwLanguageId;
+
+	constexpr DWORD kAllocateBuffer  = 0x00000100;
+	constexpr DWORD kIgnoreInserts   = 0x00000200;
+	constexpr DWORD kFromString      = 0x00000400;
+	constexpr DWORD kFromHModule     = 0x00000800;
+	constexpr DWORD kFromSystem      = 0x00001000;
+	constexpr DWORD kArgumentArray   = 0x00002000;
+
+	// Step 1: locate the message template.
+	std::string tpl;
+	bool haveTpl = false;
+	if (dwFlags & kFromString) {
+		if (lpSource) {
+			tpl.assign(static_cast<const char *>(lpSource));
+			haveTpl = true;
+		}
+	} else if (dwFlags & kFromHModule) {
+		// HMODULE is a small integer in wibo; lpSource carries it via a
+		// cast from HMODULE -> void* at the caller. Round-trip via uintptr.
+		HMODULE hMod = static_cast<HMODULE>(reinterpret_cast<uintptr_t>(lpSource));
+		haveTpl = loadMessageTemplateFromModule(hMod, dwMessageId, tpl);
+	} else if (dwFlags & kFromSystem) {
+		tpl = std::system_category().message(static_cast<int>(dwMessageId));
+		haveTpl = true;
 	}
 
-	if (lpBuffer && nSize > 0) {
-		lpBuffer[0] = '\0';
+	if (!haveTpl) {
+		setLastError(ERROR_RESOURCE_LANG_NOT_FOUND);
+		return 0;
 	}
-	setLastError(ERROR_CALL_NOT_IMPLEMENTED);
-	return 0;
+
+	// Step 2: apply inserts if not suppressed.
+	std::string formatted;
+	if (dwFlags & kIgnoreInserts) {
+		formatted = std::move(tpl);
+	} else {
+		// The guest is 32-bit: arguments are 4-byte values.
+		// FORMAT_MESSAGE_ARGUMENT_ARRAY: Arguments is a uint32_t[] directly.
+		// Otherwise: Arguments is a va_list* (pointer to a char* on i386).
+		// Dereference once to get the actual argument array pointer.
+		const uint32_t *args = nullptr;
+		DWORD argCount = 99;
+		if (dwFlags & kArgumentArray) {
+			args = reinterpret_cast<const uint32_t *>(Arguments);
+		} else if (Arguments) {
+			uint32_t vaListPtr = *reinterpret_cast<const uint32_t *>(Arguments);
+			args = reinterpret_cast<const uint32_t *>(static_cast<uintptr_t>(vaListPtr));
+		}
+		formatted = applyMessageInserts(tpl, args, argCount, false);
+	}
+
+	// Step 3: write out.
+	const size_t len = formatted.size();
+	if (dwFlags & kAllocateBuffer) {
+		// lpBuffer is really LPSTR* — store an allocated pointer there.
+		auto **outPtr = reinterpret_cast<char **>(lpBuffer);
+		if (!outPtr) {
+			setLastError(ERROR_INVALID_PARAMETER);
+			return 0;
+		}
+		size_t allocSize = std::max(static_cast<size_t>(nSize), len + 1);
+		auto *buf = reinterpret_cast<char *>(std::malloc(allocSize));
+		if (!buf) {
+			setLastError(ERROR_NOT_ENOUGH_MEMORY);
+			return 0;
+		}
+		std::memcpy(buf, formatted.data(), len);
+		buf[len] = '\0';
+		*outPtr = buf;
+		return static_cast<DWORD>(len);
+	}
+
+	if (!lpBuffer || nSize == 0) {
+		setLastError(ERROR_INSUFFICIENT_BUFFER);
+		return 0;
+	}
+	if (len >= nSize) {
+		std::memcpy(lpBuffer, formatted.data(), nSize - 1);
+		lpBuffer[nSize - 1] = '\0';
+		setLastError(ERROR_INSUFFICIENT_BUFFER);
+		return 0;
+	}
+	std::memcpy(lpBuffer, formatted.data(), len);
+	lpBuffer[len] = '\0';
+	return static_cast<DWORD>(len);
 }
 
 PVOID WINAPI EncodePointer(PVOID Ptr) {

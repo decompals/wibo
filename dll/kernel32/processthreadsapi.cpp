@@ -635,9 +635,22 @@ BOOL WINAPI CreateProcessA(LPCSTR lpApplicationName, LPSTR lpCommandLine, LPSECU
 
 	bool useSearchPath = lpApplicationName == nullptr;
 	std::string application;
-	std::string commandLine = lpCommandLine ? lpCommandLine : "";
-	if (lpApplicationName) {
-		application = lpApplicationName;
+	std::string commandLine = "";
+    bool findNewApp = false;
+
+	if (lpCommandLine) {
+        commandLine = lpCommandLine;
+
+        std::string toRemove = "cmd.exe /c ";
+        size_t pos = commandLine.find(toRemove);
+        if (pos != std::string::npos) {
+            commandLine.erase(pos, toRemove.length());
+            findNewApp = true;
+        }
+	}
+
+	if (lpApplicationName && !findNewApp) {
+        application = lpApplicationName;
 	} else {
 		std::vector<std::string> arguments = wibo::splitCommandLine(commandLine.c_str());
 		if (arguments.empty()) {

@@ -1,0 +1,59 @@
+name: Regression
+
+on:
+  push:
+    paths-ignore:
+      - '*.md'
+      - 'LICENSE'
+  pull_request:
+
+env:
+  DOCKER_BUILDKIT: 1
+
+jobs:
+  build_and_test:
+    name: Regression test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y file unzip wget dos2unix binutils-arm-none-eabi binutils-powerpc-linux-gnu binutils-mips-linux-gnu
+          
+          sudo dpkg --add-architecture i386
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
+          sudo apt-get update -qq
+          sudo apt-get install -yqq --allow-downgrades libc6:i386 libgcc-s1:i386 libstdc++6:i386 wine
+          
+          pipx install poetry 
+
+      - name: Build release
+        run: docker build --build-arg build_type=Release --target export --output build .
+
+      - name: Clone test suite
+        shell: bash
+        run: |
+          git clone --recursive https://github.com/ConorBobbleHat/wibo-test-suite
+          
+      - name: Cache compilers
+        uses: actions/cache@v3
+        with:
+          path: wibo-test-suite/decomp.me/backend/compilers/download_cache
+          key: ${{ runner.os }}-compilers-${{ hashFiles('wibo-test-suite/decomp.me/backend/compilers/compilers.*.yaml') }}
+
+      - name: Wine setup
+        shell: bash
+        run: |
+          mkdir -p "${WINEPREFIX}"
+          wineboot --init
+        env:
+          WINEPREFIX: /tmp/wine  
+          
+      - name: Run test suite
+        shell: bash
+        run: |
+          cd wibo-test-suite
+          ./setup.sh
+          ./run_compare_wine_wibo.sh $(realpath ../build/wibo)

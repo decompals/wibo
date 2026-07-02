@@ -35,6 +35,25 @@ std::string convertEnvValueForWindows(const std::string &name, const char *rawVa
 	return converted.empty() ? std::string(rawValue) : converted;
 }
 
+std::vector<std::string> prepareEnvStrings(size_t &totalSize) {
+	std::vector<std::string> strings;
+	totalSize = 0;
+	for (char **work = environ; *work; ++work) {
+		std::string s = *work;
+		size_t eq = s.find('=');
+		if (eq != std::string::npos) {
+			std::string name = s.substr(0, eq);
+			std::string value = s.substr(eq + 1);
+			std::string converted = convertEnvValueForWindows(name, value.c_str());
+			s = name + "=" + converted;
+		}
+		strings.push_back(s);
+		totalSize += s.size() + 1;
+	}
+	totalSize++; // For the final null
+	return strings;
+}
+
 std::string convertEnvValueToHost(const std::string &name, const char *rawValue) {
 	if (!rawValue) {
 		return {};
@@ -89,16 +108,10 @@ GUEST_PTR WINAPI GetEnvironmentStrings() { return GetEnvironmentStringsA(); }
 
 GUEST_PTR WINAPI GetEnvironmentStringsA() {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("GetEnvironmentStrings()\n");
+	DEBUG_LOG("GetEnvironmentStringsA()\n");
 
 	size_t bufSize = 0;
-	char **work = environ;
-
-	while (*work) {
-		bufSize += strlen(*work) + 1;
-		work++;
-	}
-	bufSize++;
+	auto strings = prepareEnvStrings(bufSize);
 
 	char *buffer = static_cast<char *>(wibo::heap::guestMalloc(bufSize));
 	if (!buffer) {
@@ -106,14 +119,10 @@ GUEST_PTR WINAPI GetEnvironmentStringsA() {
 		return GUEST_NULL;
 	}
 	char *ptr = buffer;
-	work = environ;
-
-	while (*work) {
-		size_t strSize = strlen(*work);
-		memcpy(ptr, *work, strSize);
-		ptr[strSize] = 0;
-		ptr += strSize + 1;
-		work++;
+	for (const auto &s : strings) {
+		memcpy(ptr, s.c_str(), s.size());
+		ptr[s.size()] = 0;
+		ptr += s.size() + 1;
 	}
 	*ptr = 0;
 
@@ -125,13 +134,7 @@ GUEST_PTR WINAPI GetEnvironmentStringsW() {
 	DEBUG_LOG("GetEnvironmentStringsW()\n");
 
 	size_t bufSizeW = 0;
-	char **work = environ;
-
-	while (*work) {
-		bufSizeW += strlen(*work) + 1;
-		work++;
-	}
-	bufSizeW++;
+	auto strings = prepareEnvStrings(bufSizeW);
 
 	uint16_t *buffer = static_cast<uint16_t *>(wibo::heap::guestMalloc(bufSizeW * sizeof(uint16_t)));
 	if (!buffer) {
@@ -139,16 +142,11 @@ GUEST_PTR WINAPI GetEnvironmentStringsW() {
 		return GUEST_NULL;
 	}
 	uint16_t *ptr = buffer;
-	work = environ;
-
-	while (*work) {
-		VERBOSE_LOG("-> %s\n", *work);
-		size_t strSize = strlen(*work);
-		for (size_t i = 0; i < strSize; i++) {
-			*ptr++ = static_cast<uint8_t>((*work)[i]);
+	for (const auto &s : strings) {
+		for (char c : s) {
+			*ptr++ = static_cast<uint16_t>(static_cast<unsigned char>(c));
 		}
 		*ptr++ = 0;
-		work++;
 	}
 	*ptr = 0;
 

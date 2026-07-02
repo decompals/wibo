@@ -461,7 +461,7 @@ int main(int argc, char **argv) {
 	DEBUG_LOG("Registered main module %s at %p\n", wibo::mainModule->normalizedName.c_str(),
 			  wibo::mainModule->executable->imageBase);
 
-	if (!wibo::mainModule->executable->resolveImports()) {
+	if (!wibo::mainModule->executable->resolveImports(true)) {
 		fprintf(stderr, "Failed to resolve imports for main module (DLL initialization failure?)\n");
 		abort();
 	}

@@ -91,6 +91,8 @@ BOOL WINAPI GetExitCodeThread(HANDLE hThread, LPDWORD lpExitCode);
 BOOL WINAPI SetThreadPriority(HANDLE hThread, int nPriority);
 int WINAPI GetThreadPriority(HANDLE hThread);
 DWORD WINAPI GetPriorityClass(HANDLE hProcess);
+BOOL WINAPI GetProcessTimes(HANDLE hProcess, FILETIME *lpCreationTime, FILETIME *lpExitTime, FILETIME *lpKernelTime,
+							FILETIME *lpUserTime);
 BOOL WINAPI GetThreadTimes(HANDLE hThread, FILETIME *lpCreationTime, FILETIME *lpExitTime, FILETIME *lpKernelTime,
 						   FILETIME *lpUserTime);
 BOOL WINAPI CreateProcessA(LPCSTR lpApplicationName, LPSTR lpCommandLine, LPSECURITY_ATTRIBUTES lpProcessAttributes,

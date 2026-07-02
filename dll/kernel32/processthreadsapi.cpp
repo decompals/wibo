@@ -145,11 +145,28 @@ void *threadTrampoline(void *param) {
 		}
 	}
 
+	LPTHREAD_START_ROUTINE entry = data.entry;
+	void **entrySlot = nullptr;
+	void *savedGuestStack = nullptr;
+	if (threadTib && entry) {
+		// Cygwin 1.x scans the initial thread stack during DLL_THREAD_ATTACH
+		// and rewrites the start routine slot to its own signal-aware wrapper.
+		savedGuestStack = threadTib->CurrentStackPointer;
+		entrySlot = static_cast<void **>(savedGuestStack) - 1;
+		*entrySlot = reinterpret_cast<void *>(entry);
+		threadTib->CurrentStackPointer = entrySlot;
+	}
+
 	wibo::notifyDllThreadAttach();
-	DEBUG_LOG("Calling thread entry %p with userData %p\n", data.entry, data.userData);
+
+	if (entrySlot) {
+		entry = reinterpret_cast<LPTHREAD_START_ROUTINE>(*entrySlot);
+		threadTib->CurrentStackPointer = savedGuestStack;
+	}
+	DEBUG_LOG("Calling thread entry %p with userData %p\n", entry, data.userData);
 	DWORD result = 0;
-	if (data.entry) {
-		result = call_LPTHREAD_START_ROUTINE(data.entry, data.userData);
+	if (entry) {
+		result = call_LPTHREAD_START_ROUTINE(entry, data.userData);
 	}
 	DEBUG_LOG("Thread exiting with code %u\n", result);
 	{
@@ -575,6 +592,40 @@ DWORD WINAPI GetPriorityClass(HANDLE hProcess) {
 	DEBUG_LOG("STUB: GetPriorityClass(%p)\n", hProcess);
 	(void)hProcess;
 	return NORMAL_PRIORITY_CLASS;
+}
+
+BOOL WINAPI GetProcessTimes(HANDLE hProcess, FILETIME *lpCreationTime, FILETIME *lpExitTime, FILETIME *lpKernelTime,
+							FILETIME *lpUserTime) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("GetProcessTimes(%p, %p, %p, %p, %p)\n", hProcess, lpCreationTime, lpExitTime, lpKernelTime, lpUserTime);
+	if (!lpKernelTime || !lpUserTime) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+	if (!isPseudoCurrentProcessHandle(hProcess) && !wibo::handles().getAs<ProcessObject>(hProcess)) {
+		setLastError(ERROR_INVALID_HANDLE);
+		return FALSE;
+	}
+
+	if (lpCreationTime) {
+		*lpCreationTime = kDefaultThreadFileTime;
+	}
+	if (lpExitTime) {
+		lpExitTime->dwLowDateTime = 0;
+		lpExitTime->dwHighDateTime = 0;
+	}
+
+	struct rusage usage{};
+	if (getrusage(RUSAGE_SELF, &usage) == 0) {
+		*lpKernelTime = fileTimeFromTimeval(usage.ru_stime);
+		*lpUserTime = fileTimeFromTimeval(usage.ru_utime);
+		return TRUE;
+	}
+
+	kernel32::setLastErrorFromErrno();
+	*lpKernelTime = fileTimeFromDuration(0);
+	*lpUserTime = fileTimeFromDuration(0);
+	return FALSE;
 }
 
 BOOL WINAPI GetThreadTimes(HANDLE hThread, FILETIME *lpCreationTime, FILETIME *lpExitTime, FILETIME *lpKernelTime,

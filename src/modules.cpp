@@ -59,10 +59,12 @@ extern const wibo::ModuleStub lib_ucrtbase;
 extern const wibo::ModuleStub lib_ntdll;
 extern const wibo::ModuleStub lib_rpcrt4;
 extern const wibo::ModuleStub lib_ole32;
+extern const wibo::ModuleStub lib_psapi;
 extern const wibo::ModuleStub lib_shlwapi;
 extern const wibo::ModuleStub lib_user32;
 extern const wibo::ModuleStub lib_vcruntime;
 extern const wibo::ModuleStub lib_version;
+extern const wibo::ModuleStub lib_winmm;
 extern const wibo::ModuleStub lib_ws2;
 
 // setup.S
@@ -264,9 +266,9 @@ LockedRegistry registry() {
 	if (!reg.initialized) {
 		reg.initialized = true;
 		const wibo::ModuleStub *builtins[] = {
-			&lib_advapi32, &lib_bcrypt, &lib_kernel32, &lib_lmgr,	   &lib_mscoree, &lib_ntdll,
-			&lib_ole32,	   &lib_rpcrt4, &lib_shlwapi, &lib_user32,	   &lib_vcruntime, &lib_version,
-			&lib_ws2,
+			&lib_advapi32, &lib_bcrypt,	   &lib_kernel32, &lib_lmgr,   &lib_mscoree,
+			&lib_ntdll,	   &lib_ole32,	   &lib_psapi,	  &lib_rpcrt4, &lib_shlwapi,
+			&lib_user32,   &lib_vcruntime, &lib_version,  &lib_winmm,  &lib_ws2,
 #if WIBO_HAS_MSVCRT
 			&lib_msvcrt,
 #endif
@@ -370,6 +372,18 @@ std::string normalizedBaseKey(const ParsedModuleName &parsed) {
 		base += ".dll";
 	}
 	return normalizeAlias(base);
+}
+
+std::string_view resolveApiSetAlias(std::string_view requested) {
+	const auto parsed = parseModuleName(requested);
+	std::string normalized = normalizedBaseKey(parsed);
+	for (auto &[alias, module] : kApiSet) {
+		if (alias == normalized) {
+			DEBUG_LOG("  resolved api set %s -> %s\n", alias.data(), module.data());
+			return module;
+		}
+	}
+	return requested;
 }
 
 struct ImageTlsDirectory32 {
@@ -834,7 +848,7 @@ void ensureExportsInitialized(wibo::ModuleInfo &info) {
 	info.exportsInitialized = true;
 }
 
-bool ensureModuleReady(wibo::ModuleInfo &info) {
+bool ensureModuleReady(wibo::ModuleInfo &info, bool staticAttach) {
 	if (info.moduleStub && !info.moduleStub->dllData.empty() && !info.executable) {
 		DEBUG_LOG("registerBuiltinModule: loading PE for %s\n", info.originalName.c_str());
 		auto executable = std::make_unique<wibo::Executable>();
@@ -848,13 +862,16 @@ bool ensureModuleReady(wibo::ModuleInfo &info) {
 	if (!info.executable) {
 		return true;
 	}
-	if (!info.executable->resolveImports()) {
+	if (!info.executable->resolveImports(staticAttach)) {
 		return false;
 	}
 	if (!wibo::initializeModuleTls(info)) {
 		return false;
 	}
-	if (!callDllMain(info, DLL_PROCESS_ATTACH, nullptr)) {
+	// Windows passes a non-null reserved value for process startup loads.
+	// Cygwin uses this to distinguish static imports from runtime LoadLibrary.
+	LPVOID reserved = staticAttach ? reinterpret_cast<LPVOID>(1) : nullptr;
+	if (!callDllMain(info, DLL_PROCESS_ATTACH, reserved)) {
 		kernel32::setLastError(ERROR_DLL_INIT_FAILED);
 		return false;
 	}
@@ -1227,7 +1244,7 @@ ModuleInfo *findLoadedModule(const char *name) {
 	return info;
 }
 
-static ModuleInfo *loadModuleInternal(const std::string &dllName) {
+static ModuleInfo *loadModuleInternal(const std::string &dllName, bool staticAttach) {
 	auto reg = registry();
 	ParsedModuleName parsed = parseModuleName(dllName);
 	DWORD diskError = ERROR_SUCCESS;
@@ -1282,7 +1299,7 @@ static ModuleInfo *loadModuleInternal(const std::string &dllName) {
 		if (raw->executable->isDll) {
 			reg.lock.unlock();
 			ensureExportsInitialized(*raw);
-			if (!raw->executable->resolveImports()) {
+			if (!raw->executable->resolveImports(staticAttach)) {
 				DEBUG_LOG("  resolveImports failed for %s\n", raw->originalName.c_str());
 				reg.lock.lock();
 				reg->modulesByKey.erase(key);
@@ -1297,7 +1314,8 @@ static ModuleInfo *loadModuleInternal(const std::string &dllName) {
 				return nullptr;
 			}
 			reg.lock.lock();
-			if (!callDllMain(*raw, DLL_PROCESS_ATTACH, nullptr)) {
+			LPVOID reserved = staticAttach ? reinterpret_cast<LPVOID>(1) : nullptr;
+			if (!callDllMain(*raw, DLL_PROCESS_ATTACH, reserved)) {
 				DEBUG_LOG("  DllMain failed for %s\n", raw->originalName.c_str());
 				releaseModuleTls(*raw);
 				// runPendingOnExit(*raw);
@@ -1355,7 +1373,7 @@ static ModuleInfo *loadModuleInternal(const std::string &dllName) {
 		DEBUG_LOG("  returning builtin module %s\n", existing->originalName.c_str());
 		ModuleInfo *builtin = existing;
 		reg.lock.unlock();
-		if (!ensureModuleReady(*builtin)) {
+		if (!ensureModuleReady(*builtin, staticAttach)) {
 			return nullptr;
 		}
 		return builtin;
@@ -1384,7 +1402,7 @@ static ModuleInfo *loadModuleInternal(const std::string &dllName) {
 	if (builtin && builtin->moduleStub != nullptr) {
 		DEBUG_LOG("  falling back to builtin module %s\n", builtin->originalName.c_str());
 		reg.lock.unlock();
-		if (!ensureModuleReady(*builtin)) {
+		if (!ensureModuleReady(*builtin, staticAttach)) {
 			return nullptr;
 		}
 		return builtin;
@@ -1401,21 +1419,10 @@ ModuleInfo *loadModule(const char *dllName) {
 	}
 	DEBUG_LOG("loadModule(%s)\n", dllName);
 	std::string_view requested{dllName};
-
-	const auto parsed = parseModuleName(requested);
-	std::string normalized = normalizedBaseKey(parsed);
-
-	for (auto &[alias, module] : kApiSet) {
-		if (alias == normalized) {
-			DEBUG_LOG("  resolved api set %s -> %s\n", alias.data(), module.data());
-			requested = module;
-			normalized = module;
-			break;
-		}
-	}
+	requested = resolveApiSetAlias(requested);
 
 	// DWORD lastError = kernel32::getLastError();
-	if (auto *info = loadModuleInternal(std::string{requested})) {
+	if (auto *info = loadModuleInternal(std::string{requested}, false)) {
 		return info;
 	}
 	if (kernel32::getLastError() != ERROR_MOD_NOT_FOUND) {
@@ -1426,12 +1433,22 @@ ModuleInfo *loadModule(const char *dllName) {
 	// for (auto &[module, fallback] : kFallbacks) {
 	// 	if (module == normalized) {
 	// 		DEBUG_LOG("  trying fallback %s -> %s\n", module.data(), fallback.data());
-	// 		return loadModuleInternal(std::string{fallback});
+	// 		return loadModuleInternal(std::string{fallback}, false);
 	// 	}
 	// }
 
 	// kernel32::setLastError(ERROR_MOD_NOT_FOUND);
 	return nullptr;
+}
+
+ModuleInfo *loadModuleForImport(const char *dllName, bool staticAttach) {
+	if (!dllName || *dllName == '\0') {
+		kernel32::setLastError(ERROR_INVALID_PARAMETER);
+		return nullptr;
+	}
+	std::string_view requested{dllName};
+	requested = resolveApiSetAlias(requested);
+	return loadModuleInternal(std::string{requested}, staticAttach);
 }
 
 void freeModule(ModuleInfo *info) {

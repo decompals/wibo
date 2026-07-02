@@ -20,6 +20,7 @@
 #include <cstring>
 #include <limits>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <unistd.h>
 
 #include <optional>
@@ -62,6 +63,12 @@ constexpr BYTE kProductTypeWorkstation = 1; // VER_NT_WORKSTATION
 
 constexpr ULONGLONG kHundredNanosecondsPerSecond = 10'000'000ULL;
 constexpr ULONGLONG kUnixEpochAsFileTime = 116'444'736'000'000'000ULL;
+constexpr ULONG kDefaultVolumeSerialNumber = 0x12345678;
+constexpr ULONG kDefaultMaximumComponentNameLength = 255;
+constexpr ULONG kFileDeviceDisk = 0x00000007;
+constexpr ULONG kFileCaseSensitiveSearch = 0x00000001;
+constexpr ULONG kFileCasePreservedNames = 0x00000002;
+constexpr ULONG kFileUnicodeOnDisk = 0x00000004;
 
 struct StatFetchResult {
 	bool ok = false;
@@ -147,6 +154,40 @@ StatFetchResult fetchStat(kernel32::FsObject *fs, struct stat &st) {
 	return StatFetchResult{};
 }
 
+StatFetchResult fetchStatvfs(kernel32::FsObject *fs, struct statvfs &st) {
+	if (!fs) {
+		return {};
+	}
+	if (fs->valid()) {
+		if (fstatvfs(fs->fd, &st) == 0) {
+			return StatFetchResult{.ok = true, .err = 0};
+		}
+		if (errno != EBADF) {
+			return StatFetchResult{.ok = false, .err = errno};
+		}
+	}
+	if (!fs->canonicalPath.empty()) {
+		std::filesystem::path queryPath = fs->canonicalPath;
+		while (true) {
+			if (statvfs(queryPath.c_str(), &st) == 0) {
+				return StatFetchResult{.ok = true, .err = 0};
+			}
+
+			int savedErrno = errno;
+			if (savedErrno != ENOENT && savedErrno != ENOTDIR) {
+				return StatFetchResult{.ok = false, .err = savedErrno};
+			}
+
+			std::filesystem::path parent = queryPath.parent_path();
+			if (parent == queryPath || parent.empty()) {
+				return StatFetchResult{.ok = false, .err = savedErrno};
+			}
+			queryPath = parent;
+		}
+	}
+	return StatFetchResult{};
+}
+
 bool resolveProcessDetails(HANDLE processHandle, ProcessHandleDetails &details) {
 	if (kernel32::isPseudoCurrentProcessHandle(processHandle)) {
 		details.pid = getpid();
@@ -180,6 +221,48 @@ std::string windowsImagePathFor(const ProcessHandleDetails &details) {
 		return files::pathToWindows(files::canonicalPath(resolved));
 	}
 	return {};
+}
+
+std::string ntObjectPathToWin32(const UNICODE_STRING *objectName) {
+	if (!objectName || !objectName->Buffer) {
+		return {};
+	}
+	const auto *buffer = fromGuestPtr<uint16_t>(objectName->Buffer);
+	if (!buffer) {
+		return {};
+	}
+	std::string path = wideStringToString(buffer, objectName->Length / sizeof(uint16_t));
+	if (path.rfind("\\??\\", 0) == 0) {
+		path.erase(0, 4);
+	} else if (path.rfind("\\DosDevices\\", 0) == 0) {
+		path.erase(0, 12);
+	}
+	return path;
+}
+
+bool ntPathIsRooted(const std::string &path) {
+	return (path.size() >= 2 && path[1] == ':') || (!path.empty() && (path.front() == '\\' || path.front() == '/'));
+}
+
+NTSTATUS statusFromLastError() { return wibo::statusFromWinError(kernel32::getLastError()); }
+
+std::pair<ULONG, ULONG> volumeSectorGeometry(const struct statvfs &st) {
+	uint64_t blockSize = st.f_frsize ? st.f_frsize : st.f_bsize;
+	if (blockSize == 0) {
+		blockSize = 4096;
+	}
+
+	ULONG bytesPerSector = 512;
+	if (blockSize % bytesPerSector != 0) {
+		bytesPerSector = static_cast<ULONG>(std::min<uint64_t>(blockSize, std::numeric_limits<ULONG>::max()));
+	}
+
+	ULONG sectorsPerAllocationUnit = static_cast<ULONG>(blockSize / bytesPerSector);
+	if (sectorsPerAllocationUnit == 0) {
+		sectorsPerAllocationUnit = 1;
+		bytesPerSector = static_cast<ULONG>(std::min<uint64_t>(blockSize, std::numeric_limits<ULONG>::max()));
+	}
+	return {sectorsPerAllocationUnit, bytesPerSector};
 }
 
 } // namespace
@@ -554,6 +637,270 @@ NTSTATUS WINAPI NtQueryInformationFile(HANDLE FileHandle, PIO_STATUS_BLOCK IoSta
 	return status;
 }
 
+NTSTATUS WINAPI NtQueryVolumeInformationFile(HANDLE FileHandle, PIO_STATUS_BLOCK IoStatusBlock, PVOID FsInformation,
+											 ULONG Length, FS_INFORMATION_CLASS FsInformationClass) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("NtQueryVolumeInformationFile(%p, %p, %p, %u, %u) ", FileHandle, IoStatusBlock, FsInformation, Length,
+			  static_cast<unsigned>(FsInformationClass));
+
+	if (!IoStatusBlock) {
+		DEBUG_LOG("-> 0x%x\n", STATUS_ACCESS_VIOLATION);
+		return STATUS_ACCESS_VIOLATION;
+	}
+	IoStatusBlock->Information = 0;
+
+	if (Length != 0 && !FsInformation) {
+		IoStatusBlock->Status = STATUS_ACCESS_VIOLATION;
+		DEBUG_LOG("-> 0x%x\n", STATUS_ACCESS_VIOLATION);
+		return STATUS_ACCESS_VIOLATION;
+	}
+
+	if (reinterpret_cast<int32_t>(FileHandle) < 0) {
+		IoStatusBlock->Status = STATUS_OBJECT_TYPE_MISMATCH;
+		DEBUG_LOG("-> 0x%x\n", STATUS_OBJECT_TYPE_MISMATCH);
+		return STATUS_OBJECT_TYPE_MISMATCH;
+	}
+
+	auto obj = wibo::handles().getAs<kernel32::FsObject>(FileHandle);
+	if (!obj || !obj->valid()) {
+		IoStatusBlock->Status = STATUS_INVALID_HANDLE;
+		DEBUG_LOG("-> 0x%x\n", STATUS_INVALID_HANDLE);
+		return STATUS_INVALID_HANDLE;
+	}
+
+	NTSTATUS status = STATUS_SUCCESS;
+	switch (FsInformationClass) {
+	case FileFsVolumeInformation: {
+		constexpr size_t fixedSize = offsetof(FILE_FS_VOLUME_INFORMATION, VolumeLabel);
+		if (Length < fixedSize) {
+			status = STATUS_INFO_LENGTH_MISMATCH;
+			break;
+		}
+		auto info = reinterpret_cast<PFILE_FS_VOLUME_INFORMATION>(FsInformation);
+		info->VolumeCreationTime.QuadPart = 0;
+		info->VolumeSerialNumber = kDefaultVolumeSerialNumber;
+		info->VolumeLabelLength = 0;
+		info->SupportsObjects = FALSE;
+		info->Reserved = 0;
+		IoStatusBlock->Information = fixedSize;
+		break;
+	}
+	case FileFsSizeInformation: {
+		if (Length < sizeof(FILE_FS_SIZE_INFORMATION)) {
+			status = STATUS_INFO_LENGTH_MISMATCH;
+			break;
+		}
+		struct statvfs st{};
+		StatFetchResult statRes = fetchStatvfs(obj.get(), st);
+		if (!statRes.ok) {
+			status = wibo::statusFromErrno(statRes.err != 0 ? statRes.err : EINVAL);
+			break;
+		}
+		auto [sectorsPerAllocationUnit, bytesPerSector] = volumeSectorGeometry(st);
+		auto info = reinterpret_cast<PFILE_FS_SIZE_INFORMATION>(FsInformation);
+		info->TotalAllocationUnits.QuadPart = static_cast<LONGLONG>(st.f_blocks);
+		info->AvailableAllocationUnits.QuadPart = static_cast<LONGLONG>(st.f_bavail);
+		info->SectorsPerAllocationUnit = sectorsPerAllocationUnit;
+		info->BytesPerSector = bytesPerSector;
+		IoStatusBlock->Information = sizeof(FILE_FS_SIZE_INFORMATION);
+		break;
+	}
+	case FileFsDeviceInformation: {
+		if (Length < sizeof(FILE_FS_DEVICE_INFORMATION)) {
+			status = STATUS_INFO_LENGTH_MISMATCH;
+			break;
+		}
+		auto info = reinterpret_cast<PFILE_FS_DEVICE_INFORMATION>(FsInformation);
+		info->DeviceType = kFileDeviceDisk;
+		info->Characteristics = 0;
+		IoStatusBlock->Information = sizeof(FILE_FS_DEVICE_INFORMATION);
+		break;
+	}
+	case FileFsAttributeInformation: {
+		// Cygwin mostly needs stable capability bits and a plausible FS name;
+		// match the existing GetVolumeInformation* shim's NTFS personality.
+		const char *fsName = "NTFS";
+		auto wideName = stringToWideString(fsName);
+		ULONG nameBytes = static_cast<ULONG>((wideName.size() > 0 ? wideName.size() - 1 : 0) * sizeof(WCHAR));
+		size_t fixedSize = offsetof(FILE_FS_ATTRIBUTE_INFORMATION, FileSystemName);
+		if (Length < fixedSize + nameBytes) {
+			status = STATUS_INFO_LENGTH_MISMATCH;
+			break;
+		}
+		auto info = reinterpret_cast<PFILE_FS_ATTRIBUTE_INFORMATION>(FsInformation);
+		info->FileSystemAttributes = kFileCaseSensitiveSearch | kFileCasePreservedNames | kFileUnicodeOnDisk;
+		info->MaximumComponentNameLength = kDefaultMaximumComponentNameLength;
+		info->FileSystemNameLength = nameBytes;
+		if (nameBytes > 0) {
+			std::memcpy(info->FileSystemName, wideName.data(), nameBytes);
+		}
+		IoStatusBlock->Information = fixedSize + nameBytes;
+		break;
+	}
+	case FileFsFullSizeInformation: {
+		if (Length < sizeof(FILE_FS_FULL_SIZE_INFORMATION)) {
+			status = STATUS_INFO_LENGTH_MISMATCH;
+			break;
+		}
+		struct statvfs st{};
+		StatFetchResult statRes = fetchStatvfs(obj.get(), st);
+		if (!statRes.ok) {
+			status = wibo::statusFromErrno(statRes.err != 0 ? statRes.err : EINVAL);
+			break;
+		}
+		auto [sectorsPerAllocationUnit, bytesPerSector] = volumeSectorGeometry(st);
+		auto info = reinterpret_cast<PFILE_FS_FULL_SIZE_INFORMATION>(FsInformation);
+		info->TotalAllocationUnits.QuadPart = static_cast<LONGLONG>(st.f_blocks);
+		info->CallerAvailableAllocationUnits.QuadPart = static_cast<LONGLONG>(st.f_bavail);
+		info->ActualAvailableAllocationUnits.QuadPart = static_cast<LONGLONG>(st.f_bfree);
+		info->SectorsPerAllocationUnit = sectorsPerAllocationUnit;
+		info->BytesPerSector = bytesPerSector;
+		IoStatusBlock->Information = sizeof(FILE_FS_FULL_SIZE_INFORMATION);
+		break;
+	}
+	default:
+		DEBUG_LOG("FIXME: NtQueryVolumeInformationFile: Unsupported info class");
+		status = STATUS_INVALID_INFO_CLASS;
+		break;
+	}
+
+	IoStatusBlock->Status = status;
+	DEBUG_LOG("-> 0x%x\n", status);
+	return status;
+}
+
+NTSTATUS WINAPI NtCreateFile(PHANDLE FileHandle, DWORD DesiredAccess, POBJECT_ATTRIBUTES ObjectAttributes,
+							 PIO_STATUS_BLOCK IoStatusBlock, PLARGE_INTEGER AllocationSize, ULONG FileAttributes,
+							 ULONG ShareAccess, ULONG CreateDisposition, ULONG CreateOptions, PVOID EaBuffer,
+							 ULONG EaLength) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("NtCreateFile(%p, 0x%x, %p, %p, %p, 0x%x, 0x%x, %u, 0x%x, %p, %u) ", FileHandle, DesiredAccess,
+			  ObjectAttributes, IoStatusBlock, AllocationSize, FileAttributes, ShareAccess, CreateDisposition,
+			  CreateOptions, EaBuffer, EaLength);
+	(void)AllocationSize;
+	(void)EaBuffer;
+	(void)EaLength;
+
+	if (!FileHandle || !ObjectAttributes || !IoStatusBlock) {
+		DEBUG_LOG("-> 0x%x\n", STATUS_INVALID_PARAMETER);
+		return STATUS_INVALID_PARAMETER;
+	}
+	auto *objectName = fromGuestPtr<UNICODE_STRING>(ObjectAttributes->ObjectName);
+	std::string path = ntObjectPathToWin32(objectName);
+	if (path.empty()) {
+		DEBUG_LOG("-> 0x%x (empty path)\n", STATUS_INVALID_PARAMETER);
+		return STATUS_INVALID_PARAMETER;
+	}
+	if (ObjectAttributes->RootDirectory && !ntPathIsRooted(path)) {
+		auto root = wibo::handles().getAs<kernel32::FsObject>(ObjectAttributes->RootDirectory);
+		if (!root || root->canonicalPath.empty()) {
+			DEBUG_LOG("-> 0x%x (bad RootDirectory)\n", STATUS_INVALID_HANDLE);
+			return STATUS_INVALID_HANDLE;
+		}
+		std::filesystem::path relative = files::pathFromWindows(path.c_str());
+		path = files::pathToWindows(root->canonicalPath / relative);
+	}
+
+	DWORD winDisposition = 0;
+	switch (CreateDisposition) {
+	case 0: // FILE_SUPERSEDE
+	case 5: // FILE_OVERWRITE_IF
+		winDisposition = CREATE_ALWAYS;
+		break;
+	case 1: // FILE_OPEN
+		winDisposition = OPEN_EXISTING;
+		break;
+	case 2: // FILE_CREATE
+		winDisposition = CREATE_NEW;
+		break;
+	case 3: // FILE_OPEN_IF
+		winDisposition = OPEN_ALWAYS;
+		break;
+	case 4: // FILE_OVERWRITE
+		winDisposition = TRUNCATE_EXISTING;
+		break;
+	default:
+		DEBUG_LOG("-> 0x%x (bad disposition)\n", STATUS_INVALID_PARAMETER);
+		return STATUS_INVALID_PARAMETER;
+	}
+
+	constexpr ULONG FILE_DIRECTORY_FILE = 0x00000001;
+	constexpr ULONG FILE_DELETE_ON_CLOSE = 0x00001000;
+
+	DWORD flagsAndAttributes = FileAttributes ? FileAttributes : FILE_ATTRIBUTE_NORMAL;
+	if (CreateOptions & FILE_DIRECTORY_FILE) {
+		flagsAndAttributes |= FILE_ATTRIBUTE_DIRECTORY | FILE_FLAG_BACKUP_SEMANTICS;
+	}
+	if (CreateOptions & FILE_DELETE_ON_CLOSE) {
+		flagsAndAttributes |= FILE_FLAG_DELETE_ON_CLOSE;
+	}
+
+	HANDLE handle =
+		kernel32::CreateFileA(path.c_str(), DesiredAccess, ShareAccess, nullptr, winDisposition, flagsAndAttributes, 0);
+	if (handle == INVALID_HANDLE_VALUE) {
+		NTSTATUS status = statusFromLastError();
+		IoStatusBlock->Status = status;
+		IoStatusBlock->Information = 0;
+		DEBUG_LOG("-> 0x%x\n", status);
+		return status;
+	}
+
+	*FileHandle = handle;
+	IoStatusBlock->Status = STATUS_SUCCESS;
+	IoStatusBlock->Information = 0;
+	DEBUG_LOG("-> 0x%x, handle=%p\n", STATUS_SUCCESS, handle);
+	return STATUS_SUCCESS;
+}
+
+NTSTATUS WINAPI NtQueryObject(HANDLE Handle, OBJECT_INFORMATION_CLASS ObjectInformationClass, PVOID ObjectInformation,
+							  ULONG ObjectInformationLength, PULONG ReturnLength) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("NtQueryObject(%p, %u, %p, %u, %p) ", Handle, static_cast<unsigned>(ObjectInformationClass),
+			  ObjectInformation, ObjectInformationLength, ReturnLength);
+
+	if (ReturnLength) {
+		*ReturnLength = 0;
+	}
+	if (ObjectInformationClass != ObjectNameInformation) {
+		DEBUG_LOG("-> 0x%x\n", STATUS_INVALID_INFO_CLASS);
+		return STATUS_INVALID_INFO_CLASS;
+	}
+
+	auto obj = wibo::handles().getAs<kernel32::FsObject>(Handle);
+	if (!obj || !obj->valid()) {
+		DEBUG_LOG("-> 0x%x\n", STATUS_INVALID_HANDLE);
+		return STATUS_INVALID_HANDLE;
+	}
+	if (obj->canonicalPath.empty()) {
+		DEBUG_LOG("-> 0x%x\n", STATUS_OBJECT_NAME_NOT_FOUND);
+		return STATUS_OBJECT_NAME_NOT_FOUND;
+	}
+
+	std::string ntName = "\\??\\" + files::pathToWindows(obj->canonicalPath);
+	auto wideName = stringToWideString(ntName.c_str());
+	ULONG nameBytes = static_cast<ULONG>((wideName.size() > 0 ? wideName.size() - 1 : 0) * sizeof(WCHAR));
+	ULONG required = static_cast<ULONG>(sizeof(UNICODE_STRING) + nameBytes + sizeof(WCHAR));
+	if (ReturnLength) {
+		*ReturnLength = required;
+	}
+	if (!ObjectInformation || ObjectInformationLength < required) {
+		DEBUG_LOG("-> 0x%x\n", STATUS_INFO_LENGTH_MISMATCH);
+		return STATUS_INFO_LENGTH_MISMATCH;
+	}
+
+	auto *info = reinterpret_cast<UNICODE_STRING *>(ObjectInformation);
+	auto *buffer = reinterpret_cast<WCHAR *>(reinterpret_cast<uint8_t *>(ObjectInformation) + sizeof(UNICODE_STRING));
+	info->Length = static_cast<USHORT>(nameBytes);
+	info->MaximumLength = static_cast<USHORT>(nameBytes + sizeof(WCHAR));
+	info->Buffer = toGuestPtr(buffer);
+	if (nameBytes > 0) {
+		std::memcpy(buffer, wideName.data(), nameBytes);
+	}
+	buffer[nameBytes / sizeof(WCHAR)] = 0;
+	DEBUG_LOG("-> 0x%x (%s)\n", STATUS_SUCCESS, ntName.c_str());
+	return STATUS_SUCCESS;
+}
+
 NTSTATUS WINAPI NtQuerySystemTime(PLARGE_INTEGER SystemTime) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("NtQuerySystemTime(%p) ", SystemTime);
@@ -724,6 +1071,93 @@ NTSTATUS WINAPI RtlGetVersion(PRTL_OSVERSIONINFOW lpVersionInformation) {
 
 	DEBUG_LOG("-> 0x%x\n", STATUS_SUCCESS);
 	return STATUS_SUCCESS;
+}
+
+ULONG WINAPI RtlIsDosDeviceName_U(PWSTR DeviceName) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("RtlIsDosDeviceName_U(%p) ", DeviceName);
+	if (!DeviceName) {
+		DEBUG_LOG("-> 0\n");
+		return 0;
+	}
+
+	auto asciiUpper = [](WCHAR ch) -> char {
+		if (ch >= u'a' && ch <= u'z') {
+			return static_cast<char>(ch - u'a' + u'A');
+		}
+		if (ch <= 0x7f) {
+			return static_cast<char>(ch);
+		}
+		return '\0';
+	};
+
+	size_t length = 0;
+	while (DeviceName[length]) {
+		++length;
+	}
+	if (length == 0) {
+		DEBUG_LOG("-> 0\n");
+		return 0;
+	}
+
+	size_t start = 0;
+	for (size_t i = 0; i < length; ++i) {
+		WCHAR ch = DeviceName[i];
+		if (ch == u'\\' || ch == u'/' || ch == u':') {
+			start = i + 1;
+		}
+	}
+
+	size_t end = length;
+	while (end > start && DeviceName[end - 1] == u' ') {
+		--end;
+	}
+	size_t dot = start;
+	while (dot < end && DeviceName[dot] != u'.') {
+		++dot;
+	}
+	end = dot;
+
+	size_t componentLength = end - start;
+	bool match = false;
+	if (componentLength == 3) {
+		char a = asciiUpper(DeviceName[start]);
+		char b = asciiUpper(DeviceName[start + 1]);
+		char c = asciiUpper(DeviceName[start + 2]);
+		match = (a == 'C' && b == 'O' && c == 'N') || (a == 'P' && b == 'R' && c == 'N') ||
+				(a == 'A' && b == 'U' && c == 'X') || (a == 'N' && b == 'U' && c == 'L');
+	} else if (componentLength == 4) {
+		char a = asciiUpper(DeviceName[start]);
+		char b = asciiUpper(DeviceName[start + 1]);
+		char c = asciiUpper(DeviceName[start + 2]);
+		WCHAR d = DeviceName[start + 3];
+		match = ((a == 'C' && b == 'O' && c == 'M') || (a == 'L' && b == 'P' && c == 'T')) && d >= u'1' && d <= u'9';
+	} else if (componentLength == 6) {
+		match = asciiUpper(DeviceName[start]) == 'C' && asciiUpper(DeviceName[start + 1]) == 'O' &&
+				asciiUpper(DeviceName[start + 2]) == 'N' && asciiUpper(DeviceName[start + 3]) == 'I' &&
+				asciiUpper(DeviceName[start + 4]) == 'N' && DeviceName[start + 5] == u'$';
+	} else if (componentLength == 7) {
+		match = asciiUpper(DeviceName[start]) == 'C' && asciiUpper(DeviceName[start + 1]) == 'O' &&
+				asciiUpper(DeviceName[start + 2]) == 'N' && asciiUpper(DeviceName[start + 3]) == 'O' &&
+				asciiUpper(DeviceName[start + 4]) == 'U' && asciiUpper(DeviceName[start + 5]) == 'T' &&
+				DeviceName[start + 6] == u'$';
+	}
+
+	if (!match) {
+		DEBUG_LOG("-> 0\n");
+		return 0;
+	}
+	ULONG result =
+		static_cast<ULONG>((componentLength * sizeof(WCHAR)) << 16) | static_cast<ULONG>(start * sizeof(WCHAR));
+	DEBUG_LOG("-> 0x%x\n", result);
+	return result;
+}
+
+ULONG WINAPI RtlNtStatusToDosError(NTSTATUS Status) {
+	HOST_CONTEXT_GUARD();
+	ULONG result = wibo::winErrorFromNtStatus(Status);
+	DEBUG_LOG("RtlNtStatusToDosError(0x%x) -> %u\n", Status, result);
+	return result;
 }
 
 NTSTATUS WINAPI NtQueryInformationProcess(HANDLE ProcessHandle, PROCESSINFOCLASS ProcessInformationClass,

@@ -222,11 +222,13 @@ add_executable(wibo
     dll/mscoree.cpp
     dll/ntdll.cpp
     dll/ole32.cpp
+    dll/psapi.cpp
     dll/rpcrt4.cpp
     dll/shlwapi.cpp
     dll/user32.cpp
     dll/vcruntime.cpp
     dll/version.cpp
+    dll/winmm.cpp
     dll/ws2.cpp
     src/access.cpp
     src/async_io.cpp
@@ -380,8 +382,10 @@ wibo_codegen_module(NAME bcrypt HEADERS dll/bcrypt.h)
 wibo_codegen_module(NAME entry HEADERS src/entry.h)
 wibo_codegen_module(NAME mscoree HEADERS dll/mscoree.h)
 wibo_codegen_module(NAME version HEADERS dll/version.h)
+wibo_codegen_module(NAME psapi HEADERS dll/psapi.h)
 wibo_codegen_module(NAME rpcrt4 HEADERS dll/rpcrt4.h)
 wibo_codegen_module(NAME shlwapi HEADERS dll/shlwapi.h)
+wibo_codegen_module(NAME winmm HEADERS dll/winmm.h)
 wibo_codegen_module(NAME ws2 HEADERS dll/ws2.h)
 wibo_codegen_module(NAME vcruntime HEADERS dll/vcruntime.h)
 wibo_codegen_module(NAME lmgr HEADERS dll/lmgr.h)

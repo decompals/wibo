@@ -455,18 +455,24 @@ inline void setOwningThread(LPCRITICAL_SECTION crit, DWORD threadId) {
 }
 
 void waitForCriticalSection(LPCRITICAL_SECTION cs) {
-	auto *sequence = reinterpret_cast<LONG volatile *>(&cs->LockSemaphore);
-	LONG observed = __atomic_load_n(sequence, __ATOMIC_ACQUIRE);
-	while (owningThreadId(cs) != 0) {
-		kernel32::WaitOnAddress(sequence, &observed, sizeof(observed), INFINITE);
-		observed = __atomic_load_n(sequence, __ATOMIC_ACQUIRE);
+	auto *tickets = reinterpret_cast<LONG volatile *>(&cs->LockSemaphore);
+	for (;;) {
+		LONG available = __atomic_load_n(tickets, __ATOMIC_ACQUIRE);
+		if (available > 0) {
+			if (__atomic_compare_exchange_n(tickets, &available, available - 1, false, __ATOMIC_ACQ_REL,
+											__ATOMIC_ACQUIRE)) {
+				return;
+			}
+			continue;
+		}
+		kernel32::WaitOnAddress(tickets, &available, sizeof(available), INFINITE);
 	}
 }
 
 void signalCriticalSection(LPCRITICAL_SECTION cs) {
-	auto *sequence = reinterpret_cast<LONG *>(&cs->LockSemaphore);
-	kernel32::InterlockedIncrement(const_cast<LONG volatile *>(sequence));
-	kernel32::WakeByAddressSingle(sequence);
+	auto *tickets = reinterpret_cast<LONG *>(&cs->LockSemaphore);
+	kernel32::InterlockedIncrement(const_cast<LONG volatile *>(tickets));
+	kernel32::WakeByAddressSingle(tickets);
 }
 
 inline bool trySpinAcquireCriticalSection(LPCRITICAL_SECTION cs, DWORD threadId) {
@@ -1100,16 +1106,8 @@ void WINAPI LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
 		return;
 	}
 
-	const DWORD threadId = GetCurrentThreadId();
-	if (owningThreadId(lpCriticalSection) != threadId || lpCriticalSection->RecursionCount <= 0) {
-		DEBUG_LOG("LeaveCriticalSection: thread %u does not own %p (owner=%u, recursion=%ld)\n", threadId,
-				  lpCriticalSection, owningThreadId(lpCriticalSection),
-				  static_cast<long>(lpCriticalSection->RecursionCount));
-		return;
-	}
-
 	auto *lockCount = const_cast<LONG volatile *>(&lpCriticalSection->LockCount);
-	if (--lpCriticalSection->RecursionCount > 0) {
+	if (--lpCriticalSection->RecursionCount != 0) {
 		kernel32::InterlockedDecrement(lockCount);
 		return;
 	}

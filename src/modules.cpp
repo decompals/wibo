@@ -35,6 +35,12 @@ extern const wibo::ModuleStub lib_mscoree;
 #if WIBO_HAS_MSVCRT
 extern const wibo::ModuleStub lib_msvcrt;
 #endif
+#if WIBO_HAS_MSVCIRT
+extern const wibo::ModuleStub lib_msvcirt;
+#endif
+#if WIBO_HAS_MSVCRT40
+extern const wibo::ModuleStub lib_msvcrt40;
+#endif
 #if WIBO_HAS_MSVCR71
 extern const wibo::ModuleStub lib_msvcr71;
 #endif
@@ -165,6 +171,61 @@ StubFuncType resolveMissingFuncOrdinal(const char *dllName, uint16_t ordinal) {
 	return resolveMissingFuncName(dllName, funcName.c_str());
 }
 
+wibo::ModuleInfo *loadForwarderTargetModule(std::string &dllName) {
+	wibo::ModuleInfo *target = wibo::loadModule(dllName.c_str());
+	if (target || dllName.empty() || dllName[0] != '_') {
+		return target;
+	}
+
+	std::string undecoratedName = dllName.substr(1);
+	target = wibo::loadModule(undecoratedName.c_str());
+	if (target) {
+		DEBUG_LOG("Forwarded export: treating decorated DLL name %s as %s\n", dllName.c_str(),
+				  undecoratedName.c_str());
+		dllName = std::move(undecoratedName);
+	}
+	return target;
+}
+
+void *resolveForwardedExport(wibo::ModuleInfo &source, const char *forwarder) {
+	if (!forwarder || !*forwarder) {
+		return reinterpret_cast<void *>(resolveMissingFuncName(source.originalName.c_str(), ""));
+	}
+
+	const char *separator = std::strchr(forwarder, '.');
+	if (!separator || separator == forwarder || !separator[1]) {
+		return reinterpret_cast<void *>(resolveMissingFuncName(source.originalName.c_str(), forwarder));
+	}
+
+	std::string dllName(forwarder, separator - forwarder);
+	std::string exportName(separator + 1);
+	DEBUG_LOG("Forwarded export: %s!%s -> %s!%s\n", source.originalName.c_str(), forwarder, dllName.c_str(),
+			  exportName.c_str());
+
+	wibo::ModuleInfo *target = loadForwarderTargetModule(dllName);
+	if (!target) {
+		return reinterpret_cast<void *>(resolveMissingFuncName(dllName.c_str(), exportName.c_str()));
+	}
+
+	if (exportName[0] == '#') {
+		char *end = nullptr;
+		unsigned long ordinal = std::strtoul(exportName.c_str() + 1, &end, 10);
+		if (end && *end == '\0' && ordinal <= UINT16_MAX) {
+			void *func = wibo::resolveFuncByOrdinal(target, static_cast<uint16_t>(ordinal));
+			if (func) {
+				return func;
+			}
+		}
+		return reinterpret_cast<void *>(resolveMissingFuncName(dllName.c_str(), exportName.c_str()));
+	}
+
+	void *func = wibo::resolveFuncByName(target, exportName.c_str());
+	if (func) {
+		return func;
+	}
+	return reinterpret_cast<void *>(resolveMissingFuncName(dllName.c_str(), exportName.c_str()));
+}
+
 struct ModuleRegistry {
 	std::recursive_mutex mutex;
 	std::unordered_map<std::string, wibo::ModulePtr> modulesByKey;
@@ -208,6 +269,12 @@ LockedRegistry registry() {
 			&lib_ws2,
 #if WIBO_HAS_MSVCRT
 			&lib_msvcrt,
+#endif
+#if WIBO_HAS_MSVCIRT
+			&lib_msvcirt,
+#endif
+#if WIBO_HAS_MSVCRT40
+			&lib_msvcrt40,
 #endif
 #if WIBO_HAS_MSVCR71
 			&lib_msvcr71,
@@ -744,8 +811,7 @@ void ensureExportsInitialized(wibo::ModuleInfo &info) {
 			}
 			if (rva >= exe->exportDirectoryRVA && rva < exe->exportDirectoryRVA + exe->exportDirectorySize) {
 				const char *forward = exe->fromRVA<const char>(rva);
-				info.exportsByOrdinal[i] =
-					reinterpret_cast<void *>(resolveMissingFuncName(info.originalName.c_str(), forward));
+				info.exportsByOrdinal[i] = resolveForwardedExport(info, forward);
 			} else {
 				info.exportsByOrdinal[i] = exe->fromRVA<void>(rva);
 			}

@@ -1813,6 +1813,25 @@ UINT WINAPI GetTempFileNameA(LPCSTR lpPathName, LPCSTR lpPrefixString, UINT uUni
 	return uUnique;
 }
 
+UINT WINAPI GetTempFileNameW(LPCWSTR lpPathName, LPCWSTR lpPrefixString, UINT uUnique, LPWSTR lpTempFileName) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("GetTempFileNameW -> ");
+	if (!lpPathName || !lpPrefixString || !lpTempFileName) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return 0;
+	}
+	std::string pathName = wideStringToString(lpPathName);
+	std::string prefixString = wideStringToString(lpPrefixString);
+	char tempFileName[MAX_PATH];
+	UINT result = GetTempFileNameA(pathName.c_str(), prefixString.c_str(), uUnique, tempFileName);
+	if (result == 0) {
+		return 0;
+	}
+	auto wide = stringToWideString(tempFileName);
+	wstrncpy(lpTempFileName, wide.data(), wstrlen(wide.data()) + 1);
+	return result;
+}
+
 DWORD WINAPI GetTempPathA(DWORD nBufferLength, LPSTR lpBuffer) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetTempPathA(%u, %p)\n", nBufferLength, lpBuffer);

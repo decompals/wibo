@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <climits>
 #include <csignal>
 #include <cstddef>
 #include <cstdio>

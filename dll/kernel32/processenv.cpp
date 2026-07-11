@@ -70,30 +70,35 @@ const char *getenvCaseInsensitive(const std::string &name) {
 	return nullptr;
 }
 
-std::optional<std::string> synthesizedTempEnvValue(const std::string &name) {
-	if (strcasecmp(name.c_str(), "TMP") != 0 && strcasecmp(name.c_str(), "TEMP") != 0) {
-		return std::nullopt;
-	}
-
-	const char *hostTemp = getenv("TMPDIR");
-	if (!hostTemp || !*hostTemp) {
-		hostTemp = "/tmp";
-	}
-	return convertEnvValueForWindows(name, hostTemp);
+void ensureTempEnvVariables() {
+	static const bool initialized = [] {
+		const char *hostTemp = getenv("TMPDIR");
+		if (!hostTemp || !*hostTemp) {
+			hostTemp = "/tmp";
+		}
+		if (!getenvCaseInsensitive("TMP")) {
+			setenv("TMP", hostTemp, 0);
+		}
+		if (!getenvCaseInsensitive("TEMP")) {
+			setenv("TEMP", hostTemp, 0);
+		}
+		return true;
+	}();
+	(void)initialized;
 }
 
 std::optional<std::string> getEnvValueForWindows(const std::string &name) {
+	ensureTempEnvVariables();
 	if (const char *rawValue = getenvCaseInsensitive(name)) {
 		return convertEnvValueForWindows(name, rawValue);
 	}
-	return synthesizedTempEnvValue(name);
+	return std::nullopt;
 }
 
 std::vector<std::string> prepareEnvStrings(size_t &totalSize) {
+	ensureTempEnvVariables();
 	std::vector<std::string> strings;
 	totalSize = 0;
-	bool hasTmp = false;
-	bool hasTemp = false;
 	for (char **work = environ; *work; ++work) {
 		std::string s = *work;
 		size_t eq = s.find('=');
@@ -102,30 +107,10 @@ std::vector<std::string> prepareEnvStrings(size_t &totalSize) {
 			std::string value = s.substr(eq + 1);
 			std::string converted = convertEnvValueForWindows(name, value.c_str());
 			s = name + "=" + converted;
-			if (strcasecmp(name.c_str(), "TMP") == 0) {
-				hasTmp = true;
-			} else if (strcasecmp(name.c_str(), "TEMP") == 0) {
-				hasTemp = true;
-			}
 		}
 		strings.push_back(s);
 		totalSize += s.size() + 1;
 	}
-
-	const auto addSynthesizedEnv = [&](const char *name, bool present) {
-		if (present) {
-			return;
-		}
-		auto value = synthesizedTempEnvValue(name);
-		if (!value) {
-			return;
-		}
-		std::string s = std::string(name) + "=" + *value;
-		totalSize += s.size() + 1;
-		strings.push_back(std::move(s));
-	};
-	addSynthesizedEnv("TMP", hasTmp);
-	addSynthesizedEnv("TEMP", hasTemp);
 
 	totalSize++; // For the final null
 	return strings;
@@ -315,6 +300,7 @@ BOOL WINAPI SetEnvironmentVariableA(LPCSTR lpName, LPCSTR lpValue) {
 		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
+	ensureTempEnvVariables();
 	int rc = 0;
 	if (!lpValue) {
 		rc = unsetenv(lpName);

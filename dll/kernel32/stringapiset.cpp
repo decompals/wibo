@@ -28,6 +28,9 @@ int WINAPI WideCharToMultiByte(UINT CodePage, DWORD dwFlags, LPCWCH lpWideCharSt
 		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
+	if (lpUsedDefaultChar) {
+		*lpUsedDefaultChar = FALSE;
+	}
 	if (cchWideChar == -1) {
 		cchWideChar = static_cast<int>(wstrlen(lpWideCharStr)) + 1;
 	}
@@ -37,9 +40,6 @@ int WINAPI WideCharToMultiByte(UINT CodePage, DWORD dwFlags, LPCWCH lpWideCharSt
 	if (cbMultiByte < cchWideChar) {
 		setLastError(ERROR_INSUFFICIENT_BUFFER);
 		return 0;
-	}
-	if (lpUsedDefaultChar) {
-		*lpUsedDefaultChar = FALSE;
 	}
 	for (int i = 0; i < cchWideChar; i++) {
 		lpMultiByteStr[i] = static_cast<char>(lpWideCharStr[i] & 0xFF);

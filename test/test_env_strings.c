@@ -65,5 +65,23 @@ int main(void) {
 	TEST_CHECK(len > 0 && len < sizeof(buffer));
 	TEST_CHECK_MSG(strchr(buffer, '\\') != NULL, "TEMP should be a Windows path, got: %s", buffer);
 
+	TEST_CHECK(SetEnvironmentVariableA("TMP", NULL));
+	SetLastError(ERROR_SUCCESS);
+	TEST_CHECK_EQ(0, GetEnvironmentVariableA("TMP", buffer, sizeof(buffer)));
+	TEST_CHECK_EQ(ERROR_ENVVAR_NOT_FOUND, GetLastError());
+
+	env = GetEnvironmentStringsA();
+	TEST_CHECK(env != NULL);
+	p = env;
+	foundTmp = 0;
+	while (*p != '\0') {
+		if (env_name_equals(p, "TMP")) {
+			foundTmp = 1;
+		}
+		p += strlen(p) + 1;
+	}
+	TEST_CHECK(!foundTmp);
+	FreeEnvironmentStringsA(env);
+
 	return EXIT_SUCCESS;
 }

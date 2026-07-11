@@ -22,11 +22,6 @@ static FARPROC loadExport(HMODULE module, const char *name) {
 	return proc;
 }
 
-static BOOL isRunningUnderWine(void) {
-	HMODULE hNtdll = GetModuleHandleW(L"ntdll.dll");
-	return hNtdll != NULL && GetProcAddress(hNtdll, "wine_get_version") != NULL;
-}
-
 int main(void) {
 	typedef LONG (*get_count_fn)(void);
 	typedef void (*reset_counts_fn)(void);
@@ -61,10 +56,8 @@ int main(void) {
 
 	resetCounts();
 
-	// Wine throws ERR_MOD_NOT_FOUND from DisableThreadLibraryCalls, even if we pass in hinstDLL from DllMain
-	// DLL_PROCESS_ATTACH, which is strange.
-	TEST_CHECK_MSG(disableNotifications() || isRunningUnderWine(), "DisableThreadLibraryCalls failed: %lu",
-				   (unsigned long)GetLastError());
+	// MinGW adds a static TLS directory to the DLL, so Windows rejects attempts to disable thread notifications.
+	TEST_CHECK(!disableNotifications());
 
 	thread = CreateThread(NULL, 0, workerProc, NULL, 0, NULL);
 	TEST_CHECK_MSG(thread != NULL, "CreateThread after disable failed: %lu", (unsigned long)GetLastError());
@@ -72,10 +65,8 @@ int main(void) {
 	TEST_CHECK_EQ(WAIT_OBJECT_0, wait_result);
 	TEST_CHECK(CloseHandle(thread));
 
-	if (!isRunningUnderWine()) {
-		TEST_CHECK_EQ(0, getAttach());
-		TEST_CHECK_EQ(0, getDetach());
-	}
+	TEST_CHECK_EQ(1, getAttach());
+	TEST_CHECK_EQ(1, getDetach());
 
 	LONG final_attach = getAttach();
 	LONG final_detach = getDetach();

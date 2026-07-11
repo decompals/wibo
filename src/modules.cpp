@@ -1213,6 +1213,10 @@ BOOL disableThreadNotifications(ModuleInfo *info) {
 	if (!info) {
 		return FALSE;
 	}
+	if (info->tlsInfo.hasTls) {
+		DEBUG_LOG("disableThreadNotifications: %s uses static TLS\n", info->originalName.c_str());
+		return FALSE;
+	}
 	auto reg = registry();
 	(void)reg;
 	info->threadNotificationsEnabled = false;

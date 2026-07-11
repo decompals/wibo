@@ -14,7 +14,7 @@
 namespace kernel32 {
 
 int WINAPI WideCharToMultiByte(UINT CodePage, DWORD dwFlags, LPCWCH lpWideCharStr, int cchWideChar,
-								 LPSTR lpMultiByteStr, int cbMultiByte, LPCCH lpDefaultChar, LPBOOL lpUsedDefaultChar) {
+							   LPSTR lpMultiByteStr, int cbMultiByte, LPCCH lpDefaultChar, LPBOOL lpUsedDefaultChar) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("WideCharToMultiByte(%u, %u, %p, %d, %p, %d, %p, %p)\n", CodePage, dwFlags, lpWideCharStr, cchWideChar,
 				lpMultiByteStr, cbMultiByte, lpDefaultChar, lpUsedDefaultChar);
@@ -22,16 +22,24 @@ int WINAPI WideCharToMultiByte(UINT CodePage, DWORD dwFlags, LPCWCH lpWideCharSt
 	(void)CodePage;
 	(void)dwFlags;
 	(void)lpDefaultChar;
+
+	if (!lpWideCharStr || cchWideChar == 0 || cchWideChar < -1 || cbMultiByte < 0 ||
+		(cbMultiByte > 0 && !lpMultiByteStr)) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return 0;
+	}
 	if (lpUsedDefaultChar) {
 		*lpUsedDefaultChar = FALSE;
 	}
-
 	if (cchWideChar == -1) {
 		cchWideChar = static_cast<int>(wstrlen(lpWideCharStr)) + 1;
 	}
-
 	if (cbMultiByte == 0) {
 		return cchWideChar;
+	}
+	if (cbMultiByte < cchWideChar) {
+		setLastError(ERROR_INSUFFICIENT_BUFFER);
+		return 0;
 	}
 	for (int i = 0; i < cchWideChar; i++) {
 		lpMultiByteStr[i] = static_cast<char>(lpWideCharStr[i] & 0xFF);
@@ -46,13 +54,18 @@ int WINAPI WideCharToMultiByte(UINT CodePage, DWORD dwFlags, LPCWCH lpWideCharSt
 }
 
 int WINAPI MultiByteToWideChar(UINT CodePage, DWORD dwFlags, LPCCH lpMultiByteStr, int cbMultiByte,
-								 LPWSTR lpWideCharStr, int cchWideChar) {
+							   LPWSTR lpWideCharStr, int cchWideChar) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("MultiByteToWideChar(%u, %u, %d, %d)\n", CodePage, dwFlags, cbMultiByte, cchWideChar);
 
 	(void)CodePage;
 	(void)dwFlags;
 
+	if (!lpMultiByteStr || cbMultiByte == 0 || cbMultiByte < -1 || cchWideChar < 0 ||
+		(cchWideChar > 0 && !lpWideCharStr)) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return 0;
+	}
 	if (cbMultiByte == -1) {
 		cbMultiByte = static_cast<int>(strlen(lpMultiByteStr)) + 1;
 	}
@@ -60,12 +73,15 @@ int WINAPI MultiByteToWideChar(UINT CodePage, DWORD dwFlags, LPCCH lpMultiByteSt
 	if (cchWideChar == 0) {
 		return cbMultiByte;
 	}
+	if (cchWideChar < cbMultiByte) {
+		setLastError(ERROR_INSUFFICIENT_BUFFER);
+		return 0;
+	}
 	if (wibo::debugEnabled) {
 		std::string s(lpMultiByteStr, lpMultiByteStr + cbMultiByte);
 		VERBOSE_LOG("Converting string: [%s] (len %d)\n", s.c_str(), cbMultiByte);
 	}
 
-	assert(cbMultiByte <= cchWideChar);
 	for (int i = 0; i < cbMultiByte; i++) {
 		lpWideCharStr[i] = static_cast<uint16_t>(lpMultiByteStr[i] & 0xFF);
 	}

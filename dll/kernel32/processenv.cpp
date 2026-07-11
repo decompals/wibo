@@ -8,12 +8,17 @@
 #include "strutil.h"
 #include "types.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <mimalloc.h>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <strings.h>
 #include <unistd.h>
+#include <vector>
 
 #ifdef __APPLE__
 extern char **environ;
@@ -29,13 +34,69 @@ std::string convertEnvValueForWindows(const std::string &name, const char *rawVa
 		return {};
 	}
 	if (strcasecmp(name.c_str(), "PATH") != 0) {
-		return rawValue;
+		if (strcasecmp(name.c_str(), "TMP") != 0 && strcasecmp(name.c_str(), "TEMP") != 0) {
+			return rawValue;
+		}
+		std::string path = rawValue;
+		bool looksWindows =
+			path.find('\\') != std::string::npos || (path.size() >= 2 && path[1] == ':' && path[0] != '/');
+		if (looksWindows) {
+			std::replace(path.begin(), path.end(), '/', '\\');
+			return path;
+		}
+		return files::pathToWindows(std::filesystem::path(path));
 	}
 	std::string converted = files::hostPathListToWindows(rawValue);
 	return converted.empty() ? std::string(rawValue) : converted;
 }
 
+const char *getenvCaseInsensitive(const std::string &name) {
+	if (const char *exact = getenv(name.c_str())) {
+		return exact;
+	}
+	for (char **work = environ; *work; ++work) {
+		std::string_view entry(*work);
+		size_t eq = entry.find('=');
+		if (eq != std::string_view::npos && entry.size() >= eq + 1 && entry.compare(0, eq, name) == 0) {
+			return entry.data() + eq + 1;
+		}
+		if (eq != std::string_view::npos && entry.size() >= eq + 1) {
+			std::string envName(entry.substr(0, eq));
+			if (strcasecmp(envName.c_str(), name.c_str()) == 0) {
+				return entry.data() + eq + 1;
+			}
+		}
+	}
+	return nullptr;
+}
+
+void ensureTempEnvVariables() {
+	static const bool initialized = [] {
+		const char *hostTemp = getenv("TMPDIR");
+		if (!hostTemp || !*hostTemp) {
+			hostTemp = "/tmp";
+		}
+		if (!getenvCaseInsensitive("TMP")) {
+			setenv("TMP", hostTemp, 0);
+		}
+		if (!getenvCaseInsensitive("TEMP")) {
+			setenv("TEMP", hostTemp, 0);
+		}
+		return true;
+	}();
+	(void)initialized;
+}
+
+std::optional<std::string> getEnvValueForWindows(const std::string &name) {
+	ensureTempEnvVariables();
+	if (const char *rawValue = getenvCaseInsensitive(name)) {
+		return convertEnvValueForWindows(name, rawValue);
+	}
+	return std::nullopt;
+}
+
 std::vector<std::string> prepareEnvStrings(size_t &totalSize) {
+	ensureTempEnvVariables();
 	std::vector<std::string> strings;
 	totalSize = 0;
 	for (char **work = environ; *work; ++work) {
@@ -50,6 +111,7 @@ std::vector<std::string> prepareEnvStrings(size_t &totalSize) {
 		strings.push_back(s);
 		totalSize += s.size() + 1;
 	}
+
 	totalSize++; // For the final null
 	return strings;
 }
@@ -182,14 +244,12 @@ DWORD WINAPI GetEnvironmentVariableA(LPCSTR lpName, LPSTR lpBuffer, DWORD nSize)
 		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
-	const char *rawValue = getenv(lpName);
-	if (!rawValue) {
+	auto value = getEnvValueForWindows(lpName);
+	if (!value) {
 		setLastError(ERROR_ENVVAR_NOT_FOUND);
 		return 0;
 	}
-	std::string converted = convertEnvValueForWindows(lpName, rawValue);
-	const std::string &finalValue = converted.empty() ? std::string(rawValue) : converted;
-	DWORD len = static_cast<DWORD>(finalValue.size());
+	DWORD len = static_cast<DWORD>(value->size());
 	if (nSize == 0) {
 		return len + 1;
 	}
@@ -200,7 +260,7 @@ DWORD WINAPI GetEnvironmentVariableA(LPCSTR lpName, LPSTR lpBuffer, DWORD nSize)
 	if (nSize <= len) {
 		return len + 1;
 	}
-	memcpy(lpBuffer, finalValue.c_str(), len + 1);
+	memcpy(lpBuffer, value->c_str(), len + 1);
 	return len;
 }
 
@@ -212,14 +272,12 @@ DWORD WINAPI GetEnvironmentVariableW(LPCWSTR lpName, LPWSTR lpBuffer, DWORD nSiz
 		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
-	const char *rawValue = getenv(name.c_str());
-	if (!rawValue) {
+	auto value = getEnvValueForWindows(name);
+	if (!value) {
 		setLastError(ERROR_ENVVAR_NOT_FOUND);
 		return 0;
 	}
-	std::string converted = convertEnvValueForWindows(name, rawValue);
-	const std::string &finalValue = converted.empty() ? std::string(rawValue) : converted;
-	auto wideValue = stringToWideString(finalValue.c_str());
+	auto wideValue = stringToWideString(value->c_str());
 	DWORD required = static_cast<DWORD>(wideValue.size());
 	if (nSize == 0) {
 		return required;
@@ -242,6 +300,7 @@ BOOL WINAPI SetEnvironmentVariableA(LPCSTR lpName, LPCSTR lpValue) {
 		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
+	ensureTempEnvVariables();
 	int rc = 0;
 	if (!lpValue) {
 		rc = unsetenv(lpName);

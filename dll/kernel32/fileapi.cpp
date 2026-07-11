@@ -1748,7 +1748,7 @@ UINT WINAPI GetTempFileNameA(LPCSTR lpPathName, LPCSTR lpPrefixString, UINT uUni
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetTempFileNameA(%s, %s, %u)\n", lpPathName ? lpPathName : "(null)",
 			  lpPrefixString ? lpPrefixString : "(null)", uUnique);
-	if (!lpPathName || !lpPrefixString || !lpTempFileName) {
+	if (!lpPathName || !lpTempFileName) {
 		setLastError(ERROR_INVALID_PARAMETER);
 		return 0;
 	}
@@ -1757,9 +1757,12 @@ UINT WINAPI GetTempFileNameA(LPCSTR lpPathName, LPCSTR lpPrefixString, UINT uUni
 		return 0;
 	}
 
+	// A null prefix is treated as an empty string, matching Windows/Wine.
+	const char *prefix = lpPrefixString ? lpPrefixString : "";
+
 	auto makeTempFileName = [&](UINT unique) {
 		char filename[12];
-		snprintf(filename, sizeof(filename), "%.3s%04X.TMP", lpPrefixString, unique & 0xFFFF);
+		snprintf(filename, sizeof(filename), "%.3s%04X.TMP", prefix, unique & 0xFFFF);
 
 		std::string path = lpPathName;
 		if (!path.empty() && path.back() != '\\' && path.back() != '/') {
@@ -1810,7 +1813,27 @@ UINT WINAPI GetTempFileNameA(LPCSTR lpPathName, LPCSTR lpPrefixString, UINT uUni
 		lpTempFileName[MAX_PATH - 1] = '\0';
 		DEBUG_LOG(" -> %s\n", lpTempFileName);
 	}
-	return uUnique;
+	return uUnique & 0xFFFF;
+}
+
+UINT WINAPI GetTempFileNameW(LPCWSTR lpPathName, LPCWSTR lpPrefixString, UINT uUnique, LPWSTR lpTempFileName) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("GetTempFileNameW -> ");
+	if (!lpPathName || !lpTempFileName) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return 0;
+	}
+	std::string pathName = wideStringToString(lpPathName);
+	// A null prefix is treated as an empty string, matching Windows/Wine.
+	std::string prefixString = lpPrefixString ? wideStringToString(lpPrefixString) : std::string();
+	char tempFileName[MAX_PATH];
+	UINT result = GetTempFileNameA(pathName.c_str(), prefixString.c_str(), uUnique, tempFileName);
+	if (result == 0) {
+		return 0;
+	}
+	auto wide = stringToWideString(tempFileName);
+	wstrncpy(lpTempFileName, wide.data(), wstrlen(wide.data()) + 1);
+	return result;
 }
 
 DWORD WINAPI GetTempPathA(DWORD nBufferLength, LPSTR lpBuffer) {

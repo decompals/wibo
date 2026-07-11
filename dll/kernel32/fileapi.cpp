@@ -1813,7 +1813,7 @@ UINT WINAPI GetTempFileNameA(LPCSTR lpPathName, LPCSTR lpPrefixString, UINT uUni
 		lpTempFileName[MAX_PATH - 1] = '\0';
 		DEBUG_LOG(" -> %s\n", lpTempFileName);
 	}
-	return uUnique;
+	return uUnique & 0xFFFF;
 }
 
 UINT WINAPI GetTempFileNameW(LPCWSTR lpPathName, LPCWSTR lpPrefixString, UINT uUnique, LPWSTR lpTempFileName) {

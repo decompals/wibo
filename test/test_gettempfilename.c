@@ -19,11 +19,11 @@ static void expect_fixed_unique_name(const char *temp_path) {
 	char temp_file[MAX_PATH];
 
 	UINT result = GetTempFileNameA(temp_path, "wboX", 0x12345, temp_file);
-	TEST_CHECK_EQ(0x12345, result);
+	TEST_CHECK_EQ(0x2345, result);
 	DeleteFileA(temp_file);
 
 	result = GetTempFileNameA(temp_path, "wboX", 0x12345, temp_file);
-	TEST_CHECK_EQ(0x12345, result);
+	TEST_CHECK_EQ(0x2345, result);
 	TEST_CHECK_STR_EQ("wbo2345.TMP", basename_of(temp_file));
 	TEST_CHECK_EQ(INVALID_FILE_ATTRIBUTES, GetFileAttributesA(temp_file));
 }
@@ -49,7 +49,7 @@ static void expect_null_prefix_is_empty(const char *temp_path) {
 	char temp_file[MAX_PATH];
 
 	UINT result = GetTempFileNameA(temp_path, NULL, 0x12345, temp_file);
-	TEST_CHECK_EQ(0x12345, result);
+	TEST_CHECK_EQ(0x2345, result);
 	TEST_CHECK_STR_EQ("2345.TMP", basename_of(temp_file));
 }
 
@@ -57,11 +57,11 @@ static void expect_fixed_unique_name_w(const WCHAR *temp_path) {
 	WCHAR temp_file[MAX_PATH];
 
 	UINT result = GetTempFileNameW(temp_path, L"wboX", 0x12345, temp_file);
-	TEST_CHECK_EQ(0x12345, result);
+	TEST_CHECK_EQ(0x2345, result);
 	DeleteFileW(temp_file);
 
 	result = GetTempFileNameW(temp_path, L"wboX", 0x12345, temp_file);
-	TEST_CHECK_EQ(0x12345, result);
+	TEST_CHECK_EQ(0x2345, result);
 	TEST_CHECK(wcscmp(L"wbo2345.TMP", basename_of_w(temp_file)) == 0);
 	TEST_CHECK_EQ(INVALID_FILE_ATTRIBUTES, GetFileAttributesW(temp_file));
 }
@@ -87,7 +87,7 @@ static void expect_null_prefix_is_empty_w(const WCHAR *temp_path) {
 	WCHAR temp_file[MAX_PATH];
 
 	UINT result = GetTempFileNameW(temp_path, NULL, 0x12345, temp_file);
-	TEST_CHECK_EQ(0x12345, result);
+	TEST_CHECK_EQ(0x2345, result);
 	TEST_CHECK(wcscmp(L"2345.TMP", basename_of_w(temp_file)) == 0);
 }
 

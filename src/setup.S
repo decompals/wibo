@@ -6,6 +6,19 @@
 .no_dead_strip _wibo_reserve
 #endif
 
+# void initFpState()
+# Configures 53-bit x87 precision and default SSE control state
+ASM_GLOBAL(initFpState, @function)
+	sub SP, 8
+	mov word ptr [SP], 0x027f
+	mov dword ptr [SP+4], 0x1f80
+	fninit
+	fldcw word ptr [SP]
+	ldmxcsr dword ptr [SP+4]
+	add SP, 8
+	ret
+ASM_END(initFpState)
+
 #if defined(__x86_64__) && defined(__linux__)
 
 # void installSelectors(TEB *teb)

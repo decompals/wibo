@@ -86,7 +86,11 @@ bool wibo::installTibForCurrentThread(TEB *tibPtr) {
 		return false;
 	}
 	currentThreadTeb = tibPtr;
-	return tebThreadSetup(tibPtr);
+	if (!tebThreadSetup(tibPtr)) {
+		return false;
+	}
+	initFpState();
+	return true;
 }
 
 void wibo::uninstallTebForCurrentThread() {

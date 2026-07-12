@@ -30,6 +30,20 @@ int wibo::tibEntryNumber = -1;
 PEB *wibo::processPeb = nullptr;
 thread_local TEB *currentThreadTeb = nullptr;
 
+namespace {
+
+constexpr uint16_t kWindowsX87ControlWord = 0x027f;
+constexpr uint32_t kWindowsMxcsr = 0x1f80;
+
+void initializeGuestFloatingPointState() {
+	// Win32 initializes each thread with 53-bit x87 precision and the default SSE control state.
+	asm volatile("fninit");
+	asm volatile("fldcw %0" : : "m"(kWindowsX87ControlWord));
+	asm volatile("ldmxcsr %0" : : "m"(kWindowsMxcsr));
+}
+
+} // namespace
+
 void wibo::debug_log(const char *fmt, ...) {
 	va_list args;
 	va_start(args, fmt);
@@ -86,7 +100,11 @@ bool wibo::installTibForCurrentThread(TEB *tibPtr) {
 		return false;
 	}
 	currentThreadTeb = tibPtr;
-	return tebThreadSetup(tibPtr);
+	if (!tebThreadSetup(tibPtr)) {
+		return false;
+	}
+	initializeGuestFloatingPointState();
+	return true;
 }
 
 void wibo::uninstallTebForCurrentThread() {

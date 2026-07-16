@@ -322,7 +322,11 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(CLANG_ROOT "/usr" CACHE PATH "Path to Clang installation")
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-    set(CLANG_ROOT "/Library/Developer/CommandLineTools/usr/lib" CACHE PATH "Path to Clang installation")
+    # Prefer libclang from the compiler installation. This keeps Homebrew LLVM
+    # builds from mixing its clang executable with AppleClang's libclang.
+    get_filename_component(_CLANG_BIN_DIR "${CMAKE_C_COMPILER}" DIRECTORY)
+    get_filename_component(_CLANG_COMPILER_ROOT "${_CLANG_BIN_DIR}/.." ABSOLUTE)
+    set(CLANG_ROOT "${_CLANG_COMPILER_ROOT}" CACHE PATH "Path to Clang installation")
 endif()
 set(_LLVM_MIN_VER 17)
 set(_LLVM_MAX_VER 25)
@@ -333,7 +337,7 @@ endforeach()
 list(APPEND _CLANG_LIB_SUFFIXES llvm/lib lib lib64)
 find_library(LIBCLANG_LIBRARY
     NAMES libclang clang
-    HINTS ${CLANG_ROOT}
+    HINTS ${CLANG_ROOT} "/Library/Developer/CommandLineTools/usr/lib"
     PATH_SUFFIXES ${_CLANG_LIB_SUFFIXES}
 )
 if(NOT LIBCLANG_LIBRARY)

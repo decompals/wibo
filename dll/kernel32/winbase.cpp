@@ -43,6 +43,34 @@ constexpr UINT GMEM_MODIFY = 0x0080;
 constexpr UINT LMEM_MOVEABLE = 0x0002;
 constexpr UINT LMEM_ZEROINIT = 0x0040;
 
+constexpr DWORD FORMAT_MESSAGE_FROM_STRING = 0x00000400;
+
+bool formatMessageStringInserts(const char *source, const va_list *arguments, std::string &message) {
+	if (!source || !arguments)
+		return false;
+
+	GUEST_PTR argumentList = GUEST_NULL;
+	std::memcpy(&argumentList, arguments, sizeof(argumentList));
+	if (argumentList == GUEST_NULL)
+		return false;
+
+	for (size_t index = 0; source[index] != '\0'; ++index) {
+		if (source[index] != '%' || source[index + 1] < '1' || source[index + 1] > '9') {
+			message.push_back(source[index]);
+			continue;
+		}
+
+		const unsigned int argumentIndex = static_cast<unsigned int>(source[++index] - '1');
+		GUEST_PTR value = GUEST_NULL;
+		std::memcpy(&value, fromGuestPtr<const GUEST_PTR>(argumentList) + argumentIndex, sizeof(value));
+		const char *insert = fromGuestPtr<const char>(value);
+		if (!insert)
+			return false;
+		message += insert;
+	}
+	return true;
+}
+
 constexpr ATOM kMinIntegerAtom = 0x0001;
 constexpr ATOM kMaxIntegerAtom = 0xBFFF;
 constexpr ATOM kMinStringAtom = 0xC000;
@@ -602,8 +630,19 @@ DWORD WINAPI FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId, 
 		// FORMAT_MESSAGE_ARGUMENT_ARRAY
 	} else if (dwFlags & 0x00000800) {
 		// FORMAT_MESSAGE_FROM_HMODULE
-	} else if (dwFlags & 0x00000400) {
-		// FORMAT_MESSAGE_FROM_STRING
+	} else if (dwFlags & FORMAT_MESSAGE_FROM_STRING) {
+		std::string message;
+		if (!formatMessageStringInserts(static_cast<const char *>(lpSource), Arguments, message)) {
+			setLastError(ERROR_INVALID_PARAMETER);
+			return 0;
+		}
+		const size_t length = message.length();
+		if (!lpBuffer || static_cast<size_t>(nSize) <= length) {
+			setLastError(ERROR_INSUFFICIENT_BUFFER);
+			return 0;
+		}
+		std::memcpy(lpBuffer, message.c_str(), length + 1);
+		return static_cast<DWORD>(length);
 	} else if (dwFlags & 0x00001000) {
 		// FORMAT_MESSAGE_FROM_SYSTEM
 		std::string message = std::system_category().message(static_cast<int>(dwMessageId));

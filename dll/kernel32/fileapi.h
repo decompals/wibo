@@ -105,6 +105,18 @@ BOOL WINAPI SetFileTime(HANDLE hFile, const FILETIME *lpCreationTime, const FILE
 						const FILETIME *lpLastWriteTime);
 BOOL WINAPI GetFileInformationByHandle(HANDLE hFile, LPBY_HANDLE_FILE_INFORMATION lpFileInformation);
 DWORD WINAPI GetFileType(HANDLE hFile);
+BOOL WINAPI ClearCommBreak(HANDLE hFile);
+BOOL WINAPI ClearCommError(HANDLE hFile, LPDWORD lpErrors, LPVOID lpStat);
+BOOL WINAPI EscapeCommFunction(HANDLE hFile, DWORD dwFunc);
+BOOL WINAPI GetCommModemStatus(HANDLE hFile, LPDWORD lpModemStat);
+BOOL WINAPI GetCommState(HANDLE hFile, LPVOID lpDCB);
+BOOL WINAPI PurgeComm(HANDLE hFile, DWORD dwFlags);
+BOOL WINAPI SetCommBreak(HANDLE hFile);
+BOOL WINAPI SetCommMask(HANDLE hFile, DWORD dwEvtMask);
+BOOL WINAPI SetCommState(HANDLE hFile, LPVOID lpDCB);
+BOOL WINAPI SetCommTimeouts(HANDLE hFile, LPVOID lpCommTimeouts);
+BOOL WINAPI TransmitCommChar(HANDLE hFile, char cChar);
+BOOL WINAPI WaitCommEvent(HANDLE hFile, LPDWORD lpEvtMask, LPOVERLAPPED lpOverlapped);
 LONG WINAPI CompareFileTime(const FILETIME *lpFileTime1, const FILETIME *lpFileTime2);
 BOOL WINAPI GetVolumeInformationA(LPCSTR lpRootPathName, LPSTR lpVolumeNameBuffer, DWORD nVolumeNameSize,
 								  LPDWORD lpVolumeSerialNumber, LPDWORD lpMaximumComponentLength,

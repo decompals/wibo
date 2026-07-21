@@ -175,6 +175,48 @@ HWND WINAPI GetActiveWindow() {
 	return NO_HANDLE;
 }
 
+/*
+ * CharToOem / OemToChar conversion between the "ANSI" and "OEM" codepages.
+ * For the codepages wibo exposes (GetACP=1252 Latin1 / 28591, GetOEMCP=437)
+ * the ASCII range 0x00-0x7F is identity in both directions; the high-half
+ * differs but NT-era build tools (MC, RC) only feed these APIs argv
+ * strings and filenames, which in practice are ASCII. We implement
+ * identity mapping: correct for ASCII, safe fallback for high-bytes, and
+ * sufficient for our build pipeline.
+ */
+static BOOL charToOemA_impl(LPCSTR src, LPSTR dst, DWORD length, BOOL counted) {
+	if (!src || !dst) return FALSE;
+	if (counted) {
+		for (DWORD i = 0; i < length; i++) dst[i] = src[i];
+	} else {
+		while (*src) *dst++ = *src++;
+		*dst = 0;
+	}
+	return TRUE;
+}
+
+BOOL WINAPI CharToOemA(LPCSTR lpszSrc, LPSTR lpszDst) {
+	DEBUG_LOG("CharToOemA(%p, %p) (identity)\n", lpszSrc, lpszDst);
+	return charToOemA_impl(lpszSrc, lpszDst, 0, FALSE);
+}
+
+BOOL WINAPI CharToOemBuffA(LPCSTR lpszSrc, LPSTR lpszDst, DWORD cchDstLength) {
+	DEBUG_LOG("CharToOemBuffA(%p, %p, %lu)\n", lpszSrc, lpszDst,
+			  static_cast<unsigned long>(cchDstLength));
+	return charToOemA_impl(lpszSrc, lpszDst, cchDstLength, TRUE);
+}
+
+BOOL WINAPI OemToCharA(LPCSTR lpszSrc, LPSTR lpszDst) {
+	DEBUG_LOG("OemToCharA(%p, %p) (identity)\n", lpszSrc, lpszDst);
+	return charToOemA_impl(lpszSrc, lpszDst, 0, FALSE);
+}
+
+BOOL WINAPI OemToCharBuffA(LPCSTR lpszSrc, LPSTR lpszDst, DWORD cchDstLength) {
+	DEBUG_LOG("OemToCharBuffA(%p, %p, %lu)\n", lpszSrc, lpszDst,
+			  static_cast<unsigned long>(cchDstLength));
+	return charToOemA_impl(lpszSrc, lpszDst, cchDstLength, TRUE);
+}
+
 } // namespace user32
 
 #include "user32_trampolines.h"

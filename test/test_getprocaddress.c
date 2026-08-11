@@ -9,6 +9,8 @@ int main(void) {
 	SetLastError(0xdeadbeef);
 	FARPROC present = GetProcAddress(kernel32, "GetModuleHandleA");
 	TEST_CHECK_MSG(present != NULL, "GetProcAddress(GetModuleHandleA) failed: %lu", (unsigned long)GetLastError());
+	FARPROC formatMessage = GetProcAddress(kernel32, "FormatMessageA");
+	TEST_CHECK_MSG(formatMessage != NULL, "GetProcAddress(FormatMessageA) failed: %lu", (unsigned long)GetLastError());
 
 	SetLastError(0xdeadbeef);
 	FARPROC missing = GetProcAddress(kernel32, "IsTNT");

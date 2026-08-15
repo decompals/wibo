@@ -1,5 +1,5 @@
 # Build stage
-FROM alpine:latest AS build
+FROM alpine:latest AS dependencies
 
 # Install dependencies
 RUN apk add --no-cache \
@@ -9,6 +9,7 @@ RUN apk add --no-cache \
     clang-dev \
     cmake \
     coreutils \
+    gcc \
     git \
     linux-headers \
     lld \
@@ -16,8 +17,11 @@ RUN apk add --no-cache \
     make \
     mingw-w64-binutils \
     mingw-w64-gcc \
+    musl-dev \
     ninja \
     python3
+
+FROM dependencies AS build
 
 # Copy source files
 WORKDIR /wibo

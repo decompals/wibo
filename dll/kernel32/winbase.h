@@ -74,6 +74,7 @@ namespace kernel32 {
 
 BOOL WINAPI IsBadReadPtr(LPCVOID lp, UINT_PTR ucb);
 BOOL WINAPI IsBadWritePtr(LPVOID lp, UINT_PTR ucb);
+LPSTR WINAPI lstrcpynA(LPSTR lpString1, LPCSTR lpString2, int iMaxLength);
 ATOM WINAPI FindAtomA(LPCSTR lpString);
 ATOM WINAPI FindAtomW(LPCWSTR lpString);
 ATOM WINAPI AddAtomA(LPCSTR lpString);

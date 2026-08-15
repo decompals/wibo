@@ -128,6 +128,8 @@ void releaseModuleTls(ModuleInfo &module);
 
 ModuleInfo *loadModule(const char *name);
 void freeModule(ModuleInfo *info);
+void *findExportByName(ModuleInfo *info, const char *funcName);
+void *findExportByOrdinal(ModuleInfo *info, uint16_t ordinal);
 void *resolveFuncByName(ModuleInfo *info, const char *funcName);
 void *resolveFuncByOrdinal(ModuleInfo *info, uint16_t ordinal);
 void *resolveMissingImportByName(const char *dllName, const char *funcName);

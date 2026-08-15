@@ -72,4 +72,14 @@ BOOL WINAPI CloseHandle(HANDLE hObject) {
 	return TRUE;
 }
 
+BOOL WINAPI SetHandleInformation(HANDLE hObject, DWORD dwMask, DWORD dwFlags) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("SetHandleInformation(%p, 0x%x, 0x%x)\n", hObject, dwMask, dwFlags);
+	if (!wibo::handles().setInformation(hObject, dwMask, dwFlags)) {
+		setLastError(ERROR_INVALID_HANDLE);
+		return FALSE;
+	}
+	return TRUE;
+}
+
 } // namespace kernel32

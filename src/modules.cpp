@@ -35,6 +35,15 @@ extern const wibo::ModuleStub lib_mscoree;
 #if WIBO_HAS_MSVCRT
 extern const wibo::ModuleStub lib_msvcrt;
 #endif
+#if WIBO_HAS_MSVCIRT
+extern const wibo::ModuleStub lib_msvcirt;
+#endif
+#if WIBO_HAS_MSVCRT20
+extern const wibo::ModuleStub lib_msvcrt20;
+#endif
+#if WIBO_HAS_MSVCRT40
+extern const wibo::ModuleStub lib_msvcrt40;
+#endif
 #if WIBO_HAS_MSVCR71
 extern const wibo::ModuleStub lib_msvcr71;
 #endif
@@ -53,6 +62,7 @@ extern const wibo::ModuleStub lib_ucrtbase;
 extern const wibo::ModuleStub lib_ntdll;
 extern const wibo::ModuleStub lib_rpcrt4;
 extern const wibo::ModuleStub lib_ole32;
+extern const wibo::ModuleStub lib_shlwapi;
 extern const wibo::ModuleStub lib_user32;
 extern const wibo::ModuleStub lib_vcruntime;
 extern const wibo::ModuleStub lib_version;
@@ -164,6 +174,61 @@ StubFuncType resolveMissingFuncOrdinal(const char *dllName, uint16_t ordinal) {
 	return resolveMissingFuncName(dllName, funcName.c_str());
 }
 
+wibo::ModuleInfo *loadForwarderTargetModule(std::string &dllName) {
+	wibo::ModuleInfo *target = wibo::loadModule(dllName.c_str());
+	if (target || dllName.empty() || dllName[0] != '_') {
+		return target;
+	}
+
+	std::string undecoratedName = dllName.substr(1);
+	target = wibo::loadModule(undecoratedName.c_str());
+	if (target) {
+		DEBUG_LOG("Forwarded export: treating decorated DLL name %s as %s\n", dllName.c_str(),
+				  undecoratedName.c_str());
+		dllName = std::move(undecoratedName);
+	}
+	return target;
+}
+
+void *resolveForwardedExport(wibo::ModuleInfo &source, const char *forwarder) {
+	if (!forwarder || !*forwarder) {
+		return reinterpret_cast<void *>(resolveMissingFuncName(source.originalName.c_str(), ""));
+	}
+
+	const char *separator = std::strchr(forwarder, '.');
+	if (!separator || separator == forwarder || !separator[1]) {
+		return reinterpret_cast<void *>(resolveMissingFuncName(source.originalName.c_str(), forwarder));
+	}
+
+	std::string dllName(forwarder, separator - forwarder);
+	std::string exportName(separator + 1);
+	DEBUG_LOG("Forwarded export: %s!%s -> %s!%s\n", source.originalName.c_str(), forwarder, dllName.c_str(),
+			  exportName.c_str());
+
+	wibo::ModuleInfo *target = loadForwarderTargetModule(dllName);
+	if (!target) {
+		return reinterpret_cast<void *>(resolveMissingFuncName(dllName.c_str(), exportName.c_str()));
+	}
+
+	if (exportName[0] == '#') {
+		char *end = nullptr;
+		unsigned long ordinal = std::strtoul(exportName.c_str() + 1, &end, 10);
+		if (end && *end == '\0' && ordinal <= UINT16_MAX) {
+			void *func = wibo::resolveFuncByOrdinal(target, static_cast<uint16_t>(ordinal));
+			if (func) {
+				return func;
+			}
+		}
+		return reinterpret_cast<void *>(resolveMissingFuncName(dllName.c_str(), exportName.c_str()));
+	}
+
+	void *func = wibo::resolveFuncByName(target, exportName.c_str());
+	if (func) {
+		return func;
+	}
+	return reinterpret_cast<void *>(resolveMissingFuncName(dllName.c_str(), exportName.c_str()));
+}
+
 struct ModuleRegistry {
 	std::recursive_mutex mutex;
 	std::unordered_map<std::string, wibo::ModulePtr> modulesByKey;
@@ -203,9 +268,19 @@ LockedRegistry registry() {
 		reg.initialized = true;
 		const wibo::ModuleStub *builtins[] = {
 			&lib_advapi32, &lib_bcrypt, &lib_kernel32, &lib_lmgr,	   &lib_mscoree, &lib_ntdll,
-			&lib_ole32,	   &lib_rpcrt4, &lib_user32,   &lib_vcruntime, &lib_version, &lib_ws2,
+			&lib_ole32,	   &lib_rpcrt4, &lib_shlwapi, &lib_user32,	   &lib_vcruntime, &lib_version,
+			&lib_ws2,
 #if WIBO_HAS_MSVCRT
 			&lib_msvcrt,
+#endif
+#if WIBO_HAS_MSVCIRT
+			&lib_msvcirt,
+#endif
+#if WIBO_HAS_MSVCRT20
+			&lib_msvcrt20,
+#endif
+#if WIBO_HAS_MSVCRT40
+			&lib_msvcrt40,
 #endif
 #if WIBO_HAS_MSVCR71
 			&lib_msvcr71,
@@ -742,8 +817,7 @@ void ensureExportsInitialized(wibo::ModuleInfo &info) {
 			}
 			if (rva >= exe->exportDirectoryRVA && rva < exe->exportDirectoryRVA + exe->exportDirectorySize) {
 				const char *forward = exe->fromRVA<const char>(rva);
-				info.exportsByOrdinal[i] =
-					reinterpret_cast<void *>(resolveMissingFuncName(info.originalName.c_str(), forward));
+				info.exportsByOrdinal[i] = resolveForwardedExport(info, forward);
 			} else {
 				info.exportsByOrdinal[i] = exe->fromRVA<void>(rva);
 			}
@@ -1139,6 +1213,10 @@ BOOL disableThreadNotifications(ModuleInfo *info) {
 	if (!info) {
 		return FALSE;
 	}
+	if (info->tlsInfo.hasTls) {
+		DEBUG_LOG("disableThreadNotifications: %s uses static TLS\n", info->originalName.c_str());
+		return FALSE;
+	}
 	auto reg = registry();
 	(void)reg;
 	info->threadNotificationsEnabled = false;
@@ -1395,8 +1473,8 @@ void freeModule(ModuleInfo *info) {
 	}
 }
 
-void *resolveFuncByName(ModuleInfo *info, const char *funcName) {
-	if (!info) {
+void *findExportByName(ModuleInfo *info, const char *funcName) {
+	if (!info || !funcName) {
 		return nullptr;
 	}
 	if (info->moduleStub && info->moduleStub->byName) {
@@ -1408,15 +1486,12 @@ void *resolveFuncByName(ModuleInfo *info, const char *funcName) {
 	ensureExportsInitialized(*info);
 	auto it = info->exportNameToOrdinal.find(funcName);
 	if (it != info->exportNameToOrdinal.end()) {
-		return resolveFuncByOrdinal(info, it->second);
-	}
-	if (info->moduleStub) {
-		return reinterpret_cast<void *>(resolveMissingFuncName(info->originalName.c_str(), funcName));
+		return findExportByOrdinal(info, it->second);
 	}
 	return nullptr;
 }
 
-void *resolveFuncByOrdinal(ModuleInfo *info, uint16_t ordinal) {
+void *findExportByOrdinal(ModuleInfo *info, uint16_t ordinal) {
 	if (!info) {
 		return nullptr;
 	}
@@ -1436,7 +1511,27 @@ void *resolveFuncByOrdinal(ModuleInfo *info, uint16_t ordinal) {
 			}
 		}
 	}
-	if (info->moduleStub) {
+	return nullptr;
+}
+
+void *resolveFuncByName(ModuleInfo *info, const char *funcName) {
+	void *func = findExportByName(info, funcName);
+	if (func) {
+		return func;
+	}
+	if (info && info->moduleStub) {
+		const char *safeFunc = funcName ? funcName : "";
+		return reinterpret_cast<void *>(resolveMissingFuncName(info->originalName.c_str(), safeFunc));
+	}
+	return nullptr;
+}
+
+void *resolveFuncByOrdinal(ModuleInfo *info, uint16_t ordinal) {
+	void *func = findExportByOrdinal(info, ordinal);
+	if (func) {
+		return func;
+	}
+	if (info && info->moduleStub) {
 		return reinterpret_cast<void *>(resolveMissingFuncOrdinal(info->originalName.c_str(), ordinal));
 	}
 	return nullptr;

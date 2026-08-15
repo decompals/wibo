@@ -8,6 +8,7 @@
 #include <array>
 #include <atomic>
 #include <cerrno>
+#include <climits>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>

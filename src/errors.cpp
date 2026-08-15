@@ -20,6 +20,8 @@ DWORD winErrorFromErrno(int err) {
 		return ERROR_PATH_NOT_FOUND;
 	case ENOMEM:
 		return ERROR_NOT_ENOUGH_MEMORY;
+	case ENOSPC:
+		return ERROR_DISK_FULL;
 	case EINVAL:
 		return ERROR_INVALID_PARAMETER;
 	case EINTR:

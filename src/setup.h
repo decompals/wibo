@@ -10,6 +10,7 @@ extern "C" {
 
 bool tebThreadSetup(TEB *teb);
 bool tebThreadTeardown(TEB *teb);
+void initFpState();
 
 #ifdef __cplusplus
 }

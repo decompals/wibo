@@ -90,6 +90,14 @@ static void test_duplicate_handle_after_close(void) {
 	TEST_CHECK(dup == NULL);
 }
 
+static void test_set_handle_information_invalid_handle(void) {
+	HANDLE bogus = (HANDLE)(uintptr_t)0x1234;
+
+	SetLastError(0);
+	TEST_CHECK(!SetHandleInformation(bogus, HANDLE_FLAG_INHERIT, 0));
+	TEST_CHECK_EQ(ERROR_INVALID_HANDLE, GetLastError());
+}
+
 int main(void) {
 	test_duplicate_handle_basic();
 	test_duplicate_handle_close_source();
@@ -97,5 +105,6 @@ int main(void) {
 	test_duplicate_handle_invalid_target_process();
 	test_duplicate_pseudo_process_handle();
 	test_duplicate_handle_after_close();
+	test_set_handle_information_invalid_handle();
 	return EXIT_SUCCESS;
 }

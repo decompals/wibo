@@ -32,6 +32,12 @@
 .intel_syntax noprefix
 
 #ifdef __x86_64__
+#define SP rsp
+#else
+#define SP esp
+#endif
+
+#ifdef __x86_64__
 
 .macro LJMP32 teb_reg
 #define m64to32 m64to32_\@

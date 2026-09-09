@@ -25,6 +25,13 @@ constexpr DWORD OPEN_EXISTING = 3;
 constexpr DWORD OPEN_ALWAYS = 4;
 constexpr DWORD TRUNCATE_EXISTING = 5;
 
+constexpr DWORD MOVEFILE_REPLACE_EXISTING = 0x1;
+constexpr DWORD MOVEFILE_COPY_ALLOWED = 0x2;
+constexpr DWORD MOVEFILE_DELAY_UNTIL_REBOOT = 0x4;
+constexpr DWORD MOVEFILE_WRITE_THROUGH = 0x8;
+constexpr DWORD MOVEFILE_CREATE_HARDLINK = 0x10;
+constexpr DWORD MOVEFILE_FAIL_IF_NOT_TRACKABLE = 0x20;
+
 constexpr DWORD FILE_BEGIN = 0;
 constexpr DWORD FILE_CURRENT = 1;
 constexpr DWORD FILE_END = 2;
@@ -91,6 +98,8 @@ BOOL WINAPI DeleteFileA(LPCSTR lpFileName);
 BOOL WINAPI DeleteFileW(LPCWSTR lpFileName);
 BOOL WINAPI MoveFileA(LPCSTR lpExistingFileName, LPCSTR lpNewFileName);
 BOOL WINAPI MoveFileW(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName);
+BOOL WINAPI MoveFileExA(LPCSTR lpExistingFileName, LPCSTR lpNewFileName, DWORD dwFlags);
+BOOL WINAPI MoveFileExW(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName, DWORD dwFlags);
 DWORD WINAPI SetFilePointer(HANDLE hFile, LONG lDistanceToMove, PLONG lpDistanceToMoveHigh, DWORD dwMoveMethod);
 BOOL WINAPI SetFilePointerEx(HANDLE hFile, LARGE_INTEGER liDistanceToMove, PLARGE_INTEGER lpNewFilePointer,
 							 DWORD dwMoveMethod);

@@ -45,7 +45,7 @@ constexpr UINT LMEM_ZEROINIT = 0x0040;
 
 constexpr DWORD FORMAT_MESSAGE_FROM_STRING = 0x00000400;
 
-bool formatMessageStringInserts(const char *source, const va_list *arguments, std::string &message) {
+bool formatMessageStringInserts(const char *source, const void *arguments, std::string &message) {
 	if (!source || !arguments)
 		return false;
 

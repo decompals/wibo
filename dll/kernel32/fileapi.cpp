@@ -540,11 +540,35 @@ std::optional<DWORD> stdHandleForConsoleDevice(const std::string &name, DWORD de
 	return std::nullopt;
 }
 
+bool isConsoleOutputDevice(const std::string &name, DWORD desiredAccess) {
+	std::string lowered = stringToLower(name);
+	return lowered == "conout$" || (lowered == "con" && (desiredAccess & GENERIC_WRITE) != 0);
+}
+
+bool tryOpenHostConsoleOutput(DWORD desiredAccess, HANDLE &outHandle) {
+	int fd = open("/dev/tty", O_WRONLY | O_CLOEXEC);
+	if (fd < 0) {
+		return false;
+	}
+
+	auto fileObj = make_pin<FileObject>(fd);
+	fileObj->appendOnly = true;
+	uint32_t grantedAccess = FILE_GENERIC_WRITE;
+	if ((desiredAccess & GENERIC_READ) != 0) {
+		grantedAccess |= FILE_GENERIC_READ;
+	}
+	outHandle = wibo::handles().alloc(std::move(fileObj), grantedAccess, 0);
+	return true;
+}
+
 bool tryOpenConsoleDevice(DWORD dwDesiredAccess, DWORD dwShareMode, DWORD dwCreationDisposition,
 						  DWORD dwFlagsAndAttributes, HANDLE &outHandle, const std::string &originalName) {
 	(void)dwShareMode;
 	(void)dwCreationDisposition;
 	(void)dwFlagsAndAttributes;
+	if (isConsoleOutputDevice(originalName, dwDesiredAccess) && tryOpenHostConsoleOutput(dwDesiredAccess, outHandle)) {
+		return true;
+	}
 	auto stdHandleKind = stdHandleForConsoleDevice(originalName, dwDesiredAccess);
 	if (!stdHandleKind) {
 		return false;
@@ -1596,6 +1620,98 @@ DWORD WINAPI GetFileType(HANDLE hFile) {
 	}
 	DEBUG_LOG("-> %u\n", type);
 	return type;
+}
+
+BOOL WINAPI ClearCommBreak(HANDLE hFile) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("ClearCommBreak(%p) -> ERROR_INVALID_HANDLE\n", hFile);
+	setLastError(ERROR_INVALID_HANDLE);
+	return FALSE;
+}
+
+BOOL WINAPI ClearCommError(HANDLE hFile, LPDWORD lpErrors, LPVOID lpStat) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("ClearCommError(%p, %p, %p) -> ERROR_INVALID_HANDLE\n", hFile, lpErrors, lpStat);
+	if (lpErrors) {
+		*lpErrors = 0;
+	}
+	setLastError(ERROR_INVALID_HANDLE);
+	return FALSE;
+}
+
+BOOL WINAPI EscapeCommFunction(HANDLE hFile, DWORD dwFunc) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("EscapeCommFunction(%p, %u) -> ERROR_INVALID_HANDLE\n", hFile, dwFunc);
+	setLastError(ERROR_INVALID_HANDLE);
+	return FALSE;
+}
+
+BOOL WINAPI GetCommModemStatus(HANDLE hFile, LPDWORD lpModemStat) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("GetCommModemStatus(%p, %p) -> ERROR_INVALID_HANDLE\n", hFile, lpModemStat);
+	if (lpModemStat) {
+		*lpModemStat = 0;
+	}
+	setLastError(ERROR_INVALID_HANDLE);
+	return FALSE;
+}
+
+BOOL WINAPI GetCommState(HANDLE hFile, LPVOID lpDCB) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("GetCommState(%p, %p) -> ERROR_INVALID_HANDLE\n", hFile, lpDCB);
+	// Cygwin probes std handles as possible serial devices during fd setup.
+	// wibo does not emulate COM ports, so non-console pipes/files must fail this probe.
+	setLastError(ERROR_INVALID_HANDLE);
+	return FALSE;
+}
+
+BOOL WINAPI PurgeComm(HANDLE hFile, DWORD dwFlags) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("PurgeComm(%p, 0x%x) -> ERROR_INVALID_HANDLE\n", hFile, dwFlags);
+	setLastError(ERROR_INVALID_HANDLE);
+	return FALSE;
+}
+
+BOOL WINAPI SetCommBreak(HANDLE hFile) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("SetCommBreak(%p) -> ERROR_INVALID_HANDLE\n", hFile);
+	setLastError(ERROR_INVALID_HANDLE);
+	return FALSE;
+}
+
+BOOL WINAPI SetCommMask(HANDLE hFile, DWORD dwEvtMask) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("SetCommMask(%p, 0x%x) -> ERROR_INVALID_HANDLE\n", hFile, dwEvtMask);
+	setLastError(ERROR_INVALID_HANDLE);
+	return FALSE;
+}
+
+BOOL WINAPI SetCommState(HANDLE hFile, LPVOID lpDCB) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("SetCommState(%p, %p) -> ERROR_INVALID_HANDLE\n", hFile, lpDCB);
+	setLastError(ERROR_INVALID_HANDLE);
+	return FALSE;
+}
+
+BOOL WINAPI SetCommTimeouts(HANDLE hFile, LPVOID lpCommTimeouts) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("SetCommTimeouts(%p, %p) -> ERROR_INVALID_HANDLE\n", hFile, lpCommTimeouts);
+	setLastError(ERROR_INVALID_HANDLE);
+	return FALSE;
+}
+
+BOOL WINAPI TransmitCommChar(HANDLE hFile, char cChar) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("TransmitCommChar(%p, 0x%x) -> ERROR_INVALID_HANDLE\n", hFile, static_cast<unsigned char>(cChar));
+	setLastError(ERROR_INVALID_HANDLE);
+	return FALSE;
+}
+
+BOOL WINAPI WaitCommEvent(HANDLE hFile, LPDWORD lpEvtMask, LPOVERLAPPED lpOverlapped) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("WaitCommEvent(%p, %p, %p) -> ERROR_INVALID_HANDLE\n", hFile, lpEvtMask, lpOverlapped);
+	setLastError(ERROR_INVALID_HANDLE);
+	return FALSE;
 }
 
 DWORD WINAPI GetFullPathNameA(LPCSTR lpFileName, DWORD nBufferLength, LPSTR lpBuffer, GUEST_PTR *lpFilePart) {

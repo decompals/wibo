@@ -67,6 +67,7 @@ static void setup_fixture(void) {
 	create_file_with_content("dir\\data01.txt", "data01\n");
 	create_file_with_content("dir\\data02.txt", "data02\n");
 	create_file_with_content("dir\\data10.txt", "data10\n");
+	create_file_with_content("dir\\makefile", "makefile\n");
 	create_file_with_content("dir\\child\\nested.txt", "nested\n");
 	create_file_with_content("dir_extra\\other.txt", "other\n");
 }
@@ -90,6 +91,8 @@ static void cleanup_fixture(void) {
 	join_path(path, sizeof(path), g_fixture_dir, "dir\\data02.txt");
 	DeleteFileA(path);
 	join_path(path, sizeof(path), g_fixture_dir, "dir\\data10.txt");
+	DeleteFileA(path);
+	join_path(path, sizeof(path), g_fixture_dir, "dir\\makefile");
 	DeleteFileA(path);
 	join_path(path, sizeof(path), g_fixture_dir, "dir");
 	RemoveDirectoryA(path);
@@ -291,6 +294,118 @@ static void test_directory_iteration_includes_special_entries(void) {
 	TEST_CHECK(saw_child);
 }
 
+static void test_wildcard_star_dot(void) {
+	// Windows treats the legacy pattern "*.*" as "match everything",
+	// including names with no extension (e.g. "makefile").  Regression
+	// test for the wibo "*.*" -> "*" normalisation: Watcom wmake scans
+	// "*.*" to locate its makefile, and silently dropping extensionless
+	// names from the enumeration breaks it.
+	char matches[64][MAX_PATH];
+	size_t count = 0;
+	collect_matches("dir\\*.*", matches, &count);
+	TEST_CHECK(count >= 1);
+
+	bool saw_makefile = false;
+	bool saw_file_txt = false;
+	for (size_t i = 0; i < count; ++i) {
+		saw_makefile = saw_makefile || strcmp(matches[i], "makefile") == 0;
+		saw_file_txt = saw_file_txt || strcmp(matches[i], "file.txt") == 0;
+	}
+	TEST_CHECK(saw_makefile); // extensionless file must be matched by *.*
+	TEST_CHECK(saw_file_txt); // files with extensions still match too
+}
+
+static void test_dos_wildcard_semantics(void) {
+	// These exercise the DOS-wildcard quirks of FsRtlIsNameInExpression that
+	// a plain '*'/'?' globber gets wrong.  Fixture has: file.txt, file.bin,
+	// data01.txt, data02.txt, data10.txt, makefile (extensionless), child/.
+	char matches[64][MAX_PATH];
+	size_t count;
+	bool a, b;
+
+	// "*." matches ONLY extensionless names (translate: "*." -> "<").
+	// (wine's matcher treats "*." as plain "*" — wibo is intentionally
+	// more Windows-faithful; validated against the ReactOS kmtest table
+	// recorded from real Windows kernels.)
+	count = 0;
+	collect_matches("dir\\*.", matches, &count);
+	a = b = false;
+	for (size_t i = 0; i < count; ++i) {
+		a = a || strcmp(matches[i], "makefile") == 0;
+		b = b || strcmp(matches[i], "file.txt") == 0;
+	}
+	TEST_CHECK(a);	// extensionless -> matches
+	TEST_CHECK(!b); // has an extension -> must NOT match
+
+	// Trailing '?' (DOS_QM) matches zero-or-one character: "makefile?"
+	// still matches "makefile".
+	count = 0;
+	collect_matches("dir\\makefile?", matches, &count);
+	a = false;
+	for (size_t i = 0; i < count; ++i) {
+		a = a || strcmp(matches[i], "makefile") == 0;
+	}
+	TEST_CHECK(a);
+
+	// DOS_QM never consumes a dot: "file????" does NOT match "file.txt",
+	// but "file????.txt" does (the classic 8.3-era behaviour).
+	count = 0;
+	collect_matches("dir\\file????", matches, &count);
+	a = false;
+	for (size_t i = 0; i < count; ++i) {
+		a = a || strcmp(matches[i], "file.txt") == 0;
+	}
+	TEST_CHECK(!a);
+	count = 0;
+	collect_matches("dir\\file????.txt", matches, &count);
+	a = false;
+	for (size_t i = 0; i < count; ++i) {
+		a = a || strcmp(matches[i], "file.txt") == 0;
+	}
+	TEST_CHECK(a);
+
+	// Raw DOS_STAR ('<') passed through the API: '<' is a wildcard on
+	// Windows (FsRtlIsUnicodeCharacterWild), and it cannot consume the
+	// final dot — "make<" matches "makefile" (no dot), while "fi<" does
+	// NOT match "file.txt" (kmtest: "F<" vs "FILE.TXT" is FALSE).
+	count = 0;
+	collect_matches("dir\\make<", matches, &count);
+	a = false;
+	for (size_t i = 0; i < count; ++i) {
+		a = a || strcmp(matches[i], "makefile") == 0;
+	}
+	TEST_CHECK(a);
+	count = 0;
+	collect_matches("dir\\fi<", matches, &count);
+	a = false;
+	for (size_t i = 0; i < count; ++i) {
+		a = a || strcmp(matches[i], "file.txt") == 0;
+	}
+	TEST_CHECK(!a);
+
+	// "*.txt" requires an extension: matches data01.txt, never makefile.
+	count = 0;
+	collect_matches("dir\\*.txt", matches, &count);
+	a = b = false;
+	for (size_t i = 0; i < count; ++i) {
+		a = a || strcmp(matches[i], "data01.txt") == 0;
+		b = b || strcmp(matches[i], "makefile") == 0;
+	}
+	TEST_CHECK(a);
+	TEST_CHECK(!b);
+
+	// "file.*" (DOS_DOT) matches both extensions of "file".
+	count = 0;
+	collect_matches("dir\\file.*", matches, &count);
+	a = b = false;
+	for (size_t i = 0; i < count; ++i) {
+		a = a || strcmp(matches[i], "file.txt") == 0;
+		b = b || strcmp(matches[i], "file.bin") == 0;
+	}
+	TEST_CHECK(a);
+	TEST_CHECK(b);
+}
+
 static void test_findclose_invalid_handle(void) {
 	SetLastError(0xDEADBEEF);
 	TEST_CHECK(!FindClose(NULL));
@@ -310,6 +425,8 @@ int main(void) {
 	test_wildcard_question();
 	test_wildcard_in_directory_segment();
 	test_directory_iteration_includes_special_entries();
+	test_wildcard_star_dot();
+	test_dos_wildcard_semantics();
 	test_findclose_invalid_handle();
 
 	cleanup_fixture();

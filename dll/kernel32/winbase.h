@@ -133,4 +133,22 @@ BOOL WINAPI GetDiskFreeSpaceExA(LPCSTR lpDirectoryName, PULARGE_INTEGER lpFreeBy
 BOOL WINAPI GetDiskFreeSpaceExW(LPCWSTR lpDirectoryName, PULARGE_INTEGER lpFreeBytesAvailableToCaller,
 								PULARGE_INTEGER lpTotalNumberOfBytes, PULARGE_INTEGER lpTotalNumberOfFreeBytes);
 
+// String API family.  Documented behaviour from Microsoft's WinAPI
+// reference: these are simple length / copy / cat / compare helpers
+// for null-terminated A/W strings with no bounds checking beyond the
+// explicit limit on lstrcpyn.  No locale-aware behaviour at our level;
+// see CompareString{A,W} for that.  (lstrcpynA is declared further up
+// with the upstream implementation.)
+LPWSTR WINAPI lstrcpynW(LPWSTR lpString1, LPCWSTR lpString2, int iMaxLength);
+LPSTR WINAPI lstrcpyA(LPSTR lpString1, LPCSTR lpString2);
+LPWSTR WINAPI lstrcpyW(LPWSTR lpString1, LPCWSTR lpString2);
+LPSTR WINAPI lstrcatA(LPSTR lpString1, LPCSTR lpString2);
+LPWSTR WINAPI lstrcatW(LPWSTR lpString1, LPCWSTR lpString2);
+int WINAPI lstrlenA(LPCSTR lpString);
+int WINAPI lstrlenW(LPCWSTR lpString);
+int WINAPI lstrcmpA(LPCSTR lpString1, LPCSTR lpString2);
+int WINAPI lstrcmpW(LPCWSTR lpString1, LPCWSTR lpString2);
+int WINAPI lstrcmpiA(LPCSTR lpString1, LPCSTR lpString2);
+int WINAPI lstrcmpiW(LPCWSTR lpString1, LPCWSTR lpString2);
+
 } // namespace kernel32

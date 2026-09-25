@@ -322,7 +322,11 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(CLANG_ROOT "/usr" CACHE PATH "Path to Clang installation")
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-    set(CLANG_ROOT "/Library/Developer/CommandLineTools/usr/lib" CACHE PATH "Path to Clang installation")
+    # Prefer libclang from the compiler installation. This keeps Homebrew LLVM
+    # builds from mixing its clang executable with AppleClang's libclang.
+    get_filename_component(_CLANG_BIN_DIR "${CMAKE_C_COMPILER}" DIRECTORY)
+    get_filename_component(_CLANG_COMPILER_ROOT "${_CLANG_BIN_DIR}/.." ABSOLUTE)
+    set(CLANG_ROOT "${_CLANG_COMPILER_ROOT}" CACHE PATH "Path to Clang installation")
 endif()
 set(_LLVM_MIN_VER 17)
 set(_LLVM_MAX_VER 25)
@@ -333,7 +337,7 @@ endforeach()
 list(APPEND _CLANG_LIB_SUFFIXES llvm/lib lib lib64)
 find_library(LIBCLANG_LIBRARY
     NAMES libclang clang
-    HINTS ${CLANG_ROOT}
+    HINTS ${CLANG_ROOT} "/Library/Developer/CommandLineTools/usr/lib"
     PATH_SUFFIXES ${_CLANG_LIB_SUFFIXES}
 )
 if(NOT LIBCLANG_LIBRARY)
@@ -486,6 +490,7 @@ if (WIBO_ENABLE_FIXTURE_TESTS)
         wibo_add_fixture_bin(NAME test_bcrypt SOURCES test/test_bcrypt.c COMPILE_OPTIONS -lbcrypt)
         wibo_add_fixture_bin(NAME test_shlwapi SOURCES test/test_shlwapi.c COMPILE_OPTIONS -lshlwapi)
         wibo_add_fixture_bin(NAME test_ws2 SOURCES test/test_ws2.c COMPILE_OPTIONS -lws2_32)
+        wibo_add_fixture_bin(NAME test_charupperbuff SOURCES test/test_charupperbuff.c COMPILE_OPTIONS -luser32)
         wibo_add_fixture_bin(NAME test_resources SOURCES test/test_resources.c ${WIBO_TEST_BIN_DIR}/test_resources_res.o COMPILE_OPTIONS -lversion)
         wibo_add_fixture_bin(NAME test_threading SOURCES test/test_threading.c)
         wibo_add_fixture_bin(NAME test_temppath SOURCES test/test_temppath.c)

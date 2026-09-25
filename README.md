@@ -1,4 +1,4 @@
-# wibo
+# wibo 
 
 A minimal, low-fuss wrapper that can run simple command-line 32-bit Windows binaries on Linux and macOS - developed to run Windows compilers faster than Wine.
 

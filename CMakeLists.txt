@@ -86,6 +86,10 @@ set(MI_BUILD_SHARED OFF CACHE BOOL "Build shared library" FORCE)
 set(MI_BUILD_STATIC OFF CACHE BOOL "Build static library" FORCE)
 set(MI_BUILD_OBJECT ON CACHE BOOL "Build object library" FORCE)
 set(MI_BUILD_TESTS OFF CACHE BOOL "Build test executables" FORCE)
+# Guest allocations use the explicit mi_* API. Exporting malloc/free from this
+# fixed-address executable can interpose on shared-library initialization before
+# mimalloc's own constructors have run.
+set(MI_OVERRIDE OFF CACHE BOOL "Override the standard malloc interface" FORCE)
 
 include(FetchContent)
 FetchContent_Declare(

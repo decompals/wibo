@@ -200,6 +200,7 @@ add_executable(wibo
     dll/kernel32/errhandlingapi.cpp
     dll/kernel32/fibersapi.cpp
     dll/kernel32/fileapi.cpp
+    dll/kernel32/guest_stubs.cpp
     dll/kernel32/handleapi.cpp
     dll/kernel32/heapapi.cpp
     dll/kernel32/interlockedapi.cpp
@@ -501,9 +502,11 @@ if (WIBO_ENABLE_FIXTURE_TESTS)
         wibo_add_fixture_bin(NAME test_tls_reloc SOURCES test/test_tls_reloc.c)
         wibo_add_fixture_bin(NAME test_fls SOURCES test/test_fls.c)
         wibo_add_fixture_bin(NAME test_fpu_state SOURCES test/test_fpu_state.c)
+        wibo_add_fixture_bin(NAME test_fast_kernel32 SOURCES test/test_fast_kernel32.c)
         wibo_add_fixture_bin(NAME test_handleapi SOURCES test/test_handleapi.c)
         wibo_add_fixture_bin(NAME test_findfile SOURCES test/test_findfile.c)
         wibo_add_fixture_bin(NAME test_getfileattributesex SOURCES test/test_getfileattributesex.c)
+        wibo_add_fixture_bin(NAME test_getfullpathname SOURCES test/test_getfullpathname.c)
         wibo_add_fixture_bin(NAME test_locale SOURCES test/test_locale.c)
         wibo_add_fixture_bin(NAME test_lstrcpyn SOURCES test/test_lstrcpyn.c)
         wibo_add_fixture_bin(NAME test_critical_section SOURCES test/test_critical_section.c)

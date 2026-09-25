@@ -1514,24 +1514,24 @@ void *findExportByOrdinal(ModuleInfo *info, uint16_t ordinal) {
 	return nullptr;
 }
 
-void *resolveFuncByName(ModuleInfo *info, const char *funcName) {
+void *resolveFuncByName(ModuleInfo *info, const char *funcName, MissingFunctionPolicy policy) {
 	void *func = findExportByName(info, funcName);
 	if (func) {
 		return func;
 	}
-	if (info && info->moduleStub) {
+	if (info && info->moduleStub && (policy == MissingFunctionPolicy::AllBuiltins || info->moduleStub == &lib_lmgr)) {
 		const char *safeFunc = funcName ? funcName : "";
 		return reinterpret_cast<void *>(resolveMissingFuncName(info->originalName.c_str(), safeFunc));
 	}
 	return nullptr;
 }
 
-void *resolveFuncByOrdinal(ModuleInfo *info, uint16_t ordinal) {
+void *resolveFuncByOrdinal(ModuleInfo *info, uint16_t ordinal, MissingFunctionPolicy policy) {
 	void *func = findExportByOrdinal(info, ordinal);
 	if (func) {
 		return func;
 	}
-	if (info && info->moduleStub) {
+	if (info && info->moduleStub && (policy == MissingFunctionPolicy::AllBuiltins || info->moduleStub == &lib_lmgr)) {
 		return reinterpret_cast<void *>(resolveMissingFuncOrdinal(info->originalName.c_str(), ordinal));
 	}
 	return nullptr;

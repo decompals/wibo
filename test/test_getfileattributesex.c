@@ -123,6 +123,36 @@ static void test_invalid_info_level(void) {
 	TEST_CHECK_EQ(ERROR_INVALID_PARAMETER, GetLastError());
 }
 
+static void test_case_insensitive_cache_invalidation(void) {
+	const char *initial_name = "CacheEntry.TMP";
+	const char *moved_name = "MovedEntry.TMP";
+	DWORD attributes;
+
+	SetLastError(0xDEADBEEF);
+	TEST_CHECK_EQ(INVALID_FILE_ATTRIBUTES, GetFileAttributesA("cacheentry.tmp"));
+	TEST_CHECK_EQ(ERROR_FILE_NOT_FOUND, GetLastError());
+
+	create_file_with_content(initial_name, "x");
+	attributes = GetFileAttributesA("CACHEENTRY.tmp");
+	TEST_CHECK(attributes != INVALID_FILE_ATTRIBUTES);
+	TEST_CHECK((attributes & FILE_ATTRIBUTE_DIRECTORY) == 0);
+
+	TEST_CHECK(MoveFileA("cacheentry.tmp", moved_name));
+	TEST_CHECK(GetFileAttributesA("movedentry.tmp") != INVALID_FILE_ATTRIBUTES);
+	TEST_CHECK_EQ(INVALID_FILE_ATTRIBUTES, GetFileAttributesA("CACHEENTRY.TMP"));
+
+	TEST_CHECK(DeleteFileA("MOVEDENTRY.tmp"));
+	TEST_CHECK_EQ(INVALID_FILE_ATTRIBUTES, GetFileAttributesA("movedentry.tmp"));
+
+	TEST_CHECK_EQ(INVALID_FILE_ATTRIBUTES, GetFileAttributesA("cachedir"));
+	TEST_CHECK(CreateDirectoryA("CacheDir", NULL));
+	attributes = GetFileAttributesA("CACHEDIR");
+	TEST_CHECK(attributes != INVALID_FILE_ATTRIBUTES);
+	TEST_CHECK((attributes & FILE_ATTRIBUTE_DIRECTORY) != 0);
+	TEST_CHECK(RemoveDirectoryA("cachedir"));
+	TEST_CHECK_EQ(INVALID_FILE_ATTRIBUTES, GetFileAttributesA("CacheDir"));
+}
+
 int main(void) {
 	setup_fixture();
 
@@ -131,6 +161,7 @@ int main(void) {
 	test_missing_file();
 	test_null_name();
 	test_invalid_info_level();
+	test_case_insensitive_cache_invalidation();
 
 	cleanup_fixture();
 	return 0;

@@ -51,6 +51,29 @@ constexpr std::size_t kGuestArenaSize = 64ULL * 1024ULL * 1024ULL; // 64 MiB
 constexpr std::size_t kArenaMaxObjSize = 8ULL * 1024ULL * 1024ULL; // 8 MiB
 constexpr std::size_t kVirtualAllocationGranularity = 64ULL * 1024ULL;
 
+#ifdef __linux__
+constexpr size_t MAPS_BUFFER_SIZE = 0x10000;
+constexpr size_t MAX_NUM_MAPPINGS = 128;
+MEMORY_BASIC_INFORMATION g_initialMappings[MAX_NUM_MAPPINGS]{};
+size_t g_numInitialMappings = 0;
+bool g_addressSpaceReserved = false;
+
+size_t blockLower2GB(MEMORY_BASIC_INFORMATION mappings[MAX_NUM_MAPPINGS]);
+
+void initializeHostHeap() {
+	if (!g_addressSpaceReserved) {
+		g_numInitialMappings = blockLower2GB(g_initialMappings);
+		g_addressSpaceReserved = true;
+	}
+	mi_process_init();
+}
+
+#ifdef __GLIBC__
+// Reserve guest addresses and initialize mimalloc before shared-library constructors use malloc/free.
+__attribute__((section(".preinit_array"), used)) void (*const kHeapPreinit)() = initializeHostHeap;
+#endif
+#endif
+
 struct Arena {
 	mi_arena_id_t arenaId = nullptr;
 	void *start = nullptr;
@@ -120,6 +143,25 @@ inline void setVirtualAllocationName(void *ptr, std::size_t len, const char *nam
 	}
 #endif
 }
+
+#ifdef __linux__
+void reserveGuestRange(uintptr_t start, uintptr_t end) {
+	if (start >= end) {
+		return;
+	}
+	size_t len = end - start;
+	int flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE;
+#ifdef MAP_FIXED_NOREPLACE
+	flags |= MAP_FIXED_NOREPLACE;
+#endif
+	void *ptr = mmap(reinterpret_cast<void *>(start), len, PROT_NONE, flags, -1, 0);
+	if (ptr == MAP_FAILED || reinterpret_cast<uintptr_t>(ptr) != start) {
+		LOG_ERR("heap: failed to reserve guest address space\n");
+		_exit(1);
+	}
+	setVirtualAllocationName(ptr, len, "wibo reserved");
+}
+#endif
 
 constexpr uintptr_t alignDown(uintptr_t value, std::size_t alignment) {
 	const uintptr_t mask = static_cast<uintptr_t>(alignment) - 1;
@@ -1249,8 +1291,10 @@ bool reserveGuestStack(std::size_t stackSizeBytes, void **outStackLimit, void **
 
 } // namespace wibo::heap
 
+namespace {
+
 #ifdef __linux__
-static void debugPrintMaps() {
+void debugPrintMaps() {
 	char buf[1024];
 	int fd = open("/proc/self/maps", O_RDONLY);
 	if (fd == -1) {
@@ -1271,9 +1315,6 @@ static void debugPrintMaps() {
 	close(fd);
 }
 
-constexpr size_t MAPS_BUFFER_SIZE = 0x10000;
-constexpr size_t MAX_NUM_MAPPINGS = 128;
-
 /**
  * Read /proc/self/maps into a buffer.
  *
@@ -1284,7 +1325,7 @@ constexpr size_t MAX_NUM_MAPPINGS = 128;
  * @param buffer The buffer to read into.
  * @return The number of bytes read.
  */
-static size_t readMaps(char *buffer) {
+size_t readMaps(char *buffer) {
 	int fd = open("/proc/self/maps", O_RDONLY);
 	if (fd == -1) {
 		perror("heap: failed to open /proc/self/maps");
@@ -1317,17 +1358,17 @@ static size_t readMaps(char *buffer) {
 }
 
 /**
- * Map the upper 2GB of memory to prevent libc from allocating there.
+ * Map the lower 2GB of memory to prevent libc from allocating there.
  *
  * This is necessary because 32-bit windows only reserves the lowest 2GB of memory for use by a process
  * (https://www.tenouk.com/WinVirtualAddressSpace.html). Linux, on the other hand, will happily allow
  * nearly the entire 4GB address space to be used. Some Windows programs rely on heap allocations to be
  * in the lower 2GB of memory, otherwise they misbehave or crash.
  *
- * Between reading /proc/self/maps and mmap-ing the upper 2GB, we must be extremely careful not to allocate
+ * Between reading /proc/self/maps and mmap-ing the lower 2GB, we must be extremely careful not to allocate
  * any memory, as that could cause libc to modify memory mappings while we're attempting to fill them.
  */
-static size_t blockLower2GB(MEMORY_BASIC_INFORMATION mappings[MAX_NUM_MAPPINGS]) {
+size_t blockLower2GB(MEMORY_BASIC_INFORMATION mappings[MAX_NUM_MAPPINGS]) {
 	// Buffer lives on the stack to avoid heap allocation
 	char buffer[MAPS_BUFFER_SIZE];
 	size_t len = readMaps(buffer);
@@ -1390,29 +1431,10 @@ static size_t blockLower2GB(MEMORY_BASIC_INFORMATION mappings[MAX_NUM_MAPPINGS])
 		}
 
 		// The empty space we want to map out is now between lastMapEnd and mapStart
-		uintptr_t reserveStart = lastMapEnd;
-		uintptr_t reserveEnd = mapStart;
-
-		if ((reserveEnd - reserveStart) != 0 && reserveStart < kTwoGB) {
-			reserveEnd = std::min(reserveEnd, kTwoGB);
-
-			uintptr_t len = reserveEnd - reserveStart;
-			int flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE;
-#ifdef MAP_FIXED_NOREPLACE
-			flags |= MAP_FIXED_NOREPLACE;
-#else
-			flags |= MAP_FIXED;
-#endif
-			void *ptr = mmap(reinterpret_cast<void *>(reserveStart), len, PROT_NONE, flags, -1, 0);
-			if (ptr == MAP_FAILED) {
-				perror("heap: failed reserve memory");
-				exit(1);
-			}
-			setVirtualAllocationName(ptr, len, "wibo reserved");
-		}
-
+		reserveGuestRange(lastMapEnd, mapStart);
 		lastMapEnd = mapEnd;
 	}
+	reserveGuestRange(lastMapEnd, kTwoGB);
 
 	return numMappings;
 }
@@ -1423,10 +1445,10 @@ __attribute__((constructor(101)))
 #else
 __attribute__((constructor))
 #endif
-__attribute__((used)) static void wibo_heap_constructor() {
+__attribute__((used)) void wibo_heap_constructor() {
 #ifdef __linux__
-	MEMORY_BASIC_INFORMATION mappings[MAX_NUM_MAPPINGS];
-	memset(mappings, 0, sizeof(mappings));
+	// musl does not run .preinit_array; reserve here before this constructor allocates.
+	initializeHostHeap();
 #endif
 	bool debug = getenv("WIBO_DEBUG_HEAP") != nullptr;
 	if (debug) {
@@ -1435,9 +1457,6 @@ __attribute__((used)) static void wibo_heap_constructor() {
 		debugPrintMaps();
 #endif
 	}
-#ifdef __linux__
-	size_t numMappings = blockLower2GB(mappings);
-#endif
 	// Mark DOS area as read-only
 	const uintptr_t minAddr = mmapMinAddr();
 	if (minAddr < kLowMemoryStart) {
@@ -1457,12 +1476,15 @@ __attribute__((used)) static void wibo_heap_constructor() {
 	}
 	g_mappings = new std::map<uintptr_t, MEMORY_BASIC_INFORMATION>;
 #ifdef __linux__
-	for (size_t i = 0; i < numMappings; ++i) {
+	for (size_t i = 0; i < g_numInitialMappings; ++i) {
+		const auto &mapping = g_initialMappings[i];
 		if (debug) {
-			fprintf(stderr, "Existing %zu: BaseAddress=%x, RegionSize=%u\n", i, mappings[i].BaseAddress,
-					mappings[i].RegionSize);
+			fprintf(stderr, "Existing %zu: BaseAddress=%x, RegionSize=%u\n", i, mapping.BaseAddress,
+					mapping.RegionSize);
 		}
-		g_mappings->emplace(reinterpret_cast<uintptr_t>(fromGuestPtr(mappings[i].BaseAddress)), mappings[i]);
+		g_mappings->emplace(reinterpret_cast<uintptr_t>(fromGuestPtr(mapping.BaseAddress)), mapping);
 	}
 #endif
 }
+
+} // namespace

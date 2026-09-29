@@ -1342,36 +1342,6 @@ BOOL WINAPI GetDiskFreeSpaceExW(LPCWSTR lpDirectoryName, PULARGE_INTEGER lpFreeB
 							   lpTotalNumberOfBytes, lpTotalNumberOfFreeBytes);
 }
 
-// ---------------------------------------------------------------------------
-// String API family (lstr*).
-//
-// Pre-Unicode helpers documented at
-//     https://learn.microsoft.com/en-us/windows/win32/api/winbase/
-//
-// Microsoft's documented semantics, summarised:
-//
-//   * lstrcpyn copies up to iMaxLength-1 chars from src to dst and ALWAYS
-//     writes a terminating nul — unlike strncpy.  iMaxLength is declared INT
-//     but is treated as unsigned: a negative value behaves as a very large
-//     positive bound.
-//   * lstrcpy / lstrcat behave like strcpy / strcat with no bounds checks.
-//   * lstrlen returns the length excluding the terminator.
-//   * lstrcmp returns -1 / 0 / +1, NOT strcmp's arbitrary signed delta.
-//     The official implementation defers to CompareString with the thread
-//     locale; for our usage — driving Win95-era command-line compilers —
-//     a byte-wise compare is indistinguishable and avoids dragging in the
-//     full locale subsystem here.  Same for lstrcmpi (case-insensitive).
-//
-//   * On access violation the documented behaviour is to set
-//     ERROR_INVALID_PARAMETER and return NULL (or 0).  wibo does not have
-//     SEH page-fault dispatch, so we only catch the obvious NULL case;
-//     anything else faults the guest as it would on a real Windows.
-// ---------------------------------------------------------------------------
-
-// (lstrcpynA lives further up in this file — upstream 1.2.0 grew its own
-// implementation; ours was dropped in the 1.2.0 rebase to avoid the
-// duplicate definition.)
-
 LPWSTR WINAPI lstrcpynW(LPWSTR lpString1, LPCWSTR lpString2, int iMaxLength) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("lstrcpynW(%p, %p, %d)\n", lpString1, lpString2, iMaxLength);
@@ -1456,6 +1426,7 @@ int WINAPI lstrlenW(LPCWSTR lpString) {
 	return static_cast<int>(wstrlen(reinterpret_cast<const uint16_t *>(lpString)));
 }
 
+// TODO: Use Windows locale ordering for lstrcmp/lstrcmpi.
 int WINAPI lstrcmpA(LPCSTR lpString1, LPCSTR lpString2) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("lstrcmpA(%p, %p)\n", lpString1, lpString2);

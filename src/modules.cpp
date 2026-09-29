@@ -29,6 +29,9 @@
 
 extern const wibo::ModuleStub lib_advapi32;
 extern const wibo::ModuleStub lib_bcrypt;
+#if WIBO_HAS_CRTDLL
+extern const wibo::ModuleStub lib_crtdll;
+#endif
 extern const wibo::ModuleStub lib_kernel32;
 extern const wibo::ModuleStub lib_lmgr;
 extern const wibo::ModuleStub lib_mscoree;
@@ -270,6 +273,9 @@ LockedRegistry registry() {
 			&lib_advapi32, &lib_bcrypt, &lib_kernel32, &lib_lmgr,	   &lib_mscoree, &lib_ntdll,
 			&lib_ole32,	   &lib_rpcrt4, &lib_shlwapi, &lib_user32,	   &lib_vcruntime, &lib_version,
 			&lib_ws2,
+#if WIBO_HAS_CRTDLL
+			&lib_crtdll,
+#endif
 #if WIBO_HAS_MSVCRT
 			&lib_msvcrt,
 #endif

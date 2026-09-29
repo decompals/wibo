@@ -86,6 +86,7 @@ set(MI_BUILD_SHARED OFF CACHE BOOL "Build shared library" FORCE)
 set(MI_BUILD_STATIC OFF CACHE BOOL "Build static library" FORCE)
 set(MI_BUILD_OBJECT ON CACHE BOOL "Build object library" FORCE)
 set(MI_BUILD_TESTS OFF CACHE BOOL "Build test executables" FORCE)
+set(MI_OVERRIDE ON CACHE BOOL "Override the standard malloc interface" FORCE)
 
 include(FetchContent)
 FetchContent_Declare(
@@ -140,7 +141,7 @@ if (WIBO_ENABLE_LIBURING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_include_directories(liburing PRIVATE ${liburing_SOURCE_DIR})
 endif()
 
-set(WIBO_WINEDLL_RELEASE_TAG "2026-07-10")
+set(WIBO_WINEDLL_RELEASE_TAG "2026-09-29")
 
 function(configure_wine_dll VAR FILENAME SHA256)
     if (NOT DEFINED ${VAR})
@@ -159,15 +160,16 @@ function(configure_wine_dll VAR FILENAME SHA256)
     set(${VAR} "${${VAR}}" PARENT_SCOPE)
 endfunction()
 
-configure_wine_dll(MSVCRT_DLL msvcrt.dll 01f5b5a6f8b249e2842e74720376ca84ea6e8094c18b5416ec80a2183fc9ef81)
-configure_wine_dll(MSVCIRT_DLL msvcirt.dll c170ef5e15c91cafe520e4342a42eef8f8ed2c007e20471b0ac1c0277e1e0333)
-configure_wine_dll(MSVCRT20_DLL msvcrt20.dll fb94edfa05414460ea8f27b82acf205a0d3caccd68d66f7e7de8ae7d29ae4563)
-configure_wine_dll(MSVCRT40_DLL msvcrt40.dll da49673adf20b5f8cf23e99b18278f3ea225d33ce47bd25e1455c654ff4fc5ec)
-configure_wine_dll(MSVCR71_DLL msvcr71.dll ad5b9673604a205f24feb06283c93fdbd7b652fbe9c865c50dbf26505b3df463)
-configure_wine_dll(MSVCR90_DLL msvcr90.dll c8682ba683665bd3d6b9ff8ee0b34af34edbcfd30e7682321b98941aefeae659)
-configure_wine_dll(MSVCR100_DLL msvcr100.dll 405e44bced50a4b57c08de47e16e7d9792603c0af52bdd0fb19cff2c858b5880)
-configure_wine_dll(MSVCR120_DLL msvcr120.dll fdb166b3eadd663fda65718334b72736a6f4aa3ec94a32d4c47e7a7add75b696)
-configure_wine_dll(UCRTBASE_DLL ucrtbase.dll 9606bcdd8d8436ce4d5c995cada5c20ce3d6cb52c35a04a0366613950785c282)
+configure_wine_dll(CRTDLL_DLL crtdll.dll 3caf465b10ae4cb2127bc535e91a39c644b605253130d523fbf122760f422c0b)
+configure_wine_dll(MSVCRT_DLL msvcrt.dll 9dea2e3c73dc071430772aae0417534fd76c7be082939d9623be5432227605e3)
+configure_wine_dll(MSVCIRT_DLL msvcirt.dll 2086a637fb2aecb754510761f0dd04b79694e10526c4f8964e262c8cccca9db4)
+configure_wine_dll(MSVCRT20_DLL msvcrt20.dll f603f5e4c20e54f2475c940199064f2f81fac5f3ae5e1b7a73bd130691a1e78c)
+configure_wine_dll(MSVCRT40_DLL msvcrt40.dll d37ea23b4c36b2377817617d2a93fb53bd3bfde40a5c0ecec502b623439fe50e)
+configure_wine_dll(MSVCR71_DLL msvcr71.dll 3f56fd7107c45626c9e6904e6bea7e832933ea4879a743195e7fa09ab085ddac)
+configure_wine_dll(MSVCR90_DLL msvcr90.dll 9294a314266a6a7cd828f6d3d84b956283e1db13830b8fb27fd5429cbd966f29)
+configure_wine_dll(MSVCR100_DLL msvcr100.dll 624d89f0cfb67d9153582910e81d3748971959a16d3872e4503afd7708912692)
+configure_wine_dll(MSVCR120_DLL msvcr120.dll f1dd6500a7aa4cf58c3c17f3d3b091f00138f7b465c363efef4bf20119a1bcaf)
+configure_wine_dll(UCRTBASE_DLL ucrtbase.dll 1d5e5bbf3a766e031d7d208659c097c944985cbcbc2725d3f926f220d6e22c16)
 
 function(embed_binary SRC FILE)
     set_source_files_properties(${SRC} PROPERTIES
@@ -244,6 +246,7 @@ add_executable(wibo
     src/strutil.cpp
     src/tls.cpp
 )
+add_embedded_wine_dll(wibo dll/crtdll.cpp WIBO_HAS_CRTDLL "${CRTDLL_DLL}")
 add_embedded_wine_dll(wibo dll/msvcrt.cpp WIBO_HAS_MSVCRT "${MSVCRT_DLL}")
 add_embedded_wine_dll(wibo dll/msvcirt.cpp WIBO_HAS_MSVCIRT "${MSVCIRT_DLL}")
 add_embedded_wine_dll(wibo dll/msvcrt20.cpp WIBO_HAS_MSVCRT20 "${MSVCRT20_DLL}")
@@ -322,7 +325,11 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(CLANG_ROOT "/usr" CACHE PATH "Path to Clang installation")
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-    set(CLANG_ROOT "/Library/Developer/CommandLineTools/usr/lib" CACHE PATH "Path to Clang installation")
+    # Prefer libclang from the compiler installation. This keeps Homebrew LLVM
+    # builds from mixing its clang executable with AppleClang's libclang.
+    get_filename_component(_CLANG_BIN_DIR "${CMAKE_C_COMPILER}" DIRECTORY)
+    get_filename_component(_CLANG_COMPILER_ROOT "${_CLANG_BIN_DIR}/.." ABSOLUTE)
+    set(CLANG_ROOT "${_CLANG_COMPILER_ROOT}" CACHE PATH "Path to Clang installation")
 endif()
 set(_LLVM_MIN_VER 17)
 set(_LLVM_MAX_VER 25)
@@ -333,7 +340,7 @@ endforeach()
 list(APPEND _CLANG_LIB_SUFFIXES llvm/lib lib lib64)
 find_library(LIBCLANG_LIBRARY
     NAMES libclang clang
-    HINTS ${CLANG_ROOT}
+    HINTS ${CLANG_ROOT} "/Library/Developer/CommandLineTools/usr/lib"
     PATH_SUFFIXES ${_CLANG_LIB_SUFFIXES}
 )
 if(NOT LIBCLANG_LIBRARY)
@@ -486,6 +493,7 @@ if (WIBO_ENABLE_FIXTURE_TESTS)
         wibo_add_fixture_bin(NAME test_bcrypt SOURCES test/test_bcrypt.c COMPILE_OPTIONS -lbcrypt)
         wibo_add_fixture_bin(NAME test_shlwapi SOURCES test/test_shlwapi.c COMPILE_OPTIONS -lshlwapi)
         wibo_add_fixture_bin(NAME test_ws2 SOURCES test/test_ws2.c COMPILE_OPTIONS -lws2_32)
+        wibo_add_fixture_bin(NAME test_charupperbuff SOURCES test/test_charupperbuff.c COMPILE_OPTIONS -luser32)
         wibo_add_fixture_bin(NAME test_resources SOURCES test/test_resources.c ${WIBO_TEST_BIN_DIR}/test_resources_res.o COMPILE_OPTIONS -lversion)
         wibo_add_fixture_bin(NAME test_threading SOURCES test/test_threading.c)
         wibo_add_fixture_bin(NAME test_temppath SOURCES test/test_temppath.c)

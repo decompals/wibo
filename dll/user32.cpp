@@ -6,6 +6,7 @@
 #include "kernel32/internal.h"
 #include "modules.h"
 #include "resources.h"
+#include "strutil.h"
 
 #include <cstring>
 
@@ -21,6 +22,24 @@ struct USEROBJECTFLAGS {
 	BOOL fReserved;
 	DWORD dwFlags;
 };
+
+DWORD WINAPI CharUpperBuffW(LPWSTR lpsz, DWORD cchLength) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("CharUpperBuffW(%p, %u)\n", lpsz, cchLength);
+	if (!lpsz) {
+		return 0;
+	}
+	for (DWORD i = 0; i < cchLength; ++i) {
+		lpsz[i] = wcharToUpper(lpsz[i]);
+	}
+	return cchLength;
+}
+
+LPSTR WINAPI CharNextA(LPCSTR lpsz) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("CharNextA(%p)\n", lpsz);
+	return const_cast<LPSTR>(*lpsz ? lpsz + 1 : lpsz);
+}
 
 int WINAPI LoadStringA(HMODULE hInstance, UINT uID, LPSTR lpBuffer, int cchBufferMax) {
 	HOST_CONTEXT_GUARD();

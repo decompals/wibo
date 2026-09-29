@@ -45,7 +45,7 @@
       "name": "debug-macos",
       "displayName": "Debug",
       "description": "Debug build (64-bit macOS)",
-      "inherits": ["ninja-base"],
+      "inherits": ["ninja-base", "clang-base"],
       "binaryDir": "${sourceDir}/build/debug",
       "condition": {
         "type": "equals",
@@ -77,7 +77,7 @@
       "name": "release-macos",
       "displayName": "Release",
       "description": "Release build (64-bit macOS)",
-      "inherits": ["ninja-base"],
+      "inherits": ["ninja-base", "clang-base"],
       "binaryDir": "${sourceDir}/build/release",
       "condition": {
         "type": "equals",

@@ -17,6 +17,7 @@
 - Use PascalCase for Win32 entry points, camelCase for internal helpers, SCREAMING_SNAKE_CASE for Win32 constants, kCamelCase for internal constants, g_camelCase for globals, and mPascalCase for member variables.
 - Put static functions and variables in anonymous namespaces at the top of the file.
 - Prefer scoping types to the header or source file that uses them; avoid polluting `common.h` unless widely shared.
+- Keep new comments concise and focused on non-obvious constraints or reasons; avoid API documentation dumps and change-history narration. Preserve existing explanatory comments unless the change makes them inaccurate.
 - Win32 APIs generally do NOT set `ERROR_SUCCESS` on success, though there are a few exceptions; check the docs.
 
 ## Shim Implementation Guidelines

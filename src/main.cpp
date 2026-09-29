@@ -85,6 +85,7 @@ bool wibo::installTibForCurrentThread(TEB *tibPtr) {
 	if (!tibPtr) {
 		return false;
 	}
+	tibPtr->ClientId.UniqueThread = wibo::getThreadId();
 	currentThreadTeb = tibPtr;
 	if (!tebThreadSetup(tibPtr)) {
 		return false;

@@ -100,6 +100,43 @@ struct FullPathInfo {
 	size_t filePartOffset = std::string::npos;
 };
 
+std::filesystem::path lexicalHostPathFromWindows(std::string input) {
+	std::replace(input.begin(), input.end(), '\\', '/');
+
+	if (input.rfind("//?/", 0) == 0) {
+		input.erase(0, 4);
+	}
+	if (input.rfind("z:/", 0) == 0 || input.rfind("Z:/", 0) == 0 || input.rfind("c:/", 0) == 0 ||
+		input.rfind("C:/", 0) == 0) {
+		input.erase(0, 2);
+	}
+
+	// Preserve pathFromWindows' trailing-dot spelling rules without performing its
+	// existence check and case-insensitive directory traversal.
+	std::string stripped;
+	stripped.reserve(input.size());
+	for (size_t start = 0; start <= input.size();) {
+		size_t separator = input.find('/', start);
+		size_t end = separator == std::string::npos ? input.size() : separator;
+		const size_t componentLength = end - start;
+		const bool isDotDirectory = (componentLength == 1 && input[start] == '.') ||
+									(componentLength == 2 && input[start] == '.' && input[start + 1] == '.');
+		if (!isDotDirectory) {
+			while (end > start && input[end - 1] == '.') {
+				--end;
+			}
+		}
+		stripped.append(input, start, end - start);
+		if (separator == std::string::npos) {
+			break;
+		}
+		stripped.push_back('/');
+		start = separator + 1;
+	}
+
+	return std::filesystem::path(stripped).lexically_normal();
+}
+
 bool computeFullPath(const std::string &input, FullPathInfo &outInfo) {
 	bool endsWithSeparator = false;
 	if (!input.empty()) {
@@ -107,7 +144,7 @@ bool computeFullPath(const std::string &input, FullPathInfo &outInfo) {
 		endsWithSeparator = (last == '\\' || last == '/');
 	}
 
-	std::filesystem::path hostPath = files::pathFromWindows(input.c_str());
+	std::filesystem::path hostPath = lexicalHostPathFromWindows(input);
 	std::error_code ec;
 	std::filesystem::path absPath = std::filesystem::absolute(hostPath, ec);
 	if (ec) {
@@ -133,6 +170,23 @@ bool computeFullPath(const std::string &input, FullPathInfo &outInfo) {
 
 	outInfo.path = std::move(windowsPath);
 	return true;
+}
+
+std::filesystem::path absoluteLexicalPath(const std::filesystem::path &path) {
+	std::error_code ec;
+	std::filesystem::path absolutePath = std::filesystem::absolute(path, ec);
+	if (ec) {
+		return path.lexically_normal();
+	}
+	return absolutePath.lexically_normal();
+}
+
+void invalidateParentDirectoryCache(const std::filesystem::path &path) {
+	std::filesystem::path parent = path.parent_path();
+	if (parent.empty()) {
+		parent = ".";
+	}
+	files::invalidatePathCache(parent);
 }
 
 struct FindSearchEntry {
@@ -568,7 +622,8 @@ DWORD WINAPI GetFileAttributesA(LPCSTR lpFileName) {
 		setLastError(ERROR_INVALID_PARAMETER);
 		return INVALID_FILE_ATTRIBUTES;
 	}
-	std::filesystem::path path = files::pathFromWindows(lpFileName);
+	files::PathResolution resolution = files::resolvePathFromWindows(lpFileName);
+	const std::filesystem::path &path = resolution.path;
 	std::string pathStr = path.string();
 	DEBUG_LOG("GetFileAttributesA(%s) -> %s\n", lpFileName, pathStr.c_str());
 
@@ -577,25 +632,21 @@ DWORD WINAPI GetFileAttributesA(LPCSTR lpFileName) {
 		return FILE_ATTRIBUTE_NORMAL;
 	}
 
-	std::error_code ec;
-	auto status = std::filesystem::status(path, ec);
-	if (ec) {
-		setLastError(wibo::winErrorFromErrno(ec.value()));
+	if (!resolution.status) {
+		setLastError(wibo::winErrorFromErrno(resolution.error != 0 ? resolution.error : ENOENT));
 		return INVALID_FILE_ATTRIBUTES;
 	}
 
-	switch (status.type()) {
-	case std::filesystem::file_type::regular:
+	if (S_ISREG(resolution.status->st_mode)) {
 		DEBUG_LOG("File exists\n");
 		return FILE_ATTRIBUTE_NORMAL;
-	case std::filesystem::file_type::directory:
-		return FILE_ATTRIBUTE_DIRECTORY;
-	case std::filesystem::file_type::not_found:
-	default:
-		DEBUG_LOG("File does not exist\n");
-		setLastError(ERROR_FILE_NOT_FOUND);
-		return INVALID_FILE_ATTRIBUTES;
 	}
+	if (S_ISDIR(resolution.status->st_mode)) {
+		return FILE_ATTRIBUTE_DIRECTORY;
+	}
+	DEBUG_LOG("File does not exist\n");
+	setLastError(ERROR_FILE_NOT_FOUND);
+	return INVALID_FILE_ATTRIBUTES;
 }
 
 DWORD WINAPI GetFileAttributesW(LPCWSTR lpFileName) {
@@ -622,7 +673,8 @@ BOOL WINAPI GetFileAttributesExA(LPCSTR lpFileName, GET_FILEEX_INFO_LEVELS fInfo
 		return FALSE;
 	}
 
-	std::filesystem::path hostPath = files::pathFromWindows(lpFileName);
+	files::PathResolution resolution = files::resolvePathFromWindows(lpFileName);
+	const std::filesystem::path &hostPath = resolution.path;
 	std::string hostPathStr = hostPath.string();
 
 	if (endsWith(hostPathStr, "/license.dat")) {
@@ -635,15 +687,14 @@ BOOL WINAPI GetFileAttributesExA(LPCSTR lpFileName, GET_FILEEX_INFO_LEVELS fInfo
 		return TRUE;
 	}
 
-	struct stat st{};
-	if (stat(hostPathStr.c_str(), &st) != 0) {
-		setLastErrorFromErrno();
+	if (!resolution.status) {
+		setLastError(wibo::winErrorFromErrno(resolution.error != 0 ? resolution.error : ENOENT));
 		return FALSE;
 	}
 
 	auto *attributeData = static_cast<LPWIN32_FILE_ATTRIBUTE_DATA>(lpFileInformation);
-	bool isDirectory = S_ISDIR(st.st_mode);
-	populateAttributeDataFromStat(st, isDirectory, *attributeData);
+	bool isDirectory = S_ISDIR(resolution.status->st_mode);
+	populateAttributeDataFromStat(*resolution.status, isDirectory, *attributeData);
 	return TRUE;
 }
 
@@ -959,7 +1010,8 @@ HANDLE WINAPI CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShar
 		return pipeHandle;
 	}
 
-	std::filesystem::path hostPath = files::pathFromWindows(lpFileName);
+	files::PathResolution resolution = files::resolvePathFromWindows(lpFileName);
+	std::filesystem::path hostPath = std::move(resolution.path);
 	std::string hostPathStr = hostPath.string();
 	DEBUG_LOG("CreateFileA(filename=%s (%s), desiredAccess=0x%x, shareMode=%u, securityAttributes=%p, "
 			  "creationDisposition=%u, flagsAndAttributes=%u)\n",
@@ -972,10 +1024,8 @@ HANDLE WINAPI CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShar
 	bool deleteOnClose = (dwFlagsAndAttributes & FILE_FLAG_DELETE_ON_CLOSE) != 0;
 	bool overlapped = (dwFlagsAndAttributes & FILE_FLAG_OVERLAPPED) != 0;
 
-	std::error_code statusEc;
-	std::filesystem::file_status status = std::filesystem::status(hostPath, statusEc);
-	bool pathExists = !statusEc && status.type() != std::filesystem::file_type::not_found;
-	bool isDirectory = pathExists && status.type() == std::filesystem::file_type::directory;
+	bool pathExists = resolution.status.has_value();
+	bool isDirectory = pathExists && S_ISDIR(resolution.status->st_mode);
 
 	if ((fileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 && !isDirectory) {
 		setLastError(ERROR_INVALID_PARAMETER);
@@ -1089,14 +1139,14 @@ HANDLE WINAPI CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShar
 	mode_t createMode = 0666;
 	bool requestCreate = false;
 	if (dwCreationDisposition == CREATE_NEW || dwCreationDisposition == CREATE_ALWAYS ||
-		(dwCreationDisposition == OPEN_ALWAYS && !pathExists)) {
+		dwCreationDisposition == OPEN_ALWAYS) {
 		requestCreate = true;
 		openFlags |= O_CREAT;
 	}
 	if (dwCreationDisposition == CREATE_NEW) {
 		openFlags |= O_EXCL;
 	}
-	if (truncateExisting && !isDirectory) {
+	if ((dwCreationDisposition == CREATE_ALWAYS || truncateExisting) && !isDirectory) {
 		openFlags |= O_TRUNC;
 	}
 
@@ -1126,23 +1176,28 @@ HANDLE WINAPI CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShar
 	}
 
 	struct stat st{};
-	if (fstat(fd, &st) == 0 && S_ISDIR(st.st_mode)) {
+	bool hasOpenStatus = fstat(fd, &st) == 0;
+	if (hasOpenStatus && S_ISDIR(st.st_mode)) {
 		isDirectory = true;
 	}
 
 	bool createdNew = !existedBefore && requestCreate;
-	std::filesystem::path canonicalPath = files::canonicalPath(hostPath);
+	std::filesystem::path objectPath = absoluteLexicalPath(hostPath);
+	if (deleteOnClose) {
+		objectPath = files::canonicalPath(objectPath);
+	}
 
 	Pin<FsObject> fsObject;
 	if (isDirectory) {
 		fsObject = make_pin<DirectoryObject>(fd);
 	} else {
-		auto fileObj = make_pin<FileObject>(fd);
+		auto fileObj = hasOpenStatus && S_ISREG(st.st_mode) ? make_pin<FileObject>(fd, static_cast<off_t>(0))
+															: make_pin<FileObject>(fd);
 		fileObj->overlapped = overlapped;
 		fileObj->appendOnly = appendOnly;
 		fsObject = std::move(fileObj);
 	}
-	fsObject->canonicalPath = std::move(canonicalPath);
+	fsObject->canonicalPath = std::move(objectPath);
 	fsObject->shareAccess = shareMask;
 	fsObject->deletePending = deleteOnClose;
 
@@ -1151,6 +1206,9 @@ HANDLE WINAPI CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShar
 		handleFlags |= HANDLE_FLAG_INHERIT;
 	}
 	HANDLE handle = wibo::handles().alloc(std::move(fsObject), normalized.grantedMask, handleFlags);
+	if (dwCreationDisposition != OPEN_EXISTING) {
+		invalidateParentDirectoryCache(hostPath);
+	}
 
 	if ((dwCreationDisposition == OPEN_ALWAYS && existedBefore) ||
 		(dwCreationDisposition == CREATE_ALWAYS && existedBefore)) {
@@ -1188,6 +1246,7 @@ BOOL WINAPI DeleteFileA(LPCSTR lpFileName) {
 		setLastErrorFromErrno();
 		return FALSE;
 	}
+	invalidateParentDirectoryCache(path);
 	return TRUE;
 }
 
@@ -1226,6 +1285,8 @@ BOOL WINAPI MoveFileA(LPCSTR lpExistingFileName, LPCSTR lpNewFileName) {
 		setLastError(wibo::winErrorFromErrno(ec.value()));
 		return FALSE;
 	}
+	invalidateParentDirectoryCache(fromPath);
+	invalidateParentDirectoryCache(toPath);
 	return TRUE;
 }
 
@@ -1364,6 +1425,7 @@ BOOL WINAPI CreateDirectoryA(LPCSTR lpPathName, LPSECURITY_ATTRIBUTES lpSecurity
 		setLastErrorFromErrno();
 		return FALSE;
 	}
+	invalidateParentDirectoryCache(path);
 	return TRUE;
 }
 
@@ -1379,6 +1441,7 @@ BOOL WINAPI RemoveDirectoryA(LPCSTR lpPathName) {
 		setLastErrorFromErrno();
 		return FALSE;
 	}
+	invalidateParentDirectoryCache(path);
 	return TRUE;
 }
 

@@ -130,8 +130,14 @@ ModuleInfo *loadModule(const char *name);
 void freeModule(ModuleInfo *info);
 void *findExportByName(ModuleInfo *info, const char *funcName);
 void *findExportByOrdinal(ModuleInfo *info, uint16_t ordinal);
-void *resolveFuncByName(ModuleInfo *info, const char *funcName);
-void *resolveFuncByOrdinal(ModuleInfo *info, uint16_t ordinal);
+enum class MissingFunctionPolicy {
+	AllBuiltins,
+	LmgrOnly,
+};
+void *resolveFuncByName(ModuleInfo *info, const char *funcName,
+						MissingFunctionPolicy policy = MissingFunctionPolicy::AllBuiltins);
+void *resolveFuncByOrdinal(ModuleInfo *info, uint16_t ordinal,
+						   MissingFunctionPolicy policy = MissingFunctionPolicy::AllBuiltins);
 void *resolveMissingImportByName(const char *dllName, const char *funcName);
 void *resolveMissingImportByOrdinal(const char *dllName, uint16_t ordinal);
 

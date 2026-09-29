@@ -18,9 +18,17 @@ struct IOResult {
 	bool reachedEnd = false;
 };
 
+struct PathResolution {
+	std::filesystem::path path;
+	std::optional<struct stat> status;
+	int error = 0;
+};
+
 void init();
+PathResolution resolvePathFromWindows(const char *inStr);
 std::filesystem::path pathFromWindows(const char *inStr);
 std::string pathToWindows(const std::filesystem::path &path);
+void invalidatePathCache(const std::filesystem::path &directory);
 IOResult read(FileObject *file, void *buffer, size_t bytesToRead, const std::optional<off_t> &offset,
 			  bool updateFilePointer);
 IOResult write(FileObject *file, const void *buffer, size_t bytesToWrite, const std::optional<off_t> &offset,

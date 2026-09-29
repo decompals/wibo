@@ -3,6 +3,7 @@
 #include "common.h"
 #include "context.h"
 #include "errors.h"
+#include "guest_stubs.h"
 #include "internal.h"
 #include "ntdll.h"
 #include "timeutil.h"
@@ -164,26 +165,9 @@ void WINAPI GetSystemTimeAsFileTime(LPFILETIME lpSystemTimeAsFileTime) {
 DWORD WINAPI GetTickCount() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetTickCount()\n");
-#if defined(CLOCK_MONOTONIC)
-	struct timespec ts{};
-	if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
-		uint64_t milliseconds =
-			static_cast<uint64_t>(ts.tv_sec) * 1000ULL + static_cast<uint64_t>(ts.tv_nsec) / 1000000ULL;
-		DWORD result = static_cast<DWORD>(milliseconds & 0xFFFFFFFFULL);
-		DEBUG_LOG(" -> %u\n", result);
-		return result;
-	}
-#endif
-	struct timeval tv{};
-	if (gettimeofday(&tv, nullptr) == 0) {
-		uint64_t milliseconds =
-			static_cast<uint64_t>(tv.tv_sec) * 1000ULL + static_cast<uint64_t>(tv.tv_usec) / 1000ULL;
-		DWORD result = static_cast<DWORD>(milliseconds & 0xFFFFFFFFULL);
-		DEBUG_LOG(" -> %u\n", result);
-		return result;
-	}
-	DEBUG_LOG(" -> 0\n");
-	return 0;
+	DWORD result = wibo::guestStubs::queryTickCount();
+	DEBUG_LOG(" -> %u\n", result);
+	return result;
 }
 
 DWORD WINAPI GetVersion() {

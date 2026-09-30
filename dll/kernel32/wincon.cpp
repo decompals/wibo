@@ -93,6 +93,35 @@ BOOL WINAPI WriteConsoleW(HANDLE hConsoleOutput, LPCWSTR lpBuffer, DWORD nNumber
 	return FALSE;
 }
 
+BOOL WINAPI WriteConsoleA(HANDLE hConsoleOutput, LPCVOID lpBuffer, DWORD nNumberOfCharsToWrite,
+						  LPDWORD lpNumberOfCharsWritten, LPVOID lpReserved) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("WriteConsoleA(%p, %p, %u, %p, %p)\n", hConsoleOutput, lpBuffer, nNumberOfCharsToWrite,
+			  lpNumberOfCharsWritten, lpReserved);
+	(void)lpReserved;
+	if (lpNumberOfCharsWritten) {
+		*lpNumberOfCharsWritten = 0;
+	}
+	if (!lpBuffer && nNumberOfCharsToWrite != 0) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+	auto file = wibo::handles().getAs<FileObject>(hConsoleOutput);
+	if (file && (file->fd == STDOUT_FILENO || file->fd == STDERR_FILENO)) {
+		auto io = files::write(file.get(), lpBuffer, nNumberOfCharsToWrite, std::nullopt, true);
+		if (lpNumberOfCharsWritten) {
+			*lpNumberOfCharsWritten = io.bytesTransferred;
+		}
+		if (io.unixError != 0) {
+			setLastError(wibo::winErrorFromErrno(io.unixError));
+			return FALSE;
+		}
+		return TRUE;
+	}
+	setLastError(ERROR_INVALID_HANDLE);
+	return FALSE;
+}
+
 DWORD WINAPI GetConsoleTitleA(LPSTR lpConsoleTitle, DWORD nSize) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetConsoleTitleA(%p, %u)\n", lpConsoleTitle, nSize);

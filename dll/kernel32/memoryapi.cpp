@@ -392,7 +392,21 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 			setLastError(ERROR_INVALID_ADDRESS);
 			return nullptr;
 		}
-		requestedBase = reinterpret_cast<void *>(mapBaseAddr);
+		uintptr_t mapEnd = alignUp(mapBaseAddr + mapLength, pageSize);
+		if (mapEnd <= mapBaseAddr || mapEnd > kProcessAddressLimit) {
+			setLastError(ERROR_INVALID_ADDRESS);
+			return nullptr;
+		}
+		// Fixed views must participate in the same address-space accounting as
+		// VirtualAlloc, both to reject overlaps and to prevent later allocations
+		// from replacing the view (VC6 restores PCH data at a fixed address).
+		wibo::heap::VmStatus reserveStatus =
+			wibo::heap::reserveViewRange(mapLength, mapBaseAddr, mapEnd, &requestedBase);
+		if (reserveStatus != wibo::heap::VmStatus::Success) {
+			setLastError(ERROR_INVALID_ADDRESS);
+			return nullptr;
+		}
+		reservedMapping = true;
 #ifdef MAP_FIXED_NOREPLACE
 		mapFlags |= MAP_FIXED_NOREPLACE;
 #else

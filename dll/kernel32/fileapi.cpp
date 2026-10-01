@@ -34,7 +34,37 @@
 #include <unordered_map>
 #include <vector>
 
+#if defined(__linux__)
+#include <linux/fs.h>
+#include <sys/syscall.h>
+#endif
+
 namespace {
+
+// Keep no-replace moves atomic even if another process creates the destination.
+int renameFile(const std::filesystem::path &from, const std::filesystem::path &to, bool replace) {
+	if (replace)
+		return rename(from.c_str(), to.c_str());
+#if defined(__APPLE__)
+	return renamex_np(from.c_str(), to.c_str(), RENAME_EXCL);
+#else
+	return syscall(SYS_renameat2, AT_FDCWD, from.c_str(), AT_FDCWD, to.c_str(), RENAME_NOREPLACE);
+#endif
+}
+
+DWORD moveFileError(int error, const std::filesystem::path &path) {
+	if (error == EXDEV)
+		return ERROR_NOT_SAME_DEVICE;
+	if (error == EISDIR || error == ENOTEMPTY || error == EPERM)
+		return ERROR_ACCESS_DENIED;
+	if (error == ENOENT) {
+		auto parent = path.parent_path();
+		std::error_code ec;
+		if (!parent.empty() && !std::filesystem::is_directory(parent, ec))
+			return ERROR_PATH_NOT_FOUND;
+	}
+	return wibo::winErrorFromErrno(error);
+}
 
 using random_shorts_engine =
 	std::independent_bits_engine<std::default_random_engine, sizeof(unsigned short) * 8, unsigned short>;
@@ -1239,6 +1269,90 @@ BOOL WINAPI MoveFileW(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName) {
 	std::string from = wideStringToString(lpExistingFileName);
 	std::string to = wideStringToString(lpNewFileName);
 	return MoveFileA(from.c_str(), to.c_str());
+}
+
+BOOL WINAPI MoveFileExA(LPCSTR lpExistingFileName, LPCSTR lpNewFileName, DWORD dwFlags) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("MoveFileExA(%s, %s, 0x%x)\n", lpExistingFileName ? lpExistingFileName : "(null)",
+			  lpNewFileName ? lpNewFileName : "(null)", dwFlags);
+	if ((dwFlags & MOVEFILE_DELAY_UNTIL_REBOOT) && (dwFlags & MOVEFILE_COPY_ALLOWED)) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+	// There is no reboot queue or Windows link-tracking service in wibo.
+	if (dwFlags & (MOVEFILE_DELAY_UNTIL_REBOOT | MOVEFILE_CREATE_HARDLINK | MOVEFILE_FAIL_IF_NOT_TRACKABLE)) {
+		setLastError(ERROR_NOT_SUPPORTED);
+		return FALSE;
+	}
+	if (!lpExistingFileName || !lpNewFileName ||
+		(dwFlags & ~(MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED | MOVEFILE_WRITE_THROUGH))) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+	auto from = files::pathFromWindows(lpExistingFileName);
+	auto to = files::pathFromWindows(lpNewFileName);
+	struct stat source{}, destination{};
+	if (stat(from.c_str(), &source) != 0) {
+		setLastError(moveFileError(errno, from));
+		return FALSE;
+	}
+	bool replace = (dwFlags & MOVEFILE_REPLACE_EXISTING) != 0;
+	if (stat(to.c_str(), &destination) == 0) {
+		if (source.st_dev == destination.st_dev && source.st_ino == destination.st_ino)
+			return TRUE;
+		if (!replace) {
+			setLastError(ERROR_ALREADY_EXISTS);
+			return FALSE;
+		}
+		if (S_ISDIR(destination.st_mode) || !(destination.st_mode & S_IWUSR)) {
+			setLastError(ERROR_ACCESS_DENIED);
+			return FALSE;
+		}
+	} else if (errno != ENOENT) {
+		setLastError(moveFileError(errno, to));
+		return FALSE;
+	}
+	if (renameFile(from, to, replace) == 0)
+		return TRUE;
+	int error = errno;
+	if (error != EXDEV || !(dwFlags & MOVEFILE_COPY_ALLOWED) || !S_ISREG(source.st_mode)) {
+		setLastError(moveFileError(error, to));
+		return FALSE;
+	}
+
+	std::error_code ec;
+	auto options = replace ? std::filesystem::copy_options::overwrite_existing : std::filesystem::copy_options::none;
+	if (!std::filesystem::copy_file(from, to, options, ec)) {
+		setLastError(moveFileError(ec.value(), to));
+		return FALSE;
+	}
+	// WRITE_THROUGH requires flushing the copy before deleting the original.
+	if (dwFlags & MOVEFILE_WRITE_THROUGH) {
+		int fd = open(to.c_str(), O_RDONLY);
+		if (fd < 0) {
+			setLastError(moveFileError(errno, to));
+			return FALSE;
+		}
+		int result = fsync(fd);
+		error = errno;
+		close(fd);
+		if (result != 0) {
+			setLastError(moveFileError(error, to));
+			return FALSE;
+		}
+	}
+	// Windows reports success after a successful copy even if deletion fails.
+	if (unlink(from.c_str()) != 0)
+		DEBUG_LOG("MoveFileExA: copied but could not delete source (errno %d)\n", errno);
+	return TRUE;
+}
+
+BOOL WINAPI MoveFileExW(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName, DWORD dwFlags) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("MoveFileExW -> ");
+	std::string from = lpExistingFileName ? wideStringToString(lpExistingFileName) : "";
+	std::string to = lpNewFileName ? wideStringToString(lpNewFileName) : "";
+	return MoveFileExA(lpExistingFileName ? from.c_str() : nullptr, lpNewFileName ? to.c_str() : nullptr, dwFlags);
 }
 
 DWORD WINAPI SetFilePointer(HANDLE hFile, LONG lDistanceToMove, PLONG lpDistanceToMoveHigh, DWORD dwMoveMethod) {

@@ -102,10 +102,46 @@ static void test_zero_size_pagefile_mapping_fails(void) {
 	TEST_CHECK_EQ(ERROR_INVALID_PARAMETER, GetLastError());
 }
 
+static void test_fixed_view_reserves_address_space(void) {
+	const SIZE_T size = 2 * 65536;
+	uint8_t *base = VirtualAlloc(NULL, size, MEM_RESERVE | MEM_COMMIT | MEM_TOP_DOWN, PAGE_READWRITE);
+	TEST_CHECK(base != NULL);
+	base[0] = 0x42;
+	HANDLE file = create_temp_file();
+	HANDLE mapping = CreateFileMappingA(file, NULL, PAGE_READWRITE, 0, (DWORD)size, NULL);
+	TEST_CHECK(mapping != NULL);
+	// A fixed view must not overwrite an existing allocation.
+	TEST_CHECK(MapViewOfFileEx(mapping, FILE_MAP_COPY, 0, 0, size, base) == NULL);
+	TEST_CHECK_EQ(ERROR_INVALID_ADDRESS, GetLastError());
+	TEST_CHECK_EQ(0x42, base[0]);
+	TEST_CHECK(VirtualFree(base, 0, MEM_RELEASE));
+	uint8_t *view = MapViewOfFileEx(mapping, FILE_MAP_COPY, 0, 0, size, base);
+	TEST_CHECK(view == base);
+	view[0] = 0x24;
+	view[size - 1] = 0x5a;
+	TEST_CHECK(MapViewOfFileEx(mapping, FILE_MAP_COPY, 0, 0, size, base) == NULL);
+	TEST_CHECK_EQ(ERROR_INVALID_ADDRESS, GetLastError());
+	TEST_CHECK(VirtualAlloc(base, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE) == NULL);
+	TEST_CHECK_EQ(ERROR_INVALID_ADDRESS, GetLastError());
+	// VC6 reserves another large top-down arena after restoring its PCH view.
+	uint8_t *arena = VirtualAlloc(NULL, 50 * 1024 * 1024, MEM_RESERVE | MEM_TOP_DOWN, PAGE_READWRITE);
+	TEST_CHECK(arena != NULL);
+	TEST_CHECK((uintptr_t)arena + 50 * 1024 * 1024 <= (uintptr_t)view || (uintptr_t)arena >= (uintptr_t)view + size);
+	TEST_CHECK_EQ(0x24, view[0]);
+	TEST_CHECK_EQ(0x5a, view[size - 1]);
+	TEST_CHECK(VirtualFree(arena, 0, MEM_RELEASE));
+	TEST_CHECK(UnmapViewOfFile(view));
+	TEST_CHECK(VirtualAlloc(base, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE) == base);
+	TEST_CHECK(VirtualFree(base, 0, MEM_RELEASE));
+	TEST_CHECK(CloseHandle(mapping));
+	TEST_CHECK(CloseHandle(file));
+}
+
 int main(void) {
 	test_readwrite_mapping_extends_file();
 	test_copy_mapping_does_not_write_file();
 	test_zero_size_file_mapping_fails();
 	test_zero_size_pagefile_mapping_fails();
+	test_fixed_view_reserves_address_space();
 	return 0;
 }

@@ -3,9 +3,11 @@
 #include "common.h"
 #include "handles.h"
 #include "heap.h"
+#include "ntheap.h"
 #include "types.h"
 
 #include <condition_variable>
+#include <memory>
 #include <optional>
 #include <pthread.h>
 
@@ -155,6 +157,7 @@ struct HeapObject : public ObjectBase {
 	static constexpr ObjectType kType = ObjectType::Heap;
 
 	std::optional<wibo::Heap> heap;
+	std::unique_ptr<wibo::NtHeap> ntHeap; // WIBO_HEAP_MODEL=nt
 	const pthread_t owner;
 	DWORD createFlags = 0;
 	SIZE_T initialSize = 0;

@@ -514,6 +514,7 @@ if (WIBO_ENABLE_FIXTURE_TESTS)
         wibo_add_fixture_bin(NAME test_synchapi SOURCES test/test_synchapi.c)
         wibo_add_fixture_bin(NAME test_processes SOURCES test/test_processes.c)
         wibo_add_fixture_bin(NAME test_heap SOURCES test/test_heap.c)
+        wibo_add_fixture_bin(NAME test_ntheap SOURCES test/test_ntheap.c)
         wibo_add_fixture_bin(NAME test_actctx SOURCES test/test_actctx.c)
         wibo_add_fixture_bin(NAME test_overlapped_io SOURCES test/test_overlapped_io.c)
         wibo_add_fixture_bin(NAME test_time SOURCES test/test_time.c)
@@ -536,6 +537,16 @@ if (WIBO_ENABLE_FIXTURE_TESTS)
         wibo_add_fixture_bin(NAME test_init_once SOURCES test/test_init_once.c)
         wibo_add_fixture_bin(NAME test_wait_on_address SOURCES test/test_wait_on_address.c COMPILE_OPTIONS -lsynchronization)
         wibo_add_fixture_bin(NAME test_env_strings SOURCES test/test_env_strings.c)
+
+        # Heap fixtures again with the NT heap model
+        foreach(_wibo_heap_fixture test_heap test_ntheap)
+            add_test(NAME wibo.${_wibo_heap_fixture}.nt
+                COMMAND $<TARGET_FILE:wibo> ${WIBO_TEST_BIN_DIR}/${_wibo_heap_fixture}.exe)
+            set_tests_properties(wibo.${_wibo_heap_fixture}.nt PROPERTIES
+                ENVIRONMENT WIBO_HEAP_MODEL=nt
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test
+                DEPENDS wibo.build_fixtures)
+        endforeach()
 
         # DLLs for fixture tests
         wibo_add_fixture_dll(NAME external_exports SOURCES test/external_exports.c)

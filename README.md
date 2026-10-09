@@ -51,6 +51,12 @@ wibo path [subcommand options] <path> [path...]
 | `--cmdline STRING` | Use `STRING` as the exact guest command line (must include the program name, e.g. `"test.exe a b c"`)            |
 | `--`               | Stop option parsing; following arguments are used verbatim as the guest command line, including the program name |
 
+### Environment Variables
+
+| Variable             | Description                                                                                                                           |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `WIBO_HEAP_MODEL=nt` | Serve heaps created by `HeapCreate` with a model of the Windows NT heap, for programs whose output depends on the addresses it returns |
+
 ### Subcommands
 
 | Subcommand | Description                                                                       |

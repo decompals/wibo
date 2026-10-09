@@ -237,6 +237,7 @@ add_executable(wibo
     src/files.cpp
     src/handles.cpp
     src/heap.cpp
+    src/ntheap.cpp
     src/loader.cpp
     src/main.cpp
     src/modules.cpp

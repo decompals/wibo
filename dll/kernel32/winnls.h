@@ -17,6 +17,8 @@ typedef BOOL(_CC_STDCALL *LOCALE_ENUMPROCA)(LPSTR);
 namespace kernel32 {
 
 UINT WINAPI GetACP();
+UINT WINAPI GetOEMCP();
+BOOL WINAPI SetFileApisToOEM();
 LANGID WINAPI GetSystemDefaultLangID();
 LANGID WINAPI GetUserDefaultUILanguage();
 int WINAPI GetUserDefaultLocaleName(LPWSTR lpLocaleName, int cchLocaleName);

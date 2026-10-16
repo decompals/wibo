@@ -23,6 +23,18 @@ struct USEROBJECTFLAGS {
 	DWORD dwFlags;
 };
 
+DWORD WINAPI CharLowerBuffA(LPSTR lpsz, DWORD cchLength) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("CharLowerBuffA(%p, %u)\n", lpsz, cchLength);
+	if (!lpsz) {
+		return 0;
+	}
+	for (DWORD i = 0; i < cchLength; ++i) {
+		lpsz[i] = static_cast<char>(wcharToLower(static_cast<unsigned char>(lpsz[i])));
+	}
+	return cchLength;
+}
+
 DWORD WINAPI CharUpperBuffW(LPWSTR lpsz, DWORD cchLength) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("CharUpperBuffW(%p, %u)\n", lpsz, cchLength);

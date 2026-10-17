@@ -11,4 +11,9 @@ BOOL WINAPI IsDebuggerPresent() {
 	return FALSE;
 }
 
+void WINAPI OutputDebugStringA(LPCSTR lpOutputString) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("OutputDebugStringA(%s)\n", lpOutputString ? lpOutputString : "(null)");
+}
+
 } // namespace kernel32

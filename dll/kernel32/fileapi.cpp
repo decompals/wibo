@@ -95,6 +95,21 @@ struct timespec changeTimespec(const struct stat &st) {
 #endif
 }
 
+std::string getTempPath() {
+	const char *tmpDirEnv = getenv("TMPDIR");
+	std::string pathStr;
+	if (tmpDirEnv) {
+		auto path = std::filesystem::canonical(tmpDirEnv);
+		pathStr = files::pathToWindows(path);
+	} else {
+		pathStr = "Z:\\tmp\\";
+	}
+	if (!pathStr.empty() && pathStr.back() != '\\') {
+		pathStr.push_back('\\');
+	}
+	return pathStr;
+}
+
 struct FullPathInfo {
 	std::string path;
 	size_t filePartOffset = std::string::npos;
@@ -1846,17 +1861,7 @@ DWORD WINAPI GetTempPathA(DWORD nBufferLength, LPSTR lpBuffer) {
 		return 0;
 	}
 
-	const char *tmpDirEnv = getenv("TMPDIR");
-	std::string pathStr;
-	if (tmpDirEnv) {
-		auto path = std::filesystem::canonical(tmpDirEnv);
-		pathStr = files::pathToWindows(path);
-	} else {
-		pathStr = "Z:\\tmp\\";
-	}
-	if (!pathStr.empty() && pathStr.back() != '\\') {
-		pathStr.push_back('\\');
-	}
+	std::string pathStr = getTempPath();
 	size_t len = pathStr.length();
 	if (len + 1 > nBufferLength) {
 		DEBUG_LOG(" -> %zu (required)\n", len + 1);
@@ -1879,17 +1884,7 @@ DWORD WINAPI GetTempPathW(DWORD nBufferLength, LPWSTR lpBuffer) {
 		return 0;
 	}
 
-	const char *tmpDirEnv = getenv("TMPDIR");
-	std::string pathStr;
-	if (tmpDirEnv) {
-		auto path = std::filesystem::canonical(tmpDirEnv);
-		pathStr = files::pathToWindows(path);
-	} else {
-		pathStr = "Z:\\tmp\\";
-	}
-	if (!pathStr.empty() && pathStr.back() != '\\') {
-		pathStr.push_back('\\');
-	}
+	std::string pathStr = getTempPath();
 	size_t len = pathStr.length();
 	if (len + 1 > nBufferLength) {
 		DEBUG_LOG(" -> %zu (required)\n", len + 1);

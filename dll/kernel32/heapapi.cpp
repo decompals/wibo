@@ -249,7 +249,6 @@ BOOL WINAPI HeapValidate(HANDLE hHeap, DWORD dwFlags, LPCVOID lpMem) {
 	VERBOSE_LOG("STUB: HeapValidate(0x%x, 0x%x, %p)\n", static_cast<unsigned int>(hHeap), dwFlags, lpMem);
 	(void)dwFlags;
 	(void)lpMem;
-	// mimalloc's ownership queries only check page ranges and cannot identify live allocations.
 	auto record = wibo::handles().getAs<HeapObject>(hHeap);
 	return record && record->canAccess();
 }

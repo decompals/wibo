@@ -346,7 +346,14 @@ bool tebThreadSetup(TEB *teb) {
 		teb->CurrentFsSelector = createLdtSelector(entryNumber);
 	}
 
-	DEBUG_LOG("setup_linux: Using FS selector 0x%x\n", teb->CurrentFsSelector);
+	// Guest code never reads gs. Keep glibc's TLS selector loaded while it runs, so host code entered
+	// without a trampoline (an injected instrumentation agent's hook, a signal handler) can reach its TLS.
+	WORD hostGs;
+	asm volatile("mov %%gs, %0" : "=r"(hostGs));
+	teb->CurrentGsSelector = hostGs;
+
+	DEBUG_LOG("setup_linux: Using FS selector 0x%x, GS selector 0x%x\n", teb->CurrentFsSelector,
+			  teb->CurrentGsSelector);
 	return true;
 }
 

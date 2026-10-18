@@ -4,6 +4,7 @@
 
 namespace user32 {
 
+DWORD WINAPI CharLowerBuffA(LPSTR lpsz, DWORD cchLength);
 DWORD WINAPI CharUpperBuffW(LPWSTR lpsz, DWORD cchLength);
 LPSTR WINAPI CharNextA(LPCSTR lpsz);
 int WINAPI LoadStringA(HMODULE hInstance, UINT uID, LPSTR lpBuffer, int cchBufferMax);

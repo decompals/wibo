@@ -244,4 +244,13 @@ BOOL WINAPI HeapFree(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem) {
 	return TRUE;
 }
 
+BOOL WINAPI HeapValidate(HANDLE hHeap, DWORD dwFlags, LPCVOID lpMem) {
+	HOST_CONTEXT_GUARD();
+	VERBOSE_LOG("STUB: HeapValidate(0x%x, 0x%x, %p)\n", static_cast<unsigned int>(hHeap), dwFlags, lpMem);
+	(void)dwFlags;
+	(void)lpMem;
+	auto record = wibo::handles().getAs<HeapObject>(hHeap);
+	return record && record->canAccess();
+}
+
 } // namespace kernel32

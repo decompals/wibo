@@ -200,6 +200,7 @@ add_executable(wibo
     dll/kernel32.cpp
     dll/kernel32/debugapi.cpp
     dll/kernel32/errhandlingapi.cpp
+    dll/kernel32/errmsg.cpp
     dll/kernel32/fibersapi.cpp
     dll/kernel32/fileapi.cpp
     dll/kernel32/handleapi.cpp
@@ -511,6 +512,7 @@ if (WIBO_ENABLE_FIXTURE_TESTS)
         wibo_add_fixture_bin(NAME test_getfileattributesex SOURCES test/test_getfileattributesex.c)
         wibo_add_fixture_bin(NAME test_locale SOURCES test/test_locale.c)
         wibo_add_fixture_bin(NAME test_lstrcpyn SOURCES test/test_lstrcpyn.c)
+        wibo_add_fixture_bin(NAME test_formatmessage SOURCES test/test_formatmessage.c)
         wibo_add_fixture_bin(NAME test_critical_section SOURCES test/test_critical_section.c)
         wibo_add_fixture_bin(NAME test_synchapi SOURCES test/test_synchapi.c)
         wibo_add_fixture_bin(NAME test_processes SOURCES test/test_processes.c)

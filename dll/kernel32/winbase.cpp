@@ -2,6 +2,7 @@
 
 #include "common.h"
 #include "context.h"
+#include "errmsg.h"
 #include "errors.h"
 #include "files.h"
 #include "heap.h"
@@ -63,7 +64,7 @@ struct MemorySnapshot {
 
 bool queryHostMemory(MemorySnapshot &out) {
 #if defined(__linux__)
-	struct sysinfo info {};
+	struct sysinfo info{};
 	if (sysinfo(&info) != 0) {
 		return false;
 	}
@@ -88,7 +89,7 @@ bool queryHostMemory(MemorySnapshot &out) {
 	if (host_page_size(mach_host_self(), &pageSize) != KERN_SUCCESS || pageSize == 0) {
 		return false;
 	}
-	vm_statistics64_data_t vmstat {};
+	vm_statistics64_data_t vmstat{};
 	mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
 	if (host_statistics64(mach_host_self(), HOST_VM_INFO64, reinterpret_cast<host_info64_t>(&vmstat), &count) !=
 		KERN_SUCCESS) {
@@ -99,7 +100,7 @@ bool queryHostMemory(MemorySnapshot &out) {
 	out.totalPhys = totalPhys;
 	out.availPhys = freePages * static_cast<uint64_t>(pageSize);
 
-	struct xsw_usage swap {};
+	struct xsw_usage swap{};
 	size_t swapSize = sizeof(swap);
 	if (sysctlbyname("vm.swapusage", &swap, &swapSize, nullptr, 0) == 0 && swapSize == sizeof(swap)) {
 		out.totalPageFile = swap.xsu_total;
@@ -592,48 +593,58 @@ UINT WINAPI SetHandleCount(UINT uNumber) {
 }
 
 DWORD WINAPI FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId, DWORD dwLanguageId, LPSTR lpBuffer,
-							DWORD nSize, va_list *Arguments) {
+							DWORD nSize, GUEST_PTR *Arguments) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FormatMessageA(%u, %p, %u, %u, %p, %u, %p)\n", dwFlags, lpSource, dwMessageId, dwLanguageId, lpBuffer,
 			  nSize, Arguments);
 
-	if (dwFlags & 0x00000100) {
-		// FORMAT_MESSAGE_ALLOCATE_BUFFER
-	} else if (dwFlags & 0x00002000) {
-		// FORMAT_MESSAGE_ARGUMENT_ARRAY
-	} else if (dwFlags & 0x00000800) {
-		// FORMAT_MESSAGE_FROM_HMODULE
-	} else if (dwFlags & 0x00000400) {
-		// FORMAT_MESSAGE_FROM_STRING
-	} else if (dwFlags & 0x00001000) {
-		// FORMAT_MESSAGE_FROM_SYSTEM
-		std::string message = std::system_category().message(static_cast<int>(dwMessageId));
-		size_t length = message.length();
-		if (!lpBuffer || nSize == 0) {
-			setLastError(ERROR_INSUFFICIENT_BUFFER);
-			return 0;
-		}
-		std::strncpy(lpBuffer, message.c_str(), static_cast<size_t>(nSize));
-		if (static_cast<size_t>(nSize) <= length) {
-			if (static_cast<size_t>(nSize) > 0) {
-				lpBuffer[nSize - 1] = '\0';
-			}
-			setLastError(ERROR_INSUFFICIENT_BUFFER);
-			return 0;
-		}
-		lpBuffer[length] = '\0';
-		return static_cast<DWORD>(length);
-	} else if (dwFlags & 0x00000200) {
-		// FORMAT_MESSAGE_IGNORE_INSERTS
-	} else {
-		// unhandled?
+	if (dwFlags & FORMAT_MESSAGE_ARGUMENT_ARRAY) {
+		DEBUG_LOG("FormatMessageA: ignoring FORMAT_MESSAGE_ARGUMENT_ARRAY\n");
+	}
+	constexpr DWORD kUnsupportedFlags =
+		FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_STRING | FORMAT_MESSAGE_FROM_HMODULE;
+	if (dwFlags & kUnsupportedFlags) {
+		DEBUG_LOG("FormatMessageA: unsupported flags %#x\n", dwFlags & kUnsupportedFlags);
+		setLastError(ERROR_CALL_NOT_IMPLEMENTED);
+		return 0;
+	}
+	if (!(dwFlags & FORMAT_MESSAGE_FROM_SYSTEM) || nSize >= 32768) {
+		DEBUG_LOG("FormatMessageA: invalid source flags or buffer size\n");
+		setLastError(ERROR_INVALID_PARAMETER);
+		return 0;
 	}
 
-	if (lpBuffer && nSize > 0) {
-		lpBuffer[0] = '\0';
+	DWORD code = dwMessageId;
+	if ((code & 0xFFFF0000) == 0x80070000) {
+		code &= 0xFFFF;
 	}
-	setLastError(ERROR_CALL_NOT_IMPLEMENTED);
-	return 0;
+	const char *message = lookupSystemMessage(code);
+	if (!message) {
+		DEBUG_LOG("FormatMessageA: message %u not found\n", code);
+		setLastError(ERROR_MR_MID_NOT_FOUND);
+		return 0;
+	}
+	size_t length = std::strlen(message);
+	// System messages are single lines ending in "\r\n"; any width turns that break into a space.
+	const DWORD width = dwFlags & FORMAT_MESSAGE_MAX_WIDTH_MASK;
+	if (width) {
+		--length;
+		if (width != FORMAT_MESSAGE_MAX_WIDTH_MASK && width < length) {
+			DEBUG_LOG("FormatMessageA: ignoring line wrap at width %u\n", width);
+		}
+	}
+	if (!lpBuffer || length + 1 > static_cast<size_t>(nSize)) {
+		DEBUG_LOG("FormatMessageA: message %u needs %zu bytes\n", code, length + 1);
+		setLastError(ERROR_INSUFFICIENT_BUFFER);
+		return 0;
+	}
+	std::memcpy(lpBuffer, message, length);
+	if (width) {
+		lpBuffer[length - 1] = ' ';
+	}
+	lpBuffer[length] = '\0';
+	DEBUG_LOG("FormatMessageA: message %u -> %zu characters\n", code, length);
+	return static_cast<DWORD>(length);
 }
 
 PVOID WINAPI EncodePointer(PVOID Ptr) {

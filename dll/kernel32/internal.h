@@ -34,10 +34,14 @@ struct FileObject : FsObject {
 	// Used to notify overlapped operations without an event handle
 	std::condition_variable overlappedCv;
 
-	explicit FileObject(int fd) : FileObject(ObjectType::File, fd) {}
-	FileObject(ObjectType type, int fd) : FsObject(type, fd) {
+	explicit FileObject(int fd, std::optional<off_t> initialPosition = std::nullopt)
+		: FileObject(ObjectType::File, fd, initialPosition) {}
+	FileObject(ObjectType type, int fd) : FileObject(type, fd, std::nullopt) {}
+	FileObject(ObjectType type, int fd, std::optional<off_t> initialPosition) : FsObject(type, fd) {
 		flags |= Of_File;
-		if (fd >= 0) {
+		if (initialPosition) {
+			filePos = *initialPosition;
+		} else if (fd >= 0) {
 			off_t pos = lseek(fd, 0, SEEK_CUR);
 			if (pos == -1 && errno == ESPIPE) {
 				isPipe = true;

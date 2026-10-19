@@ -995,6 +995,7 @@ def emit_header_mapping(
                 or t.kind == TypeKind.ENUM
                 or t.kind == TypeKind.FUNCTIONPROTO
                 or t.kind == TypeKind.FUNCTIONNOPROTO
+                or t.kind == TypeKind.CONSTANTARRAY
             ):
                 return True
             return t.kind == TypeKind.POINTER and _is_opaque(

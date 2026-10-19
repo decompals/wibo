@@ -558,6 +558,8 @@ typedef struct _TEB {
 typedef GUEST_PTR PTEB;
 
 static_assert(offsetof(NT_TIB, Self) == TEB_SELF, "Self pointer offset mismatch");
+static_assert(offsetof(TEB, ClientId) + offsetof(CLIENT_ID, UniqueThread) == 0x24,
+			  "ClientId.UniqueThread offset mismatch");
 static_assert(offsetof(TEB, ThreadLocalStoragePointer) == 0x2C, "TLS pointer offset mismatch");
 static_assert(offsetof(TEB, Peb) == 0x30, "PEB pointer offset mismatch");
 static_assert(offsetof(TEB, LastErrorValue) == 0x34, "LastErrorValue offset mismatch");

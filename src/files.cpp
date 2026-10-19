@@ -12,10 +12,12 @@
 #include <cstdio>
 #include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <string>
-#include <strings.h>
 #include <system_error>
 #include <unistd.h>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 kernel32::FsObject::~FsObject() {
@@ -24,13 +26,236 @@ kernel32::FsObject::~FsObject() {
 		close(fd);
 	}
 	if (deletePending && !canonicalPath.empty()) {
-		if (unlink(canonicalPath.c_str()) != 0) {
+		if (unlink(canonicalPath.c_str()) == 0) {
+			files::invalidatePathCache(canonicalPath.parent_path());
+		} else {
 			perror("Failed to delete file on close");
 		}
 	}
 }
 
 namespace files {
+
+namespace {
+
+struct DirectoryIdentity {
+	dev_t device = 0;
+	ino_t inode = 0;
+	mode_t mode = 0;
+	off_t size = 0;
+	time_t modifiedSeconds = 0;
+	long modifiedNanoseconds = 0;
+	time_t changedSeconds = 0;
+	long changedNanoseconds = 0;
+
+	bool operator==(const DirectoryIdentity &) const = default;
+};
+
+struct DirectoryCacheEntry {
+	DirectoryIdentity identity;
+	std::unordered_map<std::string, std::string> names;
+	std::unordered_set<std::string> exactNames;
+	std::unordered_set<std::string> negativeNames;
+};
+
+struct DirectoryAlias {
+	DirectoryIdentity identity;
+	std::string canonicalKey;
+};
+
+struct NegativePathCacheEntry {
+	std::filesystem::path resolvedPath;
+	std::filesystem::path checkedDirectory;
+	DirectoryIdentity directoryIdentity;
+	std::string canonicalDirectoryKey;
+	int error = 0;
+};
+
+struct CachedNameResult {
+	std::optional<std::string> realName;
+	std::optional<DirectoryIdentity> directoryIdentity;
+	std::string canonicalDirectoryKey;
+	bool cacheUsable = false;
+};
+
+std::shared_mutex g_pathCacheMutex;
+std::unordered_map<std::string, DirectoryCacheEntry> g_directoryCache;
+std::unordered_map<std::string, DirectoryAlias> g_directoryAliases;
+std::unordered_map<std::string, NegativePathCacheEntry> g_negativePathCache;
+
+DirectoryIdentity identityFromStat(const struct stat &st) {
+	DirectoryIdentity identity;
+	identity.device = st.st_dev;
+	identity.inode = st.st_ino;
+	identity.mode = st.st_mode;
+	identity.size = st.st_size;
+#if defined(__APPLE__)
+	identity.modifiedSeconds = st.st_mtimespec.tv_sec;
+	identity.modifiedNanoseconds = st.st_mtimespec.tv_nsec;
+	identity.changedSeconds = st.st_ctimespec.tv_sec;
+	identity.changedNanoseconds = st.st_ctimespec.tv_nsec;
+#elif defined(__linux__)
+	identity.modifiedSeconds = st.st_mtim.tv_sec;
+	identity.modifiedNanoseconds = st.st_mtim.tv_nsec;
+	identity.changedSeconds = st.st_ctim.tv_sec;
+	identity.changedNanoseconds = st.st_ctim.tv_nsec;
+#else
+	identity.modifiedSeconds = st.st_mtime;
+	identity.changedSeconds = st.st_ctime;
+#endif
+	return identity;
+}
+
+std::string lexicalAbsoluteKey(const std::filesystem::path &path) {
+	std::error_code ec;
+	const std::filesystem::path &effectivePath = path.empty() ? std::filesystem::path(".") : path;
+	auto absolute = std::filesystem::absolute(effectivePath, ec);
+	if (ec) {
+		return effectivePath.lexically_normal().string();
+	}
+	return absolute.lexically_normal().string();
+}
+
+std::string lowercaseName(const std::string &name) {
+	std::string result = name;
+	toLowerInPlace(result);
+	return result;
+}
+
+void eraseNegativeEntriesForDirectoryLocked(const std::string &canonicalKey) {
+	for (auto it = g_negativePathCache.begin(); it != g_negativePathCache.end();) {
+		if (it->second.canonicalDirectoryKey == canonicalKey) {
+			it = g_negativePathCache.erase(it);
+		} else {
+			++it;
+		}
+	}
+}
+
+std::optional<std::string> cachedCanonicalDirectoryKey(const std::string &aliasKey, const DirectoryIdentity &identity) {
+	std::shared_lock lock(g_pathCacheMutex);
+	auto alias = g_directoryAliases.find(aliasKey);
+	if (alias != g_directoryAliases.end() && alias->second.identity == identity) {
+		return alias->second.canonicalKey;
+	}
+	return std::nullopt;
+}
+
+std::optional<std::string> canonicalDirectoryKey(const std::filesystem::path &directory, const std::string &aliasKey,
+												 const DirectoryIdentity &identity) {
+	if (auto cached = cachedCanonicalDirectoryKey(aliasKey, identity)) {
+		return cached;
+	}
+
+	std::error_code ec;
+	auto canonical = std::filesystem::canonical(directory, ec);
+	if (ec) {
+		return std::nullopt;
+	}
+	std::string key = canonical.lexically_normal().string();
+	std::unique_lock lock(g_pathCacheMutex);
+	g_directoryAliases[aliasKey] = DirectoryAlias{identity, key};
+	return key;
+}
+
+std::optional<std::string> selectCachedName(const DirectoryCacheEntry &entry, const std::filesystem::path &directory,
+											const std::string &filename, const std::string &lowered) {
+	auto found = entry.names.find(lowered);
+	if (found == entry.names.end()) {
+		return std::nullopt;
+	}
+	if (!entry.exactNames.contains(filename) || found->second == filename) {
+		return found->second;
+	}
+
+	// Normally exact membership is enough to preserve the old exact-first
+	// behavior without another stat. A case-colliding dangling symlink is the
+	// exception: filesystem::exists used to reject it, then readdir order won.
+	struct stat exactStat{};
+	if (::stat((directory / filename).c_str(), &exactStat) == 0) {
+		return filename;
+	}
+	return found->second;
+}
+
+CachedNameResult lookupCachedName(const std::filesystem::path &inputDirectory, const std::string &filename) {
+	const std::filesystem::path directory = inputDirectory.empty() ? std::filesystem::path(".") : inputDirectory;
+	struct stat directoryStat{};
+	if (::stat(directory.c_str(), &directoryStat) != 0 || !S_ISDIR(directoryStat.st_mode)) {
+		return {};
+	}
+
+	DirectoryIdentity identity = identityFromStat(directoryStat);
+	std::string aliasKey = lexicalAbsoluteKey(directory);
+	auto key = canonicalDirectoryKey(directory, aliasKey, identity);
+	if (!key) {
+		return {};
+	}
+	std::string lowered = lowercaseName(filename);
+
+	{
+		std::shared_lock lock(g_pathCacheMutex);
+		auto cached = g_directoryCache.find(*key);
+		if (cached != g_directoryCache.end() && cached->second.identity == identity) {
+			if (auto found = selectCachedName(cached->second, directory, filename, lowered)) {
+				return {std::move(found), identity, *key, true};
+			}
+			if (cached->second.negativeNames.contains(lowered)) {
+				return {std::nullopt, identity, *key, true};
+			}
+		}
+	}
+
+	DirectoryCacheEntry rebuilt;
+	rebuilt.identity = identity;
+	std::error_code ec;
+	std::filesystem::directory_iterator end;
+	for (std::filesystem::directory_iterator it(directory, ec); !ec && it != end; it.increment(ec)) {
+		std::string name = it->path().filename().string();
+		rebuilt.exactNames.emplace(name);
+		rebuilt.names.emplace(lowercaseName(name), name);
+	}
+	if (ec) {
+		return {};
+	}
+
+	std::optional<std::string> result;
+	result = selectCachedName(rebuilt, directory, filename, lowered);
+	if (!result) {
+		rebuilt.negativeNames.emplace(lowered);
+	}
+
+	{
+		std::unique_lock lock(g_pathCacheMutex);
+		auto cached = g_directoryCache.find(*key);
+		if (cached == g_directoryCache.end() || !(cached->second.identity == identity)) {
+			eraseNegativeEntriesForDirectoryLocked(*key);
+			g_directoryCache.insert_or_assign(*key, std::move(rebuilt));
+		} else {
+			result = selectCachedName(cached->second, directory, filename, lowered);
+			if (!result) {
+				cached->second.negativeNames.emplace(lowered);
+			}
+		}
+	}
+	return {result, identity, *key, true};
+}
+
+std::optional<NegativePathCacheEntry> cachedNegativePath(const std::string &pathKey) {
+	std::shared_lock lock(g_pathCacheMutex);
+	auto cached = g_negativePathCache.find(pathKey);
+	if (cached == g_negativePathCache.end()) {
+		return std::nullopt;
+	}
+	return cached->second;
+}
+
+void cacheNegativePath(const std::string &pathKey, NegativePathCacheEntry entry) {
+	std::unique_lock lock(g_pathCacheMutex);
+	g_negativePathCache.insert_or_assign(pathKey, std::move(entry));
+}
+
+} // namespace
 
 static std::vector<std::string> splitList(const std::string &value, char delimiter) {
 	std::vector<std::string> entries;
@@ -99,8 +324,7 @@ static std::string stripTrailingDots(const std::string &s) {
 		size_t end = i;
 		size_t len = end - start;
 		// Leave "." and ".." untouched.
-		bool isDotDir = (len == 1 && s[start] == '.') ||
-						(len == 2 && s[start] == '.' && s[start + 1] == '.');
+		bool isDotDir = (len == 1 && s[start] == '.') || (len == 2 && s[start] == '.' && s[start + 1] == '.');
 		if (!isDotDir) {
 			while (end > start && s[end - 1] == '.') {
 				end--;
@@ -115,7 +339,7 @@ static std::string stripTrailingDots(const std::string &s) {
 	return out;
 }
 
-std::filesystem::path pathFromWindows(const char *inStr) {
+PathResolution resolvePathFromWindows(const char *inStr) {
 	// Convert to forward slashes
 	std::string str = inStr;
 	std::replace(str.begin(), str.end(), '\\', '/');
@@ -133,29 +357,49 @@ std::filesystem::path pathFromWindows(const char *inStr) {
 	// Apply Windows trailing-dot normalization per path component.
 	str = stripTrailingDots(str);
 
-	// Return as-is if it exists, else traverse the filesystem looking for
-	// a path that matches case insensitively
+	// Return as-is after one stat if it exists, else traverse the directory
+	// caches looking for a path that matches case insensitively.
 	std::filesystem::path path = std::filesystem::path(str).lexically_normal();
-	if (std::filesystem::exists(path)) {
-		return path;
+	struct stat pathStat{};
+	if (::stat(path.c_str(), &pathStat) == 0) {
+		return {path, pathStat, 0};
+	}
+	int pathError = errno;
+	std::string pathKey = path.empty() ? std::string() : lexicalAbsoluteKey(path);
+	if (!pathKey.empty()) {
+		if (auto negative = cachedNegativePath(pathKey)) {
+			struct stat directoryStat{};
+			if (::stat(negative->checkedDirectory.c_str(), &directoryStat) == 0 &&
+				identityFromStat(directoryStat) == negative->directoryIdentity) {
+				return {negative->resolvedPath, std::nullopt, negative->error};
+			}
+			std::unique_lock lock(g_pathCacheMutex);
+			g_negativePathCache.erase(pathKey);
+		}
 	}
 
 	std::filesystem::path newPath = ".";
 	bool followingExisting = true;
+	std::optional<NegativePathCacheEntry> negativeEntry;
 	for (const auto &component : path) {
 		std::filesystem::path newPath2 = newPath / component;
-		if (followingExisting && !std::filesystem::exists(newPath2) &&
-			(component != ".." && component != "." && component != "")) {
-			followingExisting = false;
-			std::error_code ec;
-			std::filesystem::directory_iterator iter{newPath, ec};
-			if (!ec) {
-				for (std::filesystem::path entry : iter) {
-					if (strcasecmp(entry.filename().c_str(), component.c_str()) == 0) {
-						followingExisting = true;
-						newPath2 = entry;
-						break;
-					}
+		bool isLexicalComponent = component == ".." || component == "." || component == "" || component == "/";
+		if (followingExisting && !isLexicalComponent) {
+			CachedNameResult match = lookupCachedName(newPath, component.string());
+			if (match.realName) {
+				newPath2 = newPath / *match.realName;
+			} else if (!match.cacheUsable) {
+				// Preserve exact lookup through directories that can be searched but
+				// cannot be enumerated or canonicalized (for example execute-only dirs).
+				struct stat exactStat{};
+				if (::stat(newPath2.c_str(), &exactStat) != 0) {
+					followingExisting = false;
+				}
+			} else {
+				followingExisting = false;
+				if (!pathKey.empty() && match.directoryIdentity) {
+					negativeEntry =
+						NegativePathCacheEntry{{}, newPath, *match.directoryIdentity, match.canonicalDirectoryKey, 0};
 				}
 			}
 		}
@@ -163,12 +407,29 @@ std::filesystem::path pathFromWindows(const char *inStr) {
 	}
 	if (followingExisting) {
 		DEBUG_LOG("Resolved case-insensitive path: %s\n", newPath.c_str());
+		struct stat resolvedStat{};
+		if (::stat(newPath.c_str(), &resolvedStat) == 0) {
+			return {newPath, resolvedStat, 0};
+		}
+		return {newPath, std::nullopt, errno};
 	} else {
 		DEBUG_LOG("Failed to resolve path: %s\n", newPath.c_str());
 	}
+	struct stat resolvedStat{};
+	if (::stat(newPath.c_str(), &resolvedStat) == 0) {
+		return {newPath, resolvedStat, 0};
+	}
+	int resolvedError = errno;
+	if (negativeEntry) {
+		negativeEntry->resolvedPath = newPath;
+		negativeEntry->error = resolvedError;
+		cacheNegativePath(pathKey, std::move(*negativeEntry));
+	}
 
-	return newPath;
+	return {newPath, std::nullopt, resolvedError != 0 ? resolvedError : pathError};
 }
+
+std::filesystem::path pathFromWindows(const char *inStr) { return resolvePathFromWindows(inStr).path; }
 
 std::string pathToWindows(const std::filesystem::path &path) {
 	std::string str = path.lexically_normal();
@@ -179,6 +440,38 @@ std::string pathToWindows(const std::filesystem::path &path) {
 
 	std::replace(str.begin(), str.end(), '/', '\\');
 	return str;
+}
+
+void invalidatePathCache(const std::filesystem::path &inputDirectory) {
+	const std::filesystem::path directory = inputDirectory.empty() ? std::filesystem::path(".") : inputDirectory;
+	std::string aliasKey = lexicalAbsoluteKey(directory);
+	struct stat directoryStat{};
+	bool haveIdentity = ::stat(directory.c_str(), &directoryStat) == 0;
+
+	std::unique_lock lock(g_pathCacheMutex);
+	std::unordered_set<std::string> canonicalKeys;
+	if (auto alias = g_directoryAliases.find(aliasKey); alias != g_directoryAliases.end()) {
+		canonicalKeys.emplace(alias->second.canonicalKey);
+	}
+	if (haveIdentity) {
+		for (const auto &[unusedAlias, alias] : g_directoryAliases) {
+			(void)unusedAlias;
+			if (alias.identity.device == directoryStat.st_dev && alias.identity.inode == directoryStat.st_ino) {
+				canonicalKeys.emplace(alias.canonicalKey);
+			}
+		}
+	}
+	for (const auto &key : canonicalKeys) {
+		g_directoryCache.erase(key);
+		eraseNegativeEntriesForDirectoryLocked(key);
+	}
+	for (auto it = g_directoryAliases.begin(); it != g_directoryAliases.end();) {
+		if (it->first == aliasKey || canonicalKeys.contains(it->second.canonicalKey)) {
+			it = g_directoryAliases.erase(it);
+		} else {
+			++it;
+		}
+	}
 }
 
 IOResult read(FileObject *file, void *buffer, size_t bytesToRead, const std::optional<off_t> &offset,
@@ -391,28 +684,17 @@ void init() {
 
 std::optional<std::filesystem::path> findCaseInsensitiveFile(const std::filesystem::path &directory,
 															 const std::string &filename) {
-	std::error_code ec;
 	if (directory.empty()) {
 		return std::nullopt;
 	}
-	if (!std::filesystem::exists(directory, ec) || !std::filesystem::is_directory(directory, ec)) {
-		return std::nullopt;
-	}
-	std::string needle = filename;
-	toLowerInPlace(needle);
-	for (const auto &entry : std::filesystem::directory_iterator(directory, ec)) {
-		if (ec) {
-			break;
-		}
-		std::string candidate = entry.path().filename().string();
-		toLowerInPlace(candidate);
-		if (candidate == needle) {
-			return canonicalPath(entry.path());
-		}
-	}
 	auto direct = directory / filename;
-	if (std::filesystem::exists(direct, ec)) {
+	struct stat directStat{};
+	if (::stat(direct.c_str(), &directStat) == 0) {
 		return canonicalPath(direct);
+	}
+	CachedNameResult match = lookupCachedName(directory, filename);
+	if (match.realName) {
+		return canonicalPath(directory / *match.realName);
 	}
 	return std::nullopt;
 }

@@ -136,7 +136,6 @@ bool computeFullPath(const std::string &input, FullPathInfo &outInfo) {
 
 	std::string windowsPath = files::pathToWindows(absPath);
 	if (hasDriveRoot) {
-		// The host path has no drive; retain the caller's instead of the default Z:.
 		windowsPath[0] = input[0];
 	}
 	if (endsWithSeparator && !windowsPath.empty() && windowsPath.back() != '\\') {

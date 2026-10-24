@@ -122,7 +122,11 @@ bool computeFullPath(const std::string &input, FullPathInfo &outInfo) {
 		endsWithSeparator = (last == '\\' || last == '/');
 	}
 
-	std::filesystem::path hostPath = files::pathFromWindows(input.c_str());
+	bool hasDriveRoot = input.size() >= 3 &&
+						((input[0] >= 'A' && input[0] <= 'Z') || (input[0] >= 'a' && input[0] <= 'z')) &&
+						input[1] == ':' && (input[2] == '\\' || input[2] == '/');
+	std::string hostInput = hasDriveRoot ? input.substr(2) : input;
+	std::filesystem::path hostPath = files::pathFromWindows(hostInput.c_str());
 	std::error_code ec;
 	std::filesystem::path absPath = std::filesystem::absolute(hostPath, ec);
 	if (ec) {
@@ -131,6 +135,9 @@ bool computeFullPath(const std::string &input, FullPathInfo &outInfo) {
 	}
 
 	std::string windowsPath = files::pathToWindows(absPath);
+	if (hasDriveRoot) {
+		windowsPath[0] = input[0];
+	}
 	if (endsWithSeparator && !windowsPath.empty() && windowsPath.back() != '\\') {
 		windowsPath.push_back('\\');
 	}

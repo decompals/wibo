@@ -115,40 +115,113 @@ struct FullPathInfo {
 	size_t filePartOffset = std::string::npos;
 };
 
-bool computeFullPath(const std::string &input, FullPathInfo &outInfo) {
-	bool endsWithSeparator = false;
-	if (!input.empty()) {
-		char last = input.back();
-		endsWithSeparator = (last == '\\' || last == '/');
-	}
+bool isDriveLetter(char c) { return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'); }
 
-	bool hasDriveRoot = input.size() >= 3 &&
-						((input[0] >= 'A' && input[0] <= 'Z') || (input[0] >= 'a' && input[0] <= 'z')) &&
-						input[1] == ':' && (input[2] == '\\' || input[2] == '/');
-	std::string hostInput = hasDriveRoot ? input.substr(2) : input;
-	std::filesystem::path hostPath = files::pathFromWindows(hostInput.c_str());
-	std::error_code ec;
-	std::filesystem::path absPath = std::filesystem::absolute(hostPath, ec);
-	if (ec) {
-		kernel32::setLastError(wibo::winErrorFromErrno(ec.value()));
+size_t windowsRootLength(const std::string &path) {
+	if (path.size() >= 3 && isDriveLetter(path[0]) && path[1] == ':' && path[2] == '\\') {
+		return 3;
+	}
+	if (path.size() >= 4 && path[0] == '\\' && path[1] == '\\' && (path[2] == '.' || path[2] == '?') &&
+		path[3] == '\\') {
+		return 4;
+	}
+	if (path.size() >= 2 && path[0] == '\\' && path[1] == '\\') {
+		size_t server = path.find('\\', 2);
+		if (server == std::string::npos) {
+			return path.size();
+		}
+		size_t share = path.find('\\', server + 1);
+		return share == std::string::npos ? path.size() : share + 1;
+	}
+	return 0;
+}
+
+bool computeFullPath(const std::string &input, FullPathInfo &outInfo) {
+	if (input.find_first_not_of(' ') == std::string::npos) {
 		return false;
 	}
 
-	std::string windowsPath = files::pathToWindows(absPath);
-	if (hasDriveRoot) {
-		windowsPath[0] = input[0];
-	}
-	if (endsWithSeparator && !windowsPath.empty() && windowsPath.back() != '\\') {
-		windowsPath.push_back('\\');
+	std::string path = input;
+	std::replace(path.begin(), path.end(), '/', '\\');
+
+	if (windowsRootLength(path) == 0) {
+		std::error_code ec;
+		std::filesystem::path hostCwd = std::filesystem::current_path(ec);
+		if (ec) {
+			kernel32::setLastError(wibo::winErrorFromErrno(ec.value()));
+			return false;
+		}
+		std::string cwd = files::pathToWindows(hostCwd);
+		if (cwd.empty() || cwd.back() != '\\') {
+			cwd.push_back('\\');
+		}
+
+		if (path.size() >= 2 && isDriveLetter(path[0]) && path[1] == ':') {
+			bool sameDrive =
+				cwd.size() >= 2 && cwd[1] == ':' &&
+				std::toupper(static_cast<unsigned char>(cwd[0])) == std::toupper(static_cast<unsigned char>(path[0]));
+			std::string base = sameDrive ? cwd : path.substr(0, 2) + "\\";
+			path = base + path.substr(2);
+		} else if (path[0] == '\\') {
+			size_t cwdRoot = windowsRootLength(cwd);
+			std::string root = cwd.substr(0, cwdRoot);
+			if (!root.empty() && root.back() == '\\') {
+				root.pop_back();
+			}
+			path = root + path;
+		} else {
+			path = cwd + path;
+		}
 	}
 
-	if (!windowsPath.empty() && windowsPath.back() != '\\') {
-		size_t lastSlash = windowsPath.find_last_of('\\');
-		if (lastSlash == std::string::npos) {
-			outInfo.filePartOffset = 0;
-		} else if (lastSlash + 1 < windowsPath.size()) {
-			outInfo.filePartOffset = lastSlash + 1;
+	size_t rootLen = windowsRootLength(path);
+	std::string windowsPath = path.substr(0, rootLen);
+	const size_t mark = windowsPath.size();
+
+	std::vector<std::string> components;
+	bool endsWithSeparator = false;
+	size_t pos = rootLen;
+	while (pos <= path.size()) {
+		size_t next = path.find('\\', pos);
+		bool isLast = next == std::string::npos;
+		std::string component = path.substr(pos, isLast ? std::string::npos : next - pos);
+		pos = isLast ? path.size() + 1 : next + 1;
+
+		if (component.empty()) {
+			endsWithSeparator = isLast;
+			continue;
 		}
+		if (component == ".") {
+			continue;
+		}
+		if (component == "..") {
+			if (!components.empty()) {
+				components.pop_back();
+			}
+			continue;
+		}
+		if (!isLast && component.back() == '.') {
+			component.pop_back();
+		}
+		components.push_back(std::move(component));
+	}
+
+	for (const auto &component : components) {
+		if (!windowsPath.empty() && windowsPath.back() != '\\') {
+			windowsPath.push_back('\\');
+		}
+		windowsPath += component;
+	}
+	if (endsWithSeparator && windowsPath.size() > mark) {
+		windowsPath.push_back('\\');
+	}
+	while (windowsPath.size() > mark && (windowsPath.back() == '.' || windowsPath.back() == ' ')) {
+		windowsPath.pop_back();
+	}
+
+	size_t lastSlash = windowsPath.find_last_of('\\');
+	if (lastSlash != std::string::npos && lastSlash >= 2 && lastSlash + 1 < windowsPath.size()) {
+		outInfo.filePartOffset = lastSlash + 1;
 	} else {
 		outInfo.filePartOffset = std::string::npos;
 	}
@@ -1624,13 +1697,12 @@ DWORD WINAPI GetFullPathNameA(LPCSTR lpFileName, DWORD nBufferLength, LPSTR lpBu
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetFullPathNameA(%s, %u)\n", lpFileName ? lpFileName : "(null)", nBufferLength);
 
-	if (lpFilePart) {
-		*lpFilePart = GUEST_NULL;
+	if (!lpFileName || !lpFileName[0]) {
+		return 0;
 	}
 
-	if (!lpFileName) {
-		setLastError(ERROR_INVALID_PARAMETER);
-		return 0;
+	if (lpFilePart) {
+		*lpFilePart = GUEST_NULL;
 	}
 
 	FullPathInfo info;
@@ -1676,13 +1748,12 @@ DWORD WINAPI GetFullPathNameW(LPCWSTR lpFileName, DWORD nBufferLength, LPWSTR lp
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetFullPathNameW(%p, %u)\n", lpFileName, nBufferLength);
 
-	if (lpFilePart) {
-		*lpFilePart = GUEST_NULL;
+	if (!lpFileName || !lpFileName[0]) {
+		return 0;
 	}
 
-	if (!lpFileName) {
-		setLastError(ERROR_INVALID_PARAMETER);
-		return 0;
+	if (lpFilePart) {
+		*lpFilePart = GUEST_NULL;
 	}
 
 	std::string narrow = wideStringToString(lpFileName);

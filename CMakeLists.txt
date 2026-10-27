@@ -242,6 +242,7 @@ add_executable(wibo
     src/modules.cpp
     src/processes_common.cpp
     src/resources.cpp
+    src/fast_thunks.S
     src/setup.S
     src/strutil.cpp
     src/tls.cpp

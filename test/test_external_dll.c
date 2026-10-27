@@ -36,6 +36,14 @@ int main(void) {
 
     TEST_CHECK_MSG(FreeLibrary(mod) != 0, "FreeLibrary failed: %lu", (unsigned long)GetLastError());
 
+    HMODULE via_ex = LoadLibraryExA("external_exports.dll", NULL, 0);
+    TEST_CHECK_MSG(via_ex != NULL, "LoadLibraryExA failed: %lu", (unsigned long)GetLastError());
+    TEST_CHECK(FreeLibrary(via_ex) != 0);
+
+    SetLastError(0xdeadbeef);
+    TEST_CHECK(LoadLibraryExA("wibo_no_such_library.dll", NULL, 0) == NULL);
+    TEST_CHECK_EQ(ERROR_MOD_NOT_FOUND, GetLastError());
+
     printf("external_exports: sum=%d attached=%d\n", sum, attached);
     return EXIT_SUCCESS;
 }

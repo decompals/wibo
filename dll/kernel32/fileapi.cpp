@@ -1514,6 +1514,27 @@ DWORD WINAPI GetFileSize(HANDLE hFile, LPDWORD lpFileSizeHigh) {
 	return static_cast<DWORD>(uSize & 0xFFFFFFFFu);
 }
 
+BOOL WINAPI GetFileSizeEx(HANDLE hFile, PLARGE_INTEGER lpFileSize) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("GetFileSizeEx(%p, %p)\n", hFile, lpFileSize);
+	if (!lpFileSize) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+	auto file = wibo::handles().getAs<FileObject>(hFile);
+	if (!file || !file->valid()) {
+		setLastError(ERROR_INVALID_HANDLE);
+		return FALSE;
+	}
+	const auto size = lseek(file->fd, 0, SEEK_END);
+	if (size < 0) {
+		setLastErrorFromErrno();
+		return FALSE;
+	}
+	lpFileSize->QuadPart = size;
+	return TRUE;
+}
+
 BOOL WINAPI GetFileTime(HANDLE hFile, LPFILETIME lpCreationTime, LPFILETIME lpLastAccessTime,
 						LPFILETIME lpLastWriteTime) {
 	HOST_CONTEXT_GUARD();
@@ -1976,6 +1997,12 @@ DWORD WINAPI GetTempPathW(DWORD nBufferLength, LPWSTR lpBuffer) {
 	return static_cast<DWORD>(len);
 }
 
+BOOL WINAPI AreFileApisANSI() {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("AreFileApisANSI()\n");
+	return TRUE;
+}
+
 HANDLE WINAPI FindFirstFileA(LPCSTR lpFileName, LPWIN32_FIND_DATAA lpFindFileData) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FindFirstFileA(%s, %p)", lpFileName ? lpFileName : "(null)", lpFindFileData);
@@ -2055,6 +2082,44 @@ HANDLE WINAPI FindFirstFileExA(LPCSTR lpFileName, FINDEX_INFO_LEVELS fInfoLevelI
 	return findFirstFileCommon(std::string(lpFileName), findData);
 }
 
+HANDLE WINAPI FindFirstFileExW(LPCWSTR lpFileName, FINDEX_INFO_LEVELS fInfoLevelId, LPVOID lpFindFileData,
+							   FINDEX_SEARCH_OPS fSearchOp, LPVOID lpSearchFilter, DWORD dwAdditionalFlags) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("FindFirstFileExW(%p, %d, %p, %d, %p, 0x%x)", lpFileName, fInfoLevelId, lpFindFileData, fSearchOp,
+			  lpSearchFilter, dwAdditionalFlags);
+	if (!lpFindFileData) {
+		DEBUG_LOG(" -> ERROR_INVALID_PARAMETER\n");
+		setLastError(ERROR_INVALID_PARAMETER);
+		return INVALID_HANDLE_VALUE;
+	}
+	if (!lpFileName) {
+		DEBUG_LOG(" -> ERROR_PATH_NOT_FOUND\n");
+		setLastError(ERROR_PATH_NOT_FOUND);
+		return INVALID_HANDLE_VALUE;
+	}
+	// FindExInfoBasic only drops the alternate (8.3) name, which we never fill in anyway.
+	if (fInfoLevelId != FindExInfoStandard && fInfoLevelId != FindExInfoBasic) {
+		DEBUG_LOG(" -> ERROR_INVALID_PARAMETER\n");
+		setLastError(ERROR_INVALID_PARAMETER);
+		return INVALID_HANDLE_VALUE;
+	}
+	if (fSearchOp != FindExSearchNameMatch) {
+		DEBUG_LOG(" -> ERROR_INVALID_PARAMETER\n");
+		setLastError(ERROR_INVALID_PARAMETER);
+		return INVALID_HANDLE_VALUE;
+	}
+	if (lpSearchFilter) {
+		DEBUG_LOG(" -> ERROR_INVALID_PARAMETER\n");
+		setLastError(ERROR_INVALID_PARAMETER);
+		return INVALID_HANDLE_VALUE;
+	}
+
+	auto *findData = static_cast<LPWIN32_FIND_DATAW>(lpFindFileData);
+	HANDLE handle = findFirstFileCommon(wideStringToString(lpFileName), findData);
+	DEBUG_LOG(" -> %p\n", handle);
+	return handle;
+}
+
 BOOL WINAPI FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileData) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("FindNextFileA(%p, %p)\n", hFindFile, lpFindFileData);
@@ -2101,6 +2166,49 @@ BOOL WINAPI FindNextFileW(HANDLE hFindFile, LPWIN32_FIND_DATAW lpFindFileData) {
 		return FALSE;
 	}
 	populateFindData(state->entries[state->nextIndex++], *lpFindFileData);
+	return TRUE;
+}
+
+// wibo exposes the host filesystem as a single volume.
+constexpr const char *kSingleVolumeName = R"(\\?\Volume{00000000-0000-0000-0000-000000000000}\)";
+
+HANDLE WINAPI FindFirstVolumeW(LPWSTR lpszVolumeName, DWORD cchBufferLength) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("FindFirstVolumeW(%p, %u)\n", lpszVolumeName, cchBufferLength);
+	if (!lpszVolumeName) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return INVALID_HANDLE_VALUE;
+	}
+	auto wide = stringToWideString(kSingleVolumeName);
+	if (cchBufferLength < wide.size()) {
+		setLastError(ERROR_FILENAME_EXCED_RANGE);
+		return INVALID_HANDLE_VALUE;
+	}
+	for (size_t i = 0; i < wide.size(); ++i) {
+		lpszVolumeName[i] = wide[i];
+	}
+	return registerFindHandle(std::make_unique<FindSearchHandle>());
+}
+
+BOOL WINAPI FindNextVolumeW(HANDLE hFindVolume, LPWSTR lpszVolumeName, DWORD cchBufferLength) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("FindNextVolumeW(%p, %p, %u)\n", hFindVolume, lpszVolumeName, cchBufferLength);
+	std::lock_guard lk(g_findHandleMutex);
+	if (!lookupFindHandleLocked(hFindVolume)) {
+		setLastError(ERROR_INVALID_HANDLE);
+		return FALSE;
+	}
+	setLastError(ERROR_NO_MORE_FILES);
+	return FALSE;
+}
+
+BOOL WINAPI FindVolumeClose(HANDLE hFindVolume) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("FindVolumeClose(%p)\n", hFindVolume);
+	if (!detachFindHandle(hFindVolume)) {
+		setLastError(ERROR_INVALID_HANDLE);
+		return FALSE;
+	}
 	return TRUE;
 }
 

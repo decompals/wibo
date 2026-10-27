@@ -297,6 +297,31 @@ static void test_findclose_invalid_handle(void) {
 	TEST_CHECK_EQ(ERROR_INVALID_HANDLE, GetLastError());
 }
 
+static void test_find_first_file_ex_wide(void) {
+	WIN32_FIND_DATAW data;
+	memset(&data, 0, sizeof(data));
+	HANDLE search = FindFirstFileExW(L"dir\\file.txt", FindExInfoStandard, &data, FindExSearchNameMatch, NULL, 0);
+	TEST_CHECK_MSG(search != INVALID_HANDLE_VALUE, "FindFirstFileExW failed: %lu", GetLastError());
+	TEST_CHECK(wcscmp(data.cFileName, L"file.txt") == 0);
+	TEST_CHECK(FindClose(search));
+
+	memset(&data, 0, sizeof(data));
+	search = FindFirstFileExW(L"dir\\data*.txt", FindExInfoBasic, &data, FindExSearchNameMatch, NULL, 0);
+	TEST_CHECK_MSG(search != INVALID_HANDLE_VALUE, "FindFirstFileExW(basic) failed: %lu", GetLastError());
+	int count = 1;
+	while (FindNextFileW(search, &data)) {
+		++count;
+	}
+	TEST_CHECK_EQ(ERROR_NO_MORE_FILES, GetLastError());
+	TEST_CHECK_EQ(3, count);
+	TEST_CHECK(FindClose(search));
+
+	SetLastError(0xdeadbeef);
+	search = FindFirstFileExW(L"dir\\nope.txt", FindExInfoStandard, &data, FindExSearchNameMatch, NULL, 0);
+	TEST_CHECK(search == INVALID_HANDLE_VALUE);
+	TEST_CHECK_EQ(ERROR_FILE_NOT_FOUND, GetLastError());
+}
+
 int main(void) {
 	setup_fixture();
 
@@ -312,6 +337,7 @@ int main(void) {
 	test_directory_iteration_includes_special_entries();
 	test_findclose_invalid_handle();
 
+	test_find_first_file_ex_wide();
 	cleanup_fixture();
 	return EXIT_SUCCESS;
 }

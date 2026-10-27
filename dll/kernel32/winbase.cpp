@@ -1180,6 +1180,99 @@ int WINAPI SetCurrentDirectoryW(LPCWSTR lpPathName) {
 	return SetCurrentDirectoryA(path.c_str());
 }
 
+namespace {
+
+std::vector<std::string> defaultSearchDirectories() {
+	std::vector<std::string> dirs;
+	std::filesystem::path exeDir = wibo::guestExecutablePath.parent_path();
+	if (!exeDir.empty()) {
+		dirs.push_back(exeDir.string());
+	}
+	dirs.emplace_back(".");
+	if (const char *path = getenv("PATH")) {
+		std::string entry;
+		for (const char *p = path;; ++p) {
+			if (*p == ':' || *p == '\0') {
+				if (!entry.empty()) {
+					dirs.push_back(entry);
+				}
+				entry.clear();
+				if (*p == '\0') {
+					break;
+				}
+				continue;
+			}
+			entry.push_back(*p);
+		}
+	}
+	return dirs;
+}
+
+} // namespace
+
+DWORD WINAPI SearchPathA(LPCSTR lpPath, LPCSTR lpFileName, LPCSTR lpExtension, DWORD nBufferLength, LPSTR lpBuffer,
+						 GUEST_PTR *lpFilePart) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("SearchPathA(%s, %s, %s, %u, %p, %p)\n", lpPath ? lpPath : "(null)", lpFileName ? lpFileName : "(null)",
+			  lpExtension ? lpExtension : "(null)", nBufferLength, lpBuffer, lpFilePart);
+	if (!lpFileName) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return 0;
+	}
+
+	std::string name = lpFileName;
+	if (lpExtension && name.find('.') == std::string::npos) {
+		name += lpExtension;
+	}
+
+	std::vector<std::string> dirs;
+	if (lpPath) {
+		std::string entry;
+		for (const char *p = lpPath;; ++p) {
+			if (*p == ';' || *p == '\0') {
+				if (!entry.empty()) {
+					dirs.push_back(entry);
+				}
+				entry.clear();
+				if (*p == '\0') {
+					break;
+				}
+				continue;
+			}
+			entry.push_back(*p);
+		}
+	} else {
+		dirs = defaultSearchDirectories();
+	}
+
+	for (const auto &dir : dirs) {
+		std::string candidatePath = dir;
+		candidatePath += '\\';
+		candidatePath += name;
+		std::filesystem::path candidate = files::pathFromWindows(candidatePath.c_str());
+		std::error_code ec;
+		if (!std::filesystem::is_regular_file(candidate, ec)) {
+			continue;
+		}
+		std::string found = files::pathToWindows(std::filesystem::absolute(candidate, ec).lexically_normal());
+		DWORD required = static_cast<DWORD>(found.size() + 1);
+		if (nBufferLength < required || !lpBuffer) {
+			DEBUG_LOG("SearchPathA: buffer too small for %s (need %u)\n", found.c_str(), required);
+			return required;
+		}
+		std::memcpy(lpBuffer, found.c_str(), required);
+		if (lpFilePart) {
+			size_t slash = found.find_last_of('\\');
+			*lpFilePart = toGuestPtr(lpBuffer + (slash == std::string::npos ? 0 : slash + 1));
+		}
+		DEBUG_LOG("SearchPathA -> %s\n", found.c_str());
+		return required - 1;
+	}
+
+	setLastError(ERROR_FILE_NOT_FOUND);
+	return 0;
+}
+
 DWORD WINAPI GetLongPathNameA(LPCSTR lpszShortPath, LPSTR lpszLongPath, DWORD cchBuffer) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetLongPathNameA(%s, %p, %u)\n", lpszShortPath ? lpszShortPath : "(null)", lpszLongPath, cchBuffer);

@@ -102,23 +102,79 @@ static void test_zero_size_pagefile_mapping_fails(void) {
 	TEST_CHECK_EQ(ERROR_INVALID_PARAMETER, GetLastError());
 }
 
-static void test_two_views_of_pagefile_mapping_alias(void) {
+static void test_named_mapping_reopens_same_object(void) {
+	static const char kName[] = "wibo_test_named_mapping";
 	const DWORD size = 4096;
-	HANDLE mapping = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, size, NULL);
+
+	SetLastError(0xdeadbeef);
+	HANDLE first = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, size, kName);
+	TEST_CHECK_MSG(first != NULL, "CreateFileMappingA(named) failed: %lu", GetLastError());
+	TEST_CHECK_EQ(0u, GetLastError());
+
+	SetLastError(0xdeadbeef);
+	HANDLE second = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, size, kName);
+	TEST_CHECK_MSG(second != NULL, "CreateFileMappingA(existing) failed: %lu", GetLastError());
+	TEST_CHECK_EQ(ERROR_ALREADY_EXISTS, GetLastError());
+	TEST_CHECK(second != first);
+
+	uint8_t *view = (uint8_t *)MapViewOfFile(first, FILE_MAP_ALL_ACCESS, 0, 0, size);
+	TEST_CHECK_MSG(view != NULL, "MapViewOfFile failed: %lu", GetLastError());
+	view[0] = 0x42;
+
+	uint8_t *other = (uint8_t *)MapViewOfFile(second, FILE_MAP_ALL_ACCESS, 0, 0, size);
+	TEST_CHECK_MSG(other != NULL, "MapViewOfFile(second) failed: %lu", GetLastError());
+	TEST_CHECK_EQ(0x42u, other[0]);
+
+	TEST_CHECK(UnmapViewOfFile(other));
+	TEST_CHECK(UnmapViewOfFile(view));
+	TEST_CHECK(CloseHandle(second));
+	TEST_CHECK(CloseHandle(first));
+}
+
+static void test_open_named_mapping(void) {
+	static const char kName[] = "wibo_test_open_mapping";
+	static const WCHAR kNameW[] = L"wibo_test_open_mapping";
+	const DWORD size = 4096;
+
+	HANDLE mapping = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, size, kName);
 	TEST_CHECK_MSG(mapping != NULL, "CreateFileMappingA failed: %lu", GetLastError());
 
-	uint8_t *first = (uint8_t *)MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, size);
-	uint8_t *second = (uint8_t *)MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, size);
-	TEST_CHECK(first != NULL && second != NULL);
-	TEST_CHECK(first != second);
-	first[0] = 0x5a;
-	first[size - 1] = 0xa5;
-	TEST_CHECK_EQ(0x5au, second[0]);
-	TEST_CHECK_EQ(0xa5u, second[size - 1]);
+	HANDLE opened = OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, kName);
+	TEST_CHECK_MSG(opened != NULL, "OpenFileMappingA failed: %lu", GetLastError());
+	TEST_CHECK(opened != mapping);
 
-	TEST_CHECK(UnmapViewOfFile(second));
-	TEST_CHECK(UnmapViewOfFile(first));
+	uint8_t *view = (uint8_t *)MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, size);
+	TEST_CHECK(view != NULL);
+	view[0] = 0x7e;
+	uint8_t *opened_view = (uint8_t *)MapViewOfFile(opened, FILE_MAP_READ, 0, 0, size);
+	TEST_CHECK_MSG(opened_view != NULL, "MapViewOfFile(opened) failed: %lu", GetLastError());
+	TEST_CHECK_EQ(0x7eu, opened_view[0]);
+
+	HANDLE opened_wide = OpenFileMappingW(FILE_MAP_READ, FALSE, kNameW);
+	TEST_CHECK_MSG(opened_wide != NULL, "OpenFileMappingW failed: %lu", GetLastError());
+
+	TEST_CHECK(CloseHandle(opened_wide));
+	TEST_CHECK(UnmapViewOfFile(opened_view));
+	TEST_CHECK(UnmapViewOfFile(view));
+	TEST_CHECK(CloseHandle(opened));
 	TEST_CHECK(CloseHandle(mapping));
+
+	SetLastError(0xdeadbeef);
+	HANDLE gone = OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, kName);
+	TEST_CHECK(gone == NULL);
+	TEST_CHECK_EQ(ERROR_FILE_NOT_FOUND, GetLastError());
+}
+
+static void test_open_unknown_mapping_fails(void) {
+	SetLastError(0xdeadbeef);
+	HANDLE mapping = OpenFileMappingA(FILE_MAP_READ, FALSE, "wibo_test_no_such_mapping");
+	TEST_CHECK(mapping == NULL);
+	TEST_CHECK_EQ(ERROR_FILE_NOT_FOUND, GetLastError());
+
+	SetLastError(0xdeadbeef);
+	mapping = OpenFileMappingA(FILE_MAP_READ, FALSE, NULL);
+	TEST_CHECK(mapping == NULL);
+	TEST_CHECK_EQ(ERROR_INVALID_PARAMETER, GetLastError());
 }
 
 int main(void) {
@@ -126,6 +182,8 @@ int main(void) {
 	test_copy_mapping_does_not_write_file();
 	test_zero_size_file_mapping_fails();
 	test_zero_size_pagefile_mapping_fails();
-	test_two_views_of_pagefile_mapping_alias();
+	test_named_mapping_reopens_same_object();
+	test_open_named_mapping();
+	test_open_unknown_mapping_fails();
 	return 0;
 }

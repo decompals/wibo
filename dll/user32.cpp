@@ -206,6 +206,30 @@ HWND WINAPI GetActiveWindow() {
 	return NO_HANDLE;
 }
 
+DWORD WINAPI CharLowerBuffW(LPWSTR lpsz, DWORD cchLength) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("CharLowerBuffW(%p, %u)\n", lpsz, cchLength);
+	if (!lpsz) {
+		return 0;
+	}
+	auto *str = reinterpret_cast<uint16_t *>(lpsz);
+	for (DWORD i = 0; i < cchLength; ++i) {
+		str[i] = wcharToLower(str[i]);
+	}
+	return cchLength;
+}
+
+BOOL WINAPI CharToOemBuffA(LPCSTR pSrc, LPSTR pDst, DWORD cchDstLength) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("CharToOemBuffA(%p, %p, %u)\n", pSrc, pDst, cchDstLength);
+	if (!pSrc || !pDst) {
+		return FALSE;
+	}
+	// wibo runs a single ASCII-compatible code page, so ANSI and OEM agree.
+	memcpy(pDst, pSrc, cchDstLength);
+	return TRUE;
+}
+
 } // namespace user32
 
 #include "user32_trampolines.h"

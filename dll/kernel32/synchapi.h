@@ -101,6 +101,7 @@ void WINAPI DeleteCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 void WINAPI EnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 void WINAPI LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 BOOL WINAPI TryEnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
+DWORD WINAPI SetCriticalSectionSpinCount(LPCRITICAL_SECTION lpCriticalSection, DWORD dwSpinCount);
 BOOL WINAPI InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBOOL fPending, GUEST_PTR *lpContext);
 BOOL WINAPI InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpContext);
 void WINAPI AcquireSRWLockShared(PSRWLOCK SRWLock);

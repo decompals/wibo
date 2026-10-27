@@ -96,10 +96,23 @@ static void test_file_mapping(void) {
     TEST_CHECK(GetFileAttributesA("test_virtualquery.tmp") == INVALID_FILE_ATTRIBUTES);
 }
 
+static void test_query_ex_current_process(void) {
+    MEMORY_BASIC_INFORMATION direct;
+    MEMORY_BASIC_INFORMATION via_ex;
+    SIZE_T got = VirtualQuery((void *)&test_query_ex_current_process, &direct, sizeof(direct));
+    TEST_CHECK_EQ(sizeof(direct), got);
+    got = VirtualQueryEx(GetCurrentProcess(), (void *)&test_query_ex_current_process, &via_ex, sizeof(via_ex));
+    TEST_CHECK_EQ(sizeof(via_ex), got);
+    TEST_CHECK_EQ((uintptr_t)direct.BaseAddress, (uintptr_t)via_ex.BaseAddress);
+    TEST_CHECK_EQ(direct.State, via_ex.State);
+    TEST_CHECK_EQ(direct.Protect, via_ex.Protect);
+}
+
 int main(void) {
     test_null_address();
     test_module_region();
     test_anonymous_mapping();
     test_file_mapping();
+    test_query_ex_current_process();
     return 0;
 }

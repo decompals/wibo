@@ -21,6 +21,16 @@ constexpr DWORD LCID_INSTALLED = 0x00000001;
 constexpr DWORD LCID_SUPPORTED = 0x00000002;
 constexpr DWORD LCID_ALTERNATE_SORTS = 0x00000004;
 constexpr LCID kEnUsLcid = 0x0409;
+constexpr DWORD kMuiLanguageId = 0x4;
+constexpr CALID kCalGregorian = 1;
+constexpr CALID ENUM_ALL_CALENDARS = 0xffffffff;
+constexpr CALTYPE CAL_IYEAROFFSETRANGE = 0x3;
+constexpr CALTYPE CAL_SERASTRING = 0x4;
+constexpr int CSTR_LESS_THAN = 1;
+constexpr int CSTR_EQUAL = 2;
+constexpr int CSTR_GREATER_THAN = 3;
+constexpr DWORD kMuiLanguageName = 0x8;
+thread_local LCID tlsThreadLocale = kEnUsLcid;
 constexpr LCID kInvariantLcid = 0x007f;
 constexpr DWORD LOCALE_ALLOW_NEUTRAL_NAMES = 0x08000000;
 constexpr DWORD kLocaleNoUserOverride = 0x80000000u;
@@ -95,6 +105,93 @@ UINT WINAPI GetACP() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetACP() -> %u\n", 28591);
 	return 28591; // Latin1 (ISO/IEC 8859-1)
+}
+
+LCID WINAPI GetThreadLocale() {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("GetThreadLocale() -> 0x%x\n", tlsThreadLocale);
+	return tlsThreadLocale;
+}
+
+BOOL WINAPI SetThreadLocale(LCID Locale) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("SetThreadLocale(0x%x)\n", Locale);
+	tlsThreadLocale = Locale;
+	return TRUE;
+}
+
+LANGID WINAPI GetThreadUILanguage() {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("GetThreadUILanguage()\n");
+	return static_cast<LANGID>(tlsThreadLocale & 0xFFFF);
+}
+
+BOOL WINAPI GetThreadPreferredUILanguages(DWORD dwFlags, PULONG pulNumLanguages, LPWSTR pwszLanguagesBuffer,
+										  PULONG pcchLanguagesBuffer) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("GetThreadPreferredUILanguages(0x%x, %p, %p, %p)\n", dwFlags, pulNumLanguages, pwszLanguagesBuffer,
+			  pcchLanguagesBuffer);
+	if (!pulNumLanguages || !pcchLanguagesBuffer) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+	// One locale, so one entry, double-NUL terminated. Ids win when both flags are set.
+	auto entry = stringToWideString((dwFlags & kMuiLanguageId) != 0 ? "0409" : "en-US");
+	const ULONG needed = static_cast<ULONG>(entry.size() + 1);
+	if (!pwszLanguagesBuffer) {
+		*pulNumLanguages = 1;
+		*pcchLanguagesBuffer = needed;
+		return TRUE;
+	}
+	if (*pcchLanguagesBuffer < needed) {
+		setLastError(ERROR_INSUFFICIENT_BUFFER);
+		return FALSE;
+	}
+	for (size_t i = 0; i < entry.size(); ++i) {
+		pwszLanguagesBuffer[i] = entry[i];
+	}
+	pwszLanguagesBuffer[entry.size()] = 0;
+	*pulNumLanguages = 1;
+	*pcchLanguagesBuffer = needed;
+	return TRUE;
+}
+
+BOOL WINAPI SetThreadPreferredUILanguages(DWORD dwFlags, LPCWSTR pwszLanguagesBuffer, PULONG pulNumLanguages) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("SetThreadPreferredUILanguages(0x%x, %p, %p)\n", dwFlags, pwszLanguagesBuffer, pulNumLanguages);
+	// Nothing to switch to, so report that none were set.
+	if (pulNumLanguages) {
+		*pulNumLanguages = 0;
+	}
+	return TRUE;
+}
+
+int WINAPI CompareStringOrdinal(LPCWCH lpString1, int cchCount1, LPCWCH lpString2, int cchCount2, BOOL bIgnoreCase) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("CompareStringOrdinal(%p, %d, %p, %d, %d)\n", lpString1, cchCount1, lpString2, cchCount2,
+			  static_cast<int>(bIgnoreCase));
+	if (!lpString1 || !lpString2) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return 0;
+	}
+	size_t len1 = cchCount1 < 0 ? wstrlen(lpString1) : static_cast<size_t>(cchCount1);
+	size_t len2 = cchCount2 < 0 ? wstrlen(lpString2) : static_cast<size_t>(cchCount2);
+	size_t common = std::min(len1, len2);
+	for (size_t i = 0; i < common; ++i) {
+		uint16_t a = lpString1[i];
+		uint16_t b = lpString2[i];
+		if (bIgnoreCase) {
+			a = wcharToUpper(a);
+			b = wcharToUpper(b);
+		}
+		if (a != b) {
+			return a < b ? CSTR_LESS_THAN : CSTR_GREATER_THAN;
+		}
+	}
+	if (len1 == len2) {
+		return CSTR_EQUAL;
+	}
+	return len1 < len2 ? CSTR_LESS_THAN : CSTR_GREATER_THAN;
 }
 
 LANGID WINAPI GetSystemDefaultLangID() {
@@ -341,6 +438,41 @@ BOOL WINAPI EnumSystemLocalesA(LOCALE_ENUMPROCA lpLocaleEnumProc, DWORD dwFlags)
 	std::memcpy(localeId, defaultLocaleId, sizeof(defaultLocaleId));
 	BOOL ret = call_LOCALE_ENUMPROCA(lpLocaleEnumProc, localeId);
 	wibo::heap::guestFree(localeId);
+	return ret;
+}
+
+BOOL WINAPI EnumCalendarInfoW(CALINFO_ENUMPROCW lpCalInfoEnumProc, LCID Locale, CALID Calendar, CALTYPE CalType) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("EnumCalendarInfoW(%p, 0x%x, %u, 0x%x)\n", lpCalInfoEnumProc, Locale, Calendar, CalType);
+	(void)Locale;
+	if (!lpCalInfoEnumProc || (Calendar != kCalGregorian && Calendar != ENUM_ALL_CALENDARS)) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+
+	const char *value = nullptr;
+	switch (CalType) {
+	case CAL_SERASTRING:
+		value = "A.D.";
+		break;
+	case CAL_IYEAROFFSETRANGE:
+		value = "1";
+		break;
+	default:
+		DEBUG_LOG("EnumCalendarInfoW: unsupported calendar type 0x%x\n", CalType);
+		setLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+
+	auto wide = stringToWideString(value);
+	auto *guestValue = static_cast<uint16_t *>(wibo::heap::guestMalloc(wide.size() * sizeof(uint16_t)));
+	if (!guestValue) {
+		setLastError(ERROR_NOT_ENOUGH_MEMORY);
+		return FALSE;
+	}
+	std::memcpy(guestValue, wide.data(), wide.size() * sizeof(uint16_t));
+	BOOL ret = call_CALINFO_ENUMPROCW(lpCalInfoEnumProc, reinterpret_cast<LPWSTR>(guestValue));
+	wibo::heap::guestFree(guestValue);
 	return ret;
 }
 

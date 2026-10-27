@@ -69,6 +69,9 @@ using LPOSVERSIONINFOEXW = OSVERSIONINFOEXW *;
 namespace kernel32 {
 
 void WINAPI GetSystemInfo(LPSYSTEM_INFO lpSystemInfo);
+void WINAPI GetNativeSystemInfo(LPSYSTEM_INFO lpSystemInfo);
+ULONGLONG WINAPI VerSetConditionMask(ULONGLONG ConditionMask, DWORD TypeMask, BYTE Condition);
+BOOL WINAPI VerifyVersionInfoW(LPOSVERSIONINFOEXW lpVersionInformation, DWORD dwTypeMask, ULONGLONG dwlConditionMask);
 void WINAPI GetSystemTime(LPSYSTEMTIME lpSystemTime);
 void WINAPI GetLocalTime(LPSYSTEMTIME lpSystemTime);
 void WINAPI GetSystemTimeAsFileTime(LPFILETIME lpSystemTimeAsFileTime);

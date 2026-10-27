@@ -30,6 +30,55 @@ DWORD_PTR computeSystemProcessorMask(unsigned int cpuCount) {
 	return mask == 0 ? 1 : mask;
 }
 
+constexpr DWORD VER_MINORVERSION = 0x0000001;
+constexpr DWORD VER_MAJORVERSION = 0x0000002;
+constexpr DWORD VER_BUILDNUMBER = 0x0000004;
+constexpr DWORD VER_PLATFORMID = 0x0000008;
+constexpr DWORD VER_SERVICEPACKMINOR = 0x0000010;
+constexpr DWORD VER_SERVICEPACKMAJOR = 0x0000020;
+constexpr DWORD VER_SUITENAME = 0x0000040;
+constexpr DWORD VER_PRODUCT_TYPE = 0x0000080;
+
+constexpr BYTE VER_EQUAL = 1;
+constexpr BYTE VER_GREATER = 2;
+constexpr BYTE VER_GREATER_EQUAL = 3;
+constexpr BYTE VER_LESS = 4;
+constexpr BYTE VER_LESS_EQUAL = 5;
+constexpr BYTE VER_AND = 6;
+constexpr BYTE VER_OR = 7;
+
+BYTE conditionFor(ULONGLONG conditionMask, unsigned int slot) {
+	return static_cast<BYTE>((conditionMask >> (slot * 3)) & 0x07);
+}
+
+bool compareValues(DWORD actual, DWORD expected, BYTE condition) {
+	switch (condition) {
+	case VER_EQUAL:
+		return actual == expected;
+	case VER_GREATER:
+		return actual > expected;
+	case VER_GREATER_EQUAL:
+		return actual >= expected;
+	case VER_LESS:
+		return actual < expected;
+	case VER_LESS_EQUAL:
+		return actual <= expected;
+	default:
+		return false;
+	}
+}
+
+bool compareMask(WORD actual, WORD expected, BYTE condition) {
+	switch (condition) {
+	case VER_AND:
+		return (actual & expected) == expected;
+	case VER_OR:
+		return expected == 0 || (actual & expected) != 0;
+	default:
+		return false;
+	}
+}
+
 } // namespace
 
 namespace kernel32 {
@@ -69,6 +118,12 @@ void WINAPI GetSystemInfo(LPSYSTEM_INFO lpSystemInfo) {
 	lpSystemInfo->dwActiveProcessorMask = computeSystemProcessorMask(cpuCount);
 
 	lpSystemInfo->dwAllocationGranularity = 0x10000;
+}
+
+void WINAPI GetNativeSystemInfo(LPSYSTEM_INFO lpSystemInfo) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("GetNativeSystemInfo -> ");
+	GetSystemInfo(lpSystemInfo);
 }
 
 void WINAPI GetSystemTime(LPSYSTEMTIME lpSystemTime) {
@@ -190,6 +245,112 @@ DWORD WINAPI GetVersion() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetVersion()\n");
 	return kMajorVersion | (kMinorVersion << 8) | (5 << 16) | (kBuildNumber << 24);
+}
+
+ULONGLONG WINAPI VerSetConditionMask(ULONGLONG ConditionMask, DWORD TypeMask, BYTE Condition) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("VerSetConditionMask(%llu, 0x%x, %u)\n", ConditionMask, TypeMask, Condition);
+	Condition &= 0x07;
+	if (TypeMask == 0 || Condition == 0) {
+		return ConditionMask;
+	}
+	// Only the highest-numbered type in the mask is recorded, per the documented behaviour.
+	if (TypeMask & VER_PRODUCT_TYPE) {
+		ConditionMask |= static_cast<ULONGLONG>(Condition) << (7 * 3);
+	} else if (TypeMask & VER_SUITENAME) {
+		ConditionMask |= static_cast<ULONGLONG>(Condition) << (6 * 3);
+	} else if (TypeMask & VER_SERVICEPACKMAJOR) {
+		ConditionMask |= static_cast<ULONGLONG>(Condition) << (5 * 3);
+	} else if (TypeMask & VER_SERVICEPACKMINOR) {
+		ConditionMask |= static_cast<ULONGLONG>(Condition) << (4 * 3);
+	} else if (TypeMask & VER_PLATFORMID) {
+		ConditionMask |= static_cast<ULONGLONG>(Condition) << (3 * 3);
+	} else if (TypeMask & VER_BUILDNUMBER) {
+		ConditionMask |= static_cast<ULONGLONG>(Condition) << (2 * 3);
+	} else if (TypeMask & VER_MAJORVERSION) {
+		ConditionMask |= static_cast<ULONGLONG>(Condition) << (1 * 3);
+	} else if (TypeMask & VER_MINORVERSION) {
+		ConditionMask |= static_cast<ULONGLONG>(Condition) << (0 * 3);
+	}
+	return ConditionMask;
+}
+
+BOOL WINAPI VerifyVersionInfoW(LPOSVERSIONINFOEXW lpVersionInformation, DWORD dwTypeMask, ULONGLONG dwlConditionMask) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("VerifyVersionInfoW(%p, 0x%x, %llu) -> ", lpVersionInformation, dwTypeMask, dwlConditionMask);
+	if (!lpVersionInformation || dwTypeMask == 0 || dwlConditionMask == 0) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		DEBUG_LOG("ERROR_INVALID_PARAMETER\n");
+		return FALSE;
+	}
+
+	OSVERSIONINFOEXW ours{};
+	ours.dwOSVersionInfoSize = sizeof(ours);
+	if (ntdll::RtlGetVersion(reinterpret_cast<PRTL_OSVERSIONINFOW>(&ours)) != STATUS_SUCCESS) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		DEBUG_LOG("ERROR_INVALID_PARAMETER\n");
+		return FALSE;
+	}
+
+	bool matches = true;
+	if (dwTypeMask & VER_PRODUCT_TYPE) {
+		matches = matches && compareValues(ours.wProductType, lpVersionInformation->wProductType,
+										   conditionFor(dwlConditionMask, 7));
+	}
+	if (dwTypeMask & VER_SUITENAME) {
+		matches = matches &&
+				  compareMask(ours.wSuiteMask, lpVersionInformation->wSuiteMask, conditionFor(dwlConditionMask, 6));
+	}
+	if (dwTypeMask & VER_PLATFORMID) {
+		matches = matches && compareValues(ours.dwPlatformId, lpVersionInformation->dwPlatformId,
+										   conditionFor(dwlConditionMask, 3));
+	}
+	if (dwTypeMask & VER_BUILDNUMBER) {
+		matches = matches && compareValues(ours.dwBuildNumber, lpVersionInformation->dwBuildNumber,
+										   conditionFor(dwlConditionMask, 2));
+	}
+
+	// One version number: the first component that differs decides.
+	constexpr DWORD kVersionTypes = VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR;
+	if (matches && (dwTypeMask & kVersionTypes)) {
+		BYTE condition = 0;
+		if (dwTypeMask & VER_MAJORVERSION) {
+			condition = conditionFor(dwlConditionMask, 1);
+		} else if (dwTypeMask & VER_MINORVERSION) {
+			condition = conditionFor(dwlConditionMask, 0);
+		} else if (dwTypeMask & VER_SERVICEPACKMAJOR) {
+			condition = conditionFor(dwlConditionMask, 5);
+		} else {
+			condition = conditionFor(dwlConditionMask, 4);
+		}
+
+		const DWORD oursValues[4] = {ours.dwMajorVersion, ours.dwMinorVersion, ours.wServicePackMajor,
+									 ours.wServicePackMinor};
+		const DWORD wantedValues[4] = {lpVersionInformation->dwMajorVersion, lpVersionInformation->dwMinorVersion,
+									   lpVersionInformation->wServicePackMajor,
+									   lpVersionInformation->wServicePackMinor};
+		const DWORD types[4] = {VER_MAJORVERSION, VER_MINORVERSION, VER_SERVICEPACKMAJOR, VER_SERVICEPACKMINOR};
+
+		matches = condition == VER_EQUAL;
+		for (int i = 0; i < 4; ++i) {
+			if ((dwTypeMask & types[i]) == 0) {
+				continue;
+			}
+			if (oursValues[i] != wantedValues[i]) {
+				matches = compareValues(oursValues[i], wantedValues[i], condition);
+				break;
+			}
+			matches = condition != VER_GREATER && condition != VER_LESS;
+		}
+	}
+
+	if (!matches) {
+		setLastError(ERROR_OLD_WIN_VERSION);
+		DEBUG_LOG("FALSE\n");
+		return FALSE;
+	}
+	DEBUG_LOG("TRUE\n");
+	return TRUE;
 }
 
 BOOL WINAPI GetVersionExA(LPOSVERSIONINFOA lpVersionInformation) {

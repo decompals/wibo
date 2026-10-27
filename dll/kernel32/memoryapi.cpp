@@ -17,11 +17,14 @@
 #include <iterator>
 #include <limits>
 #include <map>
+#include <memory>
 #include <mutex>
+#include <string>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -80,6 +83,14 @@ uintptr_t alignUp(uintptr_t value, size_t alignment) {
 		return std::numeric_limits<uintptr_t>::max();
 	}
 	return (value + mask) & ~mask;
+}
+
+std::u16string mappingKey(LPCWSTR name) {
+	if (!name) {
+		return {};
+	}
+	const auto *raw = reinterpret_cast<const uint16_t *>(name);
+	return {reinterpret_cast<const char16_t *>(raw), wstrlen(raw)};
 }
 
 struct FileMapAccess {
@@ -256,86 +267,139 @@ int createSectionBackingFd(uint64_t size) {
 	return fd;
 }
 
-} // namespace
-
-namespace kernel32 {
-
-HANDLE WINAPI CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMappingAttributes, DWORD flProtect,
-								 DWORD dwMaximumSizeHigh, DWORD dwMaximumSizeLow, LPCSTR lpName) {
-	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("CreateFileMappingA(%p, %p, %u, %u, %u, %s)\n", hFile, lpFileMappingAttributes, flProtect,
-			  dwMaximumSizeHigh, dwMaximumSizeLow, lpName ? lpName : "(null)");
-	(void)lpFileMappingAttributes;
-	(void)lpName;
-
-	uint64_t size = (static_cast<uint64_t>(dwMaximumSizeHigh) << 32) | dwMaximumSizeLow;
-	if (flProtect != PAGE_READONLY && flProtect != PAGE_READWRITE && flProtect != PAGE_WRITECOPY) {
-		DEBUG_LOG("CreateFileMappingA: unsupported protection 0x%x\n", flProtect);
-		setLastError(ERROR_INVALID_PARAMETER);
-		return NO_HANDLE;
-	}
-
-	auto mapping = make_pin<MappingObject>();
+MappingObject *makeMappingObject(HANDLE hFile, DWORD flProtect, uint64_t size, DWORD &failure) {
+	auto mapping = std::make_unique<MappingObject>();
 	mapping->protect = flProtect;
 
 	if (hFile == INVALID_HANDLE_VALUE) {
 		if (size == 0) {
-			setLastError(ERROR_INVALID_PARAMETER);
-			return NO_HANDLE;
+			failure = ERROR_INVALID_PARAMETER;
+			return nullptr;
 		}
 		mapping->fd = createSectionBackingFd(size);
 		if (mapping->fd < 0) {
-			setLastErrorFromErrno();
-			return NO_HANDLE;
+			kernel32::setLastErrorFromErrno();
+			failure = kernel32::getLastError();
+			return nullptr;
 		}
 		mapping->anonymous = true;
 		mapping->maxSize = size;
-	} else {
-		auto file = wibo::handles().getAs<FileObject>(hFile);
-		if (!file || !file->valid()) {
-			setLastError(ERROR_INVALID_HANDLE);
-			return NO_HANDLE;
-		}
-		int dupFd = fcntl(file->fd, F_DUPFD_CLOEXEC, 0);
-		if (dupFd == -1) {
-			setLastErrorFromErrno();
-			return NO_HANDLE;
-		}
-		mapping->fd = dupFd;
-		uint64_t fileSize = 0;
-		if (!fileSizeFromFd(dupFd, fileSize)) {
-			return NO_HANDLE;
-		}
-		if (size == 0) {
-			if (fileSize == 0) {
-				setLastError(ERROR_FILE_INVALID);
-				return NO_HANDLE;
-			}
-			size = fileSize;
-		} else if (size > fileSize && protectAllowsFileGrowth(flProtect)) {
-			if (!growFileForMapping(dupFd, size)) {
-				return NO_HANDLE;
-			}
-			DEBUG_LOG("CreateFileMappingA: grew backing file from %llu to %llu bytes\n",
-					  static_cast<unsigned long long>(fileSize), static_cast<unsigned long long>(size));
-		}
-		if (size > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
-			setLastError(ERROR_INVALID_PARAMETER);
-			return NO_HANDLE;
-		}
-		mapping->maxSize = size;
+		return mapping.release();
 	}
 
-	return wibo::handles().alloc(std::move(mapping), 0, 0);
+	auto file = wibo::handles().getAs<kernel32::FileObject>(hFile);
+	if (!file || !file->valid()) {
+		failure = ERROR_INVALID_HANDLE;
+		return nullptr;
+	}
+	int dupFd = fcntl(file->fd, F_DUPFD_CLOEXEC, 0);
+	if (dupFd == -1) {
+		kernel32::setLastErrorFromErrno();
+		failure = kernel32::getLastError();
+		return nullptr;
+	}
+	mapping->fd = dupFd;
+	uint64_t fileSize = 0;
+	if (!fileSizeFromFd(dupFd, fileSize)) {
+		failure = kernel32::getLastError();
+		return nullptr;
+	}
+	if (size == 0) {
+		if (fileSize == 0) {
+			failure = ERROR_FILE_INVALID;
+			return nullptr;
+		}
+		size = fileSize;
+	} else if (size > fileSize && protectAllowsFileGrowth(flProtect)) {
+		if (!growFileForMapping(dupFd, size)) {
+			failure = kernel32::getLastError();
+			return nullptr;
+		}
+		DEBUG_LOG("CreateFileMapping: grew backing file from %llu to %llu bytes\n",
+				  static_cast<unsigned long long>(fileSize), static_cast<unsigned long long>(size));
+	}
+	if (size > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+		failure = ERROR_INVALID_PARAMETER;
+		return nullptr;
+	}
+	mapping->maxSize = size;
+	return mapping.release();
 }
+
+} // namespace
+
+namespace kernel32 {
 
 HANDLE WINAPI CreateFileMappingW(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMappingAttributes, DWORD flProtect,
 								 DWORD dwMaximumSizeHigh, DWORD dwMaximumSizeLow, LPCWSTR lpName) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("CreateFileMappingW -> ");
-	std::string name = wideStringToString(lpName);
-	return CreateFileMappingA(hFile, lpFileMappingAttributes, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow,
-							  lpName ? name.c_str() : nullptr);
+	DEBUG_LOG("CreateFileMappingW(%p, %p, %u, %u, %u, %s)\n", hFile, lpFileMappingAttributes, flProtect,
+			  dwMaximumSizeHigh, dwMaximumSizeLow, lpName ? wideStringToString(lpName).c_str() : "(null)");
+
+	uint64_t size = (static_cast<uint64_t>(dwMaximumSizeHigh) << 32) | dwMaximumSizeLow;
+	if (flProtect != PAGE_READONLY && flProtect != PAGE_READWRITE && flProtect != PAGE_WRITECOPY) {
+		DEBUG_LOG("CreateFileMappingW: unsupported protection 0x%x\n", flProtect);
+		setLastError(ERROR_INVALID_PARAMETER);
+		return NO_HANDLE;
+	}
+
+	DWORD failure = ERROR_SUCCESS;
+	auto [mapping, created] = wibo::g_namespace.getOrCreate(
+		mappingKey(lpName), [&]() { return makeMappingObject(hFile, flProtect, size, failure); });
+	if (!mapping) {
+		setLastError(failure != ERROR_SUCCESS ? failure : ERROR_INVALID_HANDLE);
+		return NO_HANDLE;
+	}
+
+	uint32_t handleFlags = 0;
+	if (lpFileMappingAttributes && lpFileMappingAttributes->bInheritHandle) {
+		handleFlags |= HANDLE_FLAG_INHERIT;
+	}
+	HANDLE h = wibo::handles().alloc(std::move(mapping), 0, handleFlags);
+	setLastError(created ? ERROR_SUCCESS : ERROR_ALREADY_EXISTS);
+	return h;
+}
+
+HANDLE WINAPI CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMappingAttributes, DWORD flProtect,
+								 DWORD dwMaximumSizeHigh, DWORD dwMaximumSizeLow, LPCSTR lpName) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("CreateFileMappingA -> ");
+	std::vector<uint16_t> wideName;
+	if (lpName) {
+		wideName = stringToWideString(lpName);
+	}
+	return CreateFileMappingW(hFile, lpFileMappingAttributes, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow,
+							  lpName ? reinterpret_cast<LPCWSTR>(wideName.data()) : nullptr);
+}
+
+HANDLE WINAPI OpenFileMappingW(DWORD dwDesiredAccess, BOOL bInheritHandle, LPCWSTR lpName) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("OpenFileMappingW(0x%x, %d, %s)\n", dwDesiredAccess, static_cast<int>(bInheritHandle),
+			  lpName ? wideStringToString(lpName).c_str() : "(null)");
+	if (!lpName || !*reinterpret_cast<const uint16_t *>(lpName)) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return NO_HANDLE;
+	}
+	auto mapping = wibo::g_namespace.getAs<MappingObject>(mappingKey(lpName));
+	if (!mapping) {
+		setLastError(ERROR_FILE_NOT_FOUND);
+		return NO_HANDLE;
+	}
+	uint32_t handleFlags = bInheritHandle ? HANDLE_FLAG_INHERIT : 0;
+	HANDLE h = wibo::handles().alloc(std::move(mapping), 0, handleFlags);
+	setLastError(ERROR_SUCCESS);
+	return h;
+}
+
+HANDLE WINAPI OpenFileMappingA(DWORD dwDesiredAccess, BOOL bInheritHandle, LPCSTR lpName) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("OpenFileMappingA -> ");
+	std::vector<uint16_t> wideName;
+	if (lpName) {
+		wideName = stringToWideString(lpName);
+	}
+	return OpenFileMappingW(dwDesiredAccess, bInheritHandle,
+							lpName ? reinterpret_cast<LPCWSTR>(wideName.data()) : nullptr);
 }
 
 static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredAccess, uint64_t offset,
@@ -697,6 +761,17 @@ SIZE_T WINAPI VirtualQuery(LPCVOID lpAddress, PMEMORY_BASIC_INFORMATION lpBuffer
 	setLastError(wibo::heap::win32ErrorFromVmStatus(status));
 	DEBUG_LOG("-> VirtualQuery failed (status=%u)\n", static_cast<unsigned>(status));
 	return 0;
+}
+
+SIZE_T WINAPI VirtualQueryEx(HANDLE hProcess, LPCVOID lpAddress, PMEMORY_BASIC_INFORMATION lpBuffer, SIZE_T dwLength) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("VirtualQueryEx(%p, %p, %p, %zu) -> ", hProcess, lpAddress, lpBuffer, dwLength);
+	if (!isPseudoCurrentProcessHandle(hProcess)) {
+		// Only the calling process's address space is visible to us.
+		setLastError(ERROR_INVALID_HANDLE);
+		return 0;
+	}
+	return VirtualQuery(lpAddress, lpBuffer, dwLength);
 }
 
 BOOL WINAPI GetProcessWorkingSetSize(HANDLE hProcess, PSIZE_T lpMinimumWorkingSetSize,

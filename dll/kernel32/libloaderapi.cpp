@@ -17,6 +17,14 @@
 
 namespace {
 
+// MAKEINTRESOURCE ids are integers cast to a pointer, so they cannot be logged as strings.
+std::string describeResource(const wibo::ResourceIdentifier &id) {
+	if (id.isString) {
+		return wideStringToString(reinterpret_cast<const uint16_t *>(id.name.c_str()));
+	}
+	return "#" + std::to_string(id.id);
+}
+
 constexpr DWORD GET_MODULE_HANDLE_EX_FLAG_PIN = 0x00000001;
 constexpr DWORD GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT = 0x00000002;
 constexpr DWORD GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS = 0x00000004;
@@ -198,17 +206,18 @@ DWORD WINAPI GetModuleFileNameW(HMODULE hModule, LPWSTR lpFilename, DWORD nSize)
 
 HRSRC WINAPI FindResourceA(HMODULE hModule, LPCSTR lpName, LPCSTR lpType) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("FindResourceA(%p, %s, %s)\n", hModule, lpName, lpType);
 	auto type = wibo::resourceIdentifierFromAnsi(lpType);
 	auto name = wibo::resourceIdentifierFromAnsi(lpName);
+	DEBUG_LOG("FindResourceA(%p, %s, %s)\n", hModule, describeResource(name).c_str(), describeResource(type).c_str());
 	return findResourceInternal(hModule, type, name, std::nullopt);
 }
 
 HRSRC WINAPI FindResourceExA(HMODULE hModule, LPCSTR lpType, LPCSTR lpName, WORD wLanguage) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("FindResourceExA(%p, %s, %s, %u)\n", hModule, lpName, lpType, wLanguage);
 	auto type = wibo::resourceIdentifierFromAnsi(lpType);
 	auto name = wibo::resourceIdentifierFromAnsi(lpName);
+	DEBUG_LOG("FindResourceExA(%p, %s, %s, %u)\n", hModule, describeResource(name).c_str(),
+			  describeResource(type).c_str(), wLanguage);
 	return findResourceInternal(hModule, type, name, wLanguage);
 }
 

@@ -456,6 +456,16 @@ bool loadPEFromSource(wibo::Executable &executable, const PeInputView &source, b
 	executable.sections.clear();
 
 	uintptr_t imageBaseAddr = reinterpret_cast<uintptr_t>(executable.imageBase);
+
+	// Windows maps the headers at the image base, and code reads them from there
+	// (mingw's pseudo-reloc walks its own section table).
+	if (!source.read(0, executable.imageBase, header32.sizeOfHeaders)) {
+		DEBUG_LOG("loadPE: failed to copy %u bytes of headers\n", header32.sizeOfHeaders);
+		return false;
+	}
+	auto *mappedOptionalHeader = reinterpret_cast<PE32Header *>(imageBaseAddr + offsetToPE + sizeof(PEHeader));
+	mappedOptionalHeader->imageBase = static_cast<uint32_t>(imageBaseAddr);
+
 	uintptr_t headerSpan = alignUp(static_cast<uintptr_t>(header32.sizeOfHeaders), pageSizeValue);
 	if (headerSpan != 0) {
 		wibo::Executable::SectionInfo headerInfo{};

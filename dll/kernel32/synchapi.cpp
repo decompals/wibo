@@ -1046,6 +1046,18 @@ void WINAPI DeleteCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
 	kernel32::WakeByAddressAll(lockCount);
 }
 
+DWORD WINAPI SetCriticalSectionSpinCount(LPCRITICAL_SECTION lpCriticalSection, DWORD dwSpinCount) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("SetCriticalSectionSpinCount(%p, %u)\n", lpCriticalSection, dwSpinCount);
+	// wibo's critical sections are plain mutexes; spinning is not modelled.
+	if (!lpCriticalSection) {
+		return 0;
+	}
+	DWORD previous = lpCriticalSection->SpinCount;
+	lpCriticalSection->SpinCount = dwSpinCount;
+	return previous;
+}
+
 BOOL WINAPI TryEnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
 	HOST_CONTEXT_GUARD();
 	VERBOSE_LOG("TryEnterCriticalSection(%p)\n", lpCriticalSection);

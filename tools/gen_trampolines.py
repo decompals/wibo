@@ -330,22 +330,18 @@ def compute_arg_layout(
         placements.append(placement)
         gpr_index += 1
 
-    # Special case for x86 fastcall: stop using registers if any spill onto the stack
+    # x86 fastcall: an aggregate argument stops register use for everything after it,
+    # but an oversized scalar (a 64-bit integer, say) only takes the stack itself.
     if arch == Arch.X86 and cc == CallingConv.X86_FASTCALL:
-        stack_args_start = 0
-        for i in range(min(len(gpr_order), len(args))):
-            if gpr_index >= len(gpr_order):
-                break
-            arg = args[i]
-            slot_size = _slot_size_for_arch(arg, arch)
-            if arg.arg_class == ArgClass.INT and slot_size == 4:
+        registers_available = True
+        for arg in args:
+            if arg.arg_class != ArgClass.INT:
+                registers_available = False
+                _push_stack(arg)
+            elif registers_available and gpr_index < len(gpr_order) and _slot_size_for_arch(arg, arch) == 4:
                 _push_register(arg)
-                stack_args_start += 1
             else:
-                break
-
-        for i in range(stack_args_start, len(args)):
-            _push_stack(args[i])
+                _push_stack(arg)
     else:
         for arg in args:
             slot_size = _slot_size_for_arch(arg, arch)
@@ -886,6 +882,11 @@ def emit_cc_thunk64(f: FuncInfo | TypedefInfo, lines: List[str]):
 
         # Call into target
         lines.append(f"\tcall {call_target}")
+
+        # A 64-bit result comes back in rax but the guest reads it from edx:eax
+        if f.return_type.arg_class == ArgClass.INT and f.return_type.type.get_size() > 4:
+            lines.append("\tmov rdx, rax")
+            lines.append("\tshr rdx, 32")
 
         # Restore host stack
         lines.append("\tmov rsp, qword ptr [rbx+TEB_SP]")

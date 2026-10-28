@@ -2,6 +2,9 @@
 
 #include "types.h"
 
+using CALID = DWORD;
+using CALTYPE = DWORD;
+
 constexpr UINT MAX_DEFAULTCHAR = 2;
 constexpr UINT MAX_LEADBYTES = 12;
 
@@ -13,10 +16,18 @@ struct CPINFO {
 
 using LPCPINFO = CPINFO *;
 typedef BOOL(_CC_STDCALL *LOCALE_ENUMPROCA)(LPSTR);
+typedef BOOL(_CC_STDCALL *CALINFO_ENUMPROCW)(LPWSTR);
 
 namespace kernel32 {
 
 UINT WINAPI GetACP();
+LCID WINAPI GetThreadLocale();
+BOOL WINAPI SetThreadLocale(LCID Locale);
+LANGID WINAPI GetThreadUILanguage();
+BOOL WINAPI GetThreadPreferredUILanguages(DWORD dwFlags, PULONG pulNumLanguages, LPWSTR pwszLanguagesBuffer,
+										  PULONG pcchLanguagesBuffer);
+BOOL WINAPI SetThreadPreferredUILanguages(DWORD dwFlags, LPCWSTR pwszLanguagesBuffer, PULONG pulNumLanguages);
+int WINAPI CompareStringOrdinal(LPCWCH lpString1, int cchCount1, LPCWCH lpString2, int cchCount2, BOOL bIgnoreCase);
 LANGID WINAPI GetSystemDefaultLangID();
 LANGID WINAPI GetUserDefaultUILanguage();
 int WINAPI GetUserDefaultLocaleName(LPWSTR lpLocaleName, int cchLocaleName);
@@ -32,6 +43,7 @@ int WINAPI GetLocaleInfoA(LCID Locale, LCTYPE LCType, LPSTR lpLCData, int cchDat
 int WINAPI GetLocaleInfoW(LCID Locale, LCTYPE LCType, LPWSTR lpLCData, int cchData);
 int WINAPI GetLocaleInfoEx(LPCWSTR lpLocaleName, LCTYPE LCType, LPWSTR lpLCData, int cchData);
 BOOL WINAPI EnumSystemLocalesA(LOCALE_ENUMPROCA lpLocaleEnumProc, DWORD dwFlags);
+BOOL WINAPI EnumCalendarInfoW(CALINFO_ENUMPROCW lpCalInfoEnumProc, LCID Locale, CALID Calendar, CALTYPE CalType);
 LCID WINAPI GetUserDefaultLCID();
 BOOL WINAPI IsDBCSLeadByte(BYTE TestChar);
 BOOL WINAPI IsDBCSLeadByteEx(UINT CodePage, BYTE TestChar);

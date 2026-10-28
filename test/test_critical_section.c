@@ -165,10 +165,22 @@ static void test_delete_and_reinit(void) {
 	DeleteCriticalSection(&cs);
 }
 
+static void test_set_spin_count(void) {
+	CRITICAL_SECTION cs;
+	InitializeCriticalSectionAndSpinCount(&cs, 1000);
+	DWORD previous = SetCriticalSectionSpinCount(&cs, 2000);
+	TEST_CHECK_EQ(1000u, previous);
+	TEST_CHECK_EQ(2000u, SetCriticalSectionSpinCount(&cs, 0));
+	EnterCriticalSection(&cs);
+	LeaveCriticalSection(&cs);
+	DeleteCriticalSection(&cs);
+}
+
 int main(void) {
 	test_recursive_behavior();
 	test_wait_contention();
 	test_try_enter_contention();
 	test_delete_and_reinit();
+	test_set_spin_count();
 	return EXIT_SUCCESS;
 }

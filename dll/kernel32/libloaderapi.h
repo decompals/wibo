@@ -19,6 +19,7 @@ LPVOID WINAPI LockResource(HGLOBAL hResData);
 DWORD WINAPI SizeofResource(HMODULE hModule, HRSRC hResInfo);
 HMODULE WINAPI LoadLibraryA(LPCSTR lpLibFileName);
 HMODULE WINAPI LoadLibraryW(LPCWSTR lpLibFileName);
+HMODULE WINAPI LoadLibraryExA(LPCSTR lpLibFileName, HANDLE hFile, DWORD dwFlags);
 HMODULE WINAPI LoadLibraryExW(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwFlags);
 BOOL WINAPI FreeLibrary(HMODULE hLibModule);
 FARPROC WINAPI GetProcAddress(HMODULE hModule, LPCSTR lpProcName);

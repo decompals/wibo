@@ -225,6 +225,7 @@ add_executable(wibo
     dll/mscoree.cpp
     dll/ntdll.cpp
     dll/ole32.cpp
+    dll/oleaut32.cpp
     dll/rpcrt4.cpp
     dll/shlwapi.cpp
     dll/user32.cpp
@@ -395,6 +396,7 @@ wibo_codegen_module(NAME ws2 HEADERS dll/ws2.h)
 wibo_codegen_module(NAME vcruntime HEADERS dll/vcruntime.h)
 wibo_codegen_module(NAME lmgr HEADERS dll/lmgr.h)
 wibo_codegen_module(NAME ole32 HEADERS dll/ole32.h)
+wibo_codegen_module(NAME oleaut32 HEADERS dll/oleaut32.h)
 wibo_codegen_module(NAME user32 HEADERS dll/user32.h)
 wibo_codegen_module(NAME ntdll HEADERS dll/ntdll.h)
 wibo_codegen_module(NAME kernel32 HEADERS
@@ -524,6 +526,12 @@ if (WIBO_ENABLE_FIXTURE_TESTS)
         wibo_add_fixture_bin(NAME test_virtualalloc SOURCES test/test_virtualalloc.c)
         wibo_add_fixture_bin(NAME test_virtualquery SOURCES test/test_virtualquery.c)
         wibo_add_fixture_bin(NAME test_createfilemapping SOURCES test/test_createfilemapping.c)
+        wibo_add_fixture_bin(NAME test_findvolume SOURCES test/test_findvolume.c)
+        wibo_add_fixture_bin(NAME test_searchpath SOURCES test/test_searchpath.c)
+        wibo_add_fixture_bin(NAME test_bstr SOURCES test/test_bstr.c COMPILE_OPTIONS -loleaut32)
+        wibo_add_fixture_bin(NAME test_versioninfo SOURCES test/test_versioninfo.c)
+        wibo_add_fixture_bin(NAME test_charbuff SOURCES test/test_charbuff.c)
+        wibo_add_fixture_bin(NAME test_getfilesizeex SOURCES test/test_getfilesizeex.c)
         wibo_add_fixture_bin(NAME test_clsids SOURCES test/test_clsids.c COMPILE_OPTIONS -lole32)
         wibo_add_fixture_bin(NAME test_rtl SOURCES test/test_rtl.c)
         wibo_add_fixture_bin(NAME test_rtl_bitmap SOURCES test/test_rtl_bitmap.c)

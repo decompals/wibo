@@ -225,6 +225,7 @@ add_executable(wibo
     dll/mscoree.cpp
     dll/ntdll.cpp
     dll/ole32.cpp
+    dll/oleaut32.cpp
     dll/rpcrt4.cpp
     dll/shlwapi.cpp
     dll/user32.cpp
@@ -395,6 +396,7 @@ wibo_codegen_module(NAME ws2 HEADERS dll/ws2.h)
 wibo_codegen_module(NAME vcruntime HEADERS dll/vcruntime.h)
 wibo_codegen_module(NAME lmgr HEADERS dll/lmgr.h)
 wibo_codegen_module(NAME ole32 HEADERS dll/ole32.h)
+wibo_codegen_module(NAME oleaut32 HEADERS dll/oleaut32.h)
 wibo_codegen_module(NAME user32 HEADERS dll/user32.h)
 wibo_codegen_module(NAME ntdll HEADERS dll/ntdll.h)
 wibo_codegen_module(NAME kernel32 HEADERS
@@ -492,6 +494,7 @@ if (WIBO_ENABLE_FIXTURE_TESTS)
         wibo_add_fixture_bin(NAME test_thread_notifications SOURCES test/test_thread_notifications.c)
         wibo_add_fixture_bin(NAME test_bcrypt SOURCES test/test_bcrypt.c COMPILE_OPTIONS -lbcrypt)
         wibo_add_fixture_bin(NAME test_shlwapi SOURCES test/test_shlwapi.c COMPILE_OPTIONS -lshlwapi)
+        wibo_add_fixture_bin(NAME test_oleaut32 SOURCES test/test_oleaut32.c COMPILE_OPTIONS -loleaut32)
         wibo_add_fixture_bin(NAME test_ws2 SOURCES test/test_ws2.c COMPILE_OPTIONS -lws2_32)
         wibo_add_fixture_bin(NAME test_charupperbuff SOURCES test/test_charupperbuff.c COMPILE_OPTIONS -luser32)
         wibo_add_fixture_bin(NAME test_charlowerbuff SOURCES test/test_charlowerbuff.c COMPILE_OPTIONS -luser32)

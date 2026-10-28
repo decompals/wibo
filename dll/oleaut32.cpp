@@ -9,7 +9,7 @@
 
 namespace oleaut32 {
 
-// A BSTR points just past a 4-byte byte-length prefix and is NUL-terminated.
+// Returns a string pointer, The preceding uint contains the length in bytes (excluding NUL terminator).
 GUEST_PTR WINAPI SysAllocString(LPCWSTR psz) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("SysAllocString(%p)\n", psz);

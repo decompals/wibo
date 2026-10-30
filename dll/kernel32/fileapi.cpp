@@ -1297,31 +1297,107 @@ BOOL WINAPI DeleteFileW(LPCWSTR lpFileName) {
 	return DeleteFileA(name.c_str());
 }
 
+BOOL WINAPI MoveFileExA(LPCSTR lpExistingFileName, LPCSTR lpNewFileName, DWORD dwFlags) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("MoveFileExA(%s, %s, 0x%x)\n", lpExistingFileName ? lpExistingFileName : "(null)",
+			  lpNewFileName ? lpNewFileName : "(null)", dwFlags);
+	if (!lpExistingFileName) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+	if (dwFlags & MOVEFILE_DELAY_UNTIL_REBOOT) {
+		DEBUG_LOG("-> MOVEFILE_DELAY_UNTIL_REBOOT ignored\n");
+		return TRUE;
+	}
+	if (!lpNewFileName) {
+		return DeleteFileA(lpExistingFileName);
+	}
+	auto fromPath = files::pathFromWindows(lpExistingFileName);
+	auto toPath = files::pathFromWindows(lpNewFileName);
+	DEBUG_LOG("-> %s -> %s\n", fromPath.c_str(), toPath.c_str());
+
+	std::error_code ec;
+	auto fromStatus = std::filesystem::symlink_status(fromPath, ec);
+	if (!std::filesystem::exists(fromStatus)) {
+		auto parent = fromPath.parent_path();
+		bool parentExists = parent.empty() || std::filesystem::is_directory(parent, ec);
+		setLastError(parentExists ? ERROR_FILE_NOT_FOUND : ERROR_PATH_NOT_FOUND);
+		return FALSE;
+	}
+	auto toStatus = std::filesystem::status(toPath, ec);
+	if (std::filesystem::exists(toStatus)) {
+		// Case-insensitive path resolution can map the destination onto the source itself.
+		if (std::filesystem::equivalent(fromPath, toPath, ec)) {
+			DEBUG_LOG("-> same file, nothing to move\n");
+			return TRUE;
+		}
+		if (!(dwFlags & MOVEFILE_REPLACE_EXISTING)) {
+			setLastError(ERROR_ALREADY_EXISTS);
+			return FALSE;
+		}
+		if (std::filesystem::is_directory(toStatus)) {
+			DEBUG_LOG("-> cannot replace a directory\n");
+			setLastError(ERROR_ACCESS_DENIED);
+			return FALSE;
+		}
+	}
+
+	std::filesystem::rename(fromPath, toPath, ec);
+	if (ec.value() == EXDEV && (dwFlags & MOVEFILE_COPY_ALLOWED)) {
+		if (std::filesystem::is_directory(fromStatus)) {
+			DEBUG_LOG("-> EXDEV, cannot copy a directory\n");
+			setLastError(ERROR_ACCESS_DENIED);
+			return FALSE;
+		}
+		DEBUG_LOG("-> EXDEV, copying\n");
+		ec.clear();
+		struct stat fromStat{};
+		bool haveStat = stat(fromPath.c_str(), &fromStat) == 0;
+		auto copyOptions = (dwFlags & MOVEFILE_REPLACE_EXISTING) ? std::filesystem::copy_options::overwrite_existing
+																 : std::filesystem::copy_options::none;
+		std::filesystem::copy_file(fromPath, toPath, copyOptions, ec);
+		if (!ec) {
+			const struct timespec times[2] = {accessTimespec(fromStat), modifyTimespec(fromStat)};
+			if (haveStat && utimensat(AT_FDCWD, toPath.c_str(), times, 0) != 0) {
+				DEBUG_LOG("-> failed to copy timestamps: %s\n", strerror(errno));
+			}
+			std::error_code removeError;
+			std::filesystem::remove(fromPath, removeError);
+			if (removeError) {
+				DEBUG_LOG("-> source deletion failed after copy: %s\n", removeError.message().c_str());
+			}
+		}
+	}
+	if (ec) {
+		setLastError(ec.value() == ENOENT ? ERROR_PATH_NOT_FOUND : wibo::winErrorFromErrno(ec.value()));
+		return FALSE;
+	}
+	return TRUE;
+}
+
+BOOL WINAPI MoveFileExW(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName, DWORD dwFlags) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("MoveFileExW -> ");
+	if (!lpExistingFileName) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+	std::string from = wideStringToString(lpExistingFileName);
+	if (!lpNewFileName) {
+		return MoveFileExA(from.c_str(), nullptr, dwFlags);
+	}
+	std::string to = wideStringToString(lpNewFileName);
+	return MoveFileExA(from.c_str(), to.c_str(), dwFlags);
+}
+
 BOOL WINAPI MoveFileA(LPCSTR lpExistingFileName, LPCSTR lpNewFileName) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("MoveFileA(%s, %s)\n", lpExistingFileName ? lpExistingFileName : "(null)",
-			  lpNewFileName ? lpNewFileName : "(null)");
+	DEBUG_LOG("MoveFileA -> ");
 	if (!lpExistingFileName || !lpNewFileName) {
 		setLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
-	auto fromPath = files::pathFromWindows(lpExistingFileName);
-	auto toPath = files::pathFromWindows(lpNewFileName);
-	std::error_code ec;
-	if (std::filesystem::exists(toPath, ec)) {
-		setLastError(ERROR_ALREADY_EXISTS);
-		return FALSE;
-	}
-	if (ec) {
-		setLastError(wibo::winErrorFromErrno(ec.value()));
-		return FALSE;
-	}
-	std::filesystem::rename(fromPath, toPath, ec);
-	if (ec) {
-		setLastError(wibo::winErrorFromErrno(ec.value()));
-		return FALSE;
-	}
-	return TRUE;
+	return MoveFileExA(lpExistingFileName, lpNewFileName, MOVEFILE_COPY_ALLOWED);
 }
 
 BOOL WINAPI MoveFileW(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName) {
@@ -1333,7 +1409,7 @@ BOOL WINAPI MoveFileW(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName) {
 	}
 	std::string from = wideStringToString(lpExistingFileName);
 	std::string to = wideStringToString(lpNewFileName);
-	return MoveFileA(from.c_str(), to.c_str());
+	return MoveFileExA(from.c_str(), to.c_str(), MOVEFILE_COPY_ALLOWED);
 }
 
 DWORD WINAPI SetFilePointer(HANDLE hFile, LONG lDistanceToMove, PLONG lpDistanceToMoveHigh, DWORD dwMoveMethod) {

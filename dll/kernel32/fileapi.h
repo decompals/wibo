@@ -29,6 +29,11 @@ constexpr DWORD FILE_BEGIN = 0;
 constexpr DWORD FILE_CURRENT = 1;
 constexpr DWORD FILE_END = 2;
 
+constexpr DWORD MOVEFILE_REPLACE_EXISTING = 0x00000001;
+constexpr DWORD MOVEFILE_COPY_ALLOWED = 0x00000002;
+constexpr DWORD MOVEFILE_DELAY_UNTIL_REBOOT = 0x00000004;
+constexpr DWORD MOVEFILE_WRITE_THROUGH = 0x00000008;
+
 constexpr DWORD FILE_ATTRIBUTE_READONLY = 0x00000001;
 constexpr DWORD FILE_ATTRIBUTE_HIDDEN = 0x00000002;
 constexpr DWORD FILE_ATTRIBUTE_SYSTEM = 0x00000004;
@@ -92,6 +97,8 @@ BOOL WINAPI DeleteFileA(LPCSTR lpFileName);
 BOOL WINAPI DeleteFileW(LPCWSTR lpFileName);
 BOOL WINAPI MoveFileA(LPCSTR lpExistingFileName, LPCSTR lpNewFileName);
 BOOL WINAPI MoveFileW(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName);
+BOOL WINAPI MoveFileExA(LPCSTR lpExistingFileName, LPCSTR lpNewFileName, DWORD dwFlags);
+BOOL WINAPI MoveFileExW(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName, DWORD dwFlags);
 DWORD WINAPI SetFilePointer(HANDLE hFile, LONG lDistanceToMove, PLONG lpDistanceToMoveHigh, DWORD dwMoveMethod);
 BOOL WINAPI SetFilePointerEx(HANDLE hFile, LARGE_INTEGER liDistanceToMove, PLARGE_INTEGER lpNewFilePointer,
 							 DWORD dwMoveMethod);

@@ -32,6 +32,10 @@ DWORD winErrorFromErrno(int err) {
 		return ERROR_BROKEN_PIPE;
 	case ESPIPE:
 		return ERROR_INVALID_PARAMETER;
+	case EXDEV:
+		return ERROR_NOT_SAME_DEVICE;
+	case EISDIR:
+		return ERROR_ACCESS_DENIED;
 	default:
 		DEBUG_LOG("Unhandled errno %d -> ERROR_NOT_SUPPORTED\n", err);
 		return ERROR_NOT_SUPPORTED;

@@ -384,7 +384,8 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 			setLastError(ERROR_INVALID_ADDRESS);
 			return nullptr;
 		}
-		// Unlike VirtualAlloc, Windows reports a base past the user address range as an invalid parameter.
+		// Windows rejects a base past the user address range with ERROR_INVALID_PARAMETER (VirtualAlloc uses
+		// ERROR_INVALID_ADDRESS). Wine doesn't enforce the limit and maps the view, so this differs from Wine.
 		if (baseAddr > kHighestUserAddress) {
 			setLastError(ERROR_INVALID_PARAMETER);
 			return nullptr;

@@ -145,11 +145,45 @@ static void test_fixed_address_view_is_not_reallocated(void) {
 	TEST_CHECK(CloseHandle(file));
 }
 
+static void test_fixed_address_view_does_not_replace_allocation(void) {
+	const DWORD granularity = 0x10000;
+	const DWORD mapping_size = 2 * granularity;
+	HANDLE file = create_temp_file();
+	HANDLE mapping = CreateFileMappingA(file, NULL, PAGE_READWRITE, 0, mapping_size, NULL);
+	TEST_CHECK_MSG(mapping != NULL, "CreateFileMappingA(PAGE_READWRITE) failed: %lu", GetLastError());
+
+	uint8_t *block = (uint8_t *)VirtualAlloc(NULL, mapping_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	TEST_CHECK_MSG(block != NULL, "VirtualAlloc failed: %lu", GetLastError());
+	block[0] = 0x42;
+	block[mapping_size - 1] = 0x24;
+	SetLastError(0xdeadbeef);
+	TEST_CHECK(MapViewOfFileEx(mapping, FILE_MAP_ALL_ACCESS, 0, 0, mapping_size, block) == NULL);
+	TEST_CHECK_EQ(ERROR_INVALID_ADDRESS, GetLastError());
+	TEST_CHECK_EQ(0x42u, block[0]);
+	TEST_CHECK_EQ(0x24u, block[mapping_size - 1]);
+	TEST_CHECK(VirtualFree(block, 0, MEM_RELEASE));
+
+	// The start of the range is free, but the rest is still allocated.
+	uint8_t *tail = (uint8_t *)VirtualAlloc(block + granularity, granularity, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	TEST_CHECK_MSG(tail == block + granularity, "VirtualAlloc at %p returned %p: %lu", block + granularity, tail,
+				   GetLastError());
+	tail[0] = 0x5a;
+	SetLastError(0xdeadbeef);
+	TEST_CHECK(MapViewOfFileEx(mapping, FILE_MAP_ALL_ACCESS, 0, 0, mapping_size, block) == NULL);
+	TEST_CHECK_EQ(ERROR_INVALID_ADDRESS, GetLastError());
+	TEST_CHECK_EQ(0x5au, tail[0]);
+	TEST_CHECK(VirtualFree(tail, 0, MEM_RELEASE));
+
+	TEST_CHECK(CloseHandle(mapping));
+	TEST_CHECK(CloseHandle(file));
+}
+
 int main(void) {
 	test_readwrite_mapping_extends_file();
 	test_copy_mapping_does_not_write_file();
 	test_zero_size_file_mapping_fails();
 	test_zero_size_pagefile_mapping_fails();
 	test_fixed_address_view_is_not_reallocated();
+	test_fixed_address_view_does_not_replace_allocation();
 	return 0;
 }

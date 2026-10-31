@@ -102,10 +102,30 @@ static void test_zero_size_pagefile_mapping_fails(void) {
 	TEST_CHECK_EQ(ERROR_INVALID_PARAMETER, GetLastError());
 }
 
+static void test_two_views_of_pagefile_mapping_alias(void) {
+	const DWORD size = 4096;
+	HANDLE mapping = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, size, NULL);
+	TEST_CHECK_MSG(mapping != NULL, "CreateFileMappingA failed: %lu", GetLastError());
+
+	uint8_t *first = (uint8_t *)MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, size);
+	uint8_t *second = (uint8_t *)MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, size);
+	TEST_CHECK(first != NULL && second != NULL);
+	TEST_CHECK(first != second);
+	first[0] = 0x5a;
+	first[size - 1] = 0xa5;
+	TEST_CHECK_EQ(0x5au, second[0]);
+	TEST_CHECK_EQ(0xa5u, second[size - 1]);
+
+	TEST_CHECK(UnmapViewOfFile(second));
+	TEST_CHECK(UnmapViewOfFile(first));
+	TEST_CHECK(CloseHandle(mapping));
+}
+
 int main(void) {
 	test_readwrite_mapping_extends_file();
 	test_copy_mapping_does_not_write_file();
 	test_zero_size_file_mapping_fails();
 	test_zero_size_pagefile_mapping_fails();
+	test_two_views_of_pagefile_mapping_alias();
 	return 0;
 }

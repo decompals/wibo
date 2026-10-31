@@ -9,7 +9,9 @@
 #include "strutil.h"
 #include "types.h"
 
+#include <atomic>
 #include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <fcntl.h>
 #include <iterator>
@@ -22,6 +24,8 @@
 #include <utility>
 
 namespace {
+
+std::atomic<uint64_t> g_sectionSerial{0};
 
 constexpr size_t kVirtualAllocationGranularity = 64 * 1024;
 constexpr uintptr_t kProcessAddressLimit = 0x80000000;
@@ -229,6 +233,29 @@ bool growFileForMapping(int fd, uint64_t size) {
 	return true;
 }
 
+// Views of one section must alias, which MAP_ANONYMOUS cannot do, so pagefile-backed
+// sections get a real shared object to map.
+int createSectionBackingFd(uint64_t size) {
+#if defined(__linux__)
+	int fd = memfd_create("wibo-section", MFD_CLOEXEC);
+#else
+	char name[64];
+	snprintf(name, sizeof(name), "/wibo-section-%d-%llu", getpid(), static_cast<unsigned long long>(g_sectionSerial++));
+	int fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
+	if (fd >= 0) {
+		shm_unlink(name);
+	}
+#endif
+	if (fd < 0) {
+		return -1;
+	}
+	if (ftruncate(fd, static_cast<off_t>(size)) != 0) {
+		close(fd);
+		return -1;
+	}
+	return fd;
+}
+
 } // namespace
 
 namespace kernel32 {
@@ -252,12 +279,16 @@ HANDLE WINAPI CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMappi
 	mapping->protect = flProtect;
 
 	if (hFile == INVALID_HANDLE_VALUE) {
-		mapping->anonymous = true;
-		mapping->fd = -1;
 		if (size == 0) {
 			setLastError(ERROR_INVALID_PARAMETER);
 			return NO_HANDLE;
 		}
+		mapping->fd = createSectionBackingFd(size);
+		if (mapping->fd < 0) {
+			setLastErrorFromErrno();
+			return NO_HANDLE;
+		}
+		mapping->anonymous = true;
 		mapping->maxSize = size;
 	} else {
 		auto file = wibo::handles().getAs<FileObject>(hFile);
@@ -358,7 +389,7 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 		prot |= PROT_EXEC;
 	}
 
-	int flags = (mapping->anonymous ? MAP_ANONYMOUS : 0) | (access.copy ? MAP_PRIVATE : MAP_SHARED);
+	int flags = access.copy ? MAP_PRIVATE : MAP_SHARED;
 	const size_t pageSize = wibo::heap::systemPageSize();
 	off_t alignedOffset = mapping->anonymous ? 0 : static_cast<off_t>(offset & ~static_cast<uint64_t>(pageSize - 1));
 	size_t offsetDelta = static_cast<size_t>(offset - static_cast<uint64_t>(alignedOffset));
@@ -373,7 +404,7 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 		return nullptr;
 	}
 
-	int mmapFd = mapping->anonymous ? -1 : mapping->fd;
+	int mmapFd = mapping->fd;
 	void *requestedBase = nullptr;
 	int mapFlags = flags;
 	bool reservedMapping = false;

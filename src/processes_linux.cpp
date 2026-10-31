@@ -68,6 +68,21 @@ std::unique_ptr<ProcessManagerImpl> createProcessManagerImpl() {
 
 int spawnProcess(char *const argv[], char *const envp[], SpawnProcessInfo &info) {
 	pid_t pid = static_cast<pid_t>(syscall(SYS_clone, CLONE_PIDFD, nullptr, &info.pidfd));
+	if (pid < 0 && (errno == EINVAL || errno == ENOSYS)) {
+		// qemu-user rejects CLONE_PIDFD, so take the pidfd after the fork instead.
+		info.pidfd = -1;
+		pid = fork();
+		if (pid > 0) {
+			info.pidfd = static_cast<int>(syscall(SYS_pidfd_open, pid, 0));
+			if (info.pidfd < 0) {
+				int err = errno;
+				perror("pidfd_open");
+				kill(pid, SIGKILL);
+				waitpid(pid, nullptr, 0);
+				return err;
+			}
+		}
+	}
 	if (pid < 0) {
 		info.pidfd = -1;
 		int err = errno;

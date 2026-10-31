@@ -102,10 +102,106 @@ static void test_zero_size_pagefile_mapping_fails(void) {
 	TEST_CHECK_EQ(ERROR_INVALID_PARAMETER, GetLastError());
 }
 
+static void test_fixed_address_view_is_not_reallocated(void) {
+	// Not a multiple of the 64 KiB allocation granularity, so the view ends partway through a granule.
+	const DWORD mapping_size = 0x23000;
+	HANDLE file = create_temp_file();
+	HANDLE mapping = CreateFileMappingA(file, NULL, PAGE_READWRITE, 0, mapping_size, NULL);
+	TEST_CHECK_MSG(mapping != NULL, "CreateFileMappingA(PAGE_READWRITE) failed: %lu", GetLastError());
+
+	// Find a free address by reserving a range and releasing it, then map the view there.
+	uint8_t *base = (uint8_t *)VirtualAlloc(NULL, mapping_size, MEM_RESERVE, PAGE_NOACCESS);
+	TEST_CHECK_MSG(base != NULL, "VirtualAlloc(MEM_RESERVE) failed: %lu", GetLastError());
+	TEST_CHECK(VirtualFree(base, 0, MEM_RELEASE));
+	uint8_t *view = (uint8_t *)MapViewOfFileEx(mapping, FILE_MAP_ALL_ACCESS, 0, 0, mapping_size, base);
+	TEST_CHECK_MSG(view == base, "MapViewOfFileEx at %p failed: %lu", base, GetLastError());
+	view[0] = 0x3c;
+	view[mapping_size - 1] = 0xc3;
+
+	uint8_t *block = (uint8_t *)VirtualAlloc(NULL, mapping_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	TEST_CHECK_MSG(block != NULL, "VirtualAlloc failed: %lu", GetLastError());
+	TEST_CHECK_MSG(block + mapping_size <= view || block >= view + mapping_size,
+				   "VirtualAlloc returned %p, overlapping the view at %p", block, view);
+	block[0] = 0xff;
+	block[mapping_size - 1] = 0xff;
+	TEST_CHECK(VirtualFree(block, 0, MEM_RELEASE));
+	TEST_CHECK_EQ(0x3cu, view[0]);
+	TEST_CHECK_EQ(0xc3u, view[mapping_size - 1]);
+
+	SetLastError(0xdeadbeef);
+	TEST_CHECK(VirtualAlloc(base, mapping_size, MEM_RESERVE, PAGE_NOACCESS) == NULL);
+	TEST_CHECK_EQ(ERROR_INVALID_ADDRESS, GetLastError());
+	SetLastError(0xdeadbeef);
+	TEST_CHECK(MapViewOfFileEx(mapping, FILE_MAP_ALL_ACCESS, 0, 0, mapping_size, base) == NULL);
+	TEST_CHECK_EQ(ERROR_INVALID_ADDRESS, GetLastError());
+
+	TEST_CHECK(UnmapViewOfFile(view));
+	uint8_t *reserved = (uint8_t *)VirtualAlloc(base, mapping_size, MEM_RESERVE, PAGE_NOACCESS);
+	TEST_CHECK_MSG(reserved == base, "VirtualAlloc(MEM_RESERVE) at %p after unmapping returned %p: %lu", base, reserved,
+				   GetLastError());
+	TEST_CHECK(VirtualFree(reserved, 0, MEM_RELEASE));
+
+	TEST_CHECK(CloseHandle(mapping));
+	TEST_CHECK(CloseHandle(file));
+}
+
+static void test_fixed_address_view_does_not_replace_allocation(void) {
+	const DWORD granularity = 0x10000;
+	const DWORD mapping_size = 2 * granularity;
+	HANDLE file = create_temp_file();
+	HANDLE mapping = CreateFileMappingA(file, NULL, PAGE_READWRITE, 0, mapping_size, NULL);
+	TEST_CHECK_MSG(mapping != NULL, "CreateFileMappingA(PAGE_READWRITE) failed: %lu", GetLastError());
+
+	uint8_t *block = (uint8_t *)VirtualAlloc(NULL, mapping_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	TEST_CHECK_MSG(block != NULL, "VirtualAlloc failed: %lu", GetLastError());
+	block[0] = 0x42;
+	block[mapping_size - 1] = 0x24;
+	SetLastError(0xdeadbeef);
+	TEST_CHECK(MapViewOfFileEx(mapping, FILE_MAP_ALL_ACCESS, 0, 0, mapping_size, block) == NULL);
+	TEST_CHECK_EQ(ERROR_INVALID_ADDRESS, GetLastError());
+	TEST_CHECK_EQ(0x42u, block[0]);
+	TEST_CHECK_EQ(0x24u, block[mapping_size - 1]);
+	TEST_CHECK(VirtualFree(block, 0, MEM_RELEASE));
+
+	// The start of the range is free, but the rest is still allocated.
+	uint8_t *tail = (uint8_t *)VirtualAlloc(block + granularity, granularity, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	TEST_CHECK_MSG(tail == block + granularity, "VirtualAlloc at %p returned %p: %lu", block + granularity, tail,
+				   GetLastError());
+	tail[0] = 0x5a;
+	SetLastError(0xdeadbeef);
+	TEST_CHECK(MapViewOfFileEx(mapping, FILE_MAP_ALL_ACCESS, 0, 0, mapping_size, block) == NULL);
+	TEST_CHECK_EQ(ERROR_INVALID_ADDRESS, GetLastError());
+	TEST_CHECK_EQ(0x5au, tail[0]);
+	TEST_CHECK(VirtualFree(tail, 0, MEM_RELEASE));
+
+	TEST_CHECK(CloseHandle(mapping));
+	TEST_CHECK(CloseHandle(file));
+}
+
+static void test_fixed_address_view_above_2gb_fails(void) {
+	// Not large-address-aware, so user addresses end at 0x7FFEFFFF. Wine maps the view anyway; Windows refuses it.
+	uint8_t *const base = (uint8_t *)0x80000000u;
+	const DWORD mapping_size = 0x10000;
+	HANDLE file = create_temp_file();
+	HANDLE mapping = CreateFileMappingA(file, NULL, PAGE_READWRITE, 0, mapping_size, NULL);
+	TEST_CHECK_MSG(mapping != NULL, "CreateFileMappingA(PAGE_READWRITE) failed: %lu", GetLastError());
+
+	SetLastError(0xdeadbeef);
+	uint8_t *view = (uint8_t *)MapViewOfFileEx(mapping, FILE_MAP_ALL_ACCESS, 0, 0, mapping_size, base);
+	TEST_CHECK_MSG(view == NULL, "MapViewOfFileEx at %p returned %p", base, view);
+	TEST_CHECK_EQ(ERROR_INVALID_PARAMETER, GetLastError());
+
+	TEST_CHECK(CloseHandle(mapping));
+	TEST_CHECK(CloseHandle(file));
+}
+
 int main(void) {
 	test_readwrite_mapping_extends_file();
 	test_copy_mapping_does_not_write_file();
 	test_zero_size_file_mapping_fails();
 	test_zero_size_pagefile_mapping_fails();
+	test_fixed_address_view_is_not_reallocated();
+	test_fixed_address_view_does_not_replace_allocation();
+	test_fixed_address_view_above_2gb_fails();
 	return 0;
 }

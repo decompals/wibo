@@ -56,7 +56,6 @@ struct ViewInfo {
 	DWORD protect = PAGE_NOACCESS;
 	DWORD allocationProtect = PAGE_NOACCESS;
 	DWORD type = MEM_PRIVATE;
-	bool managed = false;
 };
 
 std::map<uintptr_t, ViewInfo> g_viewInfo;
@@ -375,8 +374,9 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 
 	int mmapFd = mapping->anonymous ? -1 : mapping->fd;
 	void *requestedBase = nullptr;
-	int mapFlags = flags;
-	bool reservedMapping = false;
+	// Claim the range in the guest mapping table before mapping. The table, not mmap, knows whether the range is
+	// free (free guest memory may be covered by a PROT_NONE placeholder), and the claim keeps VirtualAlloc off it.
+	wibo::heap::VmStatus reserveStatus;
 	if (baseAddress) {
 		uintptr_t baseAddr = reinterpret_cast<uintptr_t>(baseAddress);
 		if (baseAddr == 0 || (baseAddr % kVirtualAllocationGranularity) != 0) {
@@ -393,25 +393,17 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 			return nullptr;
 		}
 		requestedBase = reinterpret_cast<void *>(mapBaseAddr);
-#ifdef MAP_FIXED_NOREPLACE
-		mapFlags |= MAP_FIXED_NOREPLACE;
-#else
-		mapFlags |= MAP_FIXED;
-#endif
+		reserveStatus = wibo::heap::reserveViewRangeAt(requestedBase, mapLength);
 	} else {
-		void *candidate = nullptr;
-		wibo::heap::VmStatus reserveStatus = wibo::heap::reserveViewRange(mapLength, 0, 0, &candidate);
-		if (reserveStatus != wibo::heap::VmStatus::Success) {
-			setLastError(wibo::heap::win32ErrorFromVmStatus(reserveStatus));
-			return nullptr;
-		}
-		reservedMapping = true;
-		requestedBase = candidate;
-		mapFlags |= MAP_FIXED;
+		reserveStatus = wibo::heap::reserveViewRange(mapLength, 0, 0, &requestedBase);
+	}
+	if (reserveStatus != wibo::heap::VmStatus::Success) {
+		setLastError(wibo::heap::win32ErrorFromVmStatus(reserveStatus));
+		return nullptr;
 	}
 
 	errno = 0;
-	void *mapBase = mmap(requestedBase, mapLength, prot, mapFlags, mmapFd, alignedOffset);
+	void *mapBase = mmap(requestedBase, mapLength, prot, flags | MAP_FIXED, mmapFd, alignedOffset);
 	if (mapBase == MAP_FAILED) {
 		int err = errno;
 		if (baseAddress && (err == ENOMEM || err == EEXIST || err == EINVAL || err == EPERM)) {
@@ -419,18 +411,14 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 		} else {
 			setLastError(wibo::winErrorFromErrno(err));
 		}
-		if (reservedMapping) {
-			wibo::heap::releaseViewRange(requestedBase);
-		}
+		wibo::heap::releaseViewRange(requestedBase, mapLength);
 		return nullptr;
 	}
 	void *viewPtr = static_cast<uint8_t *>(mapBase) + offsetDelta;
 	if (baseAddress && viewPtr != baseAddress) {
 		munmap(mapBase, mapLength);
 		setLastError(ERROR_INVALID_ADDRESS);
-		if (reservedMapping) {
-			wibo::heap::releaseViewRange(requestedBase);
-		}
+		wibo::heap::releaseViewRange(requestedBase, mapLength);
 		return nullptr;
 	}
 	uintptr_t viewLength = static_cast<uintptr_t>(length);
@@ -448,10 +436,7 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 	view.protect = desiredAccessToProtect(dwDesiredAccess, protect);
 	view.allocationProtect = protect;
 	view.type = MEM_MAPPED;
-	view.managed = reservedMapping;
-	if (reservedMapping) {
-		wibo::heap::registerViewRange(mapBase, mapLength, protect, view.protect);
-	}
+	wibo::heap::registerViewRange(mapBase, mapLength, protect, view.protect);
 	{
 		std::lock_guard guard(g_viewInfoMutex);
 		g_viewInfo.emplace(view.viewBase, std::move(view));
@@ -500,15 +485,9 @@ BOOL WINAPI UnmapViewOfFile(LPCVOID lpBaseAddress) {
 	}
 	void *base = reinterpret_cast<void *>(it->second.allocationBase);
 	size_t length = it->second.allocationLength;
-	bool managed = it->second.managed;
 	g_viewInfo.erase(it);
 	lk.unlock();
-	if (length != 0) {
-		munmap(base, length);
-	}
-	if (managed) {
-		wibo::heap::releaseViewRange(base);
-	}
+	wibo::heap::releaseViewRange(base, length);
 	return TRUE;
 }
 

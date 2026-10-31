@@ -1,6 +1,13 @@
 #pragma once
 
-#define TEB_SELF 0x18	 // Self
+#define TEB_SELF 0x18			  // Self
+#define TEB_CLIENT_ID_THREAD 0x24 // ClientId.UniqueThread
+#define TEB_LAST_ERROR 0x34		  // LastErrorValue
+
+// RTL_CRITICAL_SECTION
+#define CS_LOCK_COUNT 0x4
+#define CS_RECURSION_COUNT 0x8
+#define CS_OWNING_THREAD 0xc
 #define TEB_FS_SEL 0xf98 // CurrentFsSelector
 #define TEB_GS_SEL 0xf9a // CurrentGsSelector
 

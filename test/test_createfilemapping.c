@@ -178,6 +178,23 @@ static void test_fixed_address_view_does_not_replace_allocation(void) {
 	TEST_CHECK(CloseHandle(file));
 }
 
+static void test_fixed_address_view_above_2gb_fails(void) {
+	// Not large-address-aware, so user addresses end at 0x7FFEFFFF. Wine maps the view anyway; Windows refuses it.
+	uint8_t *const base = (uint8_t *)0x80000000u;
+	const DWORD mapping_size = 0x10000;
+	HANDLE file = create_temp_file();
+	HANDLE mapping = CreateFileMappingA(file, NULL, PAGE_READWRITE, 0, mapping_size, NULL);
+	TEST_CHECK_MSG(mapping != NULL, "CreateFileMappingA(PAGE_READWRITE) failed: %lu", GetLastError());
+
+	SetLastError(0xdeadbeef);
+	uint8_t *view = (uint8_t *)MapViewOfFileEx(mapping, FILE_MAP_ALL_ACCESS, 0, 0, mapping_size, base);
+	TEST_CHECK_MSG(view == NULL, "MapViewOfFileEx at %p returned %p", base, view);
+	TEST_CHECK_EQ(ERROR_INVALID_PARAMETER, GetLastError());
+
+	TEST_CHECK(CloseHandle(mapping));
+	TEST_CHECK(CloseHandle(file));
+}
+
 int main(void) {
 	test_readwrite_mapping_extends_file();
 	test_copy_mapping_does_not_write_file();
@@ -185,5 +202,6 @@ int main(void) {
 	test_zero_size_pagefile_mapping_fails();
 	test_fixed_address_view_is_not_reallocated();
 	test_fixed_address_view_does_not_replace_allocation();
+	test_fixed_address_view_above_2gb_fails();
 	return 0;
 }

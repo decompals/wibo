@@ -25,6 +25,7 @@ namespace {
 
 constexpr size_t kVirtualAllocationGranularity = 64 * 1024;
 constexpr uintptr_t kProcessAddressLimit = 0x80000000;
+constexpr uintptr_t kHighestUserAddress = 0x7FFEFFFF;
 
 struct MappingObject : ObjectBase {
 	static constexpr ObjectType kType = ObjectType::Mapping;
@@ -381,6 +382,11 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 		uintptr_t baseAddr = reinterpret_cast<uintptr_t>(baseAddress);
 		if (baseAddr == 0 || (baseAddr % kVirtualAllocationGranularity) != 0) {
 			setLastError(ERROR_INVALID_ADDRESS);
+			return nullptr;
+		}
+		// Unlike VirtualAlloc, Windows reports a base past the user address range as an invalid parameter.
+		if (baseAddr > kHighestUserAddress) {
+			setLastError(ERROR_INVALID_PARAMETER);
 			return nullptr;
 		}
 		if (offsetDelta > baseAddr) {

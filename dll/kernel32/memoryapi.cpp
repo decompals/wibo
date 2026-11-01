@@ -375,8 +375,7 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 
 	int mmapFd = mapping->anonymous ? -1 : mapping->fd;
 	void *requestedBase = nullptr;
-	// Claim the range in the guest mapping table before mapping. The table, not mmap, knows whether the range is
-	// free (free guest memory may be covered by a PROT_NONE placeholder), and the claim keeps VirtualAlloc off it.
+	// Claim the range in the guest mapping table before mapping.
 	wibo::heap::VmStatus reserveStatus;
 	if (baseAddress) {
 		uintptr_t baseAddr = reinterpret_cast<uintptr_t>(baseAddress);
@@ -384,8 +383,8 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 			setLastError(ERROR_INVALID_ADDRESS);
 			return nullptr;
 		}
-		// Windows rejects a base past the user address range with ERROR_INVALID_PARAMETER (VirtualAlloc uses
-		// ERROR_INVALID_ADDRESS). Wine doesn't enforce the limit and maps the view, so this differs from Wine.
+		// Windows rejects a base past the user address range. Wine doesn't enforce the limit
+		// and maps the view, so this differs from Wine.
 		if (baseAddr > kHighestUserAddress) {
 			setLastError(ERROR_INVALID_PARAMETER);
 			return nullptr;

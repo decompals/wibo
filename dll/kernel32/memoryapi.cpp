@@ -26,6 +26,7 @@ namespace {
 constexpr size_t kVirtualAllocationGranularity = 64 * 1024;
 constexpr uintptr_t kProcessAddressLimit = 0x80000000;
 constexpr uintptr_t kHighestUserAddress = 0x7FFEFFFF;
+constexpr uintptr_t kSharedUserDataAddr = 0x7FFE0000;
 
 struct MappingObject : ObjectBase {
 	static constexpr ObjectType kType = ObjectType::Mapping;
@@ -387,6 +388,11 @@ static LPVOID mapViewOfFileInternal(Pin<MappingObject> mapping, DWORD dwDesiredA
 		// and maps the view, so this differs from Wine.
 		if (baseAddr > kHighestUserAddress) {
 			setLastError(ERROR_INVALID_PARAMETER);
+			return nullptr;
+		}
+		// Windows always maps the shared user data page at 0x7FFE0000, so a view covering it fails like any overlap.
+		if (baseAddr >= kSharedUserDataAddr || length > kSharedUserDataAddr - baseAddr) {
+			setLastError(ERROR_INVALID_ADDRESS);
 			return nullptr;
 		}
 		if (offsetDelta > baseAddr) {

@@ -178,18 +178,32 @@ static void test_fixed_address_view_does_not_replace_allocation(void) {
 	TEST_CHECK(CloseHandle(file));
 }
 
-static void test_fixed_address_view_above_2gb_fails(void) {
-	// Not large-address-aware, so user addresses end at 0x7FFEFFFF. Wine maps the view anyway; Windows refuses it.
-	uint8_t *const base = (uint8_t *)0x80000000u;
-	const DWORD mapping_size = 0x10000;
+static void test_fixed_address_view_at_top_of_user_range_fails(void) {
+	// Not large-address-aware, so user addresses end at 0x7FFEFFFF.
+	static const struct {
+		uintptr_t base;
+		DWORD size;
+		DWORD error;
+	} cases[] = {
+		// The base is past the end. Wine maps these views anyway; Windows refuses them.
+		{0x80000000u, 0x10000, ERROR_INVALID_PARAMETER},
+		{0x7FFF0000u, 0x10000, ERROR_INVALID_PARAMETER},
+		// The view covers the shared user data page at 0x7FFE0000.
+		{0x7FFE0000u, 0x10000, ERROR_INVALID_ADDRESS},
+		{0x7FFE0000u, 0x10001, ERROR_INVALID_ADDRESS},
+		{0x7FFD0000u, 0x20000, ERROR_INVALID_ADDRESS},
+	};
 	HANDLE file = create_temp_file();
-	HANDLE mapping = CreateFileMappingA(file, NULL, PAGE_READWRITE, 0, mapping_size, NULL);
+	HANDLE mapping = CreateFileMappingA(file, NULL, PAGE_READWRITE, 0, 0x20000, NULL);
 	TEST_CHECK_MSG(mapping != NULL, "CreateFileMappingA(PAGE_READWRITE) failed: %lu", GetLastError());
 
-	SetLastError(0xdeadbeef);
-	uint8_t *view = (uint8_t *)MapViewOfFileEx(mapping, FILE_MAP_ALL_ACCESS, 0, 0, mapping_size, base);
-	TEST_CHECK_MSG(view == NULL, "MapViewOfFileEx at %p returned %p", base, view);
-	TEST_CHECK_EQ(ERROR_INVALID_PARAMETER, GetLastError());
+	for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+		void *base = (void *)cases[i].base;
+		SetLastError(0xdeadbeef);
+		void *view = MapViewOfFileEx(mapping, FILE_MAP_ALL_ACCESS, 0, 0, cases[i].size, base);
+		TEST_CHECK_MSG(view == NULL, "MapViewOfFileEx of 0x%lx bytes at %p returned %p", cases[i].size, base, view);
+		TEST_CHECK_EQ(cases[i].error, GetLastError());
+	}
 
 	TEST_CHECK(CloseHandle(mapping));
 	TEST_CHECK(CloseHandle(file));
@@ -202,6 +216,6 @@ int main(void) {
 	test_zero_size_pagefile_mapping_fails();
 	test_fixed_address_view_is_not_reallocated();
 	test_fixed_address_view_does_not_replace_allocation();
-	test_fixed_address_view_above_2gb_fails();
+	test_fixed_address_view_at_top_of_user_range_fails();
 	return 0;
 }

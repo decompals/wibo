@@ -186,6 +186,20 @@ DWORD WINAPI GetTickCount() {
 	return 0;
 }
 
+ULONGLONG WINAPI GetTickCount64() {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("GetTickCount64()\n");
+	struct timespec ts{};
+	if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+		ULONGLONG result =
+			static_cast<ULONGLONG>(ts.tv_sec) * 1000ULL + static_cast<ULONGLONG>(ts.tv_nsec) / 1000000ULL;
+		DEBUG_LOG(" -> %llu\n", static_cast<unsigned long long>(result));
+		return result;
+	}
+	DEBUG_LOG(" -> 0\n");
+	return 0;
+}
+
 DWORD WINAPI GetVersion() {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("GetVersion()\n");

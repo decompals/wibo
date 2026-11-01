@@ -435,6 +435,34 @@ int WINAPI LCMapStringW(LCID Locale, DWORD dwMapFlags, LPCWCH lpSrcStr, int cchS
 	return static_cast<int>(srcLen);
 }
 
+BOOL WINAPI IsValidLocaleName(LPCWSTR lpLocaleName) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("IsValidLocaleName(%p)\n", lpLocaleName);
+	return lpLocaleName != nullptr;
+}
+
+int WINAPI LCMapStringEx(LPCWSTR lpLocaleName, DWORD dwMapFlags, LPCWCH lpSrcStr, int cchSrc, LPWSTR lpDestStr,
+						 int cchDest, LPVOID lpVersionInformation, LPVOID lpReserved, LPVOID sortHandle) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("LCMapStringEx(%p, 0x%x, %p, %d, %p, %d)\n", lpLocaleName, dwMapFlags, lpSrcStr, cchSrc, lpDestStr,
+			  cchDest);
+	(void)lpVersionInformation;
+	(void)lpReserved;
+	(void)sortHandle;
+	return LCMapStringW(0, dwMapFlags, lpSrcStr, cchSrc, lpDestStr, cchDest);
+}
+
+int WINAPI CompareStringEx(LPCWSTR lpLocaleName, DWORD dwCmpFlags, LPCWCH lpString1, int cchCount1, LPCWCH lpString2,
+						   int cchCount2, LPVOID lpVersionInformation, LPVOID lpReserved, LPVOID lParam) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("CompareStringEx(%p, 0x%x, %p, %d, %p, %d)\n", lpLocaleName, dwCmpFlags, lpString1, cchCount1, lpString2,
+			  cchCount2);
+	(void)lpVersionInformation;
+	(void)lpReserved;
+	(void)lParam;
+	return CompareStringW(0, dwCmpFlags, lpString1, cchCount1, lpString2, cchCount2);
+}
+
 int WINAPI LCMapStringA(LCID Locale, DWORD dwMapFlags, LPCCH lpSrcStr, int cchSrc, LPSTR lpDestStr, int cchDest) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("LCMapStringA(%u, 0x%x, %p, %d, %p, %d)\n", Locale, dwMapFlags, lpSrcStr, cchSrc, lpDestStr, cchDest);

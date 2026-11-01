@@ -73,6 +73,7 @@ void WINAPI GetSystemTime(LPSYSTEMTIME lpSystemTime);
 void WINAPI GetLocalTime(LPSYSTEMTIME lpSystemTime);
 void WINAPI GetSystemTimeAsFileTime(LPFILETIME lpSystemTimeAsFileTime);
 DWORD WINAPI GetTickCount();
+ULONGLONG WINAPI GetTickCount64();
 DWORD WINAPI GetVersion();
 BOOL WINAPI GetVersionExA(LPOSVERSIONINFOA lpVersionInformation);
 BOOL WINAPI GetVersionExW(LPOSVERSIONINFOW lpVersionInformation);

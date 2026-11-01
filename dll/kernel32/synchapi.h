@@ -65,6 +65,8 @@ using LPINIT_ONCE = INIT_ONCE *;
 
 constexpr INIT_ONCE INIT_ONCE_STATIC_INIT{GUEST_NULL};
 
+typedef BOOL(_CC_STDCALL *PINIT_ONCE_FN)(PINIT_ONCE, LPVOID, GUEST_PTR *);
+
 union RTL_SRWLOCK {
 	ULONG Value;
 };
@@ -93,6 +95,9 @@ HANDLE WINAPI CreateSemaphoreW(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LONG
 							   LPCWSTR lpName);
 BOOL WINAPI ReleaseSemaphore(HANDLE hSemaphore, LONG lReleaseCount, PLONG lpPreviousCount);
 DWORD WINAPI WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds);
+DWORD WINAPI WaitForSingleObjectEx(HANDLE hHandle, DWORD dwMilliseconds, BOOL bAlertable);
+DWORD WINAPI WaitForMultipleObjectsEx(DWORD nCount, const HANDLE *lpHandles, BOOL bWaitAll, DWORD dwMilliseconds,
+									  BOOL bAlertable);
 DWORD WINAPI WaitForMultipleObjects(DWORD nCount, const HANDLE *lpHandles, BOOL bWaitAll, DWORD dwMilliseconds);
 void WINAPI InitializeCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 BOOL WINAPI InitializeCriticalSectionEx(LPCRITICAL_SECTION lpCriticalSection, DWORD dwSpinCount, DWORD Flags);
@@ -101,8 +106,11 @@ void WINAPI DeleteCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 void WINAPI EnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 void WINAPI LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
 BOOL WINAPI TryEnterCriticalSection(LPCRITICAL_SECTION lpCriticalSection);
+BOOL WINAPI InitOnceExecuteOnce(PINIT_ONCE lpInitOnce, PINIT_ONCE_FN lpInitFn, LPVOID lpParameter,
+								GUEST_PTR *lpContext);
 BOOL WINAPI InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBOOL fPending, GUEST_PTR *lpContext);
 BOOL WINAPI InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpContext);
+void WINAPI InitializeSRWLock(PSRWLOCK SRWLock);
 void WINAPI AcquireSRWLockShared(PSRWLOCK SRWLock);
 void WINAPI ReleaseSRWLockShared(PSRWLOCK SRWLock);
 void WINAPI AcquireSRWLockExclusive(PSRWLOCK SRWLock);

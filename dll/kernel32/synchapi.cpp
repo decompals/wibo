@@ -7,6 +7,8 @@
 #include "heap.h"
 #include "interlockedapi.h"
 #include "internal.h"
+#include "kernel32.h"
+#include "kernel32_trampolines.h"
 #include "processthreadsapi.h"
 #include "strutil.h"
 #include "types.h"
@@ -713,6 +715,22 @@ BOOL WINAPI ResetEvent(HANDLE hEvent) {
 	return TRUE;
 }
 
+DWORD WINAPI WaitForSingleObjectEx(HANDLE hHandle, DWORD dwMilliseconds, BOOL bAlertable) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("WaitForSingleObjectEx(%p, %u, %d)\n", hHandle, dwMilliseconds, bAlertable);
+	(void)bAlertable;
+	return WaitForSingleObject(hHandle, dwMilliseconds);
+}
+
+DWORD WINAPI WaitForMultipleObjectsEx(DWORD nCount, const HANDLE *lpHandles, BOOL bWaitAll, DWORD dwMilliseconds,
+									  BOOL bAlertable) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("WaitForMultipleObjectsEx(%u, %p, %d, %u, %d)\n", nCount, lpHandles, bWaitAll, dwMilliseconds,
+			  bAlertable);
+	(void)bAlertable;
+	return WaitForMultipleObjects(nCount, lpHandles, bWaitAll, dwMilliseconds);
+}
+
 DWORD WINAPI WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("WaitForSingleObject(%p, %u)\n", hHandle, dwMilliseconds);
@@ -1119,6 +1137,42 @@ void WINAPI LeaveCriticalSection(LPCRITICAL_SECTION lpCriticalSection) {
 	}
 }
 
+BOOL WINAPI InitOnceExecuteOnce(PINIT_ONCE lpInitOnce, PINIT_ONCE_FN lpInitFn, LPVOID lpParameter,
+								GUEST_PTR *lpContext) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("InitOnceExecuteOnce(%p, %p, %p, %p)\n", lpInitOnce, lpInitFn, lpParameter, lpContext);
+	BOOL pending = FALSE;
+	GUEST_PTR context = GUEST_NULL;
+	if (!InitOnceBeginInitialize(lpInitOnce, 0, &pending, &context)) {
+		return FALSE;
+	}
+	if (!pending) {
+		if (lpContext) {
+			*lpContext = context;
+		}
+		return TRUE;
+	}
+	// The callback writes its context through a pointer, which must be visible to the guest.
+	auto *slot = static_cast<GUEST_PTR *>(wibo::heap::guestMalloc(sizeof(GUEST_PTR)));
+	if (!slot) {
+		InitOnceComplete(lpInitOnce, INIT_ONCE_INIT_FAILED, nullptr);
+		setLastError(ERROR_NOT_ENOUGH_MEMORY);
+		return FALSE;
+	}
+	*slot = GUEST_NULL;
+	BOOL ok = call_PINIT_ONCE_FN(lpInitFn, lpInitOnce, lpParameter, slot);
+	GUEST_PTR result = *slot;
+	wibo::heap::guestFree(slot);
+	InitOnceComplete(lpInitOnce, ok ? 0 : INIT_ONCE_INIT_FAILED, fromGuestPtr(result));
+	if (!ok) {
+		return FALSE;
+	}
+	if (lpContext) {
+		*lpContext = result;
+	}
+	return TRUE;
+}
+
 BOOL WINAPI InitOnceBeginInitialize(LPINIT_ONCE lpInitOnce, DWORD dwFlags, PBOOL fPending, GUEST_PTR *lpContext) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("InitOnceBeginInitialize(%p, %u, %p, %p)\n", lpInitOnce, dwFlags, fPending, lpContext);
@@ -1315,6 +1369,14 @@ BOOL WINAPI InitOnceComplete(LPINIT_ONCE lpInitOnce, DWORD dwFlags, LPVOID lpCon
 			setLastError(ERROR_GEN_FAILURE);
 			return FALSE;
 		}
+	}
+}
+
+void WINAPI InitializeSRWLock(PSRWLOCK SRWLock) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("InitializeSRWLock(%p)\n", SRWLock);
+	if (SRWLock) {
+		SRWLock->Value = 0;
 	}
 }
 

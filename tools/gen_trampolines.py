@@ -887,6 +887,11 @@ def emit_cc_thunk64(f: FuncInfo | TypedefInfo, lines: List[str]):
         # Call into target
         lines.append(f"\tcall {call_target}")
 
+        # A 32-bit caller reads a 64-bit return value from edx:eax
+        if f.return_type.type.get_size() > 4:
+            lines.append("\tmov rdx, rax")
+            lines.append("\tshr rdx, 32")
+
         # Restore host stack
         lines.append("\tmov rsp, qword ptr [rbx+TEB_SP]")
         lines.append("\tmov qword ptr [rbx+TEB_SP], rbp")

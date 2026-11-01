@@ -37,5 +37,10 @@ BOOL WINAPI IsDBCSLeadByte(BYTE TestChar);
 BOOL WINAPI IsDBCSLeadByteEx(UINT CodePage, BYTE TestChar);
 int WINAPI LCMapStringW(LCID Locale, DWORD dwMapFlags, LPCWCH lpSrcStr, int cchSrc, LPWSTR lpDestStr, int cchDest);
 int WINAPI LCMapStringA(LCID Locale, DWORD dwMapFlags, LPCCH lpSrcStr, int cchSrc, LPSTR lpDestStr, int cchDest);
+int WINAPI LCMapStringEx(LPCWSTR lpLocaleName, DWORD dwMapFlags, LPCWCH lpSrcStr, int cchSrc, LPWSTR lpDestStr,
+						 int cchDest, LPVOID lpVersionInformation, LPVOID lpReserved, LPVOID sortHandle);
+BOOL WINAPI IsValidLocaleName(LPCWSTR lpLocaleName);
+int WINAPI CompareStringEx(LPCWSTR lpLocaleName, DWORD dwCmpFlags, LPCWCH lpString1, int cchCount1, LPCWCH lpString2,
+						   int cchCount2, LPVOID lpVersionInformation, LPVOID lpReserved, LPVOID lParam);
 
 } // namespace kernel32

@@ -1245,6 +1245,27 @@ VmStatus reserveViewRange(std::size_t regionSize, uintptr_t minAddr, uintptr_t m
 	return VmStatus::Success;
 }
 
+VmStatus reserveViewRangeAt(void *baseAddress, std::size_t regionSize) {
+	if (!baseAddress || regionSize == 0) {
+		return VmStatus::InvalidParameter;
+	}
+	const uintptr_t pageSize = wibo::heap::systemPageSize();
+	std::size_t aligned = static_cast<std::size_t>(alignUp(static_cast<uintptr_t>(regionSize), pageSize));
+	if (aligned == 0) {
+		return VmStatus::InvalidParameter;
+	}
+	uintptr_t base = reinterpret_cast<uintptr_t>(baseAddress);
+	if (base >= kTwoGB || aligned > (kTwoGB - base)) {
+		return VmStatus::InvalidAddress;
+	}
+	std::lock_guard allocLock(g_mappingsMutex);
+	if (overlapsExistingMappingLocked(base, aligned)) {
+		return VmStatus::InvalidAddress;
+	}
+	recordGuestMappingLocked(base, aligned, PAGE_NOACCESS, MEM_RESERVE, PAGE_NOACCESS, MEM_MAPPED);
+	return VmStatus::Success;
+}
+
 void registerViewRange(void *baseAddress, std::size_t regionSize, DWORD allocationProtect, DWORD protect) {
 	if (!baseAddress) {
 		return;
@@ -1256,11 +1277,18 @@ void registerViewRange(void *baseAddress, std::size_t regionSize, DWORD allocati
 							 MEM_MAPPED);
 }
 
-void releaseViewRange(void *baseAddress) {
+void releaseViewRange(void *baseAddress, std::size_t regionSize) {
 	if (!baseAddress) {
 		return;
 	}
+	const uintptr_t pageSize = wibo::heap::systemPageSize();
+	std::size_t aligned = static_cast<std::size_t>(alignUp(static_cast<uintptr_t>(regionSize), pageSize));
 	std::lock_guard allocLock(g_mappingsMutex);
+	// Put the PROT_NONE placeholder back, as virtualFree does, so an unrelated host mmap can't land here
+	void *res = mmap(baseAddress, aligned, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED | MAP_NORESERVE, -1, 0);
+	if (res != MAP_FAILED) {
+		setVirtualAllocationName(res, aligned, "wibo reserved");
+	}
 	eraseGuestMappingLocked(reinterpret_cast<uintptr_t>(baseAddress));
 }
 

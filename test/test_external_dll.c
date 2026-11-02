@@ -34,6 +34,14 @@ int main(void) {
     TEST_CHECK_EQ(1, attached);
     TEST_CHECK_EQ(initial_main, observed_main_module);
 
+    HMODULE again = LoadLibraryExA("external_exports.dll", NULL, 0);
+    TEST_CHECK_MSG(again == mod, "LoadLibraryExA returned %p, expected %p", (void *)again, (void *)mod);
+    TEST_CHECK(FreeLibrary(again) != 0);
+
+    SetLastError(0);
+    TEST_CHECK(LoadLibraryExA("no_such_module.dll", NULL, 0) == NULL);
+    TEST_CHECK(GetLastError() != 0);
+
     TEST_CHECK_MSG(FreeLibrary(mod) != 0, "FreeLibrary failed: %lu", (unsigned long)GetLastError());
 
     printf("external_exports: sum=%d attached=%d\n", sum, attached);

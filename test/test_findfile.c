@@ -297,6 +297,27 @@ static void test_findclose_invalid_handle(void) {
 	TEST_CHECK_EQ(ERROR_INVALID_HANDLE, GetLastError());
 }
 
+static void test_find_first_file_ex_w(void) {
+	WCHAR pattern[MAX_PATH];
+	TEST_CHECK(MultiByteToWideChar(CP_ACP, 0, ".", -1, pattern, MAX_PATH) > 0);
+
+	WIN32_FIND_DATAW data;
+	HANDLE handle = FindFirstFileExW(pattern, FindExInfoStandard, &data, FindExSearchNameMatch, NULL, 0);
+	TEST_CHECK_MSG(handle != INVALID_HANDLE_VALUE, "FindFirstFileExW failed (err=%lu)", GetLastError());
+	TEST_CHECK(data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY);
+	TEST_CHECK(FindClose(handle));
+
+	SetLastError(0xDEADBEEF);
+	handle = FindFirstFileExW(pattern, FindExInfoBasic, &data, FindExSearchNameMatch, NULL, 0);
+	TEST_CHECK(handle == INVALID_HANDLE_VALUE);
+	TEST_CHECK_EQ(ERROR_INVALID_PARAMETER, GetLastError());
+
+	SetLastError(0xDEADBEEF);
+	handle = FindFirstFileExW(NULL, FindExInfoStandard, &data, FindExSearchNameMatch, NULL, 0);
+	TEST_CHECK(handle == INVALID_HANDLE_VALUE);
+	TEST_CHECK_EQ(ERROR_INVALID_PARAMETER, GetLastError());
+}
+
 int main(void) {
 	setup_fixture();
 
@@ -311,6 +332,7 @@ int main(void) {
 	test_wildcard_in_directory_segment();
 	test_directory_iteration_includes_special_entries();
 	test_findclose_invalid_handle();
+	test_find_first_file_ex_w();
 
 	cleanup_fixture();
 	return EXIT_SUCCESS;

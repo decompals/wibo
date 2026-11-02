@@ -2091,6 +2091,19 @@ HANDLE WINAPI FindFirstFileW(LPCWSTR lpFileName, LPWIN32_FIND_DATAW lpFindFileDa
 	return handle;
 }
 
+HANDLE WINAPI FindFirstFileExW(LPCWSTR lpFileName, FINDEX_INFO_LEVELS fInfoLevelId, LPVOID lpFindFileData,
+							   FINDEX_SEARCH_OPS fSearchOp, LPVOID lpSearchFilter, DWORD dwAdditionalFlags) {
+	HOST_CONTEXT_GUARD();
+	DEBUG_LOG("FindFirstFileExW(%p, %d, %p, %d, %p, 0x%x)\n", lpFileName, fInfoLevelId, lpFindFileData, fSearchOp,
+			  lpSearchFilter, dwAdditionalFlags);
+	if (!lpFindFileData || !lpFileName || fInfoLevelId != FindExInfoStandard || fSearchOp != FindExSearchNameMatch ||
+		lpSearchFilter || dwAdditionalFlags != 0) {
+		setLastError(ERROR_INVALID_PARAMETER);
+		return INVALID_HANDLE_VALUE;
+	}
+	return FindFirstFileW(lpFileName, reinterpret_cast<LPWIN32_FIND_DATAW>(lpFindFileData));
+}
+
 HANDLE WINAPI FindFirstFileExA(LPCSTR lpFileName, FINDEX_INFO_LEVELS fInfoLevelId, LPVOID lpFindFileData,
 							   FINDEX_SEARCH_OPS fSearchOp, LPVOID lpSearchFilter, DWORD dwAdditionalFlags) {
 	HOST_CONTEXT_GUARD();

@@ -295,6 +295,14 @@ HMODULE WINAPI LoadLibraryW(LPCWSTR lpLibFileName) {
 	return LoadLibraryA(filename.c_str());
 }
 
+HMODULE WINAPI LoadLibraryExA(LPCSTR lpLibFileName, HANDLE hFile, DWORD dwFlags) {
+	HOST_CONTEXT_GUARD();
+	(void)hFile;
+	// TODO: handle dwFlags properly
+	DEBUG_LOG("LoadLibraryExA(%s, %x)\n", lpLibFileName, dwFlags);
+	return LoadLibraryA(lpLibFileName);
+}
+
 HMODULE WINAPI LoadLibraryExW(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwFlags) {
 	HOST_CONTEXT_GUARD();
 	(void)hFile;

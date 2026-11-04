@@ -560,7 +560,9 @@ typedef GUEST_PTR PTEB;
 static_assert(offsetof(NT_TIB, Self) == TEB_SELF, "Self pointer offset mismatch");
 static_assert(offsetof(TEB, ThreadLocalStoragePointer) == 0x2C, "TLS pointer offset mismatch");
 static_assert(offsetof(TEB, Peb) == 0x30, "PEB pointer offset mismatch");
-static_assert(offsetof(TEB, LastErrorValue) == 0x34, "LastErrorValue offset mismatch");
+static_assert(offsetof(TEB, LastErrorValue) == TEB_LAST_ERROR, "LastErrorValue offset mismatch");
+static_assert(offsetof(TEB, ClientId) + sizeof(HANDLE) == TEB_CLIENT_ID_THREAD,
+			  "ClientId.UniqueThread offset mismatch");
 static_assert(offsetof(TEB, GdiTebBatch) == 0x1FC, "GdiTebBatch offset mismatch");
 static_assert(offsetof(TEB, DeallocationStack) == 0xE0C, "DeallocationStack offset mismatch");
 static_assert(offsetof(TEB, TlsSlots) == 0xE10, "TLS slots offset mismatch");

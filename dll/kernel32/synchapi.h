@@ -1,5 +1,6 @@
 #pragma once
 
+#include "macros.h"
 #include "minwinbase.h"
 #include "types.h"
 
@@ -48,6 +49,9 @@ struct RTL_CRITICAL_SECTION {
 };
 
 static_assert(sizeof(RTL_CRITICAL_SECTION) == 24);
+static_assert(offsetof(RTL_CRITICAL_SECTION, LockCount) == CS_LOCK_COUNT);
+static_assert(offsetof(RTL_CRITICAL_SECTION, RecursionCount) == CS_RECURSION_COUNT);
+static_assert(offsetof(RTL_CRITICAL_SECTION, OwningThread) == CS_OWNING_THREAD);
 
 using PRTL_CRITICAL_SECTION = RTL_CRITICAL_SECTION *;
 using LPCRITICAL_SECTION = RTL_CRITICAL_SECTION *;

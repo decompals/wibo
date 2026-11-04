@@ -5,11 +5,13 @@
 #include "heap.h"
 #include "modules.h"
 #include "processes.h"
+
 #include "setup.h"
 #include "strutil.h"
 #include "tls.h"
 #include "types.h"
 #include "version_info.h"
+#include <unistd.h>
 
 #include <cstdarg>
 #include <cstdio>
@@ -85,6 +87,9 @@ bool wibo::installTibForCurrentThread(TEB *tibPtr) {
 	if (!tibPtr) {
 		return false;
 	}
+	// Guest code reads these straight out of the TEB.
+	tibPtr->ClientId.UniqueProcess = static_cast<HANDLE>(getpid());
+	tibPtr->ClientId.UniqueThread = static_cast<HANDLE>(wibo::getThreadId());
 	currentThreadTeb = tibPtr;
 	if (!tebThreadSetup(tibPtr)) {
 		return false;

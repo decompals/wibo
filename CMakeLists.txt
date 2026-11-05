@@ -219,7 +219,6 @@ add_executable(wibo
     dll/kernel32/winbase.cpp
     dll/kernel32/wincon.cpp
     dll/kernel32/winnls.cpp
-    dll/kernel32/winnt.cpp
     dll/kernel32/wow64apiset.cpp
     dll/lmgr.cpp
     dll/mscoree.cpp
@@ -243,6 +242,8 @@ add_executable(wibo
     src/modules.cpp
     src/processes_common.cpp
     src/resources.cpp
+    src/seh.cpp
+    src/seh.S
     src/setup.S
     src/strutil.cpp
     src/tls.cpp
@@ -274,6 +275,8 @@ elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
 else()
     message(FATAL_ERROR "Unsupported platform for ProcessManager")
 endif()
+# The signal handler runs with guest segments loaded, where the stack protector's canary isn't reachable
+set_source_files_properties(src/seh.cpp PROPERTIES COMPILE_OPTIONS -fno-stack-protector)
 target_compile_definitions(wibo PRIVATE _GNU_SOURCE _FILE_OFFSET_BITS=64 _TIME_BITS=64)
 target_compile_features(wibo PRIVATE cxx_std_20)
 target_compile_options(wibo PRIVATE -Wall -Wextra)
@@ -421,7 +424,6 @@ wibo_codegen_module(NAME kernel32 HEADERS
     dll/kernel32/winbase.h
     dll/kernel32/wincon.h
     dll/kernel32/winnls.h
-    dll/kernel32/winnt.h
     dll/kernel32/wow64apiset.h
 )
 
@@ -510,6 +512,7 @@ if (WIBO_ENABLE_FIXTURE_TESTS)
         wibo_add_fixture_bin(NAME test_tls_reloc SOURCES test/test_tls_reloc.c)
         wibo_add_fixture_bin(NAME test_fls SOURCES test/test_fls.c)
         wibo_add_fixture_bin(NAME test_fpu_state SOURCES test/test_fpu_state.c)
+        wibo_add_fixture_bin(NAME test_seh SOURCES test/test_seh.c)
         wibo_add_fixture_bin(NAME test_handleapi SOURCES test/test_handleapi.c)
         wibo_add_fixture_bin(NAME test_findfile SOURCES test/test_findfile.c)
         wibo_add_fixture_bin(NAME test_getfileattributesex SOURCES test/test_getfileattributesex.c)

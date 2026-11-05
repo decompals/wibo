@@ -1292,9 +1292,10 @@ void releaseViewRange(void *baseAddress, std::size_t regionSize) {
 	eraseGuestMappingLocked(reinterpret_cast<uintptr_t>(baseAddress));
 }
 
-bool reserveGuestStack(std::size_t stackSizeBytes, void **outStackLimit, void **outStackBase) {
+bool reserveGuestStack(std::size_t stackSizeBytes, void **outAllocationBase, void **outStackLimit,
+					   void **outStackBase) {
 	const std::size_t ps = systemPageSize();
-	std::size_t total = ((stackSizeBytes + (ps * 2) - 1) & ~(ps - 1));
+	std::size_t total = ((stackSizeBytes + (ps * 3) - 1) & ~(ps - 1));
 
 	Arena r;
 	if (!mapArena(total, kLowMemoryStart, kTwoGB, true, "wibo guest stack", r)) {
@@ -1302,15 +1303,16 @@ bool reserveGuestStack(std::size_t stackSizeBytes, void **outStackLimit, void **
 		return false;
 	}
 
-	// Protect the guard page at the bottom of the mapped region
-	if (mprotect(r.start, ps, PROT_NONE) != 0) {
+	// Protect the guard pages at the bottom of the mapped region; a stack overflow commits the upper one
+	if (mprotect(r.start, ps * 2, PROT_NONE) != 0) {
 		// Non-fatal; continue without guard
 		DEBUG_LOG("heap: reserveGuestStack: mprotect guard failed\n");
 	}
 
 	// Stack grows downwards; limit is after guard, base is top of mapping
-	void *limit = static_cast<char *>(r.start) + ps;
+	void *limit = static_cast<char *>(r.start) + (ps * 2);
 	void *base = static_cast<char *>(r.start) + r.size;
+	*outAllocationBase = r.start;
 	*outStackLimit = limit;
 	*outStackBase = base;
 	DEBUG_LOG("heap: reserved guest stack limit=%p base=%p (total=%zu KiB)\n", limit, base, r.size >> 10);

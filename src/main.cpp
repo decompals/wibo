@@ -5,6 +5,7 @@
 #include "heap.h"
 #include "modules.h"
 #include "processes.h"
+#include "seh.h"
 #include "setup.h"
 #include "strutil.h"
 #include "tls.h"
@@ -68,14 +69,17 @@ void wibo::initializeTibStackInfo(TEB *tibPtr) {
 		return;
 	}
 	// Allocate a stack for the thread in the guest address space (below 2GB)
+	void *guestAllocation = nullptr;
 	void *guestLimit = nullptr;
 	void *guestBase = nullptr;
-	if (!wibo::heap::reserveGuestStack(1 * 1024 * 1024, &guestLimit, &guestBase)) {
+	if (!wibo::heap::reserveGuestStack(1 * 1024 * 1024, &guestAllocation, &guestLimit, &guestBase)) {
 		fprintf(stderr, "Failed to reserve guest stack\n");
 		std::abort();
 	}
+	tibPtr->Tib.ExceptionList = EXCEPTION_CHAIN_END;
 	tibPtr->Tib.StackLimit = toGuestPtr(guestLimit);
 	tibPtr->Tib.StackBase = toGuestPtr(guestBase);
+	tibPtr->DeallocationStack = toGuestPtr(guestAllocation);
 	tibPtr->CurrentStackPointer = guestBase;
 	DEBUG_LOG("initializeTibStackInfo: using guest stack base=%p limit=%p\n", tibPtr->Tib.StackBase,
 			  tibPtr->Tib.StackLimit);
@@ -89,12 +93,17 @@ bool wibo::installTibForCurrentThread(TEB *tibPtr) {
 	if (!tebThreadSetup(tibPtr)) {
 		return false;
 	}
+	if (!wibo::seh::initThread()) {
+		tebThreadTeardown(tibPtr);
+		return false;
+	}
 	initFpState();
 	return true;
 }
 
 void wibo::uninstallTebForCurrentThread() {
 	TEB *teb = std::exchange(currentThreadTeb, nullptr);
+	wibo::seh::cleanupThread();
 	tebThreadTeardown(teb);
 }
 
@@ -335,6 +344,7 @@ int main(int argc, char **argv) {
 		perror("Failed to setup x86 segments and TEB");
 		return 1;
 	}
+	wibo::seh::install();
 
 	// Determine the guest program name
 	auto guestArgs = wibo::splitCommandLine(cmdLine.c_str());

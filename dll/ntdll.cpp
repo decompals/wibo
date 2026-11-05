@@ -12,6 +12,7 @@
 #include "kernel32/processthreadsapi.h"
 #include "modules.h"
 #include "processes.h"
+#include "seh.h"
 #include "strutil.h"
 #include "types.h"
 
@@ -840,11 +841,22 @@ NTSTATUS WINAPI LdrAddRefDll(ULONG Flags, HMODULE Module) {
 
 #include "ntdll_trampolines.h"
 
+namespace {
+
+void *resolveByName(const char *name) {
+	if (void *entry = wibo::seh::guestExport(name)) {
+		return entry;
+	}
+	return ntdllThunkByName(name);
+}
+
+} // namespace
+
 extern const wibo::ModuleStub lib_ntdll = {
 	(const char *[]){
 		"ntdll",
 		nullptr,
 	},
-	ntdllThunkByName,
+	resolveByName,
 	nullptr,
 };

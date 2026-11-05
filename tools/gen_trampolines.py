@@ -547,6 +547,9 @@ def emit_cc_thunk32(f: FuncInfo | TypedefInfo, lines: List[str]):
     lines.append("\tmov ebp, dword ptr [ecx+TEB_SP]")
     lines.append("\tmov dword ptr [ecx+TEB_SP], esp")
     lines.append("\tmov esp, ebp")
+    if host_to_guest:
+        # Keep the host stack pointer where a nested callback that never returns can't change it
+        lines.append("\tpush dword ptr [ecx+TEB_SP]")
 
     # Allocate stack space for arguments
     if target_layout.stack_size > 0:
@@ -628,12 +631,17 @@ def emit_cc_thunk32(f: FuncInfo | TypedefInfo, lines: List[str]):
         lines.append("\tpop eax")
 
     # Swap stack pointer
-    lines.append("\tmov esp, ebp")  # Clean up arg space
-    lines.append("\tmov ebp, dword ptr [ecx+TEB_SP]")
-    lines.append("\tmov dword ptr [ecx+TEB_SP], esp")
+    if host_to_guest:
+        lines.append("\tmov dword ptr [ecx+TEB_SP], ebp")
+        lines.append("\tmov esp, dword ptr [ebp-4]")
+        lines.append("\tpop ebp")
+    else:
+        lines.append("\tmov esp, ebp")  # Clean up arg space
+        lines.append("\tmov ebp, dword ptr [ecx+TEB_SP]")
+        lines.append("\tmov dword ptr [ecx+TEB_SP], esp")
 
-    # Restore stack and frame pointer
-    lines.append("\tleave")
+        # Restore stack and frame pointer
+        lines.append("\tleave")
 
     # Return to guest
     if f.source_cc == CallingConv.X86_STDCALL and source_layout.stack_size > 0:
@@ -699,7 +707,7 @@ def emit_cc_thunk64(f: FuncInfo | TypedefInfo, lines: List[str]):
         f.args,
         f.source_cc,
         Arch.X86_64 if host_to_guest else Arch.X86,
-        stack_offset=24 if host_to_guest else 20,
+        stack_offset=56 if host_to_guest else 20,
         skip_args=1 if host_to_guest else 0,
     )
     target_layout = compute_arg_layout(
@@ -709,9 +717,13 @@ def emit_cc_thunk64(f: FuncInfo | TypedefInfo, lines: List[str]):
     if host_to_guest:
         lines.append(".code64")
 
-        # Save rbx and rbp
+        # Save callee-saved registers; guest code that unwinds past nested host frames leaves them changed
         lines.append("\tpush rbp")
         lines.append("\tpush rbx")
+        lines.append("\tpush r12")
+        lines.append("\tpush r13")
+        lines.append("\tpush r14")
+        lines.append("\tpush r15")
 
         # Stash host stack in r10
         lines.append("\tmov r10, rsp")
@@ -728,6 +740,9 @@ def emit_cc_thunk64(f: FuncInfo | TypedefInfo, lines: List[str]):
         lines.append("\tmov rbp, qword ptr [rbx+TEB_SP]")
         lines.append("\tmov qword ptr [rbx+TEB_SP], rsp")
         lines.append("\tmov rsp, rbp")
+
+        # Keep the host stack pointer where a nested callback that never returns can't change it
+        lines.append("\tpush qword ptr [rbx+TEB_SP]")
 
         # Allocate stack space for arguments
         if target_layout.stack_size > 0:
@@ -785,10 +800,14 @@ def emit_cc_thunk64(f: FuncInfo | TypedefInfo, lines: List[str]):
             lines.append("\tWRITE_FSBASE r9, rbx")
 
         # Restore host stack
-        lines.append("\tmov rsp, qword ptr [rbx+TEB_SP]")
         lines.append("\tmov qword ptr [rbx+TEB_SP], rbp")
+        lines.append("\tmov rsp, qword ptr [rbp-8]")
 
-        # Restore rbp, rbx and return
+        # Restore callee-saved registers and return
+        lines.append("\tpop r15")
+        lines.append("\tpop r14")
+        lines.append("\tpop r13")
+        lines.append("\tpop r12")
         lines.append("\tpop rbx")
         lines.append("\tpop rbp")
         lines.append("\tret")

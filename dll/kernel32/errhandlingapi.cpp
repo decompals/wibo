@@ -4,10 +4,13 @@
 #include "context.h"
 #include "errors.h"
 #include "internal.h"
+#include "kernel32.h"
+
+#include <atomic>
 
 namespace {
 
-LPTOP_LEVEL_EXCEPTION_FILTER g_topLevelExceptionFilter = nullptr;
+std::atomic<LPTOP_LEVEL_EXCEPTION_FILTER> g_topLevelExceptionFilter = nullptr;
 UINT g_processErrorMode = 0;
 
 } // namespace
@@ -32,17 +35,6 @@ void WINAPI SetLastError(DWORD dwErrCode) {
 	currentThreadTeb->LastErrorValue = dwErrCode;
 }
 
-void WINAPI RaiseException(DWORD dwExceptionCode, DWORD dwExceptionFlags, DWORD nNumberOfArguments,
-						   const ULONG_PTR *lpArguments) {
-	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("RaiseException(0x%x, 0x%x, %u, %p)\n", dwExceptionCode, dwExceptionFlags, nNumberOfArguments,
-			  lpArguments);
-	(void)dwExceptionFlags;
-	(void)nNumberOfArguments;
-	(void)lpArguments;
-	exitInternal(dwExceptionCode);
-}
-
 PVOID WINAPI AddVectoredExceptionHandler(ULONG First, PVECTORED_EXCEPTION_HANDLER Handler) {
 	HOST_CONTEXT_GUARD();
 	DEBUG_LOG("STUB: AddVectoredExceptionHandler(%u, %p)\n", First, Handler);
@@ -52,15 +44,35 @@ PVOID WINAPI AddVectoredExceptionHandler(ULONG First, PVECTORED_EXCEPTION_HANDLE
 LPTOP_LEVEL_EXCEPTION_FILTER WINAPI
 SetUnhandledExceptionFilter(LPTOP_LEVEL_EXCEPTION_FILTER lpTopLevelExceptionFilter) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("STUB: SetUnhandledExceptionFilter(%p)\n", lpTopLevelExceptionFilter);
-	LPTOP_LEVEL_EXCEPTION_FILTER previous = g_topLevelExceptionFilter;
-	g_topLevelExceptionFilter = lpTopLevelExceptionFilter;
-	return previous;
+	DEBUG_LOG("SetUnhandledExceptionFilter(%p)\n", lpTopLevelExceptionFilter);
+	return g_topLevelExceptionFilter.exchange(lpTopLevelExceptionFilter);
 }
 
 LONG WINAPI UnhandledExceptionFilter(PEXCEPTION_POINTERS ExceptionInfo) {
 	HOST_CONTEXT_GUARD();
-	DEBUG_LOG("STUB: UnhandledExceptionFilter(%p)\n", ExceptionInfo);
+	DEBUG_LOG("UnhandledExceptionFilter(%p)\n", ExceptionInfo);
+	const auto *record = fromGuestPtr<EXCEPTION_RECORD>(ExceptionInfo->ExceptionRecord);
+	LPTOP_LEVEL_EXCEPTION_FILTER filter = g_topLevelExceptionFilter;
+	// A nested call means the top-level filter raised this exception
+	if (filter && !(record->ExceptionFlags & EXCEPTION_NESTED_CALL)) {
+		LONG result = call_LPTOP_LEVEL_EXCEPTION_FILTER(filter, ExceptionInfo);
+		if (result != EXCEPTION_CONTINUE_SEARCH) {
+			return result;
+		}
+	}
+	if (record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && record->NumberParameters >= 2) {
+		const char *access = "reading";
+		if (record->ExceptionInformation[0] == 1) {
+			access = "writing";
+		} else if (record->ExceptionInformation[0] == 8) {
+			access = "executing";
+		}
+		fprintf(stderr, "wibo: unhandled exception 0x%08x at 0x%08x (%s 0x%08x)\n", record->ExceptionCode,
+				record->ExceptionAddress, access, record->ExceptionInformation[1]);
+	} else {
+		fprintf(stderr, "wibo: unhandled exception 0x%08x at 0x%08x\n", record->ExceptionCode,
+				record->ExceptionAddress);
+	}
 	return EXCEPTION_EXECUTE_HANDLER;
 }
 

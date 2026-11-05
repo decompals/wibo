@@ -87,7 +87,7 @@ void releaseViewRange(void *baseAddress, std::size_t regionSize);
 DWORD win32ErrorFromVmStatus(VmStatus status);
 NTSTATUS ntStatusFromVmStatus(VmStatus status);
 
-bool reserveGuestStack(std::size_t stackSizeBytes, void **outStackLimit, void **outStackBase);
+bool reserveGuestStack(std::size_t stackSizeBytes, void **outAllocationBase, void **outStackLimit, void **outStackBase);
 
 //-------------------- deleters --------------------
 template <class U> struct single_deleter {

@@ -21,7 +21,6 @@
 #include "kernel32/winbase.h"			// IWYU pragma: export
 #include "kernel32/wincon.h"			// IWYU pragma: export
 #include "kernel32/winnls.h"			// IWYU pragma: export
-#include "kernel32/winnt.h"				// IWYU pragma: export
 #include "kernel32/wow64apiset.h"		// IWYU pragma: export
 
 #ifndef WIBO_CODEGEN

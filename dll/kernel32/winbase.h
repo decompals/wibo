@@ -70,6 +70,14 @@ struct MEMORYSTATUS {
 
 using LPMEMORYSTATUS = MEMORYSTATUS *;
 
+constexpr DWORD FORMAT_MESSAGE_ALLOCATE_BUFFER = 0x00000100;
+constexpr DWORD FORMAT_MESSAGE_IGNORE_INSERTS = 0x00000200;
+constexpr DWORD FORMAT_MESSAGE_FROM_STRING = 0x00000400;
+constexpr DWORD FORMAT_MESSAGE_FROM_HMODULE = 0x00000800;
+constexpr DWORD FORMAT_MESSAGE_FROM_SYSTEM = 0x00001000;
+constexpr DWORD FORMAT_MESSAGE_ARGUMENT_ARRAY = 0x00002000;
+constexpr DWORD FORMAT_MESSAGE_MAX_WIDTH_MASK = 0x000000FF;
+
 namespace kernel32 {
 
 BOOL WINAPI IsBadReadPtr(LPCVOID lp, UINT_PTR ucb);
@@ -82,8 +90,8 @@ ATOM WINAPI AddAtomW(LPCWSTR lpString);
 UINT WINAPI GetAtomNameA(ATOM nAtom, LPSTR lpBuffer, int nSize);
 UINT WINAPI GetAtomNameW(ATOM nAtom, LPWSTR lpBuffer, int nSize);
 UINT WINAPI SetHandleCount(UINT uNumber);
-// DWORD WINAPI FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId, DWORD dwLanguageId, LPSTR lpBuffer,
-// 							DWORD nSize, va_list *Arguments);
+DWORD WINAPI FormatMessageA(DWORD dwFlags, LPCVOID lpSource, DWORD dwMessageId, DWORD dwLanguageId, LPSTR lpBuffer,
+							DWORD nSize, GUEST_PTR *Arguments);
 PVOID WINAPI EncodePointer(PVOID Ptr);
 PVOID WINAPI DecodePointer(PVOID Ptr);
 BOOL WINAPI SetDllDirectoryA(LPCSTR lpPathName);
